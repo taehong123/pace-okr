@@ -12,6 +12,7 @@
 }
 
 * { box-sizing: border-box; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 html, body { margin: 0; min-height: 100%; background: var(--paper); color: var(--ink); }
 body, button, input, select, textarea { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", Arial, sans-serif; letter-spacing: 0; }
 button, input, select, textarea { font-size: inherit; }
@@ -258,6 +259,34 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .checklist-form button:disabled { opacity: .4; }
 .create-item-form { padding-top: 24px; }
 
+.routine-section { border-top: 1px solid var(--line); }
+.routine-toolbar { min-height: 53px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border-bottom: 1px solid var(--line); }
+.routine-toolbar > label { height: 31px; display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.routine-toolbar input, .routine-toolbar select { height: 30px; padding: 0 7px; border: 1px solid var(--line); outline: 0; background: white; color: var(--ink); font-size: 11px; }
+.routine-toolbar > label input { border-radius: 4px; }
+.routine-toolbar form { display: grid; grid-template-columns: minmax(150px, 260px) 76px 31px; align-items: center; }
+.routine-toolbar form input { min-width: 0; border-radius: 4px 0 0 4px; }
+.routine-toolbar form select { border-left: 0; }
+.routine-toolbar form button { width: 31px; height: 30px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 0 4px 4px 0; background: var(--ink); color: white; cursor: pointer; }
+.routine-toolbar form button:disabled { opacity: .45; }
+.routine-list { overflow-x: auto; }
+.routine-head, .routine-row { min-width: 620px; display: grid; grid-template-columns: 54px minmax(260px, 1fr) 90px 60px 36px; align-items: center; border-bottom: 1px solid var(--line); }
+.routine-head { height: 34px; color: var(--muted); font-size: 10px; }
+.routine-head span { padding: 0 8px; }
+.routine-row { min-height: 49px; }
+.routine-row > .task-check { justify-self: center; }
+.routine-row > div { min-width: 0; display: grid; gap: 2px; padding: 6px 8px; }
+.routine-row b { overflow: hidden; font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.routine-row small, .routine-row > span { color: var(--muted); font-size: 9px; }
+.routine-row > span { padding: 0 8px; }
+.routine-row.inactive > div, .routine-row.inactive > span { opacity: .45; }
+.routine-switch { position: relative; width: 30px; height: 18px; display: block; }
+.routine-switch input { position: absolute; opacity: 0; }
+.routine-switch span { position: absolute; inset: 0; border-radius: 9px; background: #d7d7d4; cursor: pointer; transition: background .15s ease; }
+.routine-switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: white; box-shadow: 0 1px 2px rgba(0, 0, 0, .2); transition: transform .15s ease; }
+.routine-switch input:checked + span { background: var(--ink); }
+.routine-switch input:checked + span::after { transform: translateX(12px); }
+
 .scrum-section, .recommendation-list { border-top: 1px solid var(--line); }
 .scrum-toolbar { min-height: 53px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
 .scrum-toolbar label { height: 31px; display: flex; align-items: center; gap: 6px; color: var(--muted); }
@@ -300,7 +329,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
   .app-shell { display: block; }
   .sidebar { position: fixed; z-index: 20; top: auto; bottom: 0; width: 100%; height: 58px; padding: 5px 8px; border-top: 1px solid var(--line); border-right: 0; }
   .workspace-switcher, .sidebar-section, .sidebar-bottom { display: none; }
-  nav { width: 100%; height: 100%; margin: 0; display: grid; grid-template-columns: repeat(7, 1fr); }
+  nav { width: 100%; height: 100%; margin: 0; display: grid; grid-template-columns: repeat(8, 1fr); }
   .nav-item { height: 47px; justify-content: center; display: grid; justify-items: center; gap: 2px; padding: 3px; }
   .nav-item span { font-size: 9px; }
   .nav-item b { position: absolute; margin: -18px 0 0 22px; }
@@ -310,6 +339,8 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
   .page-header h1 { font-size: 24px; }
   .cadence-switch { overflow-x: auto; max-width: 220px; }
   .quick-capture { margin-bottom: 20px; }
+  .routine-toolbar { align-items: stretch; flex-direction: column; gap: 7px; padding: 8px 0; }
+  .routine-toolbar form { grid-template-columns: minmax(120px, 1fr) 70px 31px; }
   .database-toolbar { align-items: flex-start; padding: 7px 0; }
   .database-actions { gap: 0; }
   .table-search { display: none; }

@@ -114,9 +114,46 @@ export const dailyScrums = sqliteTable(
   ],
 );
 
+export const routines = sqliteTable(
+  "routines",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    cadence: text("cadence").notNull().default("daily"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_routines_owner_active").on(table.ownerId, table.active),
+    index("idx_routines_owner_sort").on(table.ownerId, table.sortOrder),
+  ],
+);
+
+export const routineCompletions = sqliteTable(
+  "routine_completions",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    routineId: text("routine_id").notNull().references(() => routines.id, { onDelete: "cascade" }),
+    completionDate: text("completion_date").notNull(),
+    note: text("note").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_routine_completions_unique").on(table.ownerId, table.routineId, table.completionDate),
+    index("idx_routine_completions_owner_date").on(table.ownerId, table.completionDate),
+  ],
+);
+
 export type PaceItem = typeof items.$inferSelect;
 export type NewPaceItem = typeof items.$inferInsert;
 export type PropertyDefinition = typeof propertyDefinitions.$inferSelect;
 export type ItemPropertyValue = typeof itemPropertyValues.$inferSelect;
 export type ChecklistItem = typeof checklistItems.$inferSelect;
 export type DailyScrum = typeof dailyScrums.$inferSelect;
+export type Routine = typeof routines.$inferSelect;
+export type RoutineCompletion = typeof routineCompletions.$inferSelect;

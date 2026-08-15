@@ -8,6 +8,8 @@ import {
   itemPropertyValues,
   items,
   propertyDefinitions,
+  routineCompletions,
+  routines,
   type PaceItem,
   type PropertyDefinition,
 } from "@/db/schema";
@@ -17,6 +19,7 @@ export const ITEM_STATUSES = ["inbox", "todo", "in_progress", "done", "blocked"]
 export const ITEM_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export const ITEM_CADENCES = ["daily", "weekly", "monthly", "quarterly"] as const;
 export const PROPERTY_TYPES = ["text", "number", "select", "date", "checkbox"] as const;
+export const ROUTINE_CADENCES = ["daily", "weekly", "monthly"] as const;
 
 export type ItemKind = (typeof ITEM_KINDS)[number];
 export type ItemStatus = (typeof ITEM_STATUSES)[number];
@@ -24,6 +27,7 @@ export type ItemPriority = (typeof ITEM_PRIORITIES)[number];
 export type ItemCadence = (typeof ITEM_CADENCES)[number];
 export type PropertyType = (typeof PROPERTY_TYPES)[number];
 export type PropertyValue = string | number | boolean | null;
+export type RoutineCadence = (typeof ROUTINE_CADENCES)[number];
 
 type RuntimeEnv = typeof env & { OKITA_API_TOKEN?: string; PACE_API_TOKEN?: string };
 let schemaReady: Promise<void> | null = null;
@@ -118,6 +122,29 @@ export async function ensureWorkspace(ownerId: string) {
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_scrums_owner_date ON daily_scrums(owner_id, scrum_date)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS routines (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          cadence TEXT NOT NULL DEFAULT 'daily',
+          active INTEGER NOT NULL DEFAULT 1,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_routines_owner_active ON routines(owner_id, active)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_routines_owner_sort ON routines(owner_id, sort_order)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS routine_completions (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          routine_id TEXT NOT NULL REFERENCES routines(id) ON DELETE CASCADE,
+          completion_date TEXT NOT NULL,
+          note TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_routine_completions_unique ON routine_completions(owner_id, routine_id, completion_date)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_routine_completions_owner_date ON routine_completions(owner_id, completion_date)"),
         d1.prepare("PRAGMA optimize"),
       ])
       .then(() => undefined)
@@ -559,6 +586,154 @@ export function serializeChecklistItem(item: typeof checklistItems.$inferSelect)
   };
 }
 
+export async function listRoutines(
+  ownerId: string,
+  requestedDate: string,
+  includeInactive = true,
+) {
+  const date = normalizeDate(requestedDate);
+  const routineRows = await getDb()
+    .select()
+    .from(routines)
+    .where(includeInactive ? eq(routines.ownerId, ownerId) : and(eq(routines.ownerId, ownerId), eq(routines.active, true)))
+    .orderBy(asc(routines.sortOrder), asc(routines.createdAt));
+  const completionRows = await getDb()
+    .select()
+    .from(routineCompletions)
+    .where(and(eq(routineCompletions.ownerId, ownerId), eq(routineCompletions.completionDate, date)));
+  const completionByRoutine = new Map(completionRows.map((completion) => [completion.routineId, completion]));
+  return routineRows.map((routine) => serializeRoutine(routine, date, completionByRoutine.get(routine.id)));
+}
+
+export async function createRoutine(
+  ownerId: string,
+  input: { title: string; description?: string; cadence?: RoutineCadence; active?: boolean },
+) {
+  const title = input.title.trim();
+  if (!title) throw new Error("Routine title is required");
+  const cadence = input.cadence ?? "daily";
+  if (!ROUTINE_CADENCES.includes(cadence)) throw new Error("Unsupported routine cadence");
+  const [last] = await getDb()
+    .select({ sortOrder: routines.sortOrder })
+    .from(routines)
+    .where(eq(routines.ownerId, ownerId))
+    .orderBy(desc(routines.sortOrder))
+    .limit(1);
+  const [created] = await getDb()
+    .insert(routines)
+    .values({
+      id: crypto.randomUUID(),
+      ownerId,
+      title,
+      description: input.description?.trim() ?? "",
+      cadence,
+      active: input.active ?? true,
+      sortOrder: (last?.sortOrder ?? 0) + 10,
+    })
+    .returning();
+  return created;
+}
+
+export async function updateRoutine(
+  ownerId: string,
+  id: string,
+  patch: Partial<{ title: string; description: string; cadence: RoutineCadence; active: boolean }>,
+) {
+  const current = await getRoutine(ownerId, id);
+  if (!current) throw new Error("Routine not found");
+  if (patch.title !== undefined && !patch.title.trim()) throw new Error("Routine title is required");
+  if (patch.cadence !== undefined && !ROUTINE_CADENCES.includes(patch.cadence)) {
+    throw new Error("Unsupported routine cadence");
+  }
+  const [updated] = await getDb()
+    .update(routines)
+    .set({
+      title: patch.title?.trim(),
+      description: patch.description?.trim(),
+      cadence: patch.cadence,
+      active: patch.active,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(and(eq(routines.ownerId, ownerId), eq(routines.id, id)))
+    .returning();
+  return updated;
+}
+
+export async function deleteRoutine(ownerId: string, id: string) {
+  const current = await getRoutine(ownerId, id);
+  if (!current) throw new Error("Routine not found");
+  await getDb()
+    .delete(routineCompletions)
+    .where(and(eq(routineCompletions.ownerId, ownerId), eq(routineCompletions.routineId, id)));
+  await getDb()
+    .delete(routines)
+    .where(and(eq(routines.ownerId, ownerId), eq(routines.id, id)));
+  return current;
+}
+
+export async function setRoutineCompletion(
+  ownerId: string,
+  routineId: string,
+  completionDate: string,
+  completed: boolean,
+  note = "",
+) {
+  const date = normalizeDate(completionDate);
+  const routine = await getRoutine(ownerId, routineId);
+  if (!routine) throw new Error("Routine not found");
+  if (!completed) {
+    await getDb()
+      .delete(routineCompletions)
+      .where(
+        and(
+          eq(routineCompletions.ownerId, ownerId),
+          eq(routineCompletions.routineId, routineId),
+          eq(routineCompletions.completionDate, date),
+        ),
+      );
+  } else {
+    await getDb()
+      .insert(routineCompletions)
+      .values({ id: crypto.randomUUID(), ownerId, routineId, completionDate: date, note: note.trim() })
+      .onConflictDoUpdate({
+        target: [routineCompletions.ownerId, routineCompletions.routineId, routineCompletions.completionDate],
+        set: { note: note.trim() },
+      });
+  }
+  const rows = await listRoutines(ownerId, date);
+  return rows.find((entry) => entry.id === routineId)!;
+}
+
+async function getRoutine(ownerId: string, id: string) {
+  const [routine] = await getDb()
+    .select()
+    .from(routines)
+    .where(and(eq(routines.ownerId, ownerId), eq(routines.id, id)))
+    .limit(1);
+  return routine ?? null;
+}
+
+export function serializeRoutine(
+  routine: typeof routines.$inferSelect,
+  date: string,
+  completion?: typeof routineCompletions.$inferSelect,
+) {
+  return {
+    id: routine.id,
+    title: routine.title,
+    description: routine.description,
+    cadence: routine.cadence,
+    active: routine.active,
+    sortOrder: routine.sortOrder,
+    date,
+    completed: Boolean(completion),
+    completionId: completion?.id ?? null,
+    note: completion?.note ?? "",
+    createdAt: routine.createdAt,
+    updatedAt: routine.updatedAt,
+  };
+}
+
 export async function getDailyScrum(ownerId: string, scrumDate: string) {
   const date = normalizeDate(scrumDate);
   const previousDate = addDays(date, -1);
@@ -871,6 +1046,10 @@ async function seedWorkspace(ownerId: string) {
   await getDb().insert(checklistItems).values([
     { id: crypto.randomUUID(), ownerId, taskId: firstTask, title: "A/B 테스트 이벤트 정의", completed: true, sortOrder: 10 },
     { id: crypto.randomUUID(), ownerId, taskId: firstTask, title: "실험군 이벤트 검증", completed: false, sortOrder: 20 },
+  ]);
+  await getDb().insert(routines).values([
+    { id: crypto.randomUUID(), ownerId, title: "오늘의 최우선 Task 정리", cadence: "daily", sortOrder: 10 },
+    { id: crypto.randomUUID(), ownerId, title: "주간 회고 작성", cadence: "weekly", sortOrder: 20 },
   ]);
 }
 

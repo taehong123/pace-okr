@@ -39,6 +39,7 @@ test("server-renders the OKITA workspace", async () => {
   assert.match(html, /할 일을 입력하면 인박스에 저장됩니다/);
   assert.match(html, /데일리/);
   assert.match(html, /추천/);
+  assert.match(html, /루틴/);
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview|react-loading-skeleton/i);
 });
 
@@ -56,6 +57,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /set_property_value/);
   assert.match(page, /get_daily_scrum/);
   assert.match(page, /get_recommendations/);
+  assert.match(page, /list_routines/);
   assert.match(page, /Objective → Key Result → Initiative → Project → Task/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("app/_sites-preview/SkeletonPreview.tsx", projectRoot)));

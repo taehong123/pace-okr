@@ -7,11 +7,14 @@ import {
   ITEM_PRIORITIES,
   ITEM_STATUSES,
   PROPERTY_TYPES,
+  ROUTINE_CADENCES,
   authorizeRequest,
   createChecklistItem,
   createItem,
   createPropertyDefinition,
+  createRoutine,
   deletePropertyDefinition,
+  deleteRoutine,
   ensureWorkspace,
   getDailyScrum,
   getItemPropertiesByName,
@@ -20,20 +23,25 @@ import {
   listChecklistItems,
   listItems,
   listPropertyDefinitions,
+  listRoutines,
   saveDailyScrum,
   serializeChecklistItem,
   serializeItem,
   serializePropertyDefinition,
+  serializeRoutine,
   setItemPropertiesByName,
   setPropertyValue,
   updateChecklistItem,
   updateItem,
+  updateRoutine,
+  setRoutineCompletion,
   type ItemCadence,
   type ItemKind,
   type ItemPriority,
   type ItemStatus,
   type PropertyType,
   type PropertyValue,
+  type RoutineCadence,
 } from "@/lib/pace-data";
 
 const propertyValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
@@ -82,12 +90,27 @@ const recommendationOutput = z.object({
   score: z.number(),
 });
 
+const routineOutput = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  cadence: z.string(),
+  active: z.boolean(),
+  sortOrder: z.number(),
+  date: z.string(),
+  completed: z.boolean(),
+  completionId: z.string().nullable(),
+  note: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
 function createOkitaServer(ownerId: string) {
   const server = new McpServer(
-    { name: "okita", version: "0.2.0" },
+    { name: "okita", version: "0.3.0" },
     {
       instructions:
-        "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Tasks are database rows with custom properties and internal checklists. Use list_properties before setting unfamiliar property names.",
+        "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Routines are separate recurring work with dated completion records. Tasks are database rows with custom properties and internal checklists. Use list_properties before setting unfamiliar property names.",
     },
   );
 
@@ -546,6 +569,132 @@ function createOkitaServer(ownerId: string) {
       return {
         structuredContent: { recommendations, count: recommendations.length },
         content: [{ type: "text", text: `Found ${recommendations.length} execution recommendations.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "list_routines",
+    {
+      title: "List recurring routines",
+      description: "List routines and whether each one is completed on a specific date.",
+      inputSchema: {
+        date: z.string().optional().describe("YYYY-MM-DD; defaults to today"),
+        include_inactive: z.boolean().optional(),
+      },
+      outputSchema: { routines: z.array(routineOutput), count: z.number() },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ date, include_inactive }) => {
+      const selectedDate = date ?? new Date().toISOString().slice(0, 10);
+      const routines = await listRoutines(ownerId, selectedDate, include_inactive ?? true);
+      return {
+        structuredContent: { routines, count: routines.length },
+        content: [{ type: "text", text: `Found ${routines.length} routines for ${selectedDate}.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "create_routine",
+    {
+      title: "Create a recurring routine",
+      description: "Create recurring work that stays separate from the OKR hierarchy.",
+      inputSchema: {
+        title: z.string().min(1),
+        description: z.string().optional(),
+        cadence: z.enum(ROUTINE_CADENCES).optional(),
+        active: z.boolean().optional(),
+        date: z.string().optional().describe("Date used for the returned completion state"),
+      },
+      outputSchema: { routine: routineOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ title, description, cadence, active, date }) => {
+      const selectedDate = date ?? new Date().toISOString().slice(0, 10);
+      const created = await createRoutine(ownerId, {
+        title,
+        description,
+        cadence: cadence as RoutineCadence | undefined,
+        active,
+      });
+      const routine = serializeRoutine(created, selectedDate);
+      return {
+        structuredContent: { routine },
+        content: [{ type: "text", text: `Created routine "${routine.title}".` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "update_routine",
+    {
+      title: "Update a recurring routine",
+      description: "Rename a routine, change its cadence, or pause and resume it.",
+      inputSchema: {
+        id: z.string(),
+        title: z.string().min(1).optional(),
+        description: z.string().optional(),
+        cadence: z.enum(ROUTINE_CADENCES).optional(),
+        active: z.boolean().optional(),
+        date: z.string().optional(),
+      },
+      outputSchema: { routine: routineOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ id, title, description, cadence, active, date }) => {
+      const selectedDate = date ?? new Date().toISOString().slice(0, 10);
+      const updated = await updateRoutine(ownerId, id, {
+        title,
+        description,
+        cadence: cadence as RoutineCadence | undefined,
+        active,
+      });
+      const completionState = (await listRoutines(ownerId, selectedDate)).find((routine) => routine.id === updated.id)!;
+      return {
+        structuredContent: { routine: completionState },
+        content: [{ type: "text", text: `Updated routine "${updated.title}".` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "complete_routine",
+    {
+      title: "Set a routine completion",
+      description: "Mark a routine complete or incomplete for a date, with an optional note.",
+      inputSchema: {
+        id: z.string(),
+        date: z.string().describe("YYYY-MM-DD"),
+        completed: z.boolean().default(true),
+        note: z.string().optional(),
+      },
+      outputSchema: { routine: routineOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ id, date, completed, note }) => {
+      const routine = await setRoutineCompletion(ownerId, id, date, completed, note);
+      return {
+        structuredContent: { routine },
+        content: [{ type: "text", text: `${routine.title} is ${completed ? "complete" : "incomplete"} for ${date}.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "delete_routine",
+    {
+      title: "Delete a recurring routine",
+      description: "Delete a routine and its dated completion history.",
+      inputSchema: { id: z.string() },
+      outputSchema: { deleted: z.boolean(), id: z.string(), title: z.string() },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    async ({ id }) => {
+      const routine = await deleteRoutine(ownerId, id);
+      return {
+        structuredContent: { deleted: true, id: routine.id, title: routine.title },
+        content: [{ type: "text", text: `Deleted routine "${routine.title}".` }],
       };
     },
   );

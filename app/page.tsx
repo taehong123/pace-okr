@@ -23,6 +23,7 @@ import {
   ListChecks,
   MoreHorizontal,
   Plus,
+  Repeat2,
   Search,
   Settings2,
   Table2,
@@ -35,13 +36,14 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 
-type View = "home" | "inbox" | "work" | "okr" | "scrum" | "recommendations" | "reviews";
+type View = "home" | "inbox" | "work" | "routines" | "okr" | "scrum" | "recommendations" | "reviews";
 type Cadence = "daily" | "weekly" | "monthly" | "quarterly";
 type ItemStatus = "inbox" | "todo" | "in_progress" | "done" | "blocked";
 type ItemKind = "objective" | "key_result" | "initiative" | "project" | "task";
 type Priority = "low" | "medium" | "high" | "urgent";
 type PropertyType = "text" | "number" | "select" | "date" | "checkbox";
 type PropertyValue = string | number | boolean | null;
+type RoutineCadence = "daily" | "weekly" | "monthly";
 
 type OkitaItem = {
   id: string;
@@ -87,6 +89,18 @@ type Recommendation = {
   itemIds: string[];
   score: number;
 };
+type Routine = {
+  id: string;
+  title: string;
+  description: string;
+  cadence: RoutineCadence;
+  active: boolean;
+  sortOrder: number;
+  date: string;
+  completed: boolean;
+  completionId: string | null;
+  note: string;
+};
 
 const fallbackItems: OkitaItem[] = [
   item("obj", null, "objective", "셀프 서브 도입으로 팀의 성장 속도를 높인다", "in_progress", "quarterly", 68),
@@ -118,6 +132,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "home", label: "홈", icon: LayoutDashboard },
   { id: "inbox", label: "인박스", icon: Inbox },
   { id: "work", label: "작업", icon: Table2 },
+  { id: "routines", label: "루틴", icon: Repeat2 },
   { id: "okr", label: "OKR", icon: Target },
   { id: "scrum", label: "데일리", icon: CalendarCheck },
   { id: "recommendations", label: "추천", icon: Lightbulb },
@@ -129,6 +144,7 @@ const viewTitles: Record<View, string> = {
   home: "홈",
   inbox: "인박스",
   work: "작업",
+  routines: "루틴",
   okr: "OKR",
   scrum: "데일리 스크럼",
   recommendations: "추천",
@@ -307,7 +323,7 @@ export default function Home() {
             <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setCreateItemOpen(true)}><Plus size={14} />새 항목</button>
-            ) : !["scrum", "recommendations", "inbox"].includes(activeView) ? (
+            ) : !["scrum", "recommendations", "inbox", "routines"].includes(activeView) ? (
               <CadenceSwitch value={cadence} onChange={setCadence} />
             ) : null}
           </header>
@@ -336,6 +352,7 @@ export default function Home() {
               onOpenTask={setSelectedTaskId}
             />
           )}
+          {activeView === "routines" && <RoutineView onNotice={showNotice} />}
           {activeView === "okr" && <TreeView objective={objective} items={structuredItems} depths={depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} />}
           {activeView === "scrum" && <DailyScrumView onOpenTask={setSelectedTaskId} onNotice={showNotice} />}
           {activeView === "recommendations" && <RecommendationsView onNavigate={setActiveView} />}
@@ -494,6 +511,72 @@ function CreateItemPanel({ items, onClose, onCreated }: { items: OkitaItem[]; on
   return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>새 항목</h2><p>OKR 실행 구조에 추가</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header><form className="property-form create-item-form" onSubmit={submit}><label><span>유형</span><select value={kind} onChange={(event) => { setKind(event.target.value as ItemKind); setParentId(""); }}>{(["objective", "key_result", "initiative", "project", "task"] as ItemKind[]).map((entry) => <option value={entry} key={entry}>{kindLabel(entry)}</option>)}</select></label><label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>{parentKind && <label><span>상위 {kindLabel(parentKind)}</span><select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">{kind === "task" ? "인박스에 저장" : "선택"}</option>{parentOptions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>}<button disabled={!title.trim() || saving}>{saving ? "저장 중" : "만들기"}</button></form></aside></div>;
 }
 
+function RoutineView({ onNotice }: { onNotice: (message: string) => void }) {
+  const [date, setDate] = useState(localDate());
+  const [rows, setRows] = useState<Routine[] | null>(null);
+  const [title, setTitle] = useState("");
+  const [cadence, setCadence] = useState<RoutineCadence>("daily");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch(`/api/routines?date=${date}`)
+      .then(async (response) => response.ok ? response.json() as Promise<{ routines: Routine[] }> : Promise.reject())
+      .then((data) => setRows(data.routines))
+      .catch(() => setRows([]));
+  }, [date]);
+
+  async function create(event: FormEvent) {
+    event.preventDefault();
+    if (!title.trim() || saving) return;
+    setSaving(true);
+    const response = await fetch("/api/routines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, cadence, date }),
+    });
+    setSaving(false);
+    if (!response.ok) return;
+    const data = await response.json() as { routine: Routine };
+    setRows((current) => [...(current ?? []), data.routine]);
+    setTitle("");
+    onNotice("루틴을 추가했습니다.");
+  }
+
+  async function toggleCompletion(routine: Routine) {
+    const completed = !routine.completed;
+    setRows((current) => current?.map((entry) => entry.id === routine.id ? { ...entry, completed } : entry) ?? null);
+    const response = await fetch("/api/routine-completions", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ routineId: routine.id, date, completed }),
+    });
+    if (response.ok) {
+      const data = await response.json() as { routine: Routine };
+      setRows((current) => current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? null);
+    }
+  }
+
+  async function toggleActive(routine: Routine) {
+    const active = !routine.active;
+    setRows((current) => current?.map((entry) => entry.id === routine.id ? { ...entry, active } : entry) ?? null);
+    await fetch("/api/routines", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: routine.id, active, date }),
+    });
+  }
+
+  async function remove(id: string) {
+    const response = await fetch(`/api/routines?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (response.ok) {
+      setRows((current) => current?.filter((entry) => entry.id !== id) ?? null);
+      onNotice("루틴을 삭제했습니다.");
+    }
+  }
+
+  return <section className="routine-section"><div className="routine-toolbar"><label><CalendarDays size={14} /><input type="date" value={date} onChange={(event) => { setRows(null); setDate(event.target.value); }} /></label><form onSubmit={create}><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="새 루틴" aria-label="새 루틴 이름" /><select value={cadence} onChange={(event) => setCadence(event.target.value as RoutineCadence)} aria-label="반복 주기"><option value="daily">매일</option><option value="weekly">매주</option><option value="monthly">매월</option></select><button disabled={!title.trim() || saving} aria-label="루틴 추가" title="루틴 추가"><Plus size={14} /></button></form></div><div className="routine-list"><div className="routine-head"><span>완료</span><span>이름</span><span>반복</span><span>활성</span><span /></div>{rows === null ? <EmptyState icon={Repeat2} title="루틴을 불러오는 중입니다" /> : rows.length ? rows.map((routine) => <div className={`routine-row ${routine.active ? "" : "inactive"}`} key={routine.id}><button className={`task-check ${routine.completed ? "checked" : ""}`} disabled={!routine.active} onClick={() => void toggleCompletion(routine)} aria-label={routine.completed ? "완료 취소" : "완료 처리"}><Check size={12} /></button><div><b>{routine.title}</b>{routine.description && <small>{routine.description}</small>}</div><span>{routineCadenceLabel(routine.cadence)}</span><label className="routine-switch"><input type="checkbox" checked={routine.active} onChange={() => void toggleActive(routine)} /><span /><em className="sr-only">루틴 활성 상태</em></label><button className="icon-button" onClick={() => void remove(routine.id)} aria-label="루틴 삭제" title="루틴 삭제"><Trash2 size={13} /></button></div>) : <EmptyState icon={Repeat2} title="등록된 루틴이 없습니다" />}</div></section>;
+}
+
 function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => void; onNotice: (message: string) => void }) {
   const [date, setDate] = useState(localDate());
   const [scrum, setScrum] = useState<Scrum | null>(null);
@@ -556,7 +639,7 @@ function PropertyPanel({ properties, onClose, onCreated, onDeleted, onNotice }: 
 
 function IntegrationModal({ onClose }: { onClose: () => void }) {
   const endpoint = typeof window === "undefined" ? "/mcp" : `${window.location.origin}/mcp`;
-  const tools = ["capture_item", "create_item", "update_item", "list_items", "link_item", "review_period", "list_properties", "create_property", "set_property_value", "delete_property", "list_checklist_items", "add_checklist_item", "update_checklist_item", "get_daily_scrum", "save_daily_scrum", "get_recommendations"];
+  const tools = ["capture_item", "create_item", "update_item", "list_items", "link_item", "review_period", "list_properties", "create_property", "set_property_value", "delete_property", "list_checklist_items", "add_checklist_item", "update_checklist_item", "get_daily_scrum", "save_daily_scrum", "get_recommendations", "list_routines", "create_routine", "update_routine", "complete_routine", "delete_routine"];
   return <div className="modal-backdrop"><section className="integration-modal"><header><h2>MCP 연결</h2><button className="icon-button" onClick={onClose}><X size={17} /></button></header><div className="endpoint-row"><Bot size={18} /><div><b>Streamable HTTP</b><code>{endpoint}</code></div><button className="icon-button" onClick={() => void navigator.clipboard.writeText(endpoint)} title="주소 복사"><Copy size={14} /></button></div><div className="tool-list">{tools.map((tool) => <code key={tool}>{tool}</code>)}</div><footer><span><CheckCircle2 size={15} />Objective → Key Result → Initiative → Project → Task</span><button onClick={onClose}>닫기</button></footer></section></div>;
 }
 
@@ -574,5 +657,6 @@ function sourceLabel(source: string) { return { mcp: "MCP", slack: "Slack", disc
 function propertyTypeLabel(type: PropertyType) { return { text: "텍스트", number: "숫자", select: "선택", date: "날짜", checkbox: "체크박스" }[type]; }
 function dueLabel(value: string | null) { if (!value) return "기한 없음"; const due = new Date(`${value}T00:00:00`); return `${due.getMonth() + 1}월 ${due.getDate()}일`; }
 function localDate() { const now = new Date(); const offset = now.getTimezoneOffset() * 60_000; return new Date(now.getTime() - offset).toISOString().slice(0, 10); }
-function pageSubtitle(view: View) { return { home: "지금 집중할 목표와 작업", inbox: "아직 Project에 연결하지 않은 Task", work: "Project에 연결된 Task 데이터베이스", okr: "Objective부터 Task까지의 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘" }[view]; }
+function pageSubtitle(view: View) { return { home: "지금 집중할 목표와 작업", inbox: "아직 Project에 연결하지 않은 Task", work: "Project에 연결된 Task 데이터베이스", routines: "반복되는 실행을 날짜별로 기록", okr: "Objective부터 Task까지의 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘" }[view]; }
+function routineCadenceLabel(cadence: RoutineCadence) { return { daily: "매일", weekly: "매주", monthly: "매월" }[cadence]; }
 function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "unlinked") return "↗"; if (kind === "due_soon") return "3"; return "P"; }

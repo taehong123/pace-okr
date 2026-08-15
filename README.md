@@ -16,6 +16,7 @@ a bot webhook. Unstructured captures land in the Inbox and can be linked later.
 - OKR execution tree and Project-linked Task database
 - Notion-style inline editing and custom Task properties
 - Task-internal checklists with automatic progress calculation
+- Separate daily, weekly, and monthly Routines with dated completion history
 - Inbox for unstructured conversational captures
 - Daily scrum with yesterday, today, and blocker notes
 - Data-driven recommendations for blocked, overdue, unlinked, and due-soon work
@@ -31,9 +32,11 @@ a bot webhook. Unstructured captures land in the Inbox and can be linked later.
 - `list_checklist_items`, `add_checklist_item`, `update_checklist_item`
 - `get_daily_scrum`, `save_daily_scrum`
 - `get_recommendations`
+- `list_routines`, `create_routine`, `update_routine`, `complete_routine`, `delete_routine`
 
 The MCP endpoint enforces the hierarchy. Project belongs under Initiative, and
 Task belongs under Project. Only Inbox Tasks may temporarily have no parent.
+Routines remain outside this hierarchy because they represent recurring work.
 
 ## Local development
 
