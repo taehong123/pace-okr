@@ -36,6 +36,44 @@ export const workspaceMembers = sqliteTable(
   ],
 );
 
+export const workspaceGroups = sqliteTable(
+  "workspace_groups",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    handle: text("handle").notNull(),
+    description: text("description").notNull().default(""),
+    color: text("color").notNull().default("gray"),
+    visibility: text("visibility").notNull().default("open"),
+    archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_workspace_groups_workspace_handle").on(table.workspaceId, table.handle),
+    index("idx_workspace_groups_workspace_archived").on(table.workspaceId, table.archived),
+  ],
+);
+
+export const workspaceGroupMembers = sqliteTable(
+  "workspace_group_members",
+  {
+    id: text("id").primaryKey(),
+    groupId: text("group_id").notNull().references(() => workspaceGroups.id, { onDelete: "cascade" }),
+    memberId: text("member_id").notNull().references(() => workspaceMembers.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("member"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_workspace_group_members_unique").on(table.groupId, table.memberId),
+    index("idx_workspace_group_members_member").on(table.memberId),
+    index("idx_workspace_group_members_group_role").on(table.groupId, table.role),
+  ],
+);
+
 export const items = sqliteTable(
   "items",
   {
@@ -194,3 +232,5 @@ export type Routine = typeof routines.$inferSelect;
 export type RoutineCompletion = typeof routineCompletions.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
+export type WorkspaceGroup = typeof workspaceGroups.$inferSelect;
+export type WorkspaceGroupMember = typeof workspaceGroupMembers.$inferSelect;

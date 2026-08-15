@@ -22,6 +22,7 @@ a bot webhook. Unstructured captures land in the Inbox and can be linked later.
 - Data-driven recommendations for blocked, overdue, unlinked, and due-soon work
 - Daily, weekly, monthly, and quarterly reviews
 - Shared workspaces with Owner, Admin, Member, and Viewer roles
+- Open and private workspace groups with `@handles`, Leads, invited members, and archive/restore lifecycle
 - D1 persistence and a Streamable HTTP MCP endpoint at `/mcp`
 - Generic bot capture webhook at `/api/webhooks/capture`
 
@@ -35,12 +36,17 @@ a bot webhook. Unstructured captures land in the Inbox and can be linked later.
 - `get_recommendations`
 - `list_routines`, `create_routine`, `update_routine`, `complete_routine`, `delete_routine`
 - `list_team_members`, `invite_team_member`, `update_team_member`, `remove_team_member`
+- `list_groups`, `create_group`, `update_group`, `archive_group`, `delete_group`
+- `list_group_members`, `add_group_member`, `update_group_member`, `remove_group_member`
 
 The MCP endpoint enforces the hierarchy. Project belongs under Initiative, and
 Task belongs under Project. Only Inbox Tasks may temporarily have no parent.
 Routines remain outside this hierarchy because they represent recurring work.
 Invited members join the shared workspace when they sign in with the invited
 email. Viewer access is enforced as read-only by the API.
+Private groups are only listed for their members and workspace administrators.
+Group Leads can edit their group and manage its membership; only workspace
+Owners and Admins can create, archive, restore, or permanently delete groups.
 
 ## Local development
 

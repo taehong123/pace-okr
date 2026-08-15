@@ -73,3 +73,37 @@ test("creates relational workspaces and team memberships", async () => {
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM workspace_members").get().count, 0);
   db.close();
 });
+
+test("creates groups with unique handles and cascading memberships", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON;");
+  const [teamMigration, groupMigration] = await Promise.all([
+    readFile(new URL("../drizzle/0005_wet_roland_deschain.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0006_rich_spitfire.sql", import.meta.url), "utf8"),
+  ]);
+  db.exec(teamMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(groupMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
+    INSERT INTO workspace_members (id, workspace_id, user_id, display_name, role, status)
+      VALUES ('owner-member', 'workspace', 'owner', 'Owner', 'owner', 'active');
+    INSERT INTO workspace_members (id, workspace_id, email, display_name, role, status)
+      VALUES ('invite', 'workspace', 'pending@example.com', 'Pending', 'member', 'invited');
+    INSERT INTO workspace_groups (id, workspace_id, name, handle, color, visibility)
+      VALUES ('group', 'workspace', '제품 팀', '제품-팀', 'blue', 'private');
+    INSERT INTO workspace_group_members (id, group_id, member_id, role)
+      VALUES ('lead', 'group', 'owner-member', 'lead');
+    INSERT INTO workspace_group_members (id, group_id, member_id, role)
+      VALUES ('pending-member', 'group', 'invite', 'member');
+  `);
+
+  assert.throws(() => db.exec("INSERT INTO workspace_groups (id, workspace_id, name, handle) VALUES ('duplicate', 'workspace', 'Duplicate', '제품-팀')"), /UNIQUE/i);
+  assert.deepEqual({ ...db.prepare("SELECT visibility, archived FROM workspace_groups WHERE id = 'group'").get() }, { visibility: "private", archived: 0 });
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM workspace_group_members WHERE group_id = 'group'").get().count, 2);
+
+  db.exec("DELETE FROM workspace_members WHERE id = 'invite'");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM workspace_group_members WHERE group_id = 'group'").get().count, 1);
+  db.exec("DELETE FROM workspace_groups WHERE id = 'group'");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM workspace_group_members").get().count, 0);
+  db.close();
+});

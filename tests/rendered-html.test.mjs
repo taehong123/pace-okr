@@ -59,6 +59,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /get_recommendations/);
   assert.match(page, /list_routines/);
   assert.match(page, /list_team_members/);
+  assert.match(page, /create_group/);
+  assert.match(page, /list_group_members/);
   assert.match(page, /Objective → Key Result → Initiative → Project → Task/);
   assert.match(page, /OKR이 오늘의 일로 이어지도록/);
   assert.match(page, /Connect your OKRs to today's work/);

@@ -10,10 +10,14 @@ import {
   propertyDefinitions,
   routineCompletions,
   routines,
+  workspaceGroupMembers,
+  workspaceGroups,
   workspaceMembers,
   workspaces,
   type PaceItem,
   type PropertyDefinition,
+  type WorkspaceGroup,
+  type WorkspaceGroupMember,
   type WorkspaceMember,
 } from "@/db/schema";
 
@@ -24,6 +28,9 @@ export const ITEM_CADENCES = ["daily", "weekly", "monthly", "quarterly"] as cons
 export const PROPERTY_TYPES = ["text", "number", "select", "date", "checkbox"] as const;
 export const ROUTINE_CADENCES = ["daily", "weekly", "monthly"] as const;
 export const TEAM_ROLES = ["owner", "admin", "member", "viewer"] as const;
+export const GROUP_COLORS = ["gray", "blue", "green", "yellow", "orange", "red", "purple"] as const;
+export const GROUP_VISIBILITIES = ["open", "private"] as const;
+export const GROUP_ROLES = ["lead", "member"] as const;
 
 export type ItemKind = (typeof ITEM_KINDS)[number];
 export type ItemStatus = (typeof ITEM_STATUSES)[number];
@@ -33,6 +40,9 @@ export type PropertyType = (typeof PROPERTY_TYPES)[number];
 export type PropertyValue = string | number | boolean | null;
 export type RoutineCadence = (typeof ROUTINE_CADENCES)[number];
 export type TeamRole = (typeof TEAM_ROLES)[number];
+export type GroupColor = (typeof GROUP_COLORS)[number];
+export type GroupVisibility = (typeof GROUP_VISIBILITIES)[number];
+export type GroupRole = (typeof GROUP_ROLES)[number];
 
 export type RequestAuthorization = {
   ownerId: string;
@@ -82,6 +92,32 @@ async function ensureSchema() {
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_members_user ON workspace_members(user_id)"),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_members_workspace_email ON workspace_members(workspace_id, email)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace_status ON workspace_members(workspace_id, status)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS workspace_groups (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          handle TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          color TEXT NOT NULL DEFAULT 'gray',
+          visibility TEXT NOT NULL DEFAULT 'open',
+          archived INTEGER NOT NULL DEFAULT 0,
+          created_by_user_id TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_groups_workspace_handle ON workspace_groups(workspace_id, handle)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspace_groups_workspace_archived ON workspace_groups(workspace_id, archived)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS workspace_group_members (
+          id TEXT PRIMARY KEY,
+          group_id TEXT NOT NULL REFERENCES workspace_groups(id) ON DELETE CASCADE,
+          member_id TEXT NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
+          role TEXT NOT NULL DEFAULT 'member',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_group_members_unique ON workspace_group_members(group_id, member_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspace_group_members_member ON workspace_group_members(member_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspace_group_members_group_role ON workspace_group_members(group_id, role)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS items (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL,
@@ -366,6 +402,302 @@ function serializeTeamMember(member: WorkspaceMember, currentUserId: string) {
     isCurrent: member.userId === currentUserId,
     createdAt: member.createdAt,
   };
+}
+
+export async function listGroups(authorization: RequestAuthorization, includeArchived = false) {
+  const rows = await getDb().select().from(workspaceGroups).where(eq(workspaceGroups.workspaceId, authorization.ownerId));
+  const memberships = await getDb()
+    .select({
+      id: workspaceGroupMembers.id,
+      groupId: workspaceGroupMembers.groupId,
+      memberId: workspaceGroupMembers.memberId,
+      role: workspaceGroupMembers.role,
+      createdAt: workspaceGroupMembers.createdAt,
+      updatedAt: workspaceGroupMembers.updatedAt,
+    })
+    .from(workspaceGroupMembers)
+    .innerJoin(workspaceGroups, eq(workspaceGroupMembers.groupId, workspaceGroups.id))
+    .where(eq(workspaceGroups.workspaceId, authorization.ownerId));
+  const currentMember = await getCurrentWorkspaceMember(authorization);
+  const administrator = canManageTeam(authorization);
+
+  return rows
+    .filter((group) => includeArchived || !group.archived)
+    .filter((group) => group.visibility === "open" || administrator || memberships.some((entry) => entry.groupId === group.id && entry.memberId === currentMember?.id))
+    .map((group) => serializeGroup(group, memberships.filter((entry) => entry.groupId === group.id), currentMember?.id ?? null, administrator))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export async function createGroup(
+  authorization: RequestAuthorization,
+  input: { name: string; handle?: string; description?: string; color?: GroupColor; visibility?: GroupVisibility },
+) {
+  if (!canManageTeam(authorization)) throw new Error("Owner or Admin access is required");
+  const name = cleanGroupName(input.name);
+  const description = cleanGroupDescription(input.description ?? "");
+  const color = requireGroupColor(input.color ?? "gray");
+  const visibility = requireGroupVisibility(input.visibility ?? "open");
+  const handle = input.handle
+    ? await requireAvailableGroupHandle(authorization.ownerId, input.handle)
+    : await nextAvailableGroupHandle(authorization.ownerId, name);
+  const now = new Date().toISOString();
+  const group: WorkspaceGroup = {
+    id: crypto.randomUUID(),
+    workspaceId: authorization.ownerId,
+    name,
+    handle,
+    description,
+    color,
+    visibility,
+    archived: false,
+    createdByUserId: authorization.userId,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await getDb().insert(workspaceGroups).values(group);
+
+  const creator = await getCurrentWorkspaceMember(authorization);
+  if (creator) {
+    await getDb().insert(workspaceGroupMembers).values({
+      id: crypto.randomUUID(),
+      groupId: group.id,
+      memberId: creator.id,
+      role: "lead",
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  return getVisibleGroup(authorization, group.id, true);
+}
+
+export async function updateGroup(
+  authorization: RequestAuthorization,
+  id: string,
+  patch: Partial<{ name: string; handle: string; description: string; color: GroupColor; visibility: GroupVisibility; archived: boolean }>,
+) {
+  const context = await getGroupContext(authorization, id);
+  if (!context.visible) throw new Error("Group not found");
+  const canEdit = context.administrator || context.currentMembership?.role === "lead";
+  if (!canEdit) throw new Error("Group Lead, Owner, or Admin access is required");
+  if (context.group.archived && !context.administrator && patch.archived !== false) throw new Error("Archived groups can only be changed by an Owner or Admin");
+  if (patch.archived !== undefined && !context.administrator) throw new Error("Only an Owner or Admin can archive or restore a group");
+
+  const values: Partial<WorkspaceGroup> = { updatedAt: new Date().toISOString() };
+  if (patch.name !== undefined) values.name = cleanGroupName(patch.name);
+  if (patch.description !== undefined) values.description = cleanGroupDescription(patch.description);
+  if (patch.color !== undefined) values.color = requireGroupColor(patch.color);
+  if (patch.visibility !== undefined) values.visibility = requireGroupVisibility(patch.visibility);
+  if (patch.handle !== undefined) values.handle = await requireAvailableGroupHandle(authorization.ownerId, patch.handle, id);
+  if (patch.archived !== undefined) values.archived = patch.archived;
+  await getDb().update(workspaceGroups).set(values).where(and(eq(workspaceGroups.workspaceId, authorization.ownerId), eq(workspaceGroups.id, id)));
+  return getVisibleGroup(authorization, id, true);
+}
+
+export async function deleteGroup(authorization: RequestAuthorization, id: string) {
+  if (!canManageTeam(authorization)) throw new Error("Owner or Admin access is required");
+  const group = await getWorkspaceGroup(authorization.ownerId, id);
+  if (!group.archived) throw new Error("Archive the group before deleting it permanently");
+  await getDb().delete(workspaceGroups).where(and(eq(workspaceGroups.workspaceId, authorization.ownerId), eq(workspaceGroups.id, id)));
+  return { deleted: true, id: group.id, name: group.name };
+}
+
+export async function listGroupMembers(authorization: RequestAuthorization, groupId: string) {
+  const context = await getGroupContext(authorization, groupId);
+  if (!context.visible) throw new Error("Group not found");
+  const rows = await getDb()
+    .select({ relation: workspaceGroupMembers, member: workspaceMembers })
+    .from(workspaceGroupMembers)
+    .innerJoin(workspaceMembers, eq(workspaceGroupMembers.memberId, workspaceMembers.id))
+    .where(eq(workspaceGroupMembers.groupId, groupId));
+  const members = rows
+    .filter(({ member }) => member.workspaceId === authorization.ownerId)
+    .map(({ relation, member }) => serializeGroupMember(relation, member, authorization.userId))
+    .sort((left, right) => Number(right.groupRole === "lead") - Number(left.groupRole === "lead") || left.displayName.localeCompare(right.displayName));
+  return {
+    group: serializeGroup(context.group, rows.map(({ relation }) => relation), context.currentMember?.id ?? null, context.administrator),
+    members,
+    canManageMembers: !context.group.archived && (context.administrator || context.currentMembership?.role === "lead"),
+  };
+}
+
+export async function addGroupMember(authorization: RequestAuthorization, groupId: string, memberId: string, role: GroupRole = "member") {
+  const context = await requireGroupManager(authorization, groupId);
+  requireGroupRole(role);
+  const member = await getWorkspaceMember(authorization.ownerId, memberId);
+  if (role === "lead" && member.role === "viewer") throw new Error("A Viewer cannot be assigned as a Group Lead");
+  const [existing] = await getDb().select().from(workspaceGroupMembers).where(and(eq(workspaceGroupMembers.groupId, groupId), eq(workspaceGroupMembers.memberId, memberId))).limit(1);
+  if (existing) throw new Error("This member is already in the group");
+  const now = new Date().toISOString();
+  const relation: WorkspaceGroupMember = { id: crypto.randomUUID(), groupId: context.group.id, memberId: member.id, role, createdAt: now, updatedAt: now };
+  await getDb().insert(workspaceGroupMembers).values(relation);
+  return serializeGroupMember(relation, member, authorization.userId);
+}
+
+export async function updateGroupMember(authorization: RequestAuthorization, groupId: string, memberId: string, role: GroupRole) {
+  await requireGroupManager(authorization, groupId);
+  requireGroupRole(role);
+  const member = await getWorkspaceMember(authorization.ownerId, memberId);
+  if (role === "lead" && member.role === "viewer") throw new Error("A Viewer cannot be assigned as a Group Lead");
+  const relation = await getGroupMemberRelation(groupId, memberId);
+  const updated = { ...relation, role, updatedAt: new Date().toISOString() };
+  await getDb().update(workspaceGroupMembers).set({ role, updatedAt: updated.updatedAt }).where(eq(workspaceGroupMembers.id, relation.id));
+  return serializeGroupMember(updated, member, authorization.userId);
+}
+
+export async function removeGroupMember(authorization: RequestAuthorization, groupId: string, memberId: string) {
+  await requireGroupManager(authorization, groupId);
+  await getWorkspaceMember(authorization.ownerId, memberId);
+  const relation = await getGroupMemberRelation(groupId, memberId);
+  await getDb().delete(workspaceGroupMembers).where(eq(workspaceGroupMembers.id, relation.id));
+  return { deleted: true, groupId, memberId };
+}
+
+async function getVisibleGroup(authorization: RequestAuthorization, id: string, includeArchived = false) {
+  const groups = await listGroups(authorization, includeArchived);
+  const group = groups.find((entry) => entry.id === id);
+  if (!group) throw new Error("Group not found");
+  return group;
+}
+
+async function getGroupContext(authorization: RequestAuthorization, id: string) {
+  const group = await getWorkspaceGroup(authorization.ownerId, id);
+  const currentMember = await getCurrentWorkspaceMember(authorization);
+  const [currentMembership] = currentMember
+    ? await getDb().select().from(workspaceGroupMembers).where(and(eq(workspaceGroupMembers.groupId, id), eq(workspaceGroupMembers.memberId, currentMember.id))).limit(1)
+    : [];
+  const administrator = canManageTeam(authorization);
+  return {
+    group,
+    currentMember,
+    currentMembership: currentMembership ?? null,
+    administrator,
+    visible: group.visibility === "open" || administrator || Boolean(currentMembership),
+  };
+}
+
+async function requireGroupManager(authorization: RequestAuthorization, groupId: string) {
+  const context = await getGroupContext(authorization, groupId);
+  if (!context.visible) throw new Error("Group not found");
+  if (context.group.archived) throw new Error("Restore the group before changing its members");
+  if (!context.administrator && context.currentMembership?.role !== "lead") throw new Error("Group Lead, Owner, or Admin access is required");
+  return context;
+}
+
+async function getCurrentWorkspaceMember(authorization: RequestAuthorization) {
+  const [direct] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, authorization.ownerId), eq(workspaceMembers.userId, authorization.userId))).limit(1);
+  if (direct) return direct;
+  if (!authorization.apiToken) return null;
+  const [owner] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, authorization.ownerId), eq(workspaceMembers.role, "owner"))).limit(1);
+  return owner ?? null;
+}
+
+async function getWorkspaceGroup(ownerId: string, id: string) {
+  const [group] = await getDb().select().from(workspaceGroups).where(and(eq(workspaceGroups.workspaceId, ownerId), eq(workspaceGroups.id, id))).limit(1);
+  if (!group) throw new Error("Group not found");
+  return group;
+}
+
+async function getGroupMemberRelation(groupId: string, memberId: string) {
+  const [relation] = await getDb().select().from(workspaceGroupMembers).where(and(eq(workspaceGroupMembers.groupId, groupId), eq(workspaceGroupMembers.memberId, memberId))).limit(1);
+  if (!relation) throw new Error("Group member not found");
+  return relation;
+}
+
+function serializeGroup(
+  group: WorkspaceGroup,
+  memberships: Pick<WorkspaceGroupMember, "memberId" | "role">[],
+  currentMemberId: string | null,
+  administrator: boolean,
+) {
+  const currentMembership = memberships.find((entry) => entry.memberId === currentMemberId);
+  return {
+    id: group.id,
+    name: group.name,
+    handle: group.handle,
+    description: group.description,
+    color: group.color as GroupColor,
+    visibility: group.visibility as GroupVisibility,
+    archived: group.archived,
+    memberCount: memberships.length,
+    isMember: Boolean(currentMembership),
+    isLead: currentMembership?.role === "lead",
+    canEdit: administrator || currentMembership?.role === "lead",
+    canArchive: administrator,
+    createdAt: group.createdAt,
+    updatedAt: group.updatedAt,
+  };
+}
+
+function serializeGroupMember(relation: WorkspaceGroupMember, member: WorkspaceMember, currentUserId: string) {
+  return {
+    id: relation.id,
+    memberId: member.id,
+    email: member.email ?? "",
+    displayName: member.displayName || member.email?.split("@")[0] || "Member",
+    status: member.status as "invited" | "active",
+    workspaceRole: member.role as TeamRole,
+    groupRole: relation.role as GroupRole,
+    isCurrent: member.userId === currentUserId,
+    createdAt: relation.createdAt,
+  };
+}
+
+function cleanGroupName(value: string) {
+  const name = value.trim().replace(/\s+/g, " ");
+  if (!name) throw new Error("Group name is required");
+  if (name.length > 80) throw new Error("Group name must be 80 characters or fewer");
+  return name;
+}
+
+function cleanGroupDescription(value: string) {
+  const description = value.trim();
+  if (description.length > 500) throw new Error("Group description must be 500 characters or fewer");
+  return description;
+}
+
+function normalizeGroupHandle(value: string) {
+  return value
+    .normalize("NFKC")
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}_-]+/gu, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "")
+    .slice(0, 32);
+}
+
+async function requireAvailableGroupHandle(ownerId: string, input: string, exceptId?: string) {
+  const handle = normalizeGroupHandle(input);
+  if (!handle) throw new Error("Group handle is required");
+  const [existing] = await getDb().select().from(workspaceGroups).where(and(eq(workspaceGroups.workspaceId, ownerId), eq(workspaceGroups.handle, handle))).limit(1);
+  if (existing && existing.id !== exceptId) throw new Error(`The group handle @${handle} is already in use`);
+  return handle;
+}
+
+async function nextAvailableGroupHandle(ownerId: string, name: string) {
+  const base = normalizeGroupHandle(name) || "group";
+  for (let number = 1; number <= 100; number += 1) {
+    const suffix = number === 1 ? "" : `-${number}`;
+    const candidate = `${base.slice(0, 32 - suffix.length)}${suffix}`;
+    const [existing] = await getDb().select({ id: workspaceGroups.id }).from(workspaceGroups).where(and(eq(workspaceGroups.workspaceId, ownerId), eq(workspaceGroups.handle, candidate))).limit(1);
+    if (!existing) return candidate;
+  }
+  throw new Error("Unable to create a unique group handle");
+}
+
+function requireGroupColor(value: GroupColor) {
+  if (!GROUP_COLORS.includes(value)) throw new Error("Unsupported group color");
+  return value;
+}
+
+function requireGroupVisibility(value: GroupVisibility) {
+  if (!GROUP_VISIBILITIES.includes(value)) throw new Error("Unsupported group visibility");
+  return value;
+}
+
+function requireGroupRole(value: GroupRole) {
+  if (!GROUP_ROLES.includes(value)) throw new Error("Unsupported group role");
+  return value;
 }
 
 export async function listItems(

@@ -6,15 +6,20 @@ import {
   ITEM_KINDS,
   ITEM_PRIORITIES,
   ITEM_STATUSES,
+  GROUP_COLORS,
+  GROUP_VISIBILITIES,
   PROPERTY_TYPES,
   ROUTINE_CADENCES,
+  addGroupMember,
   authorizeRequest,
   canManageTeam,
   createChecklistItem,
+  createGroup,
   createItem,
   createPropertyDefinition,
   createRoutine,
   deletePropertyDefinition,
+  deleteGroup,
   deleteRoutine,
   ensureWorkspace,
   getTeam,
@@ -23,11 +28,14 @@ import {
   getPeriodReview,
   getRecommendations,
   listChecklistItems,
+  listGroupMembers,
+  listGroups,
   listItems,
   listPropertyDefinitions,
   listRoutines,
   inviteTeamMember,
   removeTeamMember,
+  removeGroupMember,
   saveDailyScrum,
   serializeChecklistItem,
   serializeItem,
@@ -36,6 +44,8 @@ import {
   setItemPropertiesByName,
   setPropertyValue,
   updateChecklistItem,
+  updateGroup,
+  updateGroupMember,
   updateItem,
   updateRoutine,
   updateTeamMember,
@@ -44,6 +54,9 @@ import {
   type ItemKind,
   type ItemPriority,
   type ItemStatus,
+  type GroupColor,
+  type GroupRole,
+  type GroupVisibility,
   type PropertyType,
   type PropertyValue,
   type RoutineCadence,
@@ -122,13 +135,42 @@ const teamMemberOutput = z.object({
   createdAt: z.string(),
 });
 
+const groupOutput = z.object({
+  id: z.string(),
+  name: z.string(),
+  handle: z.string(),
+  description: z.string(),
+  color: z.string(),
+  visibility: z.string(),
+  archived: z.boolean(),
+  memberCount: z.number(),
+  isMember: z.boolean(),
+  isLead: z.boolean(),
+  canEdit: z.boolean(),
+  canArchive: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const groupMemberOutput = z.object({
+  id: z.string(),
+  memberId: z.string(),
+  email: z.string(),
+  displayName: z.string(),
+  status: z.string(),
+  workspaceRole: z.string(),
+  groupRole: z.string(),
+  isCurrent: z.boolean(),
+  createdAt: z.string(),
+});
+
 function createOkrptrServer(authorization: RequestAuthorization) {
   const { ownerId } = authorization;
   const server = new McpServer(
-    { name: "okrptr", version: "0.5.0" },
+    { name: "okrptr", version: "0.6.0" },
     {
       instructions:
-        "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Routines are separate recurring work with dated completion records. Tasks are database rows with custom properties and internal checklists. Team access uses Owner, Admin, Member, and read-only Viewer roles. Use list_properties before setting unfamiliar property names.",
+        "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Routines are separate recurring work with dated completion records. Tasks are database rows with custom properties and internal checklists. Team access uses Owner, Admin, Member, and read-only Viewer roles. Workspace groups have @handles, open or private visibility, and Lead or Member roles. Use list_properties before setting unfamiliar property names.",
     },
   );
 
@@ -780,6 +822,172 @@ function createOkrptrServer(authorization: RequestAuthorization) {
       if (!canManageTeam(authorization)) throw new Error("Owner or Admin access is required.");
       const deleted = await removeTeamMember(ownerId, id, authorization.userId);
       return { structuredContent: deleted, content: [{ type: "text", text: `Removed team member or invitation ${id}.` }] };
+    },
+  );
+
+  server.registerTool(
+    "list_groups",
+    {
+      title: "List workspace groups",
+      description: "List groups visible to the current member. Private groups are only returned to their members and workspace administrators.",
+      inputSchema: { include_archived: z.boolean().default(false) },
+      outputSchema: { groups: z.array(groupOutput), count: z.number() },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ include_archived }) => {
+      const groups = await listGroups(authorization, include_archived);
+      return {
+        structuredContent: { groups, count: groups.length },
+        content: [{ type: "text", text: `Found ${groups.length} visible workspace groups.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "create_group",
+    {
+      title: "Create a workspace group",
+      description: "Create an open or private group with a unique @handle. The creator becomes a Group Lead.",
+      inputSchema: {
+        name: z.string().min(1).max(80),
+        handle: z.string().optional().describe("Optional unique handle without @; generated from the name when omitted"),
+        description: z.string().max(500).optional(),
+        color: z.enum(GROUP_COLORS).default("gray"),
+        visibility: z.enum(GROUP_VISIBILITIES).default("open"),
+      },
+      outputSchema: { group: groupOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ name, handle, description, color, visibility }) => {
+      const group = await createGroup(authorization, {
+        name,
+        handle,
+        description,
+        color: color as GroupColor,
+        visibility: visibility as GroupVisibility,
+      });
+      return { structuredContent: { group }, content: [{ type: "text", text: `Created @${group.handle} (${group.visibility}).` }] };
+    },
+  );
+
+  server.registerTool(
+    "update_group",
+    {
+      title: "Update a workspace group",
+      description: "Update group identity, description, color, or visibility. Group Leads can update their own groups.",
+      inputSchema: {
+        id: z.string(),
+        name: z.string().min(1).max(80).optional(),
+        handle: z.string().optional(),
+        description: z.string().max(500).optional(),
+        color: z.enum(GROUP_COLORS).optional(),
+        visibility: z.enum(GROUP_VISIBILITIES).optional(),
+      },
+      outputSchema: { group: groupOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ id, name, handle, description, color, visibility }) => {
+      const group = await updateGroup(authorization, id, {
+        name,
+        handle,
+        description,
+        color: color as GroupColor | undefined,
+        visibility: visibility as GroupVisibility | undefined,
+      });
+      return { structuredContent: { group }, content: [{ type: "text", text: `Updated @${group.handle}.` }] };
+    },
+  );
+
+  server.registerTool(
+    "archive_group",
+    {
+      title: "Archive or restore a workspace group",
+      description: "Archive a group without losing membership, or restore it later. Owner or Admin access is required.",
+      inputSchema: { id: z.string(), archived: z.boolean().default(true) },
+      outputSchema: { group: groupOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ id, archived }) => {
+      const group = await updateGroup(authorization, id, { archived });
+      return { structuredContent: { group }, content: [{ type: "text", text: `${archived ? "Archived" : "Restored"} @${group.handle}.` }] };
+    },
+  );
+
+  server.registerTool(
+    "delete_group",
+    {
+      title: "Permanently delete an archived group",
+      description: "Permanently delete a group and its memberships. The group must already be archived.",
+      inputSchema: { id: z.string() },
+      outputSchema: { deleted: z.boolean(), id: z.string(), name: z.string() },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    async ({ id }) => {
+      const deleted = await deleteGroup(authorization, id);
+      return { structuredContent: deleted, content: [{ type: "text", text: `Permanently deleted group "${deleted.name}".` }] };
+    },
+  );
+
+  server.registerTool(
+    "list_group_members",
+    {
+      title: "List members of a workspace group",
+      description: "List active and invited members in a visible group, including Group Lead roles.",
+      inputSchema: { group_id: z.string() },
+      outputSchema: { group: groupOutput, members: z.array(groupMemberOutput), canManageMembers: z.boolean(), count: z.number() },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ group_id }) => {
+      const result = await listGroupMembers(authorization, group_id);
+      return {
+        structuredContent: { ...result, count: result.members.length },
+        content: [{ type: "text", text: `Found ${result.members.length} members in @${result.group.handle}.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "add_group_member",
+    {
+      title: "Add a member to a workspace group",
+      description: "Add an active member or pending invitation to a group as a Lead or Member.",
+      inputSchema: { group_id: z.string(), member_id: z.string(), role: z.enum(["lead", "member"]).default("member") },
+      outputSchema: { member: groupMemberOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ group_id, member_id, role }) => {
+      const member = await addGroupMember(authorization, group_id, member_id, role as GroupRole);
+      return { structuredContent: { member }, content: [{ type: "text", text: `Added ${member.displayName} to the group as ${role}.` }] };
+    },
+  );
+
+  server.registerTool(
+    "update_group_member",
+    {
+      title: "Update a group member role",
+      description: "Change a group member between Lead and Member.",
+      inputSchema: { group_id: z.string(), member_id: z.string(), role: z.enum(["lead", "member"]) },
+      outputSchema: { member: groupMemberOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ group_id, member_id, role }) => {
+      const member = await updateGroupMember(authorization, group_id, member_id, role as GroupRole);
+      return { structuredContent: { member }, content: [{ type: "text", text: `Updated ${member.displayName} to Group ${role}.` }] };
+    },
+  );
+
+  server.registerTool(
+    "remove_group_member",
+    {
+      title: "Remove a member from a workspace group",
+      description: "Remove a member or pending invitation from a group without removing them from the workspace.",
+      inputSchema: { group_id: z.string(), member_id: z.string() },
+      outputSchema: { deleted: z.boolean(), groupId: z.string(), memberId: z.string() },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    async ({ group_id, member_id }) => {
+      const deleted = await removeGroupMember(authorization, group_id, member_id);
+      return { structuredContent: deleted, content: [{ type: "text", text: `Removed member ${member_id} from group ${group_id}.` }] };
     },
   );
 
