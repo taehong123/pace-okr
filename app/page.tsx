@@ -23,7 +23,6 @@ import {
   Plus,
   Search,
   Send,
-  Settings2,
   Target,
   X,
   Zap,
@@ -376,8 +375,14 @@ export default function Home() {
       </section>
 
       {integrationOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setIntegrationOpen(false)}>
-          <section className="integration-modal" role="dialog" aria-modal="true" aria-labelledby="integration-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setIntegrationOpen(false);
+          }}
+        >
+          <section className="integration-modal" role="dialog" aria-modal="true" aria-labelledby="integration-title">
             <header>
               <div>
                 <span className="eyebrow">Connect Pace</span>
@@ -477,7 +482,7 @@ function TreeView({
       </div>
       <div className="hierarchy" aria-label="OKR 작업 구조">
         {items.filter((entry) => entry.id !== objective.id).map((entry) => (
-          <button
+          <div
             className="hierarchy-row"
             key={entry.id}
             style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as React.CSSProperties}
@@ -490,9 +495,9 @@ function TreeView({
             <span className="mini-progress"><i style={{ width: `${entry.progress}%` }} /></span>
             <em>{entry.progress}%</em>
             {entry.status !== "done" && ["task", "action"].includes(entry.kind) ? (
-              <span
+              <button
+                type="button"
                 className="row-action"
-                role="button"
                 aria-label="완료 처리"
                 title="완료 처리"
                 onClick={(event) => {
@@ -501,9 +506,9 @@ function TreeView({
                 }}
               >
                 <Check size={14} />
-              </span>
+              </button>
             ) : <ChevronRight className="row-chevron" size={15} />}
-          </button>
+          </div>
         ))}
       </div>
     </>

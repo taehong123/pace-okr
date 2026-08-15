@@ -90,7 +90,7 @@ nav { display: grid; gap: 4px; }
 .mini-progress { width: 72px; height: 5px; border-radius: 5px; overflow: hidden; background: #e9ebe6; }
 .mini-progress i { display: block; height: 100%; background: var(--green); }
 .hierarchy-row em { color: var(--muted); font-size: 10px; font-style: normal; text-align: right; }
-.row-action { width: 25px; height: 25px; border: 1px solid var(--line); border-radius: 50%; display: grid; place-items: center; color: var(--green); }
+.row-action { width: 25px; height: 25px; padding: 0; border: 1px solid var(--line); border-radius: 50%; display: grid; place-items: center; background: white; color: var(--green); cursor: pointer; }
 .row-action:hover { background: #e8f5e9; border-color: #a9c7ae; }
 .row-chevron { color: #a4a9a0; }
 
