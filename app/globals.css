@@ -13,9 +13,9 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; background: var(--paper); color: var(--ink); }
-body, button, input, select { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", Arial, sans-serif; letter-spacing: 0; }
-button, input, select { font-size: inherit; }
-button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid rgba(51, 126, 169, .45); outline-offset: 1px; }
+body, button, input, select, textarea { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", Arial, sans-serif; letter-spacing: 0; }
+button, input, select, textarea { font-size: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid rgba(51, 126, 169, .45); outline-offset: 1px; }
 
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 238px minmax(0, 1fr); background: var(--paper); }
 .sidebar { height: 100vh; position: sticky; top: 0; display: flex; flex-direction: column; padding: 9px 8px 10px; background: var(--sidebar); border-right: 1px solid var(--line); }
@@ -55,6 +55,8 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .page-header { min-height: 72px; display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
 .page-header h1 { margin: 0; font-size: 30px; line-height: 1.25; font-weight: 700; }
 .page-header p { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
+.primary-action { height: 31px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border: 0; border-radius: 4px; background: var(--ink); color: white; font-size: 11px; cursor: pointer; }
+.primary-action:disabled { opacity: .55; cursor: default; }
 .cadence-switch { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 5px; }
 .cadence-switch button { min-width: 45px; height: 28px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
 .cadence-switch button:hover { background: var(--hover); }
@@ -159,7 +161,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .type-key_result { background: #e7f3f8; color: #337ea9; }
 .type-initiative { background: #faebdd; color: #d9730d; }
 .type-task { background: #edf3ec; color: #448361; }
-.type-action { background: #f3eeee; color: #9065b0; }
+.type-project { background: #f3eeee; color: #9065b0; }
 .hierarchy-copy { min-width: 0; display: grid; gap: 2px; }
 .hierarchy-copy small { color: var(--faint); font-size: 9px; }
 .hierarchy-copy b { overflow: hidden; font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
@@ -234,6 +236,58 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .property-form input, .property-form select { width: 100%; height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 4px; outline: 0; background: white; color: var(--ink); font-size: 11px; }
 .property-form input:focus, .property-form select:focus { border-color: #bcbcb9; box-shadow: 0 0 0 1px #bcbcb9; }
 .property-form > button { height: 34px; display: flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 4px; background: var(--ink); color: white; font-size: 11px; cursor: pointer; }
+.property-form > button:disabled { opacity: .55; cursor: default; }
+
+.task-detail-panel { width: min(460px, 100vw); }
+.task-detail-panel > header { min-height: 78px; height: auto; }
+.task-detail-panel > header > div { min-width: 0; padding: 12px 0; }
+.task-detail-panel h2 { overflow-wrap: anywhere; font-size: 15px; line-height: 1.4; }
+.task-meta { min-height: 47px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); }
+.task-meta > span:nth-child(2) { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
+.task-meta b { font-size: 11px; }
+.checklist-section { padding: 12px 18px 24px; }
+.checklist-section > header { height: 38px; display: flex; align-items: center; justify-content: space-between; }
+.checklist-section > header b { font-size: 11px; }
+.checklist-section > header span { color: var(--muted); font-size: 10px; }
+.checklist-row { min-height: 40px; display: grid; grid-template-columns: 18px minmax(0, 1fr) 28px; align-items: center; gap: 9px; border-bottom: 1px solid var(--line); }
+.checklist-row > span { overflow-wrap: anywhere; font-size: 11px; }
+.checklist-row > span.completed { color: var(--faint); text-decoration: line-through; }
+.checklist-form { height: 42px; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 7px; color: var(--faint); border-bottom: 1px solid var(--line); }
+.checklist-form input { min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 11px; }
+.checklist-form button { height: 26px; padding: 0 8px; border: 0; border-radius: 4px; background: var(--ink); color: white; font-size: 10px; cursor: pointer; }
+.checklist-form button:disabled { opacity: .4; }
+.create-item-form { padding-top: 24px; }
+
+.scrum-section, .recommendation-list { border-top: 1px solid var(--line); }
+.scrum-toolbar { min-height: 53px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+.scrum-toolbar label { height: 31px; display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.scrum-toolbar input { height: 30px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--ink); font-size: 11px; }
+.scrum-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.scrum-column { min-width: 0; border-right: 1px solid var(--line); }
+.scrum-column:last-child { border-right: 0; }
+.scrum-column > header { height: 43px; display: flex; align-items: center; gap: 7px; padding: 0 11px; border-bottom: 1px solid var(--line); }
+.scrum-column > header svg { color: var(--muted); }
+.scrum-column > header b { font-size: 11px; }
+.scrum-column > header span { margin-left: auto; color: var(--faint); font-size: 10px; }
+.scrum-task-list { min-height: 190px; }
+.scrum-task-list > button { width: 100%; min-height: 46px; display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 11px; border: 0; border-bottom: 1px solid var(--line); background: white; color: var(--ink); text-align: left; cursor: pointer; }
+.scrum-task-list > button:hover { background: #fbfbfa; }
+.scrum-task-list b { overflow: hidden; font-size: 10px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.scrum-task-list small { color: var(--faint); font-size: 9px; }
+.scrum-column textarea { width: 100%; min-height: 150px; resize: vertical; padding: 11px; border: 0; border-top: 1px solid var(--line); outline: 0; color: var(--ink); line-height: 1.55; font-size: 11px; }
+.scrum-column textarea:focus { background: #fbfbfa; }
+
+.recommendation-row { min-height: 94px; display: grid; grid-template-columns: 32px minmax(0, 1fr) 30px; align-items: center; gap: 13px; padding: 13px 7px; border-bottom: 1px solid var(--line); }
+.recommendation-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 4px; background: #f1f1ef; color: var(--muted); font-size: 10px; font-weight: 700; }
+.recommendation-blocked, .recommendation-overdue { background: #fbe9e7; color: var(--red); }
+.recommendation-due_soon { background: #faebdd; color: #d9730d; }
+.recommendation-unlinked { background: #e7f3f8; color: var(--blue); }
+.recommendation-row > div { min-width: 0; }
+.recommendation-row h3 { margin: 0; font-size: 12px; line-height: 1.4; }
+.recommendation-row p { margin: 5px 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.recommendation-row small { color: var(--faint); font-size: 9px; }
+.recommendation-row > button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.recommendation-row > button:hover { background: var(--hover); color: var(--ink); }
 
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 200px minmax(0, 1fr); }
@@ -246,7 +300,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
   .app-shell { display: block; }
   .sidebar { position: fixed; z-index: 20; top: auto; bottom: 0; width: 100%; height: 58px; padding: 5px 8px; border-top: 1px solid var(--line); border-right: 0; }
   .workspace-switcher, .sidebar-section, .sidebar-bottom { display: none; }
-  nav { width: 100%; height: 100%; margin: 0; display: grid; grid-template-columns: repeat(5, 1fr); }
+  nav { width: 100%; height: 100%; margin: 0; display: grid; grid-template-columns: repeat(7, 1fr); }
   .nav-item { height: 47px; justify-content: center; display: grid; justify-items: center; gap: 2px; padding: 3px; }
   .nav-item span { font-size: 9px; }
   .nav-item b { position: absolute; margin: -18px 0 0 22px; }
@@ -266,6 +320,10 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
   .board-column > div { min-height: 110px; }
   .metrics-row > div { padding: 0 10px; }
   .metrics-row > div:first-child { padding-left: 0; }
+  .scrum-grid { grid-template-columns: 1fr; }
+  .scrum-column { border-right: 0; border-bottom: 1px solid var(--line); }
+  .scrum-task-list { min-height: 90px; }
+  .scrum-column textarea { min-height: 105px; }
   .integration-modal footer { align-items: flex-end; }
   .integration-modal footer span { max-width: 260px; }
 }

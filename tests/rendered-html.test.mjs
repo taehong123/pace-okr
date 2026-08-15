@@ -25,18 +25,20 @@ async function render(path = "/") {
   );
 }
 
-test("server-renders the Pace workspace", async () => {
+test("server-renders the OKITA workspace", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Pace - OKR과 작업 관리<\/title>/);
-  assert.match(html, /Pace/);
+  assert.match(html, /<title>OKITA - OKR과 실행 관리<\/title>/);
+  assert.match(html, /OKITA/);
   assert.match(html, /Product Lab/);
   assert.match(html, /테이블/);
   assert.match(html, /Objective/);
-  assert.match(html, /할 일을 입력하고 Enter/);
+  assert.match(html, /할 일을 입력하면 인박스에 저장됩니다/);
+  assert.match(html, /데일리/);
+  assert.match(html, /추천/);
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview|react-loading-skeleton/i);
 });
 
@@ -48,12 +50,13 @@ test("ships product metadata and removes starter assets", async () => {
   ]);
 
   assert.match(layout, /openGraph/);
-  assert.match(layout, /\/og\.png/);
+  assert.doesNotMatch(layout, /\/og\.png/);
   assert.match(page, /capture_item/);
   assert.match(page, /create_property/);
   assert.match(page, /set_property_value/);
-  assert.match(page, /Objective → Key Result → Initiative → Task → Action/);
+  assert.match(page, /get_daily_scrum/);
+  assert.match(page, /get_recommendations/);
+  assert.match(page, /Objective → Key Result → Initiative → Project → Task/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
-  await access(new URL("../public/og.png", import.meta.url));
   await assert.rejects(access(new URL("app/_sites-preview/SkeletonPreview.tsx", projectRoot)));
 });

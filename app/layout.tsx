@@ -18,26 +18,23 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const base = new URL(`${protocol}://${host}`);
-  const socialImage = new URL("/og.png", base).toString();
 
   return {
     metadataBase: base,
-    title: "Pace - OKR과 작업 관리",
-    description: "Objective부터 Action까지 연결하고 Task 속성을 관리하는 워크스페이스",
+    title: "OKITA - OKR과 실행 관리",
+    description: "Objective부터 Task까지 연결하고 데일리 실행을 관리하는 워크스페이스",
     icons: {
       icon: "/favicon.svg",
       shortcut: "/favicon.svg",
     },
     openGraph: {
-      title: "Pace - OKR과 작업 관리",
-      description: "OKR 계층과 Task 데이터베이스를 한곳에서 관리합니다.",
-      images: [{ url: socialImage, width: 1745, height: 909, alt: "Pace OKR workflow" }],
+      title: "OKITA - OKR과 실행 관리",
+      description: "OKR 계층, Project, Task 데이터베이스와 데일리 실행을 한곳에서 관리합니다.",
     },
     twitter: {
-      card: "summary_large_image",
-      title: "Pace - OKR과 작업 관리",
-      description: "OKR 계층과 Task 데이터베이스를 한곳에서 관리합니다.",
-      images: [socialImage],
+      card: "summary",
+      title: "OKITA - OKR과 실행 관리",
+      description: "OKR 계층, Project, Task 데이터베이스와 데일리 실행을 한곳에서 관리합니다.",
     },
   };
 }

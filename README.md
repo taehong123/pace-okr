@@ -1,42 +1,39 @@
-# Pace
+# OKITA
 
-Pace is an MCP-first OKR and work-management service. It keeps the management
-hierarchy explicit while making capture nearly frictionless:
+OKITA is an MCP-first OKR and execution-management service. It keeps the
+management hierarchy explicit while making capture nearly frictionless:
 
 ```text
-Objective -> Key Result -> Initiative -> Task -> Action
+Objective -> Key Result -> Initiative -> Project -> Task
 ```
 
-New work can enter through the web UI, an MCP conversation, or a bot webhook.
-Unstructured captures land in the Inbox first and can be linked later.
+Small execution steps live as checklist items inside a Task, not as another
+hierarchy level. New work can enter through the web UI, an MCP conversation, or
+a bot webhook. Unstructured captures land in the Inbox and can be linked later.
 
 ## Product surfaces
 
-- OKR tree and task board
-- Notion-style relational Task database with inline editing
-- User-defined text, number, select, date, and checkbox properties
-- Inbox for unstructured captures
-- Daily, weekly, monthly, and quarterly work rhythms
-- D1 persistence with an activity log
-- Streamable HTTP MCP endpoint at `/mcp`
-- Generic Slack, Discord, and Telegram-compatible capture webhook at
-  `/api/webhooks/capture`
+- OKR execution tree and Project-linked Task database
+- Notion-style inline editing and custom Task properties
+- Task-internal checklists with automatic progress calculation
+- Inbox for unstructured conversational captures
+- Daily scrum with yesterday, today, and blocker notes
+- Data-driven recommendations for blocked, overdue, unlinked, and due-soon work
+- Daily, weekly, monthly, and quarterly reviews
+- D1 persistence and a Streamable HTTP MCP endpoint at `/mcp`
+- Generic bot capture webhook at `/api/webhooks/capture`
 
 ## MCP tools
 
-- `capture_item`: save a conversational follow-up to the Inbox
-- `create_item`: create an item when its type and parent are known
-- `list_items`: find work before updating or linking it
-- `update_item`: update status, progress, dates, or content
-- `link_item`: connect an Inbox item to the required parent type
-- `review_period`: summarize a daily, weekly, monthly, or quarterly period
-- `list_properties`: inspect the custom Task database columns
-- `create_property`: add a custom Task property
-- `set_property_value`: set a property value by property ID or name
-- `delete_property`: remove a property and its values
+- `capture_item`, `create_item`, `list_items`, `update_item`, `link_item`
+- `review_period`
+- `list_properties`, `create_property`, `set_property_value`, `delete_property`
+- `list_checklist_items`, `add_checklist_item`, `update_checklist_item`
+- `get_daily_scrum`, `save_daily_scrum`
+- `get_recommendations`
 
-The MCP endpoint enforces the hierarchy. In particular, Task belongs under
-Initiative and Action belongs under Task.
+The MCP endpoint enforces the hierarchy. Project belongs under Initiative, and
+Task belongs under Project. Only Inbox Tasks may temporarily have no parent.
 
 ## Local development
 
@@ -54,15 +51,16 @@ npm run test:mcp
 npm test
 ```
 
-Set `PACE_MCP_URL` to run the MCP smoke test against a different endpoint.
+Set `OKITA_MCP_URL` to run the MCP smoke test against a different endpoint.
 Hosted writes use the signed-in Sites user or a bearer token configured as
-`PACE_API_TOKEN`. Bot clients can optionally send `X-Pace-User-Id` to select
-their workspace when using the bearer token.
+`OKITA_API_TOKEN`. Bot clients can send `X-Okita-User-Id` to select a workspace.
+The previous `PACE_API_TOKEN` and `X-Pace-User-Id` names remain supported for
+existing integrations.
 
 ## Data
 
 The D1 schema lives in `db/schema.ts`, and generated migrations live in
-`drizzle/`. Tasks remain rows in `items`; custom columns live in
-`property_definitions`, and their typed per-task values live in
-`item_property_values`. The app initializes missing tables defensively at
-runtime and seeds representative data only for a new workspace.
+`drizzle/`. Core hierarchy rows live in `items`. Task properties, checklist
+items, and daily scrum notes use relational tables. The app initializes missing
+tables defensively at runtime and seeds representative data only for a new
+workspace.

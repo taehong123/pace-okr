@@ -3,6 +3,8 @@ import { and, asc, desc, eq, like, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   activityLog,
+  checklistItems,
+  dailyScrums,
   itemPropertyValues,
   items,
   propertyDefinitions,
@@ -10,7 +12,7 @@ import {
   type PropertyDefinition,
 } from "@/db/schema";
 
-export const ITEM_KINDS = ["objective", "key_result", "initiative", "task", "action"] as const;
+export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "task"] as const;
 export const ITEM_STATUSES = ["inbox", "todo", "in_progress", "done", "blocked"] as const;
 export const ITEM_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export const ITEM_CADENCES = ["daily", "weekly", "monthly", "quarterly"] as const;
@@ -23,15 +25,15 @@ export type ItemCadence = (typeof ITEM_CADENCES)[number];
 export type PropertyType = (typeof PROPERTY_TYPES)[number];
 export type PropertyValue = string | number | boolean | null;
 
-type RuntimeEnv = typeof env & { PACE_API_TOKEN?: string };
+type RuntimeEnv = typeof env & { OKITA_API_TOKEN?: string; PACE_API_TOKEN?: string };
 let schemaReady: Promise<void> | null = null;
 
 const parentKind: Record<ItemKind, ItemKind | null> = {
   objective: null,
   key_result: "objective",
   initiative: "key_result",
-  task: "initiative",
-  action: "task",
+  project: "initiative",
+  task: "project",
 };
 
 export async function ensureWorkspace(ownerId: string) {
@@ -94,6 +96,28 @@ export async function ensureWorkspace(ownerId: string) {
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_item_property_values_unique ON item_property_values(owner_id, item_id, property_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_item_property_values_owner_item ON item_property_values(owner_id, item_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_item_property_values_owner_property ON item_property_values(owner_id, property_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS checklist_items (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          task_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          completed INTEGER NOT NULL DEFAULT 0,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_checklist_owner_task ON checklist_items(owner_id, task_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS daily_scrums (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          scrum_date TEXT NOT NULL,
+          yesterday_note TEXT NOT NULL DEFAULT '',
+          today_note TEXT NOT NULL DEFAULT '',
+          blockers_note TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_scrums_owner_date ON daily_scrums(owner_id, scrum_date)"),
         d1.prepare("PRAGMA optimize"),
       ])
       .then(() => undefined)
@@ -104,6 +128,7 @@ export async function ensureWorkspace(ownerId: string) {
   }
 
   await schemaReady;
+  await migrateLegacyHierarchy(ownerId);
   await seedWorkspace(ownerId);
   await seedProperties(ownerId);
 }
@@ -112,10 +137,10 @@ export function authorizeRequest(request: Request): { ownerId: string } | Respon
   const userId = request.headers.get("oai-authenticated-user-id");
   if (userId) return { ownerId: userId };
 
-  const configuredToken = (env as RuntimeEnv).PACE_API_TOKEN;
+  const configuredToken = (env as RuntimeEnv).OKITA_API_TOKEN ?? (env as RuntimeEnv).PACE_API_TOKEN;
   const suppliedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (configuredToken && suppliedToken === configuredToken) {
-    return { ownerId: request.headers.get("x-pace-user-id") || "api-workspace" };
+    return { ownerId: request.headers.get("x-okita-user-id") || request.headers.get("x-pace-user-id") || "api-workspace" };
   }
 
   const hostname = new URL(request.url).hostname;
@@ -124,7 +149,7 @@ export function authorizeRequest(request: Request): { ownerId: string } | Respon
   }
 
   return Response.json(
-    { error: "Authentication required. Sign in or provide a Pace API token." },
+    { error: "Authentication required. Sign in or provide an OKITA API token." },
     { status: 401, headers: { "WWW-Authenticate": "Bearer" } },
   );
 }
@@ -188,7 +213,7 @@ export async function createItem(
   },
 ) {
   const kind = input.kind ?? "task";
-  const status = input.status ?? (input.parentId ? "todo" : "inbox");
+  const status = input.status ?? (kind === "task" && !input.parentId ? "inbox" : "todo");
   await validateParent(ownerId, kind, input.parentId ?? null, status);
 
   const id = crypto.randomUUID();
@@ -233,11 +258,11 @@ export async function updateItem(
   const current = await getItem(ownerId, id);
   if (!current) throw new Error("Item not found");
 
-  if (patch.parentId !== undefined) {
+  if (patch.parentId !== undefined || patch.status !== undefined) {
     await validateParent(
       ownerId,
       current.kind as ItemKind,
-      patch.parentId,
+      patch.parentId === undefined ? current.parentId : patch.parentId,
       patch.status ?? (current.status as ItemStatus),
     );
   }
@@ -449,12 +474,306 @@ export async function getPeriodReview(ownerId: string, cadence: ItemCadence) {
   return { cadence, total: rows.length, completed, blocked, averageProgress, items: rows };
 }
 
+export async function listChecklistItems(ownerId: string, taskId: string) {
+  await requireTask(ownerId, taskId);
+  return getDb()
+    .select()
+    .from(checklistItems)
+    .where(and(eq(checklistItems.ownerId, ownerId), eq(checklistItems.taskId, taskId)))
+    .orderBy(asc(checklistItems.sortOrder), asc(checklistItems.createdAt));
+}
+
+export async function createChecklistItem(ownerId: string, taskId: string, title: string) {
+  await requireTask(ownerId, taskId);
+  const normalizedTitle = title.trim();
+  if (!normalizedTitle) throw new Error("Checklist title is required");
+
+  const existing = await listChecklistItems(ownerId, taskId);
+  const [created] = await getDb()
+    .insert(checklistItems)
+    .values({
+      id: crypto.randomUUID(),
+      ownerId,
+      taskId,
+      title: normalizedTitle,
+      sortOrder: (existing.at(-1)?.sortOrder ?? 0) + 10,
+    })
+    .returning();
+  await syncChecklistProgress(ownerId, taskId);
+  return created;
+}
+
+export async function updateChecklistItem(
+  ownerId: string,
+  id: string,
+  patch: Partial<{ title: string; completed: boolean }>,
+) {
+  const [current] = await getDb()
+    .select()
+    .from(checklistItems)
+    .where(and(eq(checklistItems.ownerId, ownerId), eq(checklistItems.id, id)))
+    .limit(1);
+  if (!current) throw new Error("Checklist item not found");
+
+  const values: Partial<typeof checklistItems.$inferInsert> = { updatedAt: new Date().toISOString() };
+  if (patch.title !== undefined) {
+    const title = patch.title.trim();
+    if (!title) throw new Error("Checklist title is required");
+    values.title = title;
+  }
+  if (patch.completed !== undefined) values.completed = patch.completed;
+
+  const [updated] = await getDb()
+    .update(checklistItems)
+    .set(values)
+    .where(and(eq(checklistItems.ownerId, ownerId), eq(checklistItems.id, id)))
+    .returning();
+  await syncChecklistProgress(ownerId, current.taskId);
+  return updated;
+}
+
+export async function deleteChecklistItem(ownerId: string, id: string) {
+  const [current] = await getDb()
+    .select()
+    .from(checklistItems)
+    .where(and(eq(checklistItems.ownerId, ownerId), eq(checklistItems.id, id)))
+    .limit(1);
+  if (!current) throw new Error("Checklist item not found");
+
+  await getDb()
+    .delete(checklistItems)
+    .where(and(eq(checklistItems.ownerId, ownerId), eq(checklistItems.id, id)));
+  await syncChecklistProgress(ownerId, current.taskId);
+  return current;
+}
+
+export function serializeChecklistItem(item: typeof checklistItems.$inferSelect) {
+  return {
+    id: item.id,
+    taskId: item.taskId,
+    title: item.title,
+    completed: item.completed,
+    sortOrder: item.sortOrder,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
+export async function getDailyScrum(ownerId: string, scrumDate: string) {
+  const date = normalizeDate(scrumDate);
+  const previousDate = addDays(date, -1);
+  const [saved] = await getDb()
+    .select()
+    .from(dailyScrums)
+    .where(and(eq(dailyScrums.ownerId, ownerId), eq(dailyScrums.scrumDate, date)))
+    .limit(1);
+  const tasks = await listItems(ownerId, { kind: "task", limit: 200 });
+  const activeTasks = tasks.filter((task) => task.status !== "inbox" && task.status !== "done");
+  const yesterdayTasks = tasks
+    .filter(
+      (task) =>
+        task.status === "done" &&
+        (task.updatedAt.slice(0, 10) === previousDate || task.dueDate === previousDate),
+    )
+    .slice(0, 8);
+  const todayTasks = activeTasks
+    .filter(
+      (task) =>
+        task.status === "in_progress" ||
+        task.dueDate === date ||
+        (task.dueDate !== null && task.dueDate < date),
+    )
+    .sort(compareTaskUrgency)
+    .slice(0, 8);
+  const blockers = tasks.filter((task) => task.status === "blocked").slice(0, 8);
+
+  return {
+    date,
+    yesterdayNote: saved?.yesterdayNote ?? "",
+    todayNote: saved?.todayNote ?? "",
+    blockersNote: saved?.blockersNote ?? "",
+    yesterdayTasks,
+    todayTasks,
+    blockers,
+    updatedAt: saved?.updatedAt ?? null,
+  };
+}
+
+export async function saveDailyScrum(
+  ownerId: string,
+  scrumDate: string,
+  input: { yesterdayNote?: string; todayNote?: string; blockersNote?: string },
+) {
+  const date = normalizeDate(scrumDate);
+  const updatedAt = new Date().toISOString();
+  await getDb()
+    .insert(dailyScrums)
+    .values({
+      id: crypto.randomUUID(),
+      ownerId,
+      scrumDate: date,
+      yesterdayNote: input.yesterdayNote?.trim() ?? "",
+      todayNote: input.todayNote?.trim() ?? "",
+      blockersNote: input.blockersNote?.trim() ?? "",
+      updatedAt,
+    })
+    .onConflictDoUpdate({
+      target: [dailyScrums.ownerId, dailyScrums.scrumDate],
+      set: {
+        yesterdayNote: input.yesterdayNote?.trim() ?? "",
+        todayNote: input.todayNote?.trim() ?? "",
+        blockersNote: input.blockersNote?.trim() ?? "",
+        updatedAt,
+      },
+    });
+  return getDailyScrum(ownerId, date);
+}
+
+export type RecommendationKind = "blocked" | "overdue" | "unlinked" | "due_soon" | "empty_project";
+export type Recommendation = {
+  id: string;
+  kind: RecommendationKind;
+  title: string;
+  detail: string;
+  itemIds: string[];
+  score: number;
+};
+
+export async function getRecommendations(ownerId: string, requestedDate?: string) {
+  const date = normalizeDate(requestedDate ?? new Date().toISOString().slice(0, 10));
+  const dueSoon = addDays(date, 3);
+  const rows = await listItems(ownerId, { limit: 200 });
+  const tasks = rows.filter((item) => item.kind === "task");
+  const projects = rows.filter((item) => item.kind === "project");
+  const openTasks = tasks.filter((task) => task.status !== "done");
+  const recommendations: Recommendation[] = [];
+
+  const blocked = openTasks.filter((task) => task.status === "blocked");
+  if (blocked.length) {
+    recommendations.push({
+      id: "blocked-tasks",
+      kind: "blocked",
+      title: `막힌 Task ${blocked.length}개를 먼저 해소하세요`,
+      detail: "막힘이 길어지면 상위 Project와 Key Result의 진행도도 함께 멈춥니다.",
+      itemIds: blocked.map((task) => task.id),
+      score: 100,
+    });
+  }
+
+  const overdue = openTasks.filter((task) => task.status !== "inbox" && task.dueDate !== null && task.dueDate < date);
+  if (overdue.length) {
+    recommendations.push({
+      id: "overdue-tasks",
+      kind: "overdue",
+      title: `기한이 지난 Task ${overdue.length}개를 재계획하세요`,
+      detail: "완료일을 조정하거나 오늘 실행할 작업으로 명확히 정리하는 편이 좋습니다.",
+      itemIds: overdue.map((task) => task.id),
+      score: 90,
+    });
+  }
+
+  const unlinked = openTasks.filter((task) => task.status === "inbox" || task.parentId === null);
+  if (unlinked.length) {
+    recommendations.push({
+      id: "unlinked-tasks",
+      kind: "unlinked",
+      title: `미연결 Task ${unlinked.length}개의 Project를 정하세요`,
+      detail: "인박스에서 Project에 연결하면 OKR 진행 상황과 데일리 계획에 함께 반영됩니다.",
+      itemIds: unlinked.map((task) => task.id),
+      score: 75,
+    });
+  }
+
+  const urgent = openTasks.filter(
+    (task) =>
+      task.status !== "inbox" &&
+      task.dueDate !== null &&
+      task.dueDate >= date &&
+      task.dueDate <= dueSoon &&
+      (task.priority === "high" || task.priority === "urgent"),
+  );
+  if (urgent.length) {
+    recommendations.push({
+      id: "due-soon-tasks",
+      kind: "due_soon",
+      title: `3일 안에 마감되는 중요 Task ${urgent.length}개가 있습니다`,
+      detail: "오늘 할 일에 올리거나 담당자와 완료 기준을 확인하세요.",
+      itemIds: urgent.map((task) => task.id),
+      score: 70,
+    });
+  }
+
+  const projectIdsWithTasks = new Set(tasks.map((task) => task.parentId).filter(Boolean));
+  const emptyProjects = projects.filter((project) => !projectIdsWithTasks.has(project.id));
+  if (emptyProjects.length) {
+    recommendations.push({
+      id: "empty-projects",
+      kind: "empty_project",
+      title: `실행 Task가 없는 Project ${emptyProjects.length}개를 확인하세요`,
+      detail: "다음 행동이 없다면 Project의 범위를 줄이거나 첫 Task를 추가하세요.",
+      itemIds: emptyProjects.map((project) => project.id),
+      score: 55,
+    });
+  }
+
+  return recommendations.sort((a, b) => b.score - a.score);
+}
+
+async function requireTask(ownerId: string, taskId: string) {
+  const task = await getItem(ownerId, taskId);
+  if (!task) throw new Error("Task not found");
+  if (task.kind !== "task") throw new Error("Checklists can only belong to a Task");
+  return task;
+}
+
+async function syncChecklistProgress(ownerId: string, taskId: string) {
+  const rows = await getDb()
+    .select()
+    .from(checklistItems)
+    .where(and(eq(checklistItems.ownerId, ownerId), eq(checklistItems.taskId, taskId)));
+  const progress = rows.length
+    ? Math.round((rows.filter((row) => row.completed).length / rows.length) * 100)
+    : 0;
+  await getDb()
+    .update(items)
+    .set({ progress, updatedAt: new Date().toISOString() })
+    .where(and(eq(items.ownerId, ownerId), eq(items.id, taskId)));
+}
+
+function normalizeDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("Date must use YYYY-MM-DD");
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+    throw new Error("Date is invalid");
+  }
+  return value;
+}
+
+function addDays(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function compareTaskUrgency(a: PaceItem, b: PaceItem) {
+  if (a.status === "blocked" && b.status !== "blocked") return -1;
+  if (b.status === "blocked" && a.status !== "blocked") return 1;
+  if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+  if (a.dueDate) return -1;
+  if (b.dueDate) return 1;
+  const priorityWeight: Record<string, number> = { low: 1, medium: 2, high: 3, urgent: 4 };
+  return (priorityWeight[b.priority] ?? 0) - (priorityWeight[a.priority] ?? 0);
+}
+
 async function validateParent(
   ownerId: string,
   kind: ItemKind,
   parentId: string | null,
   status: ItemStatus,
 ) {
+  if (status === "inbox" && (kind !== "task" || parentId !== null)) {
+    throw new Error("Only an unlinked Task can use inbox status");
+  }
   const expected = parentKind[kind];
   if (!expected) {
     if (parentId) throw new Error("Objective cannot have a parent");
@@ -473,6 +792,40 @@ async function validateParent(
   }
 }
 
+async function migrateLegacyHierarchy(ownerId: string) {
+  const d1 = (env as RuntimeEnv).DB;
+  await d1.batch([
+    d1.prepare(`INSERT OR IGNORE INTO checklist_items
+      (id, owner_id, task_id, title, completed, sort_order, created_at, updated_at)
+      SELECT 'legacy-action-' || id, owner_id, parent_id, title,
+        CASE WHEN status = 'done' THEN 1 ELSE 0 END,
+        sort_order, created_at, updated_at
+      FROM items
+      WHERE owner_id = ? AND kind = 'action' AND parent_id IS NOT NULL`).bind(ownerId),
+    d1.prepare("DELETE FROM items WHERE owner_id = ? AND kind = 'action'").bind(ownerId),
+    d1.prepare(`INSERT OR IGNORE INTO items
+      (id, owner_id, parent_id, kind, title, description, status, priority, cadence,
+       progress, due_date, source, source_ref, sort_order, created_at, updated_at)
+      SELECT 'legacy-project-' || initiative.id, initiative.owner_id, initiative.id,
+        'project', initiative.title || ' 실행', '', 'in_progress', 'medium',
+        initiative.cadence, 0, NULL, 'migration', NULL, initiative.sort_order + 1,
+        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      FROM items AS initiative
+      WHERE initiative.owner_id = ? AND initiative.kind = 'initiative'
+        AND EXISTS (
+          SELECT 1 FROM items AS child
+          WHERE child.owner_id = initiative.owner_id
+            AND child.parent_id = initiative.id AND child.kind = 'task'
+        )`).bind(ownerId),
+    d1.prepare(`UPDATE items
+      SET parent_id = 'legacy-project-' || parent_id, updated_at = CURRENT_TIMESTAMP
+      WHERE owner_id = ? AND kind = 'task'
+        AND parent_id IN (
+          SELECT id FROM items WHERE owner_id = ? AND kind = 'initiative'
+        )`).bind(ownerId, ownerId),
+  ]);
+}
+
 async function seedWorkspace(ownerId: string) {
   const [result] = await getDb()
     .select({ count: sql<number>`count(*)` })
@@ -483,23 +836,28 @@ async function seedWorkspace(ownerId: string) {
   const objective = crypto.randomUUID();
   const keyResult = crypto.randomUUID();
   const initiative = crypto.randomUUID();
-  const task = crypto.randomUUID();
+  const project = crypto.randomUUID();
+  const firstTask = crypto.randomUUID();
   const due = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 
   const seedRows = [
     { id: objective, ownerId, kind: "objective", title: "셀프 서브 도입으로 팀의 성장 속도를 높인다", status: "in_progress", cadence: "quarterly", progress: 68, sortOrder: 10 },
     { id: keyResult, ownerId, parentId: objective, kind: "key_result", title: "신규 사용자의 첫 주 활성화율 32% → 48%", status: "in_progress", cadence: "monthly", progress: 61, sortOrder: 20 },
     { id: initiative, ownerId, parentId: keyResult, kind: "initiative", title: "가입 후 10분 안에 첫 가치 경험 만들기", status: "in_progress", cadence: "monthly", progress: 54, sortOrder: 30 },
-    { id: task, ownerId, parentId: initiative, kind: "task", title: "온보딩 체크리스트 실험", status: "in_progress", cadence: "weekly", progress: 75, dueDate: due(5), priority: "high", sortOrder: 40 },
-    { id: crypto.randomUUID(), ownerId, parentId: task, kind: "action", title: "A/B 테스트 이벤트 정의", status: "done", cadence: "daily", progress: 100, dueDate: due(-1), sortOrder: 50 },
-    { id: crypto.randomUUID(), ownerId, parentId: initiative, kind: "task", title: "결제 화면 카피 확정", status: "in_progress", cadence: "weekly", progress: 40, dueDate: due(0), priority: "high", sortOrder: 60 },
-    { id: crypto.randomUUID(), ownerId, parentId: initiative, kind: "task", title: "활성화 이벤트 QA", status: "todo", cadence: "weekly", progress: 0, dueDate: due(2), sortOrder: 70 },
-    { id: crypto.randomUUID(), ownerId, parentId: initiative, kind: "task", title: "신규 사용자 5명 인터뷰", status: "todo", cadence: "weekly", progress: 0, dueDate: due(4), sortOrder: 80 },
+    { id: project, ownerId, parentId: initiative, kind: "project", title: "온보딩 활성화 개선", status: "in_progress", cadence: "monthly", progress: 52, sortOrder: 40 },
+    { id: firstTask, ownerId, parentId: project, kind: "task", title: "온보딩 체크리스트 실험", status: "in_progress", cadence: "weekly", progress: 75, dueDate: due(5), priority: "high", sortOrder: 50 },
+    { id: crypto.randomUUID(), ownerId, parentId: project, kind: "task", title: "결제 화면 카피 확정", status: "in_progress", cadence: "weekly", progress: 40, dueDate: due(0), priority: "high", sortOrder: 60 },
+    { id: crypto.randomUUID(), ownerId, parentId: project, kind: "task", title: "활성화 이벤트 QA", status: "todo", cadence: "weekly", progress: 0, dueDate: due(2), sortOrder: 70 },
+    { id: crypto.randomUUID(), ownerId, parentId: project, kind: "task", title: "신규 사용자 5명 인터뷰", status: "todo", cadence: "weekly", progress: 0, dueDate: due(4), sortOrder: 80 },
     { id: crypto.randomUUID(), ownerId, kind: "task", title: "가격 정책 페이지 개선 아이디어", status: "inbox", cadence: "weekly", source: "mcp", sortOrder: 90 },
     { id: crypto.randomUUID(), ownerId, kind: "task", title: "모바일 가입 이탈 구간 확인", status: "inbox", cadence: "weekly", source: "slack", sortOrder: 100 },
   ];
   await getDb().insert(items).values(seedRows.slice(0, 5));
   await getDb().insert(items).values(seedRows.slice(5));
+  await getDb().insert(checklistItems).values([
+    { id: crypto.randomUUID(), ownerId, taskId: firstTask, title: "A/B 테스트 이벤트 정의", completed: true, sortOrder: 10 },
+    { id: crypto.randomUUID(), ownerId, taskId: firstTask, title: "실험군 이벤트 검증", completed: false, sortOrder: 20 },
+  ]);
 }
 
 async function seedProperties(ownerId: string) {

@@ -116,6 +116,6 @@ function asNullableString(value: unknown) {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
-  const status = /required|must be|cannot have|not found/i.test(message) ? 400 : 500;
+  const status = /required|requires|must be|cannot have|not found|only an/i.test(message) ? 400 : 500;
   return Response.json({ error: message }, { status });
 }

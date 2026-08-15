@@ -8,18 +8,25 @@ import {
   ITEM_STATUSES,
   PROPERTY_TYPES,
   authorizeRequest,
+  createChecklistItem,
   createItem,
   createPropertyDefinition,
   deletePropertyDefinition,
   ensureWorkspace,
+  getDailyScrum,
   getItemPropertiesByName,
   getPeriodReview,
+  getRecommendations,
+  listChecklistItems,
   listItems,
   listPropertyDefinitions,
+  saveDailyScrum,
+  serializeChecklistItem,
   serializeItem,
   serializePropertyDefinition,
   setItemPropertiesByName,
   setPropertyValue,
+  updateChecklistItem,
   updateItem,
   type ItemCadence,
   type ItemKind,
@@ -56,19 +63,38 @@ const itemOutput = z.object({
   properties: z.record(z.string(), propertyValueSchema),
 });
 
-function createPaceServer(ownerId: string) {
+const checklistOutput = z.object({
+  id: z.string(),
+  taskId: z.string(),
+  title: z.string(),
+  completed: z.boolean(),
+  sortOrder: z.number(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const recommendationOutput = z.object({
+  id: z.string(),
+  kind: z.string(),
+  title: z.string(),
+  detail: z.string(),
+  itemIds: z.array(z.string()),
+  score: z.number(),
+});
+
+function createOkitaServer(ownerId: string) {
   const server = new McpServer(
-    { name: "pace-okr", version: "0.1.0" },
+    { name: "okita", version: "0.2.0" },
     {
       instructions:
-        "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Task > Action. Tasks are database rows with custom properties. Use list_properties before setting unfamiliar property names.",
+        "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Tasks are database rows with custom properties and internal checklists. Use list_properties before setting unfamiliar property names.",
     },
   );
 
   server.registerTool(
     "capture_item",
     {
-      title: "Capture work to the Pace inbox",
+      title: "Capture work to the OKITA inbox",
       description: "Use this first when the user mentions a task, follow-up, idea, or commitment that should be saved quickly without interrupting the conversation.",
       inputSchema: {
         title: z.string().min(1).describe("Short actionable title in the user's language"),
@@ -96,7 +122,7 @@ function createPaceServer(ownerId: string) {
       const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
       return {
         structuredContent: { item: serialized },
-        content: [{ type: "text", text: `Captured "${item.title}" in the Pace inbox.` }],
+        content: [{ type: "text", text: `Captured "${item.title}" in the OKITA inbox.` }],
       };
     },
   );
@@ -105,7 +131,7 @@ function createPaceServer(ownerId: string) {
     "create_item",
     {
       title: "Create a structured OKR item",
-      description: "Create a known Objective, Key Result, Initiative, Task, or Action when its hierarchy and parent are already clear.",
+      description: "Create a known Objective, Key Result, Initiative, Project, or Task when its hierarchy and parent are already clear.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS),
         title: z.string().min(1),
@@ -148,8 +174,8 @@ function createPaceServer(ownerId: string) {
   server.registerTool(
     "list_items",
     {
-      title: "List and search Pace items",
-      description: "Find existing OKRs, tasks, actions, or inbox captures before reviewing, updating, or linking them.",
+      title: "List and search OKITA items",
+      description: "Find existing OKRs, projects, tasks, or inbox captures before reviewing, updating, or linking them.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS).optional(),
         status: z.enum(ITEM_STATUSES).optional(),
@@ -173,7 +199,7 @@ function createPaceServer(ownerId: string) {
       const serialized = await serializeItemsForMcp(ownerId, rows);
       return {
         structuredContent: { items: serialized, count: serialized.length },
-        content: [{ type: "text", text: `Found ${serialized.length} Pace items.` }],
+        content: [{ type: "text", text: `Found ${serialized.length} OKITA items.` }],
       };
     },
   );
@@ -181,7 +207,7 @@ function createPaceServer(ownerId: string) {
   server.registerTool(
     "update_item",
     {
-      title: "Update a Pace item",
+      title: "Update an OKITA item",
       description: "Change the title, status, progress, priority, cadence, or due date of an existing item. Use list_items first when the ID is unknown.",
       inputSchema: {
         id: z.string(),
@@ -223,7 +249,7 @@ function createPaceServer(ownerId: string) {
     "link_item",
     {
       title: "Link an item into the OKR hierarchy",
-      description: "Move an inbox capture or existing item under its correct parent. Task requires Initiative; Action requires Task.",
+      description: "Move an inbox capture or existing item under its correct parent. Project requires Initiative; Task requires Project.",
       inputSchema: { id: z.string(), parent_id: z.string() },
       outputSchema: { item: itemOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -372,6 +398,158 @@ function createPaceServer(ownerId: string) {
     },
   );
 
+  server.registerTool(
+    "list_checklist_items",
+    {
+      title: "List a Task checklist",
+      description: "Read the internal checklist for a Task. Use list_items first when the Task ID is unknown.",
+      inputSchema: { task_id: z.string() },
+      outputSchema: { items: z.array(checklistOutput), count: z.number() },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ task_id }) => {
+      const rows = await listChecklistItems(ownerId, task_id);
+      const serialized = rows.map(serializeChecklistItem);
+      return {
+        structuredContent: { items: serialized, count: serialized.length },
+        content: [{ type: "text", text: `Found ${serialized.length} checklist items.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "add_checklist_item",
+    {
+      title: "Add a Task checklist item",
+      description: "Add a small execution step inside a Task without creating another hierarchy level.",
+      inputSchema: { task_id: z.string(), title: z.string().min(1) },
+      outputSchema: { item: checklistOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ task_id, title }) => {
+      const item = serializeChecklistItem(await createChecklistItem(ownerId, task_id, title));
+      return {
+        structuredContent: { item },
+        content: [{ type: "text", text: `Added checklist item "${item.title}".` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "update_checklist_item",
+    {
+      title: "Update a Task checklist item",
+      description: "Rename or mark a checklist item complete. Task progress is recalculated automatically.",
+      inputSchema: {
+        id: z.string(),
+        title: z.string().min(1).optional(),
+        completed: z.boolean().optional(),
+      },
+      outputSchema: { item: checklistOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ id, title, completed }) => {
+      const item = serializeChecklistItem(await updateChecklistItem(ownerId, id, { title, completed }));
+      return {
+        structuredContent: { item },
+        content: [{ type: "text", text: `Updated checklist item "${item.title}".` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "get_daily_scrum",
+    {
+      title: "Get a daily scrum",
+      description: "Get saved notes plus automatically collected completed, active, and blocked Tasks for a date.",
+      inputSchema: { date: z.string().optional().describe("YYYY-MM-DD; defaults to today") },
+      outputSchema: {
+        date: z.string(),
+        yesterdayNote: z.string(),
+        todayNote: z.string(),
+        blockersNote: z.string(),
+        yesterdayTasks: z.array(itemOutput),
+        todayTasks: z.array(itemOutput),
+        blockers: z.array(itemOutput),
+        updatedAt: z.string().nullable(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ date }) => {
+      const scrum = await getDailyScrum(ownerId, date ?? new Date().toISOString().slice(0, 10));
+      const structuredContent = {
+        ...scrum,
+        yesterdayTasks: await serializeItemsForMcp(ownerId, scrum.yesterdayTasks),
+        todayTasks: await serializeItemsForMcp(ownerId, scrum.todayTasks),
+        blockers: await serializeItemsForMcp(ownerId, scrum.blockers),
+      };
+      return {
+        structuredContent,
+        content: [{ type: "text", text: `${scrum.date} daily scrum is ready.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "save_daily_scrum",
+    {
+      title: "Save a daily scrum",
+      description: "Save yesterday, today, and blocker notes from a daily planning conversation.",
+      inputSchema: {
+        date: z.string().describe("YYYY-MM-DD"),
+        yesterday_note: z.string().optional(),
+        today_note: z.string().optional(),
+        blockers_note: z.string().optional(),
+      },
+      outputSchema: {
+        date: z.string(),
+        yesterdayNote: z.string(),
+        todayNote: z.string(),
+        blockersNote: z.string(),
+        yesterdayTasks: z.array(itemOutput),
+        todayTasks: z.array(itemOutput),
+        blockers: z.array(itemOutput),
+        updatedAt: z.string().nullable(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ date, yesterday_note, today_note, blockers_note }) => {
+      const scrum = await saveDailyScrum(ownerId, date, {
+        yesterdayNote: yesterday_note,
+        todayNote: today_note,
+        blockersNote: blockers_note,
+      });
+      const structuredContent = {
+        ...scrum,
+        yesterdayTasks: await serializeItemsForMcp(ownerId, scrum.yesterdayTasks),
+        todayTasks: await serializeItemsForMcp(ownerId, scrum.todayTasks),
+        blockers: await serializeItemsForMcp(ownerId, scrum.blockers),
+      };
+      return {
+        structuredContent,
+        content: [{ type: "text", text: `Saved the ${scrum.date} daily scrum.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "get_recommendations",
+    {
+      title: "Get execution recommendations",
+      description: "Prioritize blocked, overdue, unlinked, due-soon, and empty Project work from current OKITA data.",
+      inputSchema: { date: z.string().optional().describe("YYYY-MM-DD; defaults to today") },
+      outputSchema: { recommendations: z.array(recommendationOutput), count: z.number() },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ date }) => {
+      const recommendations = await getRecommendations(ownerId, date);
+      return {
+        structuredContent: { recommendations, count: recommendations.length },
+        content: [{ type: "text", text: `Found ${recommendations.length} execution recommendations.` }],
+      };
+    },
+  );
+
   return server;
 }
 
@@ -401,7 +579,7 @@ async function handleMcp(request: Request) {
   try {
     await ensureWorkspace(authorization.ownerId);
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
-    const server = createPaceServer(authorization.ownerId);
+    const server = createOkitaServer(authorization.ownerId);
     await server.connect(transport);
     return withCors(await transport.handleRequest(request));
   } catch (error) {
@@ -414,7 +592,7 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, X-Pace-User-Id",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, X-Okita-User-Id, X-Pace-User-Id",
     "Access-Control-Expose-Headers": "MCP-Protocol-Version, MCP-Session-Id",
   };
 }

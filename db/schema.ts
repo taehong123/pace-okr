@@ -80,7 +80,43 @@ export const itemPropertyValues = sqliteTable(
   ],
 );
 
+export const checklistItems = sqliteTable(
+  "checklist_items",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    taskId: text("task_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    completed: integer("completed", { mode: "boolean" }).notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_checklist_owner_task").on(table.ownerId, table.taskId),
+  ],
+);
+
+export const dailyScrums = sqliteTable(
+  "daily_scrums",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    scrumDate: text("scrum_date").notNull(),
+    yesterdayNote: text("yesterday_note").notNull().default(""),
+    todayNote: text("today_note").notNull().default(""),
+    blockersNote: text("blockers_note").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_daily_scrums_owner_date").on(table.ownerId, table.scrumDate),
+  ],
+);
+
 export type PaceItem = typeof items.$inferSelect;
 export type NewPaceItem = typeof items.$inferInsert;
 export type PropertyDefinition = typeof propertyDefinitions.$inferSelect;
 export type ItemPropertyValue = typeof itemPropertyValues.$inferSelect;
+export type ChecklistItem = typeof checklistItems.$inferSelect;
+export type DailyScrum = typeof dailyScrums.$inferSelect;
