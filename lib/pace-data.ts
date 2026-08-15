@@ -1,17 +1,27 @@
 import { env } from "cloudflare:workers";
 import { and, asc, desc, eq, like, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { activityLog, items, type PaceItem } from "@/db/schema";
+import {
+  activityLog,
+  itemPropertyValues,
+  items,
+  propertyDefinitions,
+  type PaceItem,
+  type PropertyDefinition,
+} from "@/db/schema";
 
 export const ITEM_KINDS = ["objective", "key_result", "initiative", "task", "action"] as const;
 export const ITEM_STATUSES = ["inbox", "todo", "in_progress", "done", "blocked"] as const;
 export const ITEM_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export const ITEM_CADENCES = ["daily", "weekly", "monthly", "quarterly"] as const;
+export const PROPERTY_TYPES = ["text", "number", "select", "date", "checkbox"] as const;
 
 export type ItemKind = (typeof ITEM_KINDS)[number];
 export type ItemStatus = (typeof ITEM_STATUSES)[number];
 export type ItemPriority = (typeof ITEM_PRIORITIES)[number];
 export type ItemCadence = (typeof ITEM_CADENCES)[number];
+export type PropertyType = (typeof PROPERTY_TYPES)[number];
+export type PropertyValue = string | number | boolean | null;
 
 type RuntimeEnv = typeof env & { PACE_API_TOKEN?: string };
 let schemaReady: Promise<void> | null = null;
@@ -61,6 +71,29 @@ export async function ensureWorkspace(ownerId: string) {
         )`),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_activity_owner_created ON activity_log(owner_id, created_at)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_activity_item ON activity_log(item_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS property_definitions (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          type TEXT NOT NULL,
+          options TEXT NOT NULL DEFAULT '[]',
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_property_definitions_owner_name ON property_definitions(owner_id, name)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_property_definitions_owner_sort ON property_definitions(owner_id, sort_order)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS item_property_values (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+          property_id TEXT NOT NULL REFERENCES property_definitions(id) ON DELETE CASCADE,
+          value TEXT NOT NULL DEFAULT 'null',
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_item_property_values_unique ON item_property_values(owner_id, item_id, property_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_item_property_values_owner_item ON item_property_values(owner_id, item_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_item_property_values_owner_property ON item_property_values(owner_id, property_id)"),
         d1.prepare("PRAGMA optimize"),
       ])
       .then(() => undefined)
@@ -72,6 +105,7 @@ export async function ensureWorkspace(ownerId: string) {
 
   await schemaReady;
   await seedWorkspace(ownerId);
+  await seedProperties(ownerId);
 }
 
 export function authorizeRequest(request: Request): { ownerId: string } | Response {
@@ -228,6 +262,168 @@ export async function updateItem(
   return updated;
 }
 
+export async function listPropertyDefinitions(ownerId: string) {
+  return getDb()
+    .select()
+    .from(propertyDefinitions)
+    .where(eq(propertyDefinitions.ownerId, ownerId))
+    .orderBy(asc(propertyDefinitions.sortOrder), asc(propertyDefinitions.createdAt));
+}
+
+export async function getPropertyDefinition(ownerId: string, id: string) {
+  const [property] = await getDb()
+    .select()
+    .from(propertyDefinitions)
+    .where(and(eq(propertyDefinitions.ownerId, ownerId), eq(propertyDefinitions.id, id)))
+    .limit(1);
+  return property ?? null;
+}
+
+export async function createPropertyDefinition(
+  ownerId: string,
+  input: { name: string; type: PropertyType; options?: string[] },
+) {
+  const name = input.name.trim();
+  if (!name) throw new Error("Property name is required");
+  if (!PROPERTY_TYPES.includes(input.type)) throw new Error("Unsupported property type");
+
+  const existing = await listPropertyDefinitions(ownerId);
+  if (existing.some((property) => property.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    throw new Error("Property name already exists");
+  }
+
+  const [created] = await getDb()
+    .insert(propertyDefinitions)
+    .values({
+      id: crypto.randomUUID(),
+      ownerId,
+      name,
+      type: input.type,
+      options: JSON.stringify(normalizeOptions(input.options ?? [])),
+      sortOrder: (existing.at(-1)?.sortOrder ?? 0) + 10,
+    })
+    .returning();
+  return created;
+}
+
+export async function deletePropertyDefinition(ownerId: string, id: string) {
+  const property = await getPropertyDefinition(ownerId, id);
+  if (!property) throw new Error("Property not found");
+
+  await getDb()
+    .delete(itemPropertyValues)
+    .where(and(eq(itemPropertyValues.ownerId, ownerId), eq(itemPropertyValues.propertyId, id)));
+  await getDb()
+    .delete(propertyDefinitions)
+    .where(and(eq(propertyDefinitions.ownerId, ownerId), eq(propertyDefinitions.id, id)));
+  return property;
+}
+
+export async function setPropertyValue(
+  ownerId: string,
+  itemId: string,
+  propertyId: string,
+  value: PropertyValue,
+) {
+  const [itemRecord, property] = await Promise.all([
+    getItem(ownerId, itemId),
+    getPropertyDefinition(ownerId, propertyId),
+  ]);
+  if (!itemRecord) throw new Error("Item not found");
+  if (!property) throw new Error("Property not found");
+
+  const normalized = normalizePropertyValue(property, value);
+  if (normalized === null) {
+    await getDb()
+      .delete(itemPropertyValues)
+      .where(
+        and(
+          eq(itemPropertyValues.ownerId, ownerId),
+          eq(itemPropertyValues.itemId, itemId),
+          eq(itemPropertyValues.propertyId, propertyId),
+        ),
+      );
+    return null;
+  }
+
+  const updatedAt = new Date().toISOString();
+  const [stored] = await getDb()
+    .insert(itemPropertyValues)
+    .values({
+      id: crypto.randomUUID(),
+      ownerId,
+      itemId,
+      propertyId,
+      value: JSON.stringify(normalized),
+      updatedAt,
+    })
+    .onConflictDoUpdate({
+      target: [itemPropertyValues.ownerId, itemPropertyValues.itemId, itemPropertyValues.propertyId],
+      set: { value: JSON.stringify(normalized), updatedAt },
+    })
+    .returning();
+
+  await logActivity(ownerId, itemId, "property_updated", "web", {
+    propertyId,
+    value: normalized,
+  });
+  return stored;
+}
+
+export async function getPropertyValueMap(ownerId: string) {
+  const rows = await getDb()
+    .select()
+    .from(itemPropertyValues)
+    .where(eq(itemPropertyValues.ownerId, ownerId));
+  const result: Record<string, Record<string, PropertyValue>> = {};
+  for (const row of rows) {
+    result[row.itemId] ??= {};
+    result[row.itemId][row.propertyId] = parsePropertyValue(row.value);
+  }
+  return result;
+}
+
+export async function getItemPropertiesByName(ownerId: string) {
+  const [definitions, values] = await Promise.all([
+    listPropertyDefinitions(ownerId),
+    getPropertyValueMap(ownerId),
+  ]);
+  const names = new Map(definitions.map((property) => [property.id, property.name]));
+  const result: Record<string, Record<string, PropertyValue>> = {};
+  for (const [itemId, itemValues] of Object.entries(values)) {
+    result[itemId] = {};
+    for (const [propertyId, value] of Object.entries(itemValues)) {
+      const name = names.get(propertyId);
+      if (name) result[itemId][name] = value;
+    }
+  }
+  return result;
+}
+
+export async function setItemPropertiesByName(
+  ownerId: string,
+  itemId: string,
+  values: Record<string, PropertyValue>,
+) {
+  const definitions = await listPropertyDefinitions(ownerId);
+  const byName = new Map(definitions.map((property) => [property.name.toLocaleLowerCase(), property]));
+  for (const [name, value] of Object.entries(values)) {
+    const property = byName.get(name.toLocaleLowerCase());
+    if (!property) throw new Error(`Property not found: ${name}`);
+    await setPropertyValue(ownerId, itemId, property.id, value);
+  }
+}
+
+export function serializePropertyDefinition(property: PropertyDefinition) {
+  return {
+    id: property.id,
+    name: property.name,
+    type: property.type,
+    options: parseOptions(property.options),
+    sortOrder: property.sortOrder,
+  };
+}
+
 export async function getPeriodReview(ownerId: string, cadence: ItemCadence) {
   const now = new Date();
   const days = cadence === "daily" ? 1 : cadence === "weekly" ? 7 : cadence === "monthly" ? 31 : 92;
@@ -306,6 +502,56 @@ async function seedWorkspace(ownerId: string) {
   await getDb().insert(items).values(seedRows.slice(5));
 }
 
+async function seedProperties(ownerId: string) {
+  const existing = await listPropertyDefinitions(ownerId);
+  if (existing.length) return;
+
+  const ownerProperty = crypto.randomUUID();
+  const sprintProperty = crypto.randomUUID();
+  const estimateProperty = crypto.randomUUID();
+  await getDb().insert(propertyDefinitions).values([
+    { id: ownerProperty, ownerId, name: "담당", type: "text", sortOrder: 10 },
+    {
+      id: sprintProperty,
+      ownerId,
+      name: "스프린트",
+      type: "select",
+      options: JSON.stringify(["Sprint 18", "Sprint 19", "Backlog"]),
+      sortOrder: 20,
+    },
+    { id: estimateProperty, ownerId, name: "예상 시간", type: "number", sortOrder: 30 },
+  ]);
+
+  const tasks = await listItems(ownerId, { kind: "task", limit: 4 });
+  const owners = ["태홍", "민지", "태홍", "유진"];
+  const sprints = ["Sprint 18", "Sprint 18", "Sprint 18", "Sprint 19"];
+  const estimates = [6, 3, 4, 5];
+  const values = tasks.flatMap((task, index) => [
+    {
+      id: crypto.randomUUID(),
+      ownerId,
+      itemId: task.id,
+      propertyId: ownerProperty,
+      value: JSON.stringify(owners[index] ?? "태홍"),
+    },
+    {
+      id: crypto.randomUUID(),
+      ownerId,
+      itemId: task.id,
+      propertyId: sprintProperty,
+      value: JSON.stringify(sprints[index] ?? "Backlog"),
+    },
+    {
+      id: crypto.randomUUID(),
+      ownerId,
+      itemId: task.id,
+      propertyId: estimateProperty,
+      value: JSON.stringify(estimates[index] ?? 2),
+    },
+  ]);
+  if (values.length) await getDb().insert(itemPropertyValues).values(values);
+}
+
 async function logActivity(
   ownerId: string,
   itemId: string,
@@ -327,7 +573,54 @@ function clampProgress(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-export function serializeItem(item: PaceItem) {
+function normalizeOptions(options: string[]) {
+  return [...new Set(options.map((option) => option.trim()).filter(Boolean))].slice(0, 50);
+}
+
+function parseOptions(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((option): option is string => typeof option === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function parsePropertyValue(value: string): PropertyValue {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === "string" || typeof parsed === "number" || typeof parsed === "boolean" || parsed === null
+      ? parsed
+      : null;
+  } catch {
+    return value;
+  }
+}
+
+function normalizePropertyValue(property: PropertyDefinition, value: PropertyValue): PropertyValue {
+  if (value === null || value === "") return null;
+  if (property.type === "number") {
+    const number = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(number)) throw new Error(`${property.name} must be a number`);
+    return number;
+  }
+  if (property.type === "checkbox") {
+    if (typeof value !== "boolean") throw new Error(`${property.name} must be true or false`);
+    return value;
+  }
+  if (typeof value !== "string") throw new Error(`${property.name} must be text`);
+  const text = value.trim();
+  if (!text) return null;
+  if (property.type === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    throw new Error(`${property.name} must use YYYY-MM-DD`);
+  }
+  if (property.type === "select" && !parseOptions(property.options).includes(text)) {
+    throw new Error(`${property.name} must use one of its configured options`);
+  }
+  return text;
+}
+
+export function serializeItem(item: PaceItem, properties: Record<string, PropertyValue> = {}) {
   return {
     id: item.id,
     parentId: item.parentId,
@@ -342,5 +635,6 @@ export function serializeItem(item: PaceItem) {
     source: item.source,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
+    properties,
   };
 }

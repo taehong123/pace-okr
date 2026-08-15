@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const items = sqliteTable(
   "items",
@@ -45,5 +45,42 @@ export const activityLog = sqliteTable(
   ],
 );
 
+export const propertyDefinitions = sqliteTable(
+  "property_definitions",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    name: text("name").notNull(),
+    type: text("type").notNull(),
+    options: text("options").notNull().default("[]"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_property_definitions_owner_name").on(table.ownerId, table.name),
+    index("idx_property_definitions_owner_sort").on(table.ownerId, table.sortOrder),
+  ],
+);
+
+export const itemPropertyValues = sqliteTable(
+  "item_property_values",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    itemId: text("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    propertyId: text("property_id").notNull().references(() => propertyDefinitions.id, { onDelete: "cascade" }),
+    value: text("value").notNull().default("null"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_item_property_values_unique").on(table.ownerId, table.itemId, table.propertyId),
+    index("idx_item_property_values_owner_item").on(table.ownerId, table.itemId),
+    index("idx_item_property_values_owner_property").on(table.ownerId, table.propertyId),
+  ],
+);
+
 export type PaceItem = typeof items.$inferSelect;
 export type NewPaceItem = typeof items.$inferInsert;
+export type PropertyDefinition = typeof propertyDefinitions.$inferSelect;
+export type ItemPropertyValue = typeof itemPropertyValues.$inferSelect;

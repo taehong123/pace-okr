@@ -2,17 +2,19 @@
 
 import {
   Activity,
-  ArrowRight,
+  ArrowDownUp,
   Bell,
   Bot,
   CalendarDays,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   CircleHelp,
-  Clock3,
   Columns3,
   Copy,
+  Filter,
+  Hash,
   Inbox,
   LayoutDashboard,
   Link2,
@@ -22,8 +24,11 @@ import {
   MoreHorizontal,
   Plus,
   Search,
-  Send,
+  Settings2,
+  Table2,
   Target,
+  TextCursorInput,
+  Trash2,
   X,
   Zap,
 } from "lucide-react";
@@ -33,6 +38,9 @@ type View = "home" | "inbox" | "work" | "okr" | "reviews";
 type Cadence = "daily" | "weekly" | "monthly" | "quarterly";
 type ItemStatus = "inbox" | "todo" | "in_progress" | "done" | "blocked";
 type ItemKind = "objective" | "key_result" | "initiative" | "task" | "action";
+type Priority = "low" | "medium" | "high" | "urgent";
+type PropertyType = "text" | "number" | "select" | "date" | "checkbox";
+type PropertyValue = string | number | boolean | null;
 
 type PaceItem = {
   id: string;
@@ -41,7 +49,7 @@ type PaceItem = {
   title: string;
   description: string;
   status: ItemStatus;
-  priority: "low" | "medium" | "high" | "urgent";
+  priority: Priority;
   cadence: Cadence;
   progress: number;
   dueDate: string | null;
@@ -49,6 +57,16 @@ type PaceItem = {
   createdAt: string;
   updatedAt: string;
 };
+
+type PropertyDefinition = {
+  id: string;
+  name: string;
+  type: PropertyType;
+  options: string[];
+  sortOrder: number;
+};
+
+type PropertyValueMap = Record<string, Record<string, PropertyValue>>;
 
 const fallbackItems: PaceItem[] = [
   item("obj", null, "objective", "셀프 서브 도입으로 팀의 성장 속도를 높인다", "in_progress", "quarterly", 68),
@@ -63,52 +81,71 @@ const fallbackItems: PaceItem[] = [
   item("capture-2", null, "task", "모바일 가입 이탈 구간 확인", "inbox", "weekly", 0, null, "slack"),
 ];
 
+const fallbackProperties: PropertyDefinition[] = [
+  { id: "owner", name: "담당", type: "text", options: [], sortOrder: 10 },
+  { id: "sprint", name: "스프린트", type: "select", options: ["Sprint 18", "Sprint 19", "Backlog"], sortOrder: 20 },
+  { id: "estimate", name: "예상 시간", type: "number", options: [], sortOrder: 30 },
+];
+
+const fallbackValues: PropertyValueMap = {
+  "task-1": { owner: "태홍", sprint: "Sprint 18", estimate: 6 },
+  "task-2": { owner: "민지", sprint: "Sprint 18", estimate: 3 },
+  "task-3": { owner: "태홍", sprint: "Sprint 18", estimate: 4 },
+  "task-4": { owner: "유진", sprint: "Sprint 19", estimate: 5 },
+};
+
 const navItems = [
   { id: "home" as const, label: "홈", icon: LayoutDashboard },
   { id: "inbox" as const, label: "인박스", icon: Inbox },
-  { id: "work" as const, label: "내 작업", icon: ListChecks },
+  { id: "work" as const, label: "작업", icon: Table2 },
   { id: "okr" as const, label: "OKR", icon: Target },
   { id: "reviews" as const, label: "리뷰", icon: Activity },
 ];
 
 const cadenceLabels: Record<Cadence, string> = {
-  daily: "데일리",
-  weekly: "위클리",
-  monthly: "먼슬리",
+  daily: "일간",
+  weekly: "주간",
+  monthly: "월간",
   quarterly: "분기",
 };
 
-const viewTitles: Record<View, { eyebrow: string; title: string }> = {
-  home: { eyebrow: "2026년 3분기", title: "오늘의 흐름" },
-  inbox: { eyebrow: "Capture first", title: "인박스" },
-  work: { eyebrow: "집중할 일", title: "내 작업" },
-  okr: { eyebrow: "Outcome map", title: "목표와 실행" },
-  reviews: { eyebrow: "Review rhythm", title: "리뷰" },
+const viewTitles: Record<View, string> = {
+  home: "홈",
+  inbox: "인박스",
+  work: "작업",
+  okr: "OKR",
+  reviews: "리뷰",
 };
 
 export default function Home() {
   const [items, setItems] = useState<PaceItem[]>(fallbackItems);
-  const [activeView, setActiveView] = useState<View>("home");
+  const [properties, setProperties] = useState<PropertyDefinition[]>(fallbackProperties);
+  const [propertyValues, setPropertyValues] = useState<PropertyValueMap>(fallbackValues);
+  const [activeView, setActiveView] = useState<View>("work");
   const [cadence, setCadence] = useState<Cadence>("weekly");
-  const [display, setDisplay] = useState<"tree" | "board">("tree");
+  const [taskDisplay, setTaskDisplay] = useState<"table" | "board">("table");
   const [capture, setCapture] = useState("");
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [integrationOpen, setIntegrationOpen] = useState(false);
+  const [propertyPanelOpen, setPropertyPanelOpen] = useState(false);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     let active = true;
-    fetch("/api/items")
-      .then((response) => {
-        if (!response.ok) throw new Error("offline");
-        return response.json() as Promise<{ items: PaceItem[] }>;
-      })
-      .then((data) => {
-        if (active && data.items.length) {
-          setItems(data.items);
-          setConnected(true);
-        }
+    Promise.all([fetch("/api/items"), fetch("/api/properties")])
+      .then(async ([itemsResponse, propertiesResponse]) => {
+        if (!itemsResponse.ok || !propertiesResponse.ok) throw new Error("offline");
+        const itemData = (await itemsResponse.json()) as { items: PaceItem[] };
+        const propertyData = (await propertiesResponse.json()) as {
+          properties: PropertyDefinition[];
+          values: PropertyValueMap;
+        };
+        if (!active) return;
+        if (itemData.items.length) setItems(itemData.items);
+        setProperties(propertyData.properties);
+        setPropertyValues(propertyData.values);
+        setConnected(true);
       })
       .catch(() => setConnected(false));
     return () => {
@@ -117,17 +154,13 @@ export default function Home() {
   }, []);
 
   const inboxItems = items.filter((entry) => entry.status === "inbox");
+  const taskItems = items.filter((entry) => entry.kind === "task");
   const structuredItems = items.filter((entry) => entry.status !== "inbox");
   const periodItems = items.filter(
-    (entry) =>
-      entry.status !== "inbox" &&
-      (cadence === "quarterly" || entry.cadence === cadence || entry.kind === "objective"),
+    (entry) => entry.status !== "inbox" && (cadence === "quarterly" || entry.cadence === cadence || entry.kind === "objective"),
   );
-  const weekItems = items
-    .filter((entry) => ["task", "action"].includes(entry.kind) && entry.status !== "inbox")
-    .slice(0, 5);
-  const initiatives = items.filter((entry) => entry.kind === "initiative");
   const objective = items.find((entry) => entry.kind === "objective");
+  const initiatives = items.filter((entry) => entry.kind === "initiative");
   const completed = periodItems.filter((entry) => entry.status === "done").length;
   const blocked = periodItems.filter((entry) => entry.status === "blocked").length;
   const averageProgress = periodItems.length
@@ -144,21 +177,18 @@ export default function Home() {
       const response = await fetch("/api/items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, source: "web" }),
+        body: JSON.stringify({ title, kind: "task", source: "web" }),
       });
       if (!response.ok) throw new Error("save failed");
       const data = (await response.json()) as { item: PaceItem };
       setItems((current) => [...current, data.item]);
       setConnected(true);
     } catch {
-      setItems((current) => [
-        ...current,
-        item(crypto.randomUUID(), null, "task", title, "inbox", "weekly", 0),
-      ]);
+      setItems((current) => [...current, item(crypto.randomUUID(), null, "task", title, "inbox", "weekly", 0)]);
     } finally {
       setCapture("");
       setSaving(false);
-      showNotice("인박스에 담았습니다. 연결은 나중에 해도 됩니다.");
+      showNotice("인박스에 추가했습니다.");
     }
   }
 
@@ -176,23 +206,73 @@ export default function Home() {
       setItems((current) => current.map((entry) => (entry.id === id ? data.item : entry)));
     } catch {
       setItems(previous);
-      showNotice("업데이트하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      showNotice("변경사항을 저장하지 못했습니다.");
     }
+  }
+
+  async function setPropertyValue(itemId: string, propertyId: string, value: PropertyValue) {
+    const previous = propertyValues;
+    setPropertyValues((current) => ({
+      ...current,
+      [itemId]: { ...current[itemId], [propertyId]: value },
+    }));
+    try {
+      const response = await fetch("/api/property-values", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId, propertyId, value }),
+      });
+      if (!response.ok) throw new Error("update failed");
+    } catch {
+      setPropertyValues(previous);
+      showNotice("속성 값을 저장하지 못했습니다.");
+    }
+  }
+
+  async function createProperty(input: { name: string; type: PropertyType; options: string[] }) {
+    const response = await fetch("/api/properties", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!response.ok) {
+      showNotice("속성을 추가하지 못했습니다.");
+      return false;
+    }
+    const data = (await response.json()) as { property: PropertyDefinition };
+    setProperties((current) => [...current, data.property]);
+    showNotice(`${data.property.name} 속성을 추가했습니다.`);
+    return true;
+  }
+
+  async function deleteProperty(id: string) {
+    const response = await fetch(`/api/properties?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!response.ok) {
+      showNotice("속성을 삭제하지 못했습니다.");
+      return;
+    }
+    setProperties((current) => current.filter((property) => property.id !== id));
+    setPropertyValues((current) => {
+      const next: PropertyValueMap = {};
+      for (const [itemId, values] of Object.entries(current)) {
+        const { [id]: removed, ...rest } = values;
+        void removed;
+        next[itemId] = rest;
+      }
+      return next;
+    });
   }
 
   function connectInbox(entry: PaceItem) {
     const parent = initiatives[0];
-    if (!parent) {
-      showNotice("먼저 연결할 Initiative를 만들어 주세요.");
-      return;
-    }
+    if (!parent) return showNotice("연결할 Initiative가 없습니다.");
     void patchItem(entry.id, { parentId: parent.id, status: "todo" });
-    showNotice("Task로 정리하고 Initiative에 연결했습니다.");
+    showNotice("Initiative에 연결했습니다.");
   }
 
   function showNotice(message: string) {
     setNotice(message);
-    window.setTimeout(() => setNotice(""), 2800);
+    window.setTimeout(() => setNotice(""), 2600);
   }
 
   function copyValue(value: string) {
@@ -203,24 +283,18 @@ export default function Home() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div className="brand-row">
+        <button className="workspace-switcher">
           <span className="brand-mark">P</span>
-          <div>
-            <strong>Pace</strong>
-            <span>Product Lab</span>
-          </div>
-        </div>
+          <span><strong>Product Lab</strong><small>Pace</small></span>
+          <ChevronDown size={14} />
+        </button>
 
         <nav aria-label="주요 메뉴">
           {navItems.map((entry) => {
             const Icon = entry.icon;
             return (
-              <button
-                className={`nav-item ${activeView === entry.id ? "active" : ""}`}
-                key={entry.id}
-                onClick={() => setActiveView(entry.id)}
-              >
-                <Icon size={18} />
+              <button className={`nav-item ${activeView === entry.id ? "active" : ""}`} key={entry.id} onClick={() => setActiveView(entry.id)}>
+                <Icon size={16} />
                 <span>{entry.label}</span>
                 {entry.id === "inbox" && inboxItems.length > 0 && <b>{inboxItems.length}</b>}
               </button>
@@ -228,501 +302,225 @@ export default function Home() {
           })}
         </nav>
 
+        <div className="sidebar-section">
+          <span>워크스페이스</span>
+          <button className="nav-item" onClick={() => setActiveView("work")}><Table2 size={16} /><span>전체 작업</span></button>
+          <button className="nav-item" onClick={() => setActiveView("okr")}><ListTree size={16} /><span>분기 목표</span></button>
+        </div>
+
         <div className="sidebar-bottom">
-          <button className="nav-item" onClick={() => setIntegrationOpen(true)}>
-            <Zap size={18} />
-            <span>연동</span>
-            <i className={connected ? "connection-live" : "connection-local"} />
-          </button>
-          <button className="nav-item">
-            <CircleHelp size={18} />
-            <span>도움말</span>
-          </button>
-          <button className="profile-row">
-            <span className="avatar">TH</span>
-            <span>태홍</span>
-            <MoreHorizontal size={16} />
-          </button>
+          <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Zap size={16} /><span>연결</span><i className={connected ? "connection-live" : "connection-local"} /></button>
+          <button className="nav-item"><CircleHelp size={16} /><span>도움말</span></button>
+          <button className="profile-row"><span className="avatar">태</span><span>태홍</span><MoreHorizontal size={15} /></button>
         </div>
       </aside>
 
       <section className="workspace">
-        <header className="topbar">
-          <div>
-            <p>{viewTitles[activeView].eyebrow}</p>
-            <h1>{viewTitles[activeView].title}</h1>
-          </div>
-          <div className="top-actions">
-            <div className="cadence-switch" aria-label="업무 주기">
-              {(Object.keys(cadenceLabels) as Cadence[]).map((key) => (
-                <button
-                  className={cadence === key ? "selected" : ""}
-                  key={key}
-                  onClick={() => setCadence(key)}
-                >
-                  {cadenceLabels[key]}
-                </button>
-              ))}
-            </div>
-            <button className="icon-button" aria-label="검색" title="검색"><Search size={18} /></button>
-            <button className="icon-button" aria-label="알림" title="알림"><Bell size={18} /></button>
-          </div>
+        <header className="workspace-topbar">
+          <span>Product Lab</span><ChevronRight size={13} /><b>{viewTitles[activeView]}</b>
+          <div><button aria-label="알림" title="알림"><Bell size={16} /></button><button aria-label="더 보기" title="더 보기"><MoreHorizontal size={16} /></button></div>
         </header>
 
-        <form className="capture-bar" onSubmit={submitCapture}>
-          <span className="capture-plus"><Plus size={18} /></span>
-          <input
-            aria-label="새 작업 빠르게 등록"
-            value={capture}
-            onChange={(event) => setCapture(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.ctrlKey && event.key === "Enter") event.currentTarget.form?.requestSubmit();
-            }}
-            placeholder="해야 할 일을 자연스럽게 입력하세요"
-          />
-          <span className="capture-hint">Ctrl + Enter</span>
-          <button type="submit" disabled={saving}>
-            {saving ? <Clock3 size={16} /> : <Send size={16} />}
-            <span>등록</span>
-          </button>
-        </form>
-        {notice && <div className="toast" role="status">{notice}</div>}
-
-        <div className={`content-grid view-${activeView}`}>
-          <section className="main-column">
-            <PanelHeader
-              activeView={activeView}
-              display={display}
-              setDisplay={setDisplay}
-              cadence={cadence}
-              count={activeView === "inbox" ? inboxItems.length : periodItems.length}
-            />
-
-            {(activeView === "home" || activeView === "okr") && display === "tree" && (
-              <TreeView
-                objective={objective}
-                items={structuredItems}
-                depths={depths}
-                onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })}
-              />
-            )}
-            {(activeView === "home" || activeView === "okr") && display === "board" && (
-              <BoardView items={structuredItems.filter((entry) => ["task", "action"].includes(entry.kind))} />
-            )}
-            {activeView === "inbox" && (
-              <InboxView items={inboxItems} onConnect={connectInbox} />
-            )}
-            {activeView === "work" && (
-              <WorkView
-                items={periodItems.filter((entry) => ["task", "action"].includes(entry.kind))}
-                cadence={cadence}
-                onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })}
-              />
-            )}
-            {activeView === "reviews" && (
-              <ReviewView
-                items={periodItems}
-                cadence={cadence}
-                completed={completed}
-                blocked={blocked}
-                averageProgress={averageProgress}
-              />
-            )}
-          </section>
-
-          <aside className="right-column">
-            <div className="section-heading compact">
-              <div>
-                <span className="eyebrow">{formatKoreanDate(new Date())}</span>
-                <h2>{activeView === "inbox" ? "등록 경로" : "이번 주"}</h2>
-              </div>
-              <button className="text-button" onClick={() => setActiveView("work")}>전체 보기</button>
+        <div className="page-body">
+          <header className="page-header">
+            <div>
+              <h1>{viewTitles[activeView]}</h1>
+              {activeView === "work" && <p>{taskItems.length}개 작업</p>}
+              {activeView === "inbox" && <p>{inboxItems.length}개 항목</p>}
+              {activeView === "okr" && <p>2026년 3분기</p>}
             </div>
-
-            {activeView === "inbox" ? (
-              <div className="source-list">
-                <SourceRow icon={MessageSquareText} label="대화 / MCP" count={inboxItems.filter((entry) => entry.source === "mcp").length} color="blue" />
-                <SourceRow icon={Bot} label="봇 웹훅" count={inboxItems.filter((entry) => entry.source !== "mcp" && entry.source !== "web").length} color="coral" />
-                <SourceRow icon={Plus} label="웹 직접 등록" count={inboxItems.filter((entry) => entry.source === "web").length} color="green" />
-              </div>
-            ) : (
-              <div className="week-list">
-                {weekItems.map((entry) => (
-                  <button className="week-item" key={entry.id} onClick={() => setActiveView("work")}>
-                    <span className={`status-dot status-${entry.status}`} />
-                    <span>
-                      <b>{entry.title}</b>
-                      <small>{dueLabel(entry.dueDate)} · {kindLabel(entry.kind)}</small>
-                    </span>
-                    <em>{statusLabel(entry.status)}</em>
-                  </button>
-                ))}
+            {(activeView === "home" || activeView === "reviews") && (
+              <div className="cadence-switch" aria-label="업무 주기">
+                {(Object.keys(cadenceLabels) as Cadence[]).map((key) => <button className={cadence === key ? "selected" : ""} key={key} onClick={() => setCadence(key)}>{cadenceLabels[key]}</button>)}
               </div>
             )}
+          </header>
 
-            <div className="integration-strip">
-              <div className="integration-icon"><Zap size={17} /></div>
-              <div>
-                <span className="eyebrow">MCP ready</span>
-                <h3>대화에서 바로 등록</h3>
-              </div>
-              <button aria-label="연동 설정 열기" title="연동 설정" onClick={() => setIntegrationOpen(true)}>
-                <ArrowRight size={16} />
-              </button>
-            </div>
-          </aside>
+          <form className="quick-capture" onSubmit={submitCapture}>
+            <Plus size={17} />
+            <input aria-label="새 작업 등록" value={capture} onChange={(event) => setCapture(event.target.value)} placeholder="할 일을 입력하고 Enter" />
+            <button type="submit" disabled={saving}>{saving ? "저장 중" : "추가"}</button>
+          </form>
+
+          {activeView === "work" && <TaskDatabase items={taskItems} allItems={items} properties={properties} values={propertyValues} display={taskDisplay} setDisplay={setTaskDisplay} onPatch={patchItem} onSetProperty={setPropertyValue} onOpenProperties={() => setPropertyPanelOpen(true)} />}
+          {activeView === "home" && <HomeView objective={objective} items={periodItems} onGoToWork={() => setActiveView("work")} />}
+          {activeView === "inbox" && <InboxView items={inboxItems} onConnect={connectInbox} />}
+          {activeView === "okr" && <TreeView objective={objective} items={structuredItems} depths={depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} />}
+          {activeView === "reviews" && <ReviewView items={periodItems} cadence={cadence} completed={completed} blocked={blocked} averageProgress={averageProgress} />}
         </div>
       </section>
 
+      {notice && <div className="toast" role="status">{notice}</div>}
+      {propertyPanelOpen && <PropertyPanel properties={properties} onCreate={createProperty} onDelete={deleteProperty} onClose={() => setPropertyPanelOpen(false)} />}
       {integrationOpen && (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setIntegrationOpen(false);
-          }}
-        >
+        <ModalBackdrop onClose={() => setIntegrationOpen(false)}>
           <section className="integration-modal" role="dialog" aria-modal="true" aria-labelledby="integration-title">
-            <header>
-              <div>
-                <span className="eyebrow">Connect Pace</span>
-                <h2 id="integration-title">대화와 봇 연결</h2>
-              </div>
-              <button className="icon-button" aria-label="닫기" title="닫기" onClick={() => setIntegrationOpen(false)}><X size={18} /></button>
-            </header>
-            <div className="endpoint-row">
-              <span className="endpoint-icon"><MessageSquareText size={18} /></span>
-              <div><b>MCP endpoint</b><code>{typeof window !== "undefined" ? `${window.location.origin}/mcp` : "/mcp"}</code></div>
-              <button className="icon-button" aria-label="MCP 주소 복사" title="주소 복사" onClick={() => copyValue(`${window.location.origin}/mcp`)}><Copy size={16} /></button>
-            </div>
-            <div className="endpoint-row">
-              <span className="endpoint-icon coral"><Bot size={18} /></span>
-              <div><b>Bot webhook</b><code>{typeof window !== "undefined" ? `${window.location.origin}/api/webhooks/capture` : "/api/webhooks/capture"}</code></div>
-              <button className="icon-button" aria-label="웹훅 주소 복사" title="주소 복사" onClick={() => copyValue(`${window.location.origin}/api/webhooks/capture`)}><Copy size={16} /></button>
-            </div>
-            <div className="tool-list">
-              {["capture_item", "create_item", "list_items", "update_item", "link_item", "review_period"].map((tool) => (
-                <code key={tool}>{tool}</code>
-              ))}
-            </div>
-            <footer>
-              <span><CheckCircle2 size={16} /> Objective → Key Result → Initiative → Task → Action</span>
-              <button onClick={() => setIntegrationOpen(false)}>완료</button>
-            </footer>
+            <header><h2 id="integration-title">연결</h2><button className="icon-button" aria-label="닫기" title="닫기" onClick={() => setIntegrationOpen(false)}><X size={17} /></button></header>
+            <div className="endpoint-row"><MessageSquareText size={18} /><div><b>MCP endpoint</b><code>{typeof window !== "undefined" ? `${window.location.origin}/mcp` : "/mcp"}</code></div><button className="icon-button" aria-label="MCP 주소 복사" title="주소 복사" onClick={() => copyValue(`${window.location.origin}/mcp`)}><Copy size={15} /></button></div>
+            <div className="endpoint-row"><Bot size={18} /><div><b>Bot webhook</b><code>{typeof window !== "undefined" ? `${window.location.origin}/api/webhooks/capture` : "/api/webhooks/capture"}</code></div><button className="icon-button" aria-label="웹훅 주소 복사" title="주소 복사" onClick={() => copyValue(`${window.location.origin}/api/webhooks/capture`)}><Copy size={15} /></button></div>
+            <div className="tool-list">{["capture_item", "create_item", "list_items", "update_item", "link_item", "review_period", "list_properties", "create_property", "set_property_value", "delete_property"].map((tool) => <code key={tool}>{tool}</code>)}</div>
+            <footer><span><CheckCircle2 size={15} />Objective → Key Result → Initiative → Task → Action</span><button onClick={() => setIntegrationOpen(false)}>닫기</button></footer>
           </section>
-        </div>
+        </ModalBackdrop>
       )}
     </main>
   );
 }
 
-function PanelHeader({
-  activeView,
-  display,
-  setDisplay,
-  cadence,
-  count,
-}: {
-  activeView: View;
-  display: "tree" | "board";
-  setDisplay: (display: "tree" | "board") => void;
-  cadence: Cadence;
-  count: number;
+function TaskDatabase({ items, allItems, properties, values, display, setDisplay, onPatch, onSetProperty, onOpenProperties }: {
+  items: PaceItem[];
+  allItems: PaceItem[];
+  properties: PropertyDefinition[];
+  values: PropertyValueMap;
+  display: "table" | "board";
+  setDisplay: (display: "table" | "board") => void;
+  onPatch: (id: string, patch: Partial<PaceItem>) => Promise<void>;
+  onSetProperty: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void>;
+  onOpenProperties: () => void;
 }) {
-  const heading =
-    activeView === "inbox"
-      ? { eyebrow: "분류 전", title: `새로 들어온 항목 ${count}개` }
-      : activeView === "work"
-        ? { eyebrow: cadenceLabels[cadence], title: "실행 목록" }
-        : activeView === "reviews"
-          ? { eyebrow: cadenceLabels[cadence], title: "성과 리듬" }
-          : { eyebrow: "현재 집중", title: "분기 목표" };
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "done">("all");
+  const [sortOrder, setSortOrder] = useState<"default" | "due" | "title">("default");
+  const filtered = items
+    .filter((entry) => entry.title.toLowerCase().includes(query.toLowerCase()))
+    .filter((entry) => statusFilter === "all" || (statusFilter === "done" ? entry.status === "done" : entry.status !== "done"))
+    .sort((a, b) => {
+      if (sortOrder === "title") return a.title.localeCompare(b.title, "ko");
+      if (sortOrder === "due") return (a.dueDate ?? "9999-12-31").localeCompare(b.dueDate ?? "9999-12-31");
+      return 0;
+    });
+  const byId = new Map(allItems.map((entry) => [entry.id, entry]));
 
   return (
-    <div className="section-heading">
-      <div>
-        <span className="eyebrow">{heading.eyebrow}</span>
-        <h2>{heading.title}</h2>
+    <section className="database-section">
+      <div className="database-toolbar">
+        <div className="view-tabs">
+          <button className={display === "table" ? "active" : ""} onClick={() => setDisplay("table")}><Table2 size={15} />테이블</button>
+          <button className={display === "board" ? "active" : ""} onClick={() => setDisplay("board")}><Columns3 size={15} />보드</button>
+        </div>
+        <div className="database-actions">
+          <label className="table-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="작업 검색" placeholder="검색" /></label>
+          <button title="상태 필터" onClick={() => setStatusFilter(statusFilter === "all" ? "open" : statusFilter === "open" ? "done" : "all")}><Filter size={15} /><span>{statusFilter === "all" ? "필터" : statusFilter === "open" ? "미완료" : "완료"}</span></button>
+          <button title="정렬" onClick={() => setSortOrder(sortOrder === "default" ? "due" : sortOrder === "due" ? "title" : "default")}><ArrowDownUp size={15} /><span>{sortOrder === "default" ? "정렬" : sortOrder === "due" ? "기한순" : "이름순"}</span></button>
+          <button title="속성 관리" onClick={onOpenProperties}><Settings2 size={15} /><span>속성</span></button>
+        </div>
       </div>
-      {(activeView === "home" || activeView === "okr") && (
-        <div className="view-switch" aria-label="보기 전환">
-          <button className={display === "tree" ? "selected" : ""} onClick={() => setDisplay("tree")}>
-            <ListTree size={15} />트리
-          </button>
-          <button className={display === "board" ? "selected" : ""} onClick={() => setDisplay("board")}>
-            <Columns3 size={15} />보드
-          </button>
+
+      {display === "board" ? <BoardView items={filtered} /> : (
+        <div className="database-scroll">
+          <div className="task-table" style={{ "--custom-columns": properties.length } as React.CSSProperties}>
+            <div className="task-table-row task-table-head">
+              <span className="name-cell"><TextCursorInput size={14} />이름</span>
+              <span>상태</span><span>우선순위</span><span><CalendarDays size={14} />기한</span><span><Link2 size={14} />Initiative</span>
+              {properties.map((property) => <span key={property.id}>{property.type === "number" ? <Hash size={14} /> : <TextCursorInput size={14} />}{property.name}</span>)}
+              <button aria-label="속성 추가" title="속성 추가" onClick={onOpenProperties}><Plus size={15} /></button>
+            </div>
+            {filtered.map((entry) => {
+              const parent = entry.parentId ? byId.get(entry.parentId) : null;
+              return (
+                <div className="task-table-row" key={entry.id}>
+                  <div className="name-cell"><button className={`task-check ${entry.status === "done" ? "checked" : ""}`} aria-label="완료 상태 변경" onClick={() => void onPatch(entry.id, { status: entry.status === "done" ? "todo" : "done", progress: entry.status === "done" ? 0 : 100 })}>{entry.status === "done" && <Check size={13} />}</button><input aria-label="작업 이름" defaultValue={entry.title} onBlur={(event) => event.target.value.trim() && event.target.value !== entry.title && void onPatch(entry.id, { title: event.target.value })} /></div>
+                  <select className={`status-select status-${entry.status}`} aria-label="상태" value={entry.status} onChange={(event) => void onPatch(entry.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
+                  <select className={`priority-select priority-${entry.priority}`} aria-label="우선순위" value={entry.priority} onChange={(event) => void onPatch(entry.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
+                  <input className="date-cell" aria-label="기한" type="date" value={entry.dueDate ?? ""} onChange={(event) => void onPatch(entry.id, { dueDate: event.target.value || null })} />
+                  <span className="relation-cell">{parent?.title ?? "-"}</span>
+                  {properties.map((property) => <PropertyCell key={property.id} itemId={entry.id} property={property} value={values[entry.id]?.[property.id] ?? null} onChange={onSetProperty} />)}
+                  <button className="row-menu" aria-label="작업 메뉴" title="작업 메뉴"><MoreHorizontal size={15} /></button>
+                </div>
+              );
+            })}
+            {!filtered.length && <div className="table-empty">작업 없음</div>}
+          </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
-function TreeView({
-  objective,
-  items,
-  depths,
-  onComplete,
-}: {
-  objective?: PaceItem;
-  items: PaceItem[];
-  depths: Record<string, number>;
-  onComplete: (id: string) => void;
-}) {
-  if (!objective) return <EmptyState icon={Target} title="첫 Objective를 만들어 주세요" />;
+function PropertyCell({ itemId, property, value, onChange }: { itemId: string; property: PropertyDefinition; value: PropertyValue; onChange: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void> }) {
+  if (property.type === "checkbox") return <label className="property-checkbox"><input type="checkbox" checked={Boolean(value)} onChange={(event) => void onChange(itemId, property.id, event.target.checked)} /><span><Check size={12} /></span></label>;
+  if (property.type === "select") return <select className="custom-select" aria-label={property.name} value={String(value ?? "")} onChange={(event) => void onChange(itemId, property.id, event.target.value || null)}><option value="">-</option>{property.options.map((option) => <option key={option}>{option}</option>)}</select>;
+  return <input key={`${itemId}:${property.id}:${String(value)}`} className="property-input" aria-label={property.name} type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} defaultValue={value === null ? "" : String(value)} onBlur={(event) => void onChange(itemId, property.id, property.type === "number" ? (event.target.value === "" ? null : Number(event.target.value)) : event.target.value || null)} />;
+}
+
+function PropertyPanel({ properties, onCreate, onDelete, onClose }: { properties: PropertyDefinition[]; onCreate: (input: { name: string; type: PropertyType; options: string[] }) => Promise<boolean>; onDelete: (id: string) => Promise<void>; onClose: () => void }) {
+  const [name, setName] = useState("");
+  const [type, setType] = useState<PropertyType>("text");
+  const [options, setOptions] = useState("");
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!name.trim()) return;
+    const created = await onCreate({ name: name.trim(), type, options: options.split(",").map((value) => value.trim()).filter(Boolean) });
+    if (created) { setName(""); setOptions(""); }
+  }
   return (
-    <>
-      <div className="objective-summary">
-        <div>
-          <span className="type-pill">Objective</span>
-          <h3>{objective.title}</h3>
-          <p>Owner 태홍 · 분기 목표</p>
+    <ModalBackdrop onClose={onClose} align="right">
+      <aside className="property-panel" role="dialog" aria-modal="true" aria-labelledby="property-panel-title">
+        <header><div><h2 id="property-panel-title">속성</h2><p>{properties.length}개</p></div><button className="icon-button" aria-label="닫기" title="닫기" onClick={onClose}><X size={17} /></button></header>
+        <div className="property-list">
+          {properties.map((property) => <div className="property-row" key={property.id}><span className="property-type-icon">{property.type === "number" ? <Hash size={15} /> : property.type === "checkbox" ? <CheckCircle2 size={15} /> : <TextCursorInput size={15} />}</span><div><b>{property.name}</b><small>{propertyTypeLabel(property.type)}</small></div><button aria-label={`${property.name} 삭제`} title="속성 삭제" onClick={() => void onDelete(property.id)}><Trash2 size={15} /></button></div>)}
         </div>
-        <strong>{objective.progress}%</strong>
-      </div>
-      <div className="hierarchy" aria-label="OKR 작업 구조">
-        {items.filter((entry) => entry.id !== objective.id).map((entry) => (
-          <div
-            className="hierarchy-row"
-            key={entry.id}
-            style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as React.CSSProperties}
-          >
-            <span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span>
-            <span className="hierarchy-copy">
-              <small>{kindLabel(entry.kind)} · {statusLabel(entry.status)}</small>
-              <b>{entry.title}</b>
-            </span>
-            <span className="mini-progress"><i style={{ width: `${entry.progress}%` }} /></span>
-            <em>{entry.progress}%</em>
-            {entry.status !== "done" && ["task", "action"].includes(entry.kind) ? (
-              <button
-                type="button"
-                className="row-action"
-                aria-label="완료 처리"
-                title="완료 처리"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onComplete(entry.id);
-                }}
-              >
-                <Check size={14} />
-              </button>
-            ) : <ChevronRight className="row-chevron" size={15} />}
-          </div>
-        ))}
-      </div>
-    </>
+        <form className="property-form" onSubmit={submit}>
+          <h3>속성 추가</h3>
+          <label><span>이름</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="예: 팀, 스프린트, 점수" /></label>
+          <label><span>유형</span><select value={type} onChange={(event) => setType(event.target.value as PropertyType)}><option value="text">텍스트</option><option value="number">숫자</option><option value="select">선택</option><option value="date">날짜</option><option value="checkbox">체크박스</option></select></label>
+          {type === "select" && <label><span>선택 항목</span><input value={options} onChange={(event) => setOptions(event.target.value)} placeholder="기획, 개발, 디자인" /></label>}
+          <button type="submit"><Plus size={15} />추가</button>
+        </form>
+      </aside>
+    </ModalBackdrop>
   );
+}
+
+function ModalBackdrop({ children, onClose, align = "center" }: { children: React.ReactNode; onClose: () => void; align?: "center" | "right" }) {
+  return <div className={`modal-backdrop align-${align}`} role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>{children}</div>;
+}
+
+function HomeView({ objective, items, onGoToWork }: { objective?: PaceItem; items: PaceItem[]; onGoToWork: () => void }) {
+  const tasks = items.filter((entry) => entry.kind === "task").slice(0, 5);
+  return <div className="home-layout"><section className="home-focus"><header><span>분기 목표</span><button onClick={onGoToWork}>작업 보기<ChevronRight size={14} /></button></header>{objective ? <div className="home-objective"><Target size={19} /><div><h2>{objective.title}</h2><span><i style={{ width: `${objective.progress}%` }} /></span><small>{objective.progress}%</small></div></div> : <EmptyState icon={Target} title="Objective 없음" />}</section><section className="home-tasks"><header><span>다가오는 작업</span><b>{tasks.length}</b></header>{tasks.map((entry) => <button key={entry.id} onClick={onGoToWork}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b><small>{dueLabel(entry.dueDate)}</small></button>)}</section></div>;
+}
+
+function TreeView({ objective, items, depths, onComplete }: { objective?: PaceItem; items: PaceItem[]; depths: Record<string, number>; onComplete: (id: string) => void }) {
+  if (!objective) return <EmptyState icon={Target} title="Objective 없음" />;
+  return <section className="outline-section"><div className="objective-row"><Target size={18} /><div><span>Objective</span><h2>{objective.title}</h2></div><b>{objective.progress}%</b></div><div className="hierarchy">{items.filter((entry) => entry.id !== objective.id).map((entry) => <div className="hierarchy-row" key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as React.CSSProperties}><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><span className="hierarchy-copy"><small>{kindLabel(entry.kind)}</small><b>{entry.title}</b></span><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span><em>{entry.progress}%</em>{entry.status !== "done" && ["task", "action"].includes(entry.kind) ? <button className="row-action" aria-label="완료 처리" title="완료 처리" onClick={() => onComplete(entry.id)}><Check size={13} /></button> : <ChevronRight className="row-chevron" size={15} />}</div>)}</div></section>;
 }
 
 function BoardView({ items }: { items: PaceItem[] }) {
-  const columns: { status: ItemStatus; label: string }[] = [
-    { status: "todo", label: "할 일" },
-    { status: "in_progress", label: "진행 중" },
-    { status: "done", label: "완료" },
-  ];
-  return (
-    <div className="board">
-      {columns.map((column) => {
-        const rows = items.filter((entry) => entry.status === column.status);
-        return (
-          <section className="board-column" key={column.status}>
-            <header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header>
-            <div>
-              {rows.map((entry) => (
-                <button className="board-item" key={entry.id}>
-                  <small>{kindLabel(entry.kind)}</small>
-                  <b>{entry.title}</b>
-                  <span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span>
-                </button>
-              ))}
-              {!rows.length && <span className="empty-column">항목 없음</span>}
-            </div>
-          </section>
-        );
-      })}
-    </div>
-  );
+  const columns: { status: ItemStatus; label: string }[] = [{ status: "todo", label: "할 일" }, { status: "in_progress", label: "진행 중" }, { status: "done", label: "완료" }];
+  return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <button className="board-item" key={entry.id}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
 }
 
 function InboxView({ items, onConnect }: { items: PaceItem[]; onConnect: (item: PaceItem) => void }) {
-  if (!items.length) return <EmptyState icon={Inbox} title="인박스를 모두 정리했습니다" />;
-  return (
-    <div className="inbox-list">
-      {items.map((entry) => (
-        <article className="inbox-item" key={entry.id}>
-          <span className={`source-badge source-${entry.source}`}>{sourceLabel(entry.source)}</span>
-          <div>
-            <h3>{entry.title}</h3>
-            <p>방금 등록됨 · Task 후보</p>
-          </div>
-          <button onClick={() => onConnect(entry)}><Link2 size={15} />연결</button>
-        </article>
-      ))}
-    </div>
-  );
+  if (!items.length) return <EmptyState icon={Inbox} title="인박스가 비어 있습니다" />;
+  return <section className="inbox-list"><div className="list-head"><span>이름</span><span>등록 경로</span><span /></div>{items.map((entry) => <article className="inbox-item" key={entry.id}><div><span className="page-icon"><ListChecks size={15} /></span><h3>{entry.title}</h3></div><span className={`source-badge source-${entry.source}`}>{sourceLabel(entry.source)}</span><button onClick={() => onConnect(entry)}><Link2 size={14} />연결</button></article>)}</section>;
 }
 
-function WorkView({ items, cadence, onComplete }: { items: PaceItem[]; cadence: Cadence; onComplete: (id: string) => void }) {
-  if (!items.length) return <EmptyState icon={ListChecks} title={`${cadenceLabels[cadence]} 작업이 없습니다`} />;
-  return (
-    <div className="work-list">
-      {items.map((entry) => (
-        <article className="work-row" key={entry.id}>
-          <button
-            className={`check-button ${entry.status === "done" ? "checked" : ""}`}
-            aria-label={entry.status === "done" ? "완료됨" : "완료 처리"}
-            title={entry.status === "done" ? "완료됨" : "완료 처리"}
-            onClick={() => entry.status !== "done" && onComplete(entry.id)}
-          >
-            {entry.status === "done" && <Check size={14} />}
-          </button>
-          <div>
-            <b>{entry.title}</b>
-            <span>{kindLabel(entry.kind)} · {dueLabel(entry.dueDate)}</span>
-          </div>
-          <span className={`priority priority-${entry.priority}`}>{priorityLabel(entry.priority)}</span>
-          <em>{entry.progress}%</em>
-        </article>
-      ))}
-    </div>
-  );
-}
-
-function ReviewView({
-  items,
-  cadence,
-  completed,
-  blocked,
-  averageProgress,
-}: {
-  items: PaceItem[];
-  cadence: Cadence;
-  completed: number;
-  blocked: number;
-  averageProgress: number;
-}) {
-  return (
-    <div className="review-content">
-      <div className="metrics-row">
-        <div><span>완료</span><strong>{completed}<small> / {items.length}</small></strong></div>
-        <div><span>평균 진척</span><strong>{averageProgress}<small>%</small></strong></div>
-        <div><span>막힘</span><strong>{blocked}</strong></div>
-      </div>
-      <div className="review-progress">
-        <div><b>{cadenceLabels[cadence]} 진척도</b><span>{averageProgress}%</span></div>
-        <span><i style={{ width: `${averageProgress}%` }} /></span>
-      </div>
-      <div className="review-list">
-        <span className="eyebrow">다음 리뷰에서 볼 항목</span>
-        {items.slice(0, 6).map((entry) => (
-          <div key={entry.id}>
-            <span className={`status-dot status-${entry.status}`} />
-            <b>{entry.title}</b>
-            <em>{entry.progress}%</em>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function SourceRow({ icon: Icon, label, count, color }: { icon: typeof Bot; label: string; count: number; color: string }) {
-  return (
-    <div className="source-row">
-      <span className={`source-row-icon ${color}`}><Icon size={17} /></span>
-      <b>{label}</b>
-      <em>{count}</em>
-    </div>
-  );
+function ReviewView({ items, cadence, completed, blocked, averageProgress }: { items: PaceItem[]; cadence: Cadence; completed: number; blocked: number; averageProgress: number }) {
+  return <section className="review-content"><div className="metrics-row"><div><span>완료</span><strong>{completed}<small> / {items.length}</small></strong></div><div><span>평균 진척</span><strong>{averageProgress}<small>%</small></strong></div><div><span>막힘</span><strong>{blocked}</strong></div></div><div className="review-progress"><div><b>{cadenceLabels[cadence]} 진척도</b><span>{averageProgress}%</span></div><span><i style={{ width: `${averageProgress}%` }} /></span></div><div className="review-list"><span>검토할 항목</span>{items.slice(0, 7).map((entry) => <div key={entry.id}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b><em>{entry.progress}%</em></div>)}</div></section>;
 }
 
 function EmptyState({ icon: Icon, title }: { icon: typeof Target; title: string }) {
-  return (
-    <div className="empty-state">
-      <Icon size={24} />
-      <b>{title}</b>
-    </div>
-  );
+  return <div className="empty-state"><Icon size={22} /><span>{title}</span></div>;
 }
 
-function item(
-  id: string,
-  parentId: string | null,
-  kind: ItemKind,
-  title: string,
-  status: ItemStatus,
-  cadence: Cadence,
-  progress: number,
-  dueDate: string | null = null,
-  source = "web",
-  priority: PaceItem["priority"] = "medium",
-): PaceItem {
-  return {
-    id,
-    parentId,
-    kind,
-    title,
-    description: "",
-    status,
-    priority,
-    cadence,
-    progress,
-    dueDate,
-    source,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
+const statusLabels: Record<ItemStatus, string> = { inbox: "인박스", todo: "할 일", in_progress: "진행 중", done: "완료", blocked: "막힘" };
+const priorityLabels: Record<Priority, string> = { low: "낮음", medium: "보통", high: "높음", urgent: "긴급" };
+
+function item(id: string, parentId: string | null, kind: ItemKind, title: string, status: ItemStatus, cadence: Cadence, progress: number, dueDate: string | null = null, source = "web", priority: Priority = "medium"): PaceItem {
+  return { id, parentId, kind, title, description: "", status, priority, cadence, progress, dueDate, source, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
 }
 
 function buildDepths(items: PaceItem[]) {
   const byId = new Map(items.map((entry) => [entry.id, entry]));
   const result: Record<string, number> = {};
-  for (const entry of items) {
-    let depth = 0;
-    let current = entry;
-    while (current.parentId && depth < 5) {
-      depth += 1;
-      const parent = byId.get(current.parentId);
-      if (!parent) break;
-      current = parent;
-    }
-    result[entry.id] = depth;
-  }
+  for (const entry of items) { let depth = 0; let current = entry; while (current.parentId && depth < 5) { depth += 1; const parent = byId.get(current.parentId); if (!parent) break; current = parent; } result[entry.id] = depth; }
   return result;
 }
 
-function kindAbbr(kind: ItemKind) {
-  return { objective: "O", key_result: "KR", initiative: "I", task: "T", action: "A" }[kind];
-}
-
-function kindLabel(kind: ItemKind) {
-  return { objective: "Objective", key_result: "Key Result", initiative: "Initiative", task: "Task", action: "Action" }[kind];
-}
-
-function statusLabel(status: ItemStatus) {
-  return { inbox: "인박스", todo: "할 일", in_progress: "진행 중", done: "완료", blocked: "막힘" }[status];
-}
-
-function priorityLabel(priority: PaceItem["priority"]) {
-  return { low: "낮음", medium: "보통", high: "높음", urgent: "긴급" }[priority];
-}
-
-function sourceLabel(source: string) {
-  return { mcp: "MCP", slack: "Slack", discord: "Discord", telegram: "Telegram", web: "Web" }[source] ?? "Bot";
-}
-
-function dueLabel(value: string | null) {
-  if (!value) return "날짜 없음";
-  const today = new Date();
-  const due = new Date(`${value}T00:00:00`);
-  const diff = Math.round((due.getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / 86_400_000);
-  if (diff === 0) return "오늘";
-  if (diff === 1) return "내일";
-  if (diff === -1) return "어제";
-  return `${due.getMonth() + 1}월 ${due.getDate()}일`;
-}
-
-function formatKoreanDate(date: Date) {
-  return `${date.getMonth() + 1}월 ${date.getDate()}일`;
-}
+function kindAbbr(kind: ItemKind) { return { objective: "O", key_result: "KR", initiative: "I", task: "T", action: "A" }[kind]; }
+function kindLabel(kind: ItemKind) { return { objective: "Objective", key_result: "Key Result", initiative: "Initiative", task: "Task", action: "Action" }[kind]; }
+function statusLabel(status: ItemStatus) { return statusLabels[status]; }
+function sourceLabel(source: string) { return { mcp: "MCP", slack: "Slack", discord: "Discord", telegram: "Telegram", web: "Web" }[source] ?? "Bot"; }
+function propertyTypeLabel(type: PropertyType) { return { text: "텍스트", number: "숫자", select: "선택", date: "날짜", checkbox: "체크박스" }[type]; }
+function dueLabel(value: string | null) { if (!value) return "기한 없음"; const due = new Date(`${value}T00:00:00`); return `${due.getMonth() + 1}월 ${due.getDate()}일`; }

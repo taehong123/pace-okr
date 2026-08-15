@@ -31,11 +31,12 @@ test("server-renders the Pace workspace", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Pace - 성과로 이어지는 일의 흐름<\/title>/);
+  assert.match(html, /<title>Pace - OKR과 작업 관리<\/title>/);
   assert.match(html, /Pace/);
-  assert.match(html, /오늘의 흐름/);
+  assert.match(html, /Product Lab/);
+  assert.match(html, /테이블/);
   assert.match(html, /Objective/);
-  assert.match(html, /해야 할 일을 자연스럽게 입력하세요/);
+  assert.match(html, /할 일을 입력하고 Enter/);
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview|react-loading-skeleton/i);
 });
 
@@ -49,6 +50,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(layout, /openGraph/);
   assert.match(layout, /\/og\.png/);
   assert.match(page, /capture_item/);
+  assert.match(page, /create_property/);
+  assert.match(page, /set_property_value/);
   assert.match(page, /Objective → Key Result → Initiative → Task → Action/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await access(new URL("../public/og.png", import.meta.url));

@@ -13,6 +13,8 @@ Unstructured captures land in the Inbox first and can be linked later.
 ## Product surfaces
 
 - OKR tree and task board
+- Notion-style relational Task database with inline editing
+- User-defined text, number, select, date, and checkbox properties
 - Inbox for unstructured captures
 - Daily, weekly, monthly, and quarterly work rhythms
 - D1 persistence with an activity log
@@ -28,6 +30,10 @@ Unstructured captures land in the Inbox first and can be linked later.
 - `update_item`: update status, progress, dates, or content
 - `link_item`: connect an Inbox item to the required parent type
 - `review_period`: summarize a daily, weekly, monthly, or quarterly period
+- `list_properties`: inspect the custom Task database columns
+- `create_property`: add a custom Task property
+- `set_property_value`: set a property value by property ID or name
+- `delete_property`: remove a property and its values
 
 The MCP endpoint enforces the hierarchy. In particular, Task belongs under
 Initiative and Action belongs under Task.
@@ -56,5 +62,7 @@ their workspace when using the bearer token.
 ## Data
 
 The D1 schema lives in `db/schema.ts`, and generated migrations live in
-`drizzle/`. The app initializes missing tables defensively at runtime and
-seeds representative data only for a new workspace.
+`drizzle/`. Tasks remain rows in `items`; custom columns live in
+`property_definitions`, and their typed per-task values live in
+`item_property_values`. The app initializes missing tables defensively at
+runtime and seeds representative data only for a new workspace.

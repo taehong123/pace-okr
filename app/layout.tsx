@@ -22,21 +22,21 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: base,
-    title: "Pace - 성과로 이어지는 일의 흐름",
-    description: "대화로 등록하고 OKR부터 실행까지 연결하는 업무 관리 서비스",
+    title: "Pace - OKR과 작업 관리",
+    description: "Objective부터 Action까지 연결하고 Task 속성을 관리하는 워크스페이스",
     icons: {
       icon: "/favicon.svg",
       shortcut: "/favicon.svg",
     },
     openGraph: {
-      title: "Pace - 성과로 이어지는 일의 흐름",
-      description: "말하면, Objective부터 Action까지 자연스럽게 연결됩니다.",
+      title: "Pace - OKR과 작업 관리",
+      description: "OKR 계층과 Task 데이터베이스를 한곳에서 관리합니다.",
       images: [{ url: socialImage, width: 1745, height: 909, alt: "Pace OKR workflow" }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "Pace - 성과로 이어지는 일의 흐름",
-      description: "말하면, Objective부터 Action까지 자연스럽게 연결됩니다.",
+      title: "Pace - OKR과 작업 관리",
+      description: "OKR 계층과 Task 데이터베이스를 한곳에서 관리합니다.",
       images: [socialImage],
     },
   };

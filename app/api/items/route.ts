@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     const cadence = asValue(url.searchParams.get("cadence"), ITEM_CADENCES);
     if (url.searchParams.get("review") === "true" && cadence) {
       const review = await getPeriodReview(authorization.ownerId, cadence);
-      return Response.json({ review: { ...review, items: review.items.map(serializeItem) } });
+      return Response.json({ review: { ...review, items: review.items.map((item) => serializeItem(item)) } });
     }
 
     const rows = await listItems(authorization.ownerId, {
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
       parentId: url.searchParams.get("parentId") ?? undefined,
       query: url.searchParams.get("q") ?? undefined,
     });
-    return Response.json({ items: rows.map(serializeItem) });
+    return Response.json({ items: rows.map((item) => serializeItem(item)) });
   } catch (error) {
     return routeError(error);
   }
