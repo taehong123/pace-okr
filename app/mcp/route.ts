@@ -105,9 +105,9 @@ const routineOutput = z.object({
   updatedAt: z.string(),
 });
 
-function createOkitaServer(ownerId: string) {
+function createOkrptrServer(ownerId: string) {
   const server = new McpServer(
-    { name: "okita", version: "0.3.0" },
+    { name: "okrptr", version: "0.4.0" },
     {
       instructions:
         "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Routines are separate recurring work with dated completion records. Tasks are database rows with custom properties and internal checklists. Use list_properties before setting unfamiliar property names.",
@@ -117,7 +117,7 @@ function createOkitaServer(ownerId: string) {
   server.registerTool(
     "capture_item",
     {
-      title: "Capture work to the OKITA inbox",
+      title: "Capture work to the OKRPTR inbox",
       description: "Use this first when the user mentions a task, follow-up, idea, or commitment that should be saved quickly without interrupting the conversation.",
       inputSchema: {
         title: z.string().min(1).describe("Short actionable title in the user's language"),
@@ -145,7 +145,7 @@ function createOkitaServer(ownerId: string) {
       const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
       return {
         structuredContent: { item: serialized },
-        content: [{ type: "text", text: `Captured "${item.title}" in the OKITA inbox.` }],
+        content: [{ type: "text", text: `Captured "${item.title}" in the OKRPTR inbox.` }],
       };
     },
   );
@@ -197,7 +197,7 @@ function createOkitaServer(ownerId: string) {
   server.registerTool(
     "list_items",
     {
-      title: "List and search OKITA items",
+      title: "List and search OKRPTR items",
       description: "Find existing OKRs, projects, tasks, or inbox captures before reviewing, updating, or linking them.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS).optional(),
@@ -222,7 +222,7 @@ function createOkitaServer(ownerId: string) {
       const serialized = await serializeItemsForMcp(ownerId, rows);
       return {
         structuredContent: { items: serialized, count: serialized.length },
-        content: [{ type: "text", text: `Found ${serialized.length} OKITA items.` }],
+        content: [{ type: "text", text: `Found ${serialized.length} OKRPTR items.` }],
       };
     },
   );
@@ -230,7 +230,7 @@ function createOkitaServer(ownerId: string) {
   server.registerTool(
     "update_item",
     {
-      title: "Update an OKITA item",
+      title: "Update an OKRPTR item",
       description: "Change the title, status, progress, priority, cadence, or due date of an existing item. Use list_items first when the ID is unknown.",
       inputSchema: {
         id: z.string(),
@@ -559,7 +559,7 @@ function createOkitaServer(ownerId: string) {
     "get_recommendations",
     {
       title: "Get execution recommendations",
-      description: "Prioritize blocked, overdue, unlinked, due-soon, and empty Project work from current OKITA data.",
+      description: "Prioritize blocked, overdue, unlinked, due-soon, and empty Project work from current OKRPTR data.",
       inputSchema: { date: z.string().optional().describe("YYYY-MM-DD; defaults to today") },
       outputSchema: { recommendations: z.array(recommendationOutput), count: z.number() },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -728,7 +728,7 @@ async function handleMcp(request: Request) {
   try {
     await ensureWorkspace(authorization.ownerId);
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
-    const server = createOkitaServer(authorization.ownerId);
+    const server = createOkrptrServer(authorization.ownerId);
     await server.connect(transport);
     return withCors(await transport.handleRequest(request));
   } catch (error) {
@@ -741,7 +741,7 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, X-Okita-User-Id, X-Pace-User-Id",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, X-Okrptr-User-Id, X-Okita-User-Id, X-Pace-User-Id",
     "Access-Control-Expose-Headers": "MCP-Protocol-Version, MCP-Session-Id",
   };
 }

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-const endpoint = process.env.OKITA_MCP_URL || process.env.PACE_MCP_URL || "http://localhost:3002/mcp";
-const client = new Client({ name: "okita-smoke", version: "0.3.0" });
+const endpoint = process.env.OKRPTR_MCP_URL || process.env.OKITA_MCP_URL || process.env.PACE_MCP_URL || "http://localhost:3002/mcp";
+const client = new Client({ name: "okrptr-smoke", version: "0.4.0" });
 const transport = new StreamableHTTPClientTransport(new URL(endpoint));
 
 await client.connect(transport);

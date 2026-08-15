@@ -29,7 +29,7 @@ export type PropertyType = (typeof PROPERTY_TYPES)[number];
 export type PropertyValue = string | number | boolean | null;
 export type RoutineCadence = (typeof ROUTINE_CADENCES)[number];
 
-type RuntimeEnv = typeof env & { OKITA_API_TOKEN?: string; PACE_API_TOKEN?: string };
+type RuntimeEnv = typeof env & { OKRPTR_API_TOKEN?: string; OKITA_API_TOKEN?: string; PACE_API_TOKEN?: string };
 let schemaReady: Promise<void> | null = null;
 
 const parentKind: Record<ItemKind, ItemKind | null> = {
@@ -164,10 +164,10 @@ export function authorizeRequest(request: Request): { ownerId: string } | Respon
   const userId = request.headers.get("oai-authenticated-user-id");
   if (userId) return { ownerId: userId };
 
-  const configuredToken = (env as RuntimeEnv).OKITA_API_TOKEN ?? (env as RuntimeEnv).PACE_API_TOKEN;
+  const configuredToken = (env as RuntimeEnv).OKRPTR_API_TOKEN ?? (env as RuntimeEnv).OKITA_API_TOKEN ?? (env as RuntimeEnv).PACE_API_TOKEN;
   const suppliedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (configuredToken && suppliedToken === configuredToken) {
-    return { ownerId: request.headers.get("x-okita-user-id") || request.headers.get("x-pace-user-id") || "api-workspace" };
+    return { ownerId: request.headers.get("x-okrptr-user-id") || request.headers.get("x-okita-user-id") || request.headers.get("x-pace-user-id") || "api-workspace" };
   }
 
   const hostname = new URL(request.url).hostname;
@@ -176,7 +176,7 @@ export function authorizeRequest(request: Request): { ownerId: string } | Respon
   }
 
   return Response.json(
-    { error: "Authentication required. Sign in or provide an OKITA API token." },
+    { error: "Authentication required. Sign in or provide an OKRPTR API token." },
     { status: 401, headers: { "WWW-Authenticate": "Bearer" } },
   );
 }

@@ -21,6 +21,7 @@ import {
   Lightbulb,
   Link2,
   ListChecks,
+  Languages,
   MoreHorizontal,
   Plus,
   Repeat2,
@@ -45,7 +46,7 @@ type PropertyType = "text" | "number" | "select" | "date" | "checkbox";
 type PropertyValue = string | number | boolean | null;
 type RoutineCadence = "daily" | "weekly" | "monthly";
 
-type OkitaItem = {
+type OkrptrItem = {
   id: string;
   parentId: string | null;
   kind: ItemKind;
@@ -76,9 +77,9 @@ type Scrum = {
   yesterdayNote: string;
   todayNote: string;
   blockersNote: string;
-  yesterdayTasks: OkitaItem[];
-  todayTasks: OkitaItem[];
-  blockers: OkitaItem[];
+  yesterdayTasks: OkrptrItem[];
+  todayTasks: OkrptrItem[];
+  blockers: OkrptrItem[];
   updatedAt: string | null;
 };
 type Recommendation = {
@@ -102,7 +103,107 @@ type Routine = {
   note: string;
 };
 
-const fallbackItems: OkitaItem[] = [
+type IntroLanguage = "ko" | "en" | "ja" | "zh" | "es";
+
+type IntroCopy = {
+  languageLabel: string;
+  eyebrow: string;
+  title: string;
+  description: string;
+  hierarchyLabel: string;
+  routineNote: string;
+  points: { title: string; description: string }[];
+  mcpAction: string;
+  startAction: string;
+};
+
+const introLanguages: { id: IntroLanguage; label: string }[] = [
+  { id: "ko", label: "한국어" },
+  { id: "en", label: "English" },
+  { id: "ja", label: "日本語" },
+  { id: "zh", label: "中文" },
+  { id: "es", label: "Español" },
+];
+
+const introCopy: Record<IntroLanguage, IntroCopy> = {
+  ko: {
+    languageLabel: "안내 언어",
+    eyebrow: "목표를 실행으로 바꾸는 워크스페이스",
+    title: "OKR이 오늘의 일로 이어지도록.",
+    description: "OKRPTR은 목표, 프로젝트, 할 일과 반복 루틴을 한곳에 연결하고 대화와 봇에서도 바로 기록할 수 있는 실행 관리 서비스입니다.",
+    hierarchyLabel: "목표에서 실행까지",
+    routineNote: "Routine은 이 계층 밖에서 반복되는 일을 관리합니다.",
+    points: [
+      { title: "대화에서 바로 등록", description: "MCP를 연결하면 AI 대화와 봇에서 Task, 프로젝트, 루틴을 바로 만들 수 있습니다." },
+      { title: "Task를 데이터베이스처럼", description: "관계, 상태, 기한과 필요한 속성을 추가해 팀의 방식대로 관리합니다." },
+      { title: "매일 실행을 놓치지 않게", description: "루틴, 데일리 스크럼과 추천이 지금 집중할 일을 정리해 줍니다." },
+    ],
+    mcpAction: "MCP 연결 보기",
+    startAction: "워크스페이스 시작",
+  },
+  en: {
+    languageLabel: "Guide language",
+    eyebrow: "A workspace that turns goals into action",
+    title: "Connect your OKRs to today's work.",
+    description: "OKRPTR brings goals, projects, tasks, and recurring routines together, with fast capture from AI conversations and bots.",
+    hierarchyLabel: "From goal to execution",
+    routineNote: "Routines stay outside this hierarchy and track recurring work.",
+    points: [
+      { title: "Capture from conversation", description: "Connect MCP to create tasks, projects, and routines directly from AI chats and bots." },
+      { title: "Manage tasks like a database", description: "Add relations, status, due dates, and custom properties that fit the way your team works." },
+      { title: "Keep daily execution visible", description: "Routines, daily scrum, and recommendations keep your next priorities clear." },
+    ],
+    mcpAction: "View MCP setup",
+    startAction: "Start workspace",
+  },
+  ja: {
+    languageLabel: "案内言語",
+    eyebrow: "目標を実行に変えるワークスペース",
+    title: "OKRを、今日やる仕事までつなげる。",
+    description: "OKRPTRは目標、プロジェクト、タスク、繰り返しルーティンを一か所につなぎ、AIとの会話やボットからすぐに記録できる実行管理サービスです。",
+    hierarchyLabel: "目標から実行まで",
+    routineNote: "Routineはこの階層の外で、繰り返す仕事を管理します。",
+    points: [
+      { title: "会話からすぐに登録", description: "MCPを接続すると、AIチャットやボットからタスク、プロジェクト、ルーティンを作成できます。" },
+      { title: "タスクをデータベースのように管理", description: "関連、ステータス、期限、カスタムプロパティをチームに合わせて追加できます。" },
+      { title: "日々の実行を見失わない", description: "ルーティン、デイリースクラム、提案機能が次に集中することを整理します。" },
+    ],
+    mcpAction: "MCP接続を見る",
+    startAction: "ワークスペースを開始",
+  },
+  zh: {
+    languageLabel: "指南语言",
+    eyebrow: "把目标变成行动的工作空间",
+    title: "让 OKR 真正落到今天的工作。",
+    description: "OKRPTR 将目标、项目、任务和周期性例行工作连接在一起，并支持从 AI 对话和机器人中快速记录。",
+    hierarchyLabel: "从目标到执行",
+    routineNote: "Routine 独立于此层级，用于管理周期性工作。",
+    points: [
+      { title: "从对话直接记录", description: "连接 MCP 后，可以从 AI 对话和机器人中直接创建任务、项目和例行工作。" },
+      { title: "像数据库一样管理任务", description: "通过关系、状态、截止日期和自定义属性适配团队的工作方式。" },
+      { title: "让每日执行保持清晰", description: "例行工作、每日站会和智能建议会整理下一步重点。" },
+    ],
+    mcpAction: "查看 MCP 连接",
+    startAction: "开始使用",
+  },
+  es: {
+    languageLabel: "Idioma de la guía",
+    eyebrow: "Un espacio para convertir objetivos en acción",
+    title: "Conecta tus OKR con el trabajo de hoy.",
+    description: "OKRPTR reúne objetivos, proyectos, tareas y rutinas recurrentes, con captura rápida desde conversaciones con IA y bots.",
+    hierarchyLabel: "Del objetivo a la ejecución",
+    routineNote: "Las rutinas quedan fuera de esta jerarquía y organizan el trabajo recurrente.",
+    points: [
+      { title: "Registra desde una conversación", description: "Conecta MCP para crear tareas, proyectos y rutinas directamente desde chats con IA y bots." },
+      { title: "Gestiona tareas como una base de datos", description: "Añade relaciones, estados, fechas y propiedades adaptadas a la forma de trabajar de tu equipo." },
+      { title: "Mantén visible la ejecución diaria", description: "Las rutinas, el scrum diario y las recomendaciones aclaran tus próximas prioridades." },
+    ],
+    mcpAction: "Ver conexión MCP",
+    startAction: "Empezar",
+  },
+};
+
+const fallbackItems: OkrptrItem[] = [
   item("obj", null, "objective", "셀프 서브 도입으로 팀의 성장 속도를 높인다", "in_progress", "quarterly", 68),
   item("kr", "obj", "key_result", "신규 사용자의 첫 주 활성화율 32% → 48%", "in_progress", "monthly", 61),
   item("ini", "kr", "initiative", "가입 후 10분 안에 첫 가치 경험 만들기", "in_progress", "monthly", 54),
@@ -152,7 +253,7 @@ const viewTitles: Record<View, string> = {
 };
 
 export default function Home() {
-  const [items, setItems] = useState<OkitaItem[]>(fallbackItems);
+  const [items, setItems] = useState<OkrptrItem[]>(fallbackItems);
   const [properties, setProperties] = useState<PropertyDefinition[]>(fallbackProperties);
   const [propertyValues, setPropertyValues] = useState<PropertyValueMap>(fallbackValues);
   const [activeView, setActiveView] = useState<View>("work");
@@ -166,13 +267,25 @@ export default function Home() {
   const [createItemOpen, setCreateItemOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [introLanguage, setIntroLanguage] = useState<IntroLanguage>("ko");
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      const savedLanguage = window.localStorage.getItem("okrptr.intro-language");
+      const language = isIntroLanguage(savedLanguage) ? savedLanguage : preferredIntroLanguage();
+      setIntroLanguage(language);
+      if (!window.localStorage.getItem("okrptr.intro-seen")) setOnboardingOpen(true);
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   useEffect(() => {
     let active = true;
     Promise.all([fetch("/api/items"), fetch("/api/properties")])
       .then(async ([itemsResponse, propertiesResponse]) => {
         if (!itemsResponse.ok || !propertiesResponse.ok) throw new Error("offline");
-        const itemData = (await itemsResponse.json()) as { items: OkitaItem[] };
+        const itemData = (await itemsResponse.json()) as { items: OkrptrItem[] };
         const propertyData = (await propertiesResponse.json()) as { properties: PropertyDefinition[]; values: PropertyValueMap };
         if (!active) return;
         if (itemData.items.length) setItems(itemData.items);
@@ -211,7 +324,7 @@ export default function Home() {
         body: JSON.stringify({ title, kind: "task", source: "web" }),
       });
       if (!response.ok) throw new Error("save failed");
-      const data = (await response.json()) as { item: OkitaItem };
+      const data = (await response.json()) as { item: OkrptrItem };
       setItems((current) => [...current, data.item]);
       setConnected(true);
     } catch {
@@ -223,7 +336,7 @@ export default function Home() {
     }
   }
 
-  async function patchItem(id: string, patch: Partial<OkitaItem>) {
+  async function patchItem(id: string, patch: Partial<OkrptrItem>) {
     const previous = items;
     setItems((current) => current.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)));
     try {
@@ -233,7 +346,7 @@ export default function Home() {
         body: JSON.stringify({ id, ...patch }),
       });
       if (!response.ok) throw new Error("update failed");
-      const data = (await response.json()) as { item: OkitaItem };
+      const data = (await response.json()) as { item: OkrptrItem };
       setItems((current) => current.map((entry) => (entry.id === id ? data.item : entry)));
     } catch {
       setItems(previous);
@@ -262,7 +375,7 @@ export default function Home() {
     window.setTimeout(() => setNotice(""), 2200);
   }
 
-  function connectInbox(entry: OkitaItem) {
+  function connectInbox(entry: OkrptrItem) {
     const project = items.find((itemEntry) => itemEntry.kind === "project");
     if (!project) {
       setCreateItemOpen(true);
@@ -273,7 +386,7 @@ export default function Home() {
     showNotice(`‘${project.title}’에 연결했습니다.`);
   }
 
-  function addCreatedItem(created: OkitaItem) {
+  function addCreatedItem(created: OkrptrItem) {
     setItems((current) => [...current, created]);
     setCreateItemOpen(false);
     showNotice(`${kindLabel(created.kind)}를 만들었습니다.`);
@@ -284,7 +397,7 @@ export default function Home() {
       <aside className="sidebar">
         <button className="workspace-switcher">
           <span className="brand-mark">O</span>
-          <span><strong>OKITA</strong><small>Product Lab</small></span>
+          <span><strong>OKRPTR</strong><small>Execution Workspace</small></span>
           <ChevronDown size={14} />
         </button>
         <nav>
@@ -315,8 +428,8 @@ export default function Home() {
 
       <section className="workspace">
         <header className="workspace-topbar">
-          <span>OKITA</span><ChevronRight size={13} /><b>{viewTitles[activeView]}</b>
-          <div><button aria-label="알림" title="알림"><Bell size={15} /></button><button aria-label="도움말" title="도움말"><CircleHelp size={15} /></button></div>
+          <span>OKRPTR</span><ChevronRight size={13} /><b>{viewTitles[activeView]}</b>
+          <div><button aria-label="알림" title="알림"><Bell size={15} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
         </header>
         <div className="page-body">
           <header className="page-header">
@@ -361,6 +474,24 @@ export default function Home() {
       </section>
 
       {notice && <div className="toast">{notice}</div>}
+      {onboardingOpen && (
+        <WelcomeModal
+          language={introLanguage}
+          onLanguageChange={(language) => {
+            setIntroLanguage(language);
+            window.localStorage.setItem("okrptr.intro-language", language);
+          }}
+          onClose={() => {
+            window.localStorage.setItem("okrptr.intro-seen", "1");
+            setOnboardingOpen(false);
+          }}
+          onOpenMcp={() => {
+            window.localStorage.setItem("okrptr.intro-seen", "1");
+            setOnboardingOpen(false);
+            setIntegrationOpen(true);
+          }}
+        />
+      )}
       {integrationOpen && <IntegrationModal onClose={() => setIntegrationOpen(false)} />}
       {propertyPanelOpen && (
         <PropertyPanel
@@ -384,18 +515,65 @@ export default function Home() {
   );
 }
 
+function WelcomeModal({ language, onLanguageChange, onClose, onOpenMcp }: {
+  language: IntroLanguage;
+  onLanguageChange: (language: IntroLanguage) => void;
+  onClose: () => void;
+  onOpenMcp: () => void;
+}) {
+  const copy = introCopy[language];
+  const pointIcons = [Bot, Table2, CalendarCheck];
+  return (
+    <div className="modal-backdrop welcome-backdrop">
+      <section className="welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+        <header className="welcome-toolbar">
+          <div className="welcome-brand"><span className="brand-mark">O</span><strong>OKRPTR</strong></div>
+          <div className="language-select">
+            <Languages size={14} />
+            <label className="sr-only" htmlFor="intro-language">{copy.languageLabel}</label>
+            <select id="intro-language" value={language} onChange={(event) => onLanguageChange(event.target.value as IntroLanguage)}>
+              {introLanguages.map((entry) => <option value={entry.id} key={entry.id}>{entry.label}</option>)}
+            </select>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close"><X size={17} /></button>
+        </header>
+        <div className="welcome-content">
+          <p className="welcome-eyebrow">{copy.eyebrow}</p>
+          <h1 id="welcome-title">{copy.title}</h1>
+          <p className="welcome-description">{copy.description}</p>
+          <section className="welcome-hierarchy">
+            <span>{copy.hierarchyLabel}</span>
+            <div>{["Objective", "Key Result", "Initiative", "Project", "Task"].map((entry, index) => <span key={entry}><b>{entry}</b>{index < 4 && <ChevronRight size={13} />}</span>)}</div>
+            <small>{copy.routineNote}</small>
+          </section>
+          <div className="welcome-points">
+            {copy.points.map((point, index) => {
+              const Icon = pointIcons[index];
+              return <div key={point.title}><span><Icon size={16} /></span><div><b>{point.title}</b><p>{point.description}</p></div></div>;
+            })}
+          </div>
+        </div>
+        <footer className="welcome-actions">
+          <button className="welcome-secondary" onClick={onOpenMcp}><Bot size={14} />{copy.mcpAction}</button>
+          <button className="welcome-primary" onClick={onClose}>{copy.startAction}<ChevronRight size={14} /></button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function CadenceSwitch({ value, onChange }: { value: Cadence; onChange: (value: Cadence) => void }) {
   return <div className="cadence-switch">{(Object.keys(cadenceLabels) as Cadence[]).map((entry) => <button className={value === entry ? "selected" : ""} key={entry} onClick={() => onChange(entry)}>{cadenceLabels[entry]}</button>)}</div>;
 }
 
 function TaskDatabase({ items, allItems, properties, values, display, onDisplayChange, onPatch, onPropertyChange, onOpenProperties, onOpenTask }: {
-  items: OkitaItem[];
-  allItems: OkitaItem[];
+  items: OkrptrItem[];
+  allItems: OkrptrItem[];
   properties: PropertyDefinition[];
   values: PropertyValueMap;
   display: "table" | "board";
   onDisplayChange: (display: "table" | "board") => void;
-  onPatch: (id: string, patch: Partial<OkitaItem>) => Promise<void>;
+  onPatch: (id: string, patch: Partial<OkrptrItem>) => Promise<void>;
   onPropertyChange: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void>;
   onOpenProperties: () => void;
   onOpenTask: (id: string) => void;
@@ -450,7 +628,7 @@ function PropertyCell({ itemId, property, value, onChange }: { itemId: string; p
   return <input className="property-input" type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => { const raw = event.target.value; void onChange(itemId, property.id, property.type === "number" ? (raw ? Number(raw) : null) : raw || null); }} />;
 }
 
-function TaskDetailPanel({ task, project, onClose, onProgress }: { task: OkitaItem; project?: OkitaItem; onClose: () => void; onProgress: (progress: number) => void }) {
+function TaskDetailPanel({ task, project, onClose, onProgress }: { task: OkrptrItem; project?: OkrptrItem; onClose: () => void; onProgress: (progress: number) => void }) {
   const [rows, setRows] = useState<ChecklistItem[]>([]);
   const [title, setTitle] = useState("");
   useEffect(() => {
@@ -490,7 +668,7 @@ function TaskDetailPanel({ task, project, onClose, onProgress }: { task: OkitaIt
   return <div className="modal-backdrop align-right"><aside className="property-panel task-detail-panel"><header><div><p>{project?.title ?? "인박스"}</p><h2>{task.title}</h2></div><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header><div className="task-meta"><span className={`status-tag status-${task.status}`}>{statusLabel(task.status)}</span><span><CalendarDays size={13} />{dueLabel(task.dueDate)}</span><b>{task.progress}%</b></div><section className="checklist-section"><header><b>체크리스트</b><span>{rows.filter((entry) => entry.completed).length}/{rows.length}</span></header><div>{rows.map((row) => <div className="checklist-row" key={row.id}><button className={`task-check ${row.completed ? "checked" : ""}`} onClick={() => void toggleRow(row)}><Check size={12} /></button><span className={row.completed ? "completed" : ""}>{row.title}</span><button className="icon-button" onClick={() => void deleteRow(row.id)} aria-label="삭제"><Trash2 size={13} /></button></div>)}</div><form className="checklist-form" onSubmit={addRow}><Plus size={14} /><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="항목 추가" /><button disabled={!title.trim()}>추가</button></form></section></aside></div>;
 }
 
-function CreateItemPanel({ items, onClose, onCreated }: { items: OkitaItem[]; onClose: () => void; onCreated: (item: OkitaItem) => void }) {
+function CreateItemPanel({ items, onClose, onCreated }: { items: OkrptrItem[]; onClose: () => void; onCreated: (item: OkrptrItem) => void }) {
   const [kind, setKind] = useState<ItemKind>("task");
   const [title, setTitle] = useState("");
   const [parentId, setParentId] = useState("");
@@ -505,7 +683,7 @@ function CreateItemPanel({ items, onClose, onCreated }: { items: OkitaItem[]; on
     const response = await fetch("/api/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, kind, parentId: parentId || null, status: kind === "task" && !parentId ? "inbox" : "todo" }) });
     setSaving(false);
     if (!response.ok) return;
-    const data = await response.json() as { item: OkitaItem };
+    const data = await response.json() as { item: OkrptrItem };
     onCreated(data.item);
   }
   return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>새 항목</h2><p>OKR 실행 구조에 추가</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header><form className="property-form create-item-form" onSubmit={submit}><label><span>유형</span><select value={kind} onChange={(event) => { setKind(event.target.value as ItemKind); setParentId(""); }}>{(["objective", "key_result", "initiative", "project", "task"] as ItemKind[]).map((entry) => <option value={entry} key={entry}>{kindLabel(entry)}</option>)}</select></label><label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>{parentKind && <label><span>상위 {kindLabel(parentKind)}</span><select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">{kind === "task" ? "인박스에 저장" : "선택"}</option>{parentOptions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>}<button disabled={!title.trim() || saving}>{saving ? "저장 중" : "만들기"}</button></form></aside></div>;
@@ -591,7 +769,7 @@ function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => 
     setSaving(false);
     if (response.ok) onNotice("데일리 스크럼을 저장했습니다.");
   }
-  const sections: { key: "yesterdayNote" | "todayNote" | "blockersNote"; title: string; tasks: OkitaItem[]; icon: LucideIcon }[] = [
+  const sections: { key: "yesterdayNote" | "todayNote" | "blockersNote"; title: string; tasks: OkrptrItem[]; icon: LucideIcon }[] = [
     { key: "yesterdayNote", title: "어제 완료", tasks: scrum.yesterdayTasks, icon: CheckCircle2 },
     { key: "todayNote", title: "오늘 집중", tasks: scrum.todayTasks, icon: Target },
     { key: "blockersNote", title: "막힘", tasks: scrum.blockers, icon: CircleHelp },
@@ -607,26 +785,26 @@ function RecommendationsView({ onNavigate }: { onNavigate: (view: View) => void 
   return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{row.itemIds.length}개 항목 · 우선순위 {row.score}</small></div><button onClick={() => onNavigate(row.kind === "unlinked" ? "inbox" : row.kind === "empty_project" ? "okr" : "work")}><ChevronRight size={15} /></button></article>)}</section>;
 }
 
-function HomeView({ objective, items, onGoToWork, onOpenTask }: { objective?: OkitaItem; items: OkitaItem[]; onGoToWork: () => void; onOpenTask: (id: string) => void }) {
+function HomeView({ objective, items, onGoToWork, onOpenTask }: { objective?: OkrptrItem; items: OkrptrItem[]; onGoToWork: () => void; onOpenTask: (id: string) => void }) {
   return <div className="home-layout"><section className="home-focus"><header>현재 Objective<button onClick={onGoToWork}>작업 보기<ChevronRight size={13} /></button></header>{objective ? <div className="home-objective"><Target size={20} /><div><h2>{objective.title}</h2><span><i style={{ width: `${objective.progress}%` }} /></span><small>{objective.progress}% 진행</small></div></div> : <EmptyState icon={Target} title="Objective가 없습니다" />}</section><section className="home-tasks"><header>진행 중 Task<b>{items.filter((entry) => entry.status === "in_progress").length}</b></header>{items.filter((entry) => entry.status === "in_progress").slice(0, 6).map((entry) => <button key={entry.id} onClick={() => onOpenTask(entry.id)}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b><small>{dueLabel(entry.dueDate)}</small></button>)}</section></div>;
 }
 
-function TreeView({ objective, items, depths, onComplete }: { objective?: OkitaItem; items: OkitaItem[]; depths: Record<string, number>; onComplete: (id: string) => void }) {
+function TreeView({ objective, items, depths, onComplete }: { objective?: OkrptrItem; items: OkrptrItem[]; depths: Record<string, number>; onComplete: (id: string) => void }) {
   if (!objective) return <EmptyState icon={Target} title="Objective가 없습니다" />;
   return <section className="outline-section"><div className="objective-row"><Target size={18} /><div><span>Objective</span><h2>{objective.title}</h2></div><b>{objective.progress}%</b></div><div className="hierarchy">{items.filter((entry) => entry.id !== objective.id).map((entry) => <div className="hierarchy-row" key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as CSSProperties}><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><span className="hierarchy-copy"><small>{kindLabel(entry.kind)}</small><b>{entry.title}</b></span><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span><em>{entry.progress}%</em>{entry.status !== "done" && ["project", "task"].includes(entry.kind) ? <button className="row-action" aria-label="완료 처리" title="완료 처리" onClick={() => onComplete(entry.id)}><Check size={13} /></button> : <ChevronRight className="row-chevron" size={15} />}</div>)}</div></section>;
 }
 
-function BoardView({ items, onOpenTask }: { items: OkitaItem[]; onOpenTask: (id: string) => void }) {
+function BoardView({ items, onOpenTask }: { items: OkrptrItem[]; onOpenTask: (id: string) => void }) {
   const columns: { status: ItemStatus; label: string }[] = [{ status: "todo", label: "할 일" }, { status: "in_progress", label: "진행 중" }, { status: "done", label: "완료" }];
   return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <button className="board-item" key={entry.id} onClick={() => onOpenTask(entry.id)}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
 }
 
-function InboxView({ items, onConnect }: { items: OkitaItem[]; onConnect: (item: OkitaItem) => void }) {
+function InboxView({ items, onConnect }: { items: OkrptrItem[]; onConnect: (item: OkrptrItem) => void }) {
   if (!items.length) return <EmptyState icon={Inbox} title="인박스가 비어 있습니다" />;
   return <section className="inbox-list"><div className="list-head"><span>이름</span><span>등록 경로</span><span /></div>{items.map((entry) => <article className="inbox-item" key={entry.id}><div><span className="page-icon"><ListChecks size={15} /></span><h3>{entry.title}</h3></div><span className={`source-badge source-${entry.source}`}>{sourceLabel(entry.source)}</span><button onClick={() => onConnect(entry)}><Link2 size={14} />연결</button></article>)}</section>;
 }
 
-function ReviewView({ items, cadence, completed, blocked, averageProgress }: { items: OkitaItem[]; cadence: Cadence; completed: number; blocked: number; averageProgress: number }) {
+function ReviewView({ items, cadence, completed, blocked, averageProgress }: { items: OkrptrItem[]; cadence: Cadence; completed: number; blocked: number; averageProgress: number }) {
   return <section className="review-content"><div className="metrics-row"><div><span>완료</span><strong>{completed}<small> / {items.length}</small></strong></div><div><span>평균 진행</span><strong>{averageProgress}<small>%</small></strong></div><div><span>막힘</span><strong>{blocked}</strong></div></div><div className="review-progress"><div><b>{cadenceLabels[cadence]} 진행률</b><span>{averageProgress}%</span></div><span><i style={{ width: `${averageProgress}%` }} /></span></div><div className="review-list"><span>검토할 항목</span>{items.slice(0, 7).map((entry) => <div key={entry.id}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b><em>{entry.progress}%</em></div>)}</div></section>;
 }
 
@@ -648,8 +826,8 @@ function EmptyState({ icon: Icon, title }: { icon: LucideIcon; title: string }) 
 const statusLabels: Record<ItemStatus, string> = { inbox: "인박스", todo: "할 일", in_progress: "진행 중", done: "완료", blocked: "막힘" };
 const priorityLabels: Record<Priority, string> = { low: "낮음", medium: "보통", high: "높음", urgent: "긴급" };
 
-function item(id: string, parentId: string | null, kind: ItemKind, title: string, status: ItemStatus, cadence: Cadence, progress: number, dueDate: string | null = null, source = "web", priority: Priority = "medium"): OkitaItem { return { id, parentId, kind, title, description: "", status, priority, cadence, progress, dueDate, source, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; }
-function buildDepths(items: OkitaItem[]) { const byId = new Map(items.map((entry) => [entry.id, entry])); const result: Record<string, number> = {}; for (const entry of items) { let depth = 0; let current = entry; while (current.parentId && depth < 5) { depth += 1; const parent = byId.get(current.parentId); if (!parent) break; current = parent; } result[entry.id] = depth; } return result; }
+function item(id: string, parentId: string | null, kind: ItemKind, title: string, status: ItemStatus, cadence: Cadence, progress: number, dueDate: string | null = null, source = "web", priority: Priority = "medium"): OkrptrItem { return { id, parentId, kind, title, description: "", status, priority, cadence, progress, dueDate, source, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; }
+function buildDepths(items: OkrptrItem[]) { const byId = new Map(items.map((entry) => [entry.id, entry])); const result: Record<string, number> = {}; for (const entry of items) { let depth = 0; let current = entry; while (current.parentId && depth < 5) { depth += 1; const parent = byId.get(current.parentId); if (!parent) break; current = parent; } result[entry.id] = depth; } return result; }
 function kindAbbr(kind: ItemKind) { return { objective: "O", key_result: "KR", initiative: "I", project: "P", task: "T" }[kind]; }
 function kindLabel(kind: ItemKind) { return { objective: "Objective", key_result: "Key Result", initiative: "Initiative", project: "Project", task: "Task" }[kind]; }
 function statusLabel(status: ItemStatus) { return statusLabels[status]; }
@@ -657,6 +835,15 @@ function sourceLabel(source: string) { return { mcp: "MCP", slack: "Slack", disc
 function propertyTypeLabel(type: PropertyType) { return { text: "텍스트", number: "숫자", select: "선택", date: "날짜", checkbox: "체크박스" }[type]; }
 function dueLabel(value: string | null) { if (!value) return "기한 없음"; const due = new Date(`${value}T00:00:00`); return `${due.getMonth() + 1}월 ${due.getDate()}일`; }
 function localDate() { const now = new Date(); const offset = now.getTimezoneOffset() * 60_000; return new Date(now.getTime() - offset).toISOString().slice(0, 10); }
+function isIntroLanguage(value: string | null): value is IntroLanguage { return introLanguages.some((entry) => entry.id === value); }
+function preferredIntroLanguage(): IntroLanguage {
+  const language = window.navigator.language.toLocaleLowerCase();
+  if (language.startsWith("ko")) return "ko";
+  if (language.startsWith("ja")) return "ja";
+  if (language.startsWith("zh")) return "zh";
+  if (language.startsWith("es")) return "es";
+  return "en";
+}
 function pageSubtitle(view: View) { return { home: "지금 집중할 목표와 작업", inbox: "아직 Project에 연결하지 않은 Task", work: "Project에 연결된 Task 데이터베이스", routines: "반복되는 실행을 날짜별로 기록", okr: "Objective부터 Task까지의 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘" }[view]; }
 function routineCadenceLabel(cadence: RoutineCadence) { return { daily: "매일", weekly: "매주", monthly: "매월" }[cadence]; }
 function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "unlinked") return "↗"; if (kind === "due_soon") return "3"; return "P"; }

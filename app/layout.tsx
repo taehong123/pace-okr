@@ -21,20 +21,20 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: base,
-    title: "OKITA - OKR과 실행 관리",
-    description: "Objective부터 Task까지 연결하고 데일리 실행과 루틴을 관리하는 워크스페이스",
+    title: "OKRPTR - 목표를 오늘의 실행으로",
+    description: "Objective부터 Task까지 연결하고 MCP, 데일리 실행과 루틴을 관리하는 워크스페이스",
     icons: {
       icon: "/favicon.svg",
       shortcut: "/favicon.svg",
     },
     openGraph: {
-      title: "OKITA - OKR과 실행 관리",
-      description: "OKR 계층, Project, Task 데이터베이스와 반복 루틴을 한곳에서 관리합니다.",
+      title: "OKRPTR - 목표를 오늘의 실행으로",
+      description: "OKR 계층, Project, Task 데이터베이스와 반복 루틴을 MCP 중심으로 관리합니다.",
     },
     twitter: {
       card: "summary",
-      title: "OKITA - OKR과 실행 관리",
-      description: "OKR 계층, Project, Task 데이터베이스와 반복 루틴을 한곳에서 관리합니다.",
+      title: "OKRPTR - 목표를 오늘의 실행으로",
+      description: "OKR 계층, Project, Task 데이터베이스와 반복 루틴을 MCP 중심으로 관리합니다.",
     },
   };
 }

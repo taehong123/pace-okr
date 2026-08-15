@@ -1,6 +1,6 @@
-# OKITA
+# OKRPTR
 
-OKITA is an MCP-first OKR and execution-management service. It keeps the
+OKRPTR is an MCP-first OKR and execution-management service. It keeps the
 management hierarchy explicit while making capture nearly frictionless:
 
 ```text
@@ -54,10 +54,11 @@ npm run test:mcp
 npm test
 ```
 
-Set `OKITA_MCP_URL` to run the MCP smoke test against a different endpoint.
+Set `OKRPTR_MCP_URL` to run the MCP smoke test against a different endpoint.
 Hosted writes use the signed-in Sites user or a bearer token configured as
-`OKITA_API_TOKEN`. Bot clients can send `X-Okita-User-Id` to select a workspace.
-The previous `PACE_API_TOKEN` and `X-Pace-User-Id` names remain supported for
+`OKRPTR_API_TOKEN`. Bot clients can send `X-Okrptr-User-Id` to select a workspace.
+The previous `OKITA_API_TOKEN`, `X-Okita-User-Id`, `PACE_API_TOKEN`, and
+`X-Pace-User-Id` names remain supported for
 existing integrations.
 
 ## Data

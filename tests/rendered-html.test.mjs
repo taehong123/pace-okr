@@ -25,15 +25,15 @@ async function render(path = "/") {
   );
 }
 
-test("server-renders the OKITA workspace", async () => {
+test("server-renders the OKRPTR workspace", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>OKITA - OKR과 실행 관리<\/title>/);
-  assert.match(html, /OKITA/);
-  assert.match(html, /Product Lab/);
+  assert.match(html, /<title>OKRPTR - 목표를 오늘의 실행으로<\/title>/);
+  assert.match(html, /OKRPTR/);
+  assert.match(html, /Execution Workspace/);
   assert.match(html, /테이블/);
   assert.match(html, /Objective/);
   assert.match(html, /할 일을 입력하면 인박스에 저장됩니다/);
@@ -59,6 +59,11 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /get_recommendations/);
   assert.match(page, /list_routines/);
   assert.match(page, /Objective → Key Result → Initiative → Project → Task/);
+  assert.match(page, /OKR이 오늘의 일로 이어지도록/);
+  assert.match(page, /Connect your OKRs to today's work/);
+  assert.match(page, /目標を実行に変えるワークスペース/);
+  assert.match(page, /把目标变成行动的工作空间/);
+  assert.match(page, /convertir objetivos en acción/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("app/_sites-preview/SkeletonPreview.tsx", projectRoot)));
 });

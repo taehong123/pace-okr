@@ -217,6 +217,38 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .integration-modal footer span { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 9px; }
 .integration-modal footer button { height: 30px; padding: 0 12px; border: 0; border-radius: 4px; background: var(--ink); color: white; font-size: 11px; cursor: pointer; }
 
+.welcome-backdrop { z-index: 60; background: rgba(15, 15, 15, .34); }
+.welcome-modal { width: min(760px, 100%); max-height: calc(100vh - 36px); overflow: auto; border: 1px solid #d6d6d3; border-radius: 7px; background: white; box-shadow: 0 18px 64px rgba(0, 0, 0, .2); }
+.welcome-toolbar { min-height: 58px; display: grid; grid-template-columns: minmax(0, 1fr) auto 30px; align-items: center; gap: 10px; padding: 0 18px; border-bottom: 1px solid var(--line); }
+.welcome-brand { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.welcome-brand strong { font-size: 13px; }
+.language-select { height: 30px; display: flex; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); }
+.language-select select { max-width: 110px; border: 0; outline: 0; background: white; color: var(--ink); font-size: 11px; cursor: pointer; }
+.welcome-content { padding: 33px 40px 12px; }
+.welcome-eyebrow { margin: 0 0 8px; color: var(--blue); font-size: 11px; font-weight: 600; }
+.welcome-content > h1 { max-width: 620px; margin: 0; overflow-wrap: anywhere; font-size: 30px; line-height: 1.25; }
+.welcome-description { max-width: 650px; margin: 13px 0 27px; color: #5f5e5b; font-size: 13px; line-height: 1.7; }
+.welcome-hierarchy { margin: 0 -40px; padding: 18px 40px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #fafafa; }
+.welcome-hierarchy > span { display: block; margin-bottom: 11px; color: var(--muted); font-size: 10px; font-weight: 600; }
+.welcome-hierarchy > div { display: flex; align-items: center; gap: 7px; overflow-x: auto; padding-bottom: 2px; }
+.welcome-hierarchy > div > span { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; }
+.welcome-hierarchy b { padding: 5px 7px; border-radius: 3px; background: #efefed; color: #4f4e4b; font-size: 10px; font-weight: 600; }
+.welcome-hierarchy svg { color: #aaa9a5; }
+.welcome-hierarchy small { display: block; margin-top: 10px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.welcome-points { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.welcome-points > div { min-width: 0; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; padding: 22px 18px 21px 0; }
+.welcome-points > div + div { padding-left: 18px; border-left: 1px solid var(--line); }
+.welcome-points > div > span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 4px; background: #e7f3f8; color: var(--blue); }
+.welcome-points > div:nth-child(2) > span { background: #edf3ec; color: var(--green); }
+.welcome-points > div:nth-child(3) > span { background: #faebdd; color: #b35c00; }
+.welcome-points b { display: block; margin-bottom: 6px; overflow-wrap: anywhere; font-size: 11px; line-height: 1.4; }
+.welcome-points p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.welcome-actions { min-height: 64px; display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding: 12px 18px; border-top: 1px solid var(--line); }
+.welcome-actions button { height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border-radius: 4px; font-size: 11px; cursor: pointer; }
+.welcome-secondary { border: 1px solid var(--line); background: white; color: var(--ink); }
+.welcome-secondary:hover { background: var(--hover); }
+.welcome-primary { border: 0; background: var(--ink); color: white; }
+
 .property-panel { width: min(390px, 100vw); height: 100vh; overflow: auto; background: white; border-left: 1px solid var(--line); box-shadow: -8px 0 28px rgba(0, 0, 0, .1); }
 .property-panel > header { height: 64px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; border-bottom: 1px solid var(--line); }
 .property-panel h2 { margin: 0; font-size: 16px; }
@@ -357,4 +389,16 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
   .scrum-column textarea { min-height: 105px; }
   .integration-modal footer { align-items: flex-end; }
   .integration-modal footer span { max-width: 260px; }
+  .welcome-backdrop { padding: 8px; }
+  .welcome-modal { max-height: calc(100vh - 16px); }
+  .welcome-toolbar { padding: 0 12px; }
+  .welcome-content { padding: 25px 20px 8px; }
+  .welcome-content > h1 { font-size: 25px; }
+  .welcome-description { margin-bottom: 22px; }
+  .welcome-hierarchy { margin: 0 -20px; padding: 16px 20px; }
+  .welcome-points { grid-template-columns: 1fr; }
+  .welcome-points > div { padding: 17px 0; }
+  .welcome-points > div + div { padding-left: 0; border-top: 1px solid var(--line); border-left: 0; }
+  .welcome-actions { align-items: stretch; flex-direction: column-reverse; }
+  .welcome-actions button { width: 100%; }
 }
