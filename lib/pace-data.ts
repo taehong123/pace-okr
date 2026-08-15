@@ -10,8 +10,11 @@ import {
   propertyDefinitions,
   routineCompletions,
   routines,
+  workspaceMembers,
+  workspaces,
   type PaceItem,
   type PropertyDefinition,
+  type WorkspaceMember,
 } from "@/db/schema";
 
 export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "task"] as const;
@@ -20,6 +23,7 @@ export const ITEM_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export const ITEM_CADENCES = ["daily", "weekly", "monthly", "quarterly"] as const;
 export const PROPERTY_TYPES = ["text", "number", "select", "date", "checkbox"] as const;
 export const ROUTINE_CADENCES = ["daily", "weekly", "monthly"] as const;
+export const TEAM_ROLES = ["owner", "admin", "member", "viewer"] as const;
 
 export type ItemKind = (typeof ITEM_KINDS)[number];
 export type ItemStatus = (typeof ITEM_STATUSES)[number];
@@ -28,6 +32,16 @@ export type ItemCadence = (typeof ITEM_CADENCES)[number];
 export type PropertyType = (typeof PROPERTY_TYPES)[number];
 export type PropertyValue = string | number | boolean | null;
 export type RoutineCadence = (typeof ROUTINE_CADENCES)[number];
+export type TeamRole = (typeof TEAM_ROLES)[number];
+
+export type RequestAuthorization = {
+  ownerId: string;
+  userId: string;
+  email: string | null;
+  displayName: string;
+  role: TeamRole;
+  apiToken: boolean;
+};
 
 type RuntimeEnv = typeof env & { OKRPTR_API_TOKEN?: string; OKITA_API_TOKEN?: string; PACE_API_TOKEN?: string };
 let schemaReady: Promise<void> | null = null;
@@ -40,11 +54,34 @@ const parentKind: Record<ItemKind, ItemKind | null> = {
   task: "project",
 };
 
-export async function ensureWorkspace(ownerId: string) {
+async function ensureSchema() {
   if (!schemaReady) {
     const d1 = (env as RuntimeEnv).DB;
     schemaReady = d1
       .batch([
+        d1.prepare(`CREATE TABLE IF NOT EXISTS workspaces (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          owner_user_id TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_owner_user ON workspaces(owner_user_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS workspace_members (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          user_id TEXT,
+          email TEXT,
+          display_name TEXT NOT NULL DEFAULT '',
+          role TEXT NOT NULL DEFAULT 'member',
+          status TEXT NOT NULL DEFAULT 'invited',
+          invited_by_user_id TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_members_user ON workspace_members(user_id)"),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_members_workspace_email ON workspace_members(workspace_id, email)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace_status ON workspace_members(workspace_id, status)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS items (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL,
@@ -155,30 +192,180 @@ export async function ensureWorkspace(ownerId: string) {
   }
 
   await schemaReady;
+}
+
+export async function ensureWorkspace(ownerId: string) {
+  await ensureSchema();
+  await ensureWorkspaceShell(ownerId);
   await migrateLegacyHierarchy(ownerId);
   await seedWorkspace(ownerId);
   await seedProperties(ownerId);
 }
 
-export function authorizeRequest(request: Request): { ownerId: string } | Response {
+export async function authorizeRequest(request: Request): Promise<RequestAuthorization | Response> {
   const userId = request.headers.get("oai-authenticated-user-id");
-  if (userId) return { ownerId: userId };
-
   const configuredToken = (env as RuntimeEnv).OKRPTR_API_TOKEN ?? (env as RuntimeEnv).OKITA_API_TOKEN ?? (env as RuntimeEnv).PACE_API_TOKEN;
   const suppliedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (configuredToken && suppliedToken === configuredToken) {
-    return { ownerId: request.headers.get("x-okrptr-user-id") || request.headers.get("x-okita-user-id") || request.headers.get("x-pace-user-id") || "api-workspace" };
+    const ownerId = request.headers.get("x-okrptr-user-id") || request.headers.get("x-okita-user-id") || request.headers.get("x-pace-user-id") || "api-workspace";
+    return { ownerId, userId: "api-token", email: null, displayName: "API", role: "owner", apiToken: true };
   }
 
   const hostname = new URL(request.url).hostname;
   if (hostname === "localhost" || hostname === "127.0.0.1") {
-    return { ownerId: "local-user" };
+    return { ownerId: "local-user", userId: "local-user", email: "local@okrptr.com", displayName: "Local Owner", role: "owner", apiToken: false };
+  }
+
+  if (userId) {
+    try {
+      await ensureSchema();
+      const email = normalizeEmail(request.headers.get("oai-authenticated-user-email"));
+      const displayName = authenticatedDisplayName(request) || email?.split("@")[0] || "Member";
+      const membership = await resolveWorkspaceMembership(userId, email, displayName);
+      if (!membership || membership.status !== "active") {
+        return Response.json({ error: "This account is not an active workspace member." }, { status: 403 });
+      }
+      const role = membership.role as TeamRole;
+      if (role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+        return Response.json({ error: "Viewer access is read-only." }, { status: 403 });
+      }
+      return { ownerId: membership.workspaceId, userId, email, displayName, role, apiToken: false };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to resolve workspace access.";
+      return Response.json({ error: message }, { status: 500 });
+    }
   }
 
   return Response.json(
     { error: "Authentication required. Sign in or provide an OKRPTR API token." },
     { status: 401, headers: { "WWW-Authenticate": "Bearer" } },
   );
+}
+
+async function ensureWorkspaceShell(ownerId: string, email: string | null = null, displayName = "Workspace Owner") {
+  const now = new Date().toISOString();
+  const workspaceName = displayName && displayName !== "Workspace Owner" ? `${displayName} Workspace` : "OKRPTR Workspace";
+  await getDb().insert(workspaces).values({ id: ownerId, name: workspaceName, ownerUserId: ownerId, createdAt: now, updatedAt: now }).onConflictDoNothing();
+  await getDb().insert(workspaceMembers).values({
+    id: crypto.randomUUID(),
+    workspaceId: ownerId,
+    userId: ownerId,
+    email,
+    displayName,
+    role: "owner",
+    status: "active",
+    createdAt: now,
+    updatedAt: now,
+  }).onConflictDoNothing();
+}
+
+async function resolveWorkspaceMembership(userId: string, email: string | null, displayName: string) {
+  const [existing] = await getDb().select().from(workspaceMembers).where(eq(workspaceMembers.userId, userId)).limit(1);
+  if (existing) {
+    await getDb().update(workspaceMembers).set({ email: email ?? existing.email, displayName, updatedAt: new Date().toISOString() }).where(eq(workspaceMembers.id, existing.id));
+    return { ...existing, email: email ?? existing.email, displayName };
+  }
+
+  if (email) {
+    const [invitation] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.email, email), eq(workspaceMembers.status, "invited"))).orderBy(asc(workspaceMembers.createdAt)).limit(1);
+    if (invitation) {
+      const updated = { ...invitation, userId, displayName, status: "active", updatedAt: new Date().toISOString() };
+      await getDb().update(workspaceMembers).set({ userId, displayName, status: "active", updatedAt: updated.updatedAt }).where(eq(workspaceMembers.id, invitation.id));
+      return updated;
+    }
+  }
+
+  await ensureWorkspaceShell(userId, email, displayName);
+  const [created] = await getDb().select().from(workspaceMembers).where(eq(workspaceMembers.userId, userId)).limit(1);
+  return created ?? null;
+}
+
+function normalizeEmail(value: string | null) {
+  const email = value?.trim().toLocaleLowerCase() ?? "";
+  return email || null;
+}
+
+function authenticatedDisplayName(request: Request) {
+  const raw = request.headers.get("oai-authenticated-user-full-name")?.trim();
+  if (!raw) return "";
+  if (request.headers.get("oai-authenticated-user-full-name-encoding") !== "percent-encoded-utf-8") return raw;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return "";
+  }
+}
+
+export function canManageTeam(authorization: RequestAuthorization) {
+  return authorization.role === "owner" || authorization.role === "admin" || authorization.apiToken;
+}
+
+export async function getTeam(ownerId: string, currentUserId: string) {
+  const [workspace] = await getDb().select().from(workspaces).where(eq(workspaces.id, ownerId)).limit(1);
+  if (!workspace) throw new Error("Workspace not found");
+  const members = await getDb().select().from(workspaceMembers).where(eq(workspaceMembers.workspaceId, ownerId)).orderBy(asc(workspaceMembers.createdAt));
+  return {
+    workspace: { id: workspace.id, name: workspace.name },
+    members: members.map((member) => serializeTeamMember(member, currentUserId)),
+  };
+}
+
+export async function inviteTeamMember(ownerId: string, actorUserId: string, emailInput: string, role: Exclude<TeamRole, "owner">) {
+  const email = normalizeEmail(emailInput);
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) throw new Error("A valid email is required");
+  if (!(["admin", "member", "viewer"] as TeamRole[]).includes(role)) throw new Error("Unsupported team role");
+  const [existing] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, ownerId), eq(workspaceMembers.email, email))).limit(1);
+  if (existing) throw new Error("This email is already a workspace member or invitation");
+  const now = new Date().toISOString();
+  const member: WorkspaceMember = {
+    id: crypto.randomUUID(),
+    workspaceId: ownerId,
+    userId: null,
+    email,
+    displayName: email.split("@")[0],
+    role,
+    status: "invited",
+    invitedByUserId: actorUserId,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await getDb().insert(workspaceMembers).values(member);
+  return serializeTeamMember(member, actorUserId);
+}
+
+export async function updateTeamMember(ownerId: string, memberId: string, role: Exclude<TeamRole, "owner">, currentUserId: string) {
+  if (!(["admin", "member", "viewer"] as TeamRole[]).includes(role)) throw new Error("Unsupported team role");
+  const member = await getWorkspaceMember(ownerId, memberId);
+  if (member.role === "owner") throw new Error("The Owner role cannot be changed");
+  const updated = { ...member, role, updatedAt: new Date().toISOString() };
+  await getDb().update(workspaceMembers).set({ role, updatedAt: updated.updatedAt }).where(eq(workspaceMembers.id, member.id));
+  return serializeTeamMember(updated, currentUserId);
+}
+
+export async function removeTeamMember(ownerId: string, memberId: string, currentUserId: string) {
+  const member = await getWorkspaceMember(ownerId, memberId);
+  if (member.role === "owner") throw new Error("The Owner cannot be removed");
+  if (member.userId === currentUserId) throw new Error("You cannot remove yourself");
+  await getDb().delete(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, ownerId), eq(workspaceMembers.id, memberId)));
+  return { deleted: true, id: memberId };
+}
+
+async function getWorkspaceMember(ownerId: string, memberId: string) {
+  const [member] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, ownerId), eq(workspaceMembers.id, memberId))).limit(1);
+  if (!member) throw new Error("Team member not found");
+  return member;
+}
+
+function serializeTeamMember(member: WorkspaceMember, currentUserId: string) {
+  return {
+    id: member.id,
+    email: member.email ?? "",
+    displayName: member.displayName || member.email?.split("@")[0] || "Member",
+    role: member.role as TeamRole,
+    status: member.status as "invited" | "active",
+    isCurrent: member.userId === currentUserId,
+    createdAt: member.createdAt,
+  };
 }
 
 export async function listItems(

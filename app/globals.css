@@ -271,6 +271,33 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .property-form > button { height: 34px; display: flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 4px; background: var(--ink); color: white; font-size: 11px; cursor: pointer; }
 .property-form > button:disabled { opacity: .55; cursor: default; }
 
+.team-panel { width: min(500px, 100vw); }
+.team-invite { display: grid; gap: 8px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+.team-invite label { display: grid; gap: 7px; }
+.team-invite label > span { color: var(--muted); font-size: 10px; font-weight: 600; }
+.team-invite label > div { display: grid; grid-template-columns: minmax(0, 1fr) 88px 34px; }
+.team-invite input, .team-invite select { min-width: 0; height: 34px; padding: 0 9px; border: 1px solid var(--line); outline: 0; background: white; color: var(--ink); font-size: 11px; }
+.team-invite input { border-radius: 4px 0 0 4px; }
+.team-invite select { border-left: 0; }
+.team-invite label button { width: 34px; height: 34px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 0 4px 4px 0; background: var(--ink); color: white; cursor: pointer; }
+.team-invite label button:disabled { opacity: .45; cursor: default; }
+.team-invite > p { margin: 0; color: var(--red); font-size: 10px; line-height: 1.4; }
+.team-list { padding: 6px 10px 18px; }
+.team-member { min-height: 58px; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto 82px 56px; align-items: center; gap: 9px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.team-avatar { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 4px; background: #e7f3f8; color: var(--blue); font-size: 10px; font-weight: 700; }
+.team-member > div:nth-child(2) { min-width: 0; display: grid; gap: 3px; }
+.team-member b { overflow: hidden; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.team-member b em { margin-left: 5px; padding: 2px 4px; border-radius: 3px; background: #f1f1ef; color: var(--muted); font-size: 8px; font-style: normal; font-weight: 500; }
+.team-member small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.member-status { justify-self: start; padding: 3px 5px; border-radius: 3px; font-size: 8px; white-space: nowrap; }
+.member-active { background: #edf3ec; color: var(--green); }
+.member-invited { background: #faebdd; color: #a34f00; }
+.team-member > select { width: 82px; height: 28px; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--ink); font-size: 9px; }
+.member-role { color: var(--muted); font-size: 9px; text-align: center; }
+.team-member-actions { display: flex; justify-content: flex-end; gap: 1px; }
+.team-member-actions .icon-button { width: 27px; height: 27px; }
+.team-member-actions .danger:hover { color: var(--red); }
+
 .task-detail-panel { width: min(460px, 100vw); }
 .task-detail-panel > header { min-height: 78px; height: auto; }
 .task-detail-panel > header > div { min-width: 0; padding: 12px 0; }
@@ -401,4 +428,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
   .welcome-points > div + div { padding-left: 0; border-top: 1px solid var(--line); border-left: 0; }
   .welcome-actions { align-items: stretch; flex-direction: column-reverse; }
   .welcome-actions button { width: 100%; }
+  .team-member { grid-template-columns: 30px minmax(0, 1fr) auto 72px; }
+  .team-member > select { width: 72px; }
+  .team-member-actions { grid-column: 2 / -1; justify-content: flex-end; min-height: 0; }
 }

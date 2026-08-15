@@ -1,7 +1,7 @@
 import { authorizeRequest, ensureWorkspace, setRoutineCompletion } from "@/lib/pace-data";
 
 export async function PUT(request: Request) {
-  const authorization = authorizeRequest(request);
+  const authorization = await authorizeRequest(request);
   if (authorization instanceof Response) return authorization;
   try {
     await ensureWorkspace(authorization.ownerId);

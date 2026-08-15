@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const endpoint = process.env.OKRPTR_MCP_URL || process.env.OKITA_MCP_URL || process.env.PACE_MCP_URL || "http://localhost:3002/mcp";
-const client = new Client({ name: "okrptr-smoke", version: "0.4.0" });
+const client = new Client({ name: "okrptr-smoke", version: "0.5.0" });
 const transport = new StreamableHTTPClientTransport(new URL(endpoint));
 
 await client.connect(transport);
@@ -20,17 +20,21 @@ assert.deepEqual(names, [
   "delete_routine",
   "get_daily_scrum",
   "get_recommendations",
+  "invite_team_member",
   "link_item",
   "list_checklist_items",
   "list_items",
   "list_properties",
   "list_routines",
+  "list_team_members",
+  "remove_team_member",
   "review_period",
   "save_daily_scrum",
   "set_property_value",
   "update_checklist_item",
   "update_item",
   "update_routine",
+  "update_team_member",
 ]);
 
 const result = await client.callTool({ name: "list_items", arguments: { limit: 5 } });
@@ -77,6 +81,28 @@ try {
   const deletedRoutine = await client.callTool({ name: "delete_routine", arguments: { id: routineId } });
   assert.equal(deletedRoutine.isError, undefined);
   assert.equal(deletedRoutine.structuredContent.deleted, true);
+}
+
+const team = await client.callTool({ name: "list_team_members", arguments: {} });
+assert.equal(team.isError, undefined);
+assert.ok(team.structuredContent.members.length >= 1);
+const invitedMember = await client.callTool({
+  name: "invite_team_member",
+  arguments: { email: `mcp-${Date.now()}@example.com`, role: "member" },
+});
+assert.equal(invitedMember.isError, undefined);
+const invitedMemberId = invitedMember.structuredContent.member.id;
+try {
+  const updatedMember = await client.callTool({
+    name: "update_team_member",
+    arguments: { id: invitedMemberId, role: "viewer" },
+  });
+  assert.equal(updatedMember.isError, undefined);
+  assert.equal(updatedMember.structuredContent.member.role, "viewer");
+} finally {
+  const removedMember = await client.callTool({ name: "remove_team_member", arguments: { id: invitedMemberId } });
+  assert.equal(removedMember.isError, undefined);
+  assert.equal(removedMember.structuredContent.deleted, true);
 }
 
 const itemId = result.structuredContent.items[0]?.id;

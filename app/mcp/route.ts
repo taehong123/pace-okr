@@ -9,6 +9,7 @@ import {
   PROPERTY_TYPES,
   ROUTINE_CADENCES,
   authorizeRequest,
+  canManageTeam,
   createChecklistItem,
   createItem,
   createPropertyDefinition,
@@ -16,6 +17,7 @@ import {
   deletePropertyDefinition,
   deleteRoutine,
   ensureWorkspace,
+  getTeam,
   getDailyScrum,
   getItemPropertiesByName,
   getPeriodReview,
@@ -24,6 +26,8 @@ import {
   listItems,
   listPropertyDefinitions,
   listRoutines,
+  inviteTeamMember,
+  removeTeamMember,
   saveDailyScrum,
   serializeChecklistItem,
   serializeItem,
@@ -34,6 +38,7 @@ import {
   updateChecklistItem,
   updateItem,
   updateRoutine,
+  updateTeamMember,
   setRoutineCompletion,
   type ItemCadence,
   type ItemKind,
@@ -42,6 +47,8 @@ import {
   type PropertyType,
   type PropertyValue,
   type RoutineCadence,
+  type RequestAuthorization,
+  type TeamRole,
 } from "@/lib/pace-data";
 
 const propertyValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
@@ -105,12 +112,23 @@ const routineOutput = z.object({
   updatedAt: z.string(),
 });
 
-function createOkrptrServer(ownerId: string) {
+const teamMemberOutput = z.object({
+  id: z.string(),
+  email: z.string(),
+  displayName: z.string(),
+  role: z.string(),
+  status: z.string(),
+  isCurrent: z.boolean(),
+  createdAt: z.string(),
+});
+
+function createOkrptrServer(authorization: RequestAuthorization) {
+  const { ownerId } = authorization;
   const server = new McpServer(
-    { name: "okrptr", version: "0.4.0" },
+    { name: "okrptr", version: "0.5.0" },
     {
       instructions:
-        "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Routines are separate recurring work with dated completion records. Tasks are database rows with custom properties and internal checklists. Use list_properties before setting unfamiliar property names.",
+        "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Routines are separate recurring work with dated completion records. Tasks are database rows with custom properties and internal checklists. Team access uses Owner, Admin, Member, and read-only Viewer roles. Use list_properties before setting unfamiliar property names.",
     },
   );
 
@@ -699,6 +717,72 @@ function createOkrptrServer(ownerId: string) {
     },
   );
 
+  server.registerTool(
+    "list_team_members",
+    {
+      title: "List workspace team members",
+      description: "List active members and pending invitations with their workspace roles.",
+      inputSchema: {},
+      outputSchema: { workspace: z.object({ id: z.string(), name: z.string() }), members: z.array(teamMemberOutput), count: z.number() },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async () => {
+      const team = await getTeam(ownerId, authorization.userId);
+      return {
+        structuredContent: { ...team, count: team.members.length },
+        content: [{ type: "text", text: `Found ${team.members.length} workspace members and invitations.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "invite_team_member",
+    {
+      title: "Invite a workspace team member",
+      description: "Create an email invitation with an Admin, Member, or Viewer role.",
+      inputSchema: { email: z.string().email(), role: z.enum(["admin", "member", "viewer"]).default("member") },
+      outputSchema: { member: teamMemberOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ email, role }) => {
+      if (!canManageTeam(authorization)) throw new Error("Owner or Admin access is required.");
+      const member = await inviteTeamMember(ownerId, authorization.userId, email, role as Exclude<TeamRole, "owner">);
+      return { structuredContent: { member }, content: [{ type: "text", text: `Invited ${email} as ${role}.` }] };
+    },
+  );
+
+  server.registerTool(
+    "update_team_member",
+    {
+      title: "Update a team member role",
+      description: "Change a non-owner team member or invitation to Admin, Member, or Viewer.",
+      inputSchema: { id: z.string(), role: z.enum(["admin", "member", "viewer"]) },
+      outputSchema: { member: teamMemberOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ id, role }) => {
+      if (!canManageTeam(authorization)) throw new Error("Owner or Admin access is required.");
+      const member = await updateTeamMember(ownerId, id, role as Exclude<TeamRole, "owner">, authorization.userId);
+      return { structuredContent: { member }, content: [{ type: "text", text: `Updated ${member.email || member.displayName} to ${role}.` }] };
+    },
+  );
+
+  server.registerTool(
+    "remove_team_member",
+    {
+      title: "Remove a team member or invitation",
+      description: "Remove a non-owner member or cancel a pending invitation.",
+      inputSchema: { id: z.string() },
+      outputSchema: { deleted: z.boolean(), id: z.string() },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    async ({ id }) => {
+      if (!canManageTeam(authorization)) throw new Error("Owner or Admin access is required.");
+      const deleted = await removeTeamMember(ownerId, id, authorization.userId);
+      return { structuredContent: deleted, content: [{ type: "text", text: `Removed team member or invitation ${id}.` }] };
+    },
+  );
+
   return server;
 }
 
@@ -722,13 +806,13 @@ async function handleMcp(request: Request) {
     return new Response(null, { status: 204, headers: corsHeaders() });
   }
 
-  const authorization = authorizeRequest(request);
+  const authorization = await authorizeRequest(request);
   if (authorization instanceof Response) return withCors(authorization);
 
   try {
     await ensureWorkspace(authorization.ownerId);
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
-    const server = createOkrptrServer(authorization.ownerId);
+    const server = createOkrptrServer(authorization);
     await server.connect(transport);
     return withCors(await transport.handleRequest(request));
   } catch (error) {

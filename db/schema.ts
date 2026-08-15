@@ -1,6 +1,41 @@
 import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+export const workspaces = sqliteTable(
+  "workspaces",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    ownerUserId: text("owner_user_id").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_workspaces_owner_user").on(table.ownerUserId),
+  ],
+);
+
+export const workspaceMembers = sqliteTable(
+  "workspace_members",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id"),
+    email: text("email"),
+    displayName: text("display_name").notNull().default(""),
+    role: text("role").notNull().default("member"),
+    status: text("status").notNull().default("invited"),
+    invitedByUserId: text("invited_by_user_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_workspace_members_user").on(table.userId),
+    uniqueIndex("idx_workspace_members_workspace_email").on(table.workspaceId, table.email),
+    index("idx_workspace_members_workspace_status").on(table.workspaceId, table.status),
+  ],
+);
+
 export const items = sqliteTable(
   "items",
   {
@@ -157,3 +192,5 @@ export type ChecklistItem = typeof checklistItems.$inferSelect;
 export type DailyScrum = typeof dailyScrums.$inferSelect;
 export type Routine = typeof routines.$inferSelect;
 export type RoutineCompletion = typeof routineCompletions.$inferSelect;
+export type Workspace = typeof workspaces.$inferSelect;
+export type WorkspaceMember = typeof workspaceMembers.$inferSelect;

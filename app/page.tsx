@@ -31,6 +31,8 @@ import {
   Target,
   TextCursorInput,
   Trash2,
+  UserPlus,
+  Users,
   X,
   Zap,
   type LucideIcon,
@@ -45,6 +47,7 @@ type Priority = "low" | "medium" | "high" | "urgent";
 type PropertyType = "text" | "number" | "select" | "date" | "checkbox";
 type PropertyValue = string | number | boolean | null;
 type RoutineCadence = "daily" | "weekly" | "monthly";
+type TeamRole = "owner" | "admin" | "member" | "viewer";
 
 type OkrptrItem = {
   id: string;
@@ -101,6 +104,16 @@ type Routine = {
   completed: boolean;
   completionId: string | null;
   note: string;
+};
+
+type TeamMember = {
+  id: string;
+  email: string;
+  displayName: string;
+  role: TeamRole;
+  status: "invited" | "active";
+  isCurrent: boolean;
+  createdAt: string;
 };
 
 type IntroLanguage = "ko" | "en" | "ja" | "zh" | "es";
@@ -264,6 +277,7 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [integrationOpen, setIntegrationOpen] = useState(false);
   const [propertyPanelOpen, setPropertyPanelOpen] = useState(false);
+  const [teamPanelOpen, setTeamPanelOpen] = useState(false);
   const [createItemOpen, setCreateItemOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
@@ -421,6 +435,7 @@ export default function Home() {
         </div>
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Bot size={16} /><span>MCP 연결</span><i className={connected ? "connection-live" : "connection-local"} /></button>
+          <button className="nav-item" onClick={() => setTeamPanelOpen(true)}><Users size={16} /><span>팀 멤버</span></button>
           <button className="nav-item" onClick={() => setPropertyPanelOpen(true)}><Settings2 size={16} /><span>속성 관리</span></button>
           <button className="profile-row"><span className="avatar">T</span><span>태홍</span><MoreHorizontal size={15} /></button>
         </div>
@@ -429,7 +444,7 @@ export default function Home() {
       <section className="workspace">
         <header className="workspace-topbar">
           <span>OKRPTR</span><ChevronRight size={13} /><b>{viewTitles[activeView]}</b>
-          <div><button aria-label="알림" title="알림"><Bell size={15} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
+          <div><button aria-label="팀 멤버" title="팀 멤버" onClick={() => setTeamPanelOpen(true)}><Users size={15} /></button><button aria-label="알림" title="알림"><Bell size={15} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
         </header>
         <div className="page-body">
           <header className="page-header">
@@ -502,6 +517,7 @@ export default function Home() {
           onNotice={showNotice}
         />
       )}
+      {teamPanelOpen && <TeamPanel onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
       {createItemOpen && <CreateItemPanel items={items} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
       {selectedTask && (
         <TaskDetailPanel
@@ -815,9 +831,58 @@ function PropertyPanel({ properties, onClose, onCreated, onDeleted, onNotice }: 
   return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>Task 속성</h2><p>{properties.length}개 열</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header><div className="property-list">{properties.map((property) => <div className="property-row" key={property.id}><span className="property-type-icon">{property.type === "number" ? <Hash size={14} /> : <TextCursorInput size={14} />}</span><div><b>{property.name}</b><small>{propertyTypeLabel(property.type)}</small></div><button onClick={() => void remove(property.id)} aria-label="속성 삭제"><Trash2 size={13} /></button></div>)}</div><form className="property-form" onSubmit={create}><h3>속성 추가</h3><label><span>이름</span><input value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>유형</span><select value={type} onChange={(event) => setType(event.target.value as PropertyType)}>{(["text", "number", "select", "date", "checkbox"] as PropertyType[]).map((entry) => <option value={entry} key={entry}>{propertyTypeLabel(entry)}</option>)}</select></label>{type === "select" && <label><span>옵션</span><input value={options} onChange={(event) => setOptions(event.target.value)} placeholder="쉼표로 구분" /></label>}<button><Plus size={14} />추가</button></form></aside></div>;
 }
 
+function TeamPanel({ onClose, onNotice }: { onClose: () => void; onNotice: (message: string) => void }) {
+  const [team, setTeam] = useState<{ workspace: { id: string; name: string }; members: TeamMember[]; currentRole: TeamRole; canManage: boolean } | null>(null);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<Exclude<TeamRole, "owner">>("member");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetch("/api/team")
+      .then(async (response) => response.ok ? response.json() as Promise<{ workspace: { id: string; name: string }; members: TeamMember[]; currentRole: TeamRole; canManage: boolean }> : Promise.reject())
+      .then((data) => setTeam(data))
+      .catch(() => setError("팀 정보를 불러오지 못했습니다."));
+  }, []);
+
+  async function invite(event: FormEvent) {
+    event.preventDefault();
+    if (!email.trim() || saving) return;
+    setSaving(true);
+    setError("");
+    const response = await fetch("/api/team", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, role }) });
+    const data = await response.json() as { member?: TeamMember; error?: string };
+    setSaving(false);
+    if (!response.ok || !data.member) {
+      setError(data.error ?? "초대를 등록하지 못했습니다.");
+      return;
+    }
+    setTeam((current) => current ? { ...current, members: [...current.members, data.member!] } : current);
+    setEmail("");
+    onNotice("팀 초대를 등록했습니다.");
+  }
+
+  async function changeRole(member: TeamMember, nextRole: Exclude<TeamRole, "owner">) {
+    const response = await fetch("/api/team", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: member.id, role: nextRole }) });
+    if (!response.ok) return;
+    const data = await response.json() as { member: TeamMember };
+    setTeam((current) => current ? { ...current, members: current.members.map((entry) => entry.id === member.id ? data.member : entry) } : current);
+    onNotice("멤버 역할을 변경했습니다.");
+  }
+
+  async function remove(member: TeamMember) {
+    const response = await fetch(`/api/team?id=${encodeURIComponent(member.id)}`, { method: "DELETE" });
+    if (!response.ok) return;
+    setTeam((current) => current ? { ...current, members: current.members.filter((entry) => entry.id !== member.id) } : current);
+    onNotice(member.status === "invited" ? "초대를 취소했습니다." : "팀에서 제거했습니다.");
+  }
+
+  return <div className="modal-backdrop align-right"><aside className="property-panel team-panel"><header><div><h2>팀 멤버</h2><p>{team ? `${team.workspace.name} · ${team.members.length}명` : "불러오는 중"}</p></div><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header>{team?.canManage && <form className="team-invite" onSubmit={invite}><label><span>이메일로 초대</span><div><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.com" aria-label="초대 이메일" /><select value={role} onChange={(event) => setRole(event.target.value as Exclude<TeamRole, "owner">)} aria-label="초대 역할"><option value="admin">Admin</option><option value="member">Member</option><option value="viewer">Viewer</option></select><button disabled={!email.trim() || saving} aria-label="멤버 초대" title="멤버 초대"><UserPlus size={14} /></button></div></label>{error && <p>{error}</p>}</form>}<div className="team-list">{team ? team.members.map((member) => <div className="team-member" key={member.id}><span className="team-avatar">{member.displayName.slice(0, 1).toLocaleUpperCase()}</span><div><b>{member.displayName}{member.isCurrent && <em>나</em>}</b><small>{member.email || (member.role === "owner" ? "Workspace owner" : "이메일 없음")}</small></div><span className={`member-status member-${member.status}`}>{member.status === "active" ? "활성" : "초대 대기"}</span>{team.canManage && member.role !== "owner" ? <select value={member.role} onChange={(event) => void changeRole(member, event.target.value as Exclude<TeamRole, "owner">)} aria-label={`${member.displayName} 역할`}><option value="admin">Admin</option><option value="member">Member</option><option value="viewer">Viewer</option></select> : <span className="member-role">{teamRoleLabel(member.role)}</span>}<div className="team-member-actions">{member.status === "invited" && <button className="icon-button" onClick={() => { void navigator.clipboard.writeText(window.location.origin); onNotice("워크스페이스 주소를 복사했습니다."); }} aria-label="초대 주소 복사" title="초대 주소 복사"><Copy size={13} /></button>}{team.canManage && member.role !== "owner" && !member.isCurrent && <button className="icon-button danger" onClick={() => void remove(member)} aria-label={member.status === "invited" ? "초대 취소" : "팀에서 제거"} title={member.status === "invited" ? "초대 취소" : "팀에서 제거"}><Trash2 size={13} /></button>}</div></div>) : !error ? <EmptyState icon={Users} title="팀 정보를 불러오는 중입니다" /> : <EmptyState icon={Users} title={error} />}</div></aside></div>;
+}
+
 function IntegrationModal({ onClose }: { onClose: () => void }) {
   const endpoint = typeof window === "undefined" ? "/mcp" : `${window.location.origin}/mcp`;
-  const tools = ["capture_item", "create_item", "update_item", "list_items", "link_item", "review_period", "list_properties", "create_property", "set_property_value", "delete_property", "list_checklist_items", "add_checklist_item", "update_checklist_item", "get_daily_scrum", "save_daily_scrum", "get_recommendations", "list_routines", "create_routine", "update_routine", "complete_routine", "delete_routine"];
+  const tools = ["capture_item", "create_item", "update_item", "list_items", "link_item", "review_period", "list_properties", "create_property", "set_property_value", "delete_property", "list_checklist_items", "add_checklist_item", "update_checklist_item", "get_daily_scrum", "save_daily_scrum", "get_recommendations", "list_routines", "create_routine", "update_routine", "complete_routine", "delete_routine", "list_team_members", "invite_team_member", "update_team_member", "remove_team_member"];
   return <div className="modal-backdrop"><section className="integration-modal"><header><h2>MCP 연결</h2><button className="icon-button" onClick={onClose}><X size={17} /></button></header><div className="endpoint-row"><Bot size={18} /><div><b>Streamable HTTP</b><code>{endpoint}</code></div><button className="icon-button" onClick={() => void navigator.clipboard.writeText(endpoint)} title="주소 복사"><Copy size={14} /></button></div><div className="tool-list">{tools.map((tool) => <code key={tool}>{tool}</code>)}</div><footer><span><CheckCircle2 size={15} />Objective → Key Result → Initiative → Project → Task</span><button onClick={onClose}>닫기</button></footer></section></div>;
 }
 
@@ -833,6 +898,7 @@ function kindLabel(kind: ItemKind) { return { objective: "Objective", key_result
 function statusLabel(status: ItemStatus) { return statusLabels[status]; }
 function sourceLabel(source: string) { return { mcp: "MCP", slack: "Slack", discord: "Discord", telegram: "Telegram", web: "Web" }[source] ?? "Bot"; }
 function propertyTypeLabel(type: PropertyType) { return { text: "텍스트", number: "숫자", select: "선택", date: "날짜", checkbox: "체크박스" }[type]; }
+function teamRoleLabel(role: TeamRole) { return { owner: "Owner", admin: "Admin", member: "Member", viewer: "Viewer" }[role]; }
 function dueLabel(value: string | null) { if (!value) return "기한 없음"; const due = new Date(`${value}T00:00:00`); return `${due.getMonth() + 1}월 ${due.getDate()}일`; }
 function localDate() { const now = new Date(); const offset = now.getTimezoneOffset() * 60_000; return new Date(now.getTime() - offset).toISOString().slice(0, 10); }
 function isIntroLanguage(value: string | null): value is IntroLanguage { return introLanguages.some((entry) => entry.id === value); }

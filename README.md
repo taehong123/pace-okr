@@ -21,6 +21,7 @@ a bot webhook. Unstructured captures land in the Inbox and can be linked later.
 - Daily scrum with yesterday, today, and blocker notes
 - Data-driven recommendations for blocked, overdue, unlinked, and due-soon work
 - Daily, weekly, monthly, and quarterly reviews
+- Shared workspaces with Owner, Admin, Member, and Viewer roles
 - D1 persistence and a Streamable HTTP MCP endpoint at `/mcp`
 - Generic bot capture webhook at `/api/webhooks/capture`
 
@@ -33,10 +34,13 @@ a bot webhook. Unstructured captures land in the Inbox and can be linked later.
 - `get_daily_scrum`, `save_daily_scrum`
 - `get_recommendations`
 - `list_routines`, `create_routine`, `update_routine`, `complete_routine`, `delete_routine`
+- `list_team_members`, `invite_team_member`, `update_team_member`, `remove_team_member`
 
 The MCP endpoint enforces the hierarchy. Project belongs under Initiative, and
 Task belongs under Project. Only Inbox Tasks may temporarily have no parent.
 Routines remain outside this hierarchy because they represent recurring work.
+Invited members join the shared workspace when they sign in with the invited
+email. Viewer access is enforced as read-only by the API.
 
 ## Local development
 

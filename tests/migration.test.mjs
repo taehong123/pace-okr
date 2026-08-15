@@ -50,3 +50,26 @@ test("migrates Action rows into checklists and Project-linked Tasks", async () =
   assert.deepEqual(checklist.map((row) => ({ ...row })), [{ task_id: "task", title: "Checklist", completed: 1 }]);
   db.close();
 });
+
+test("creates relational workspaces and team memberships", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON;");
+  const migration = await readFile(new URL("../drizzle/0005_wet_roland_deschain.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
+    INSERT INTO workspace_members (id, workspace_id, user_id, email, display_name, role, status)
+      VALUES ('owner-member', 'workspace', 'owner', 'owner@example.com', 'Owner', 'owner', 'active');
+    INSERT INTO workspace_members (id, workspace_id, email, display_name, role, status)
+      VALUES ('invite', 'workspace', 'viewer@example.com', 'Viewer', 'viewer', 'invited');
+  `);
+
+  const rows = db.prepare("SELECT role, status FROM workspace_members ORDER BY role").all();
+  assert.deepEqual(rows.map((row) => ({ ...row })), [
+    { role: "owner", status: "active" },
+    { role: "viewer", status: "invited" },
+  ]);
+  db.exec("DELETE FROM workspaces WHERE id = 'workspace'");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM workspace_members").get().count, 0);
+  db.close();
+});
