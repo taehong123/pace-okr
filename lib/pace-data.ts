@@ -800,9 +800,23 @@ async function migrateLegacyHierarchy(ownerId: string) {
       SELECT 'legacy-action-' || id, owner_id, parent_id, title,
         CASE WHEN status = 'done' THEN 1 ELSE 0 END,
         sort_order, created_at, updated_at
-      FROM items
-      WHERE owner_id = ? AND kind = 'action' AND parent_id IS NOT NULL`).bind(ownerId),
-    d1.prepare("DELETE FROM items WHERE owner_id = ? AND kind = 'action'").bind(ownerId),
+      FROM items AS action_item
+      WHERE action_item.owner_id = ? AND action_item.kind = 'action'
+        AND EXISTS (
+          SELECT 1 FROM items AS parent_task
+          WHERE parent_task.owner_id = action_item.owner_id
+            AND parent_task.id = action_item.parent_id
+            AND parent_task.kind = 'task'
+        )`).bind(ownerId),
+    d1.prepare(`DELETE FROM items
+      WHERE owner_id = ? AND kind = 'action'
+        AND parent_id IN (
+          SELECT id FROM items WHERE owner_id = ? AND kind = 'task'
+        )`).bind(ownerId, ownerId),
+    d1.prepare(`UPDATE items
+      SET kind = 'task', parent_id = NULL, status = 'inbox', source = 'migration',
+        updated_at = CURRENT_TIMESTAMP
+      WHERE owner_id = ? AND kind = 'action'`).bind(ownerId),
     d1.prepare(`INSERT OR IGNORE INTO items
       (id, owner_id, parent_id, kind, title, description, status, priority, cadence,
        progress, due_date, source, source_ref, sort_order, created_at, updated_at)
