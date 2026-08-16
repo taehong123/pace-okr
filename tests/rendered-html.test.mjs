@@ -56,8 +56,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /capture_item/);
   assert.match(page, /get_workspace_rules/);
   assert.match(page, /update_workspace_rules/);
-  assert.match(page, /OKRPTR 규칙/);
-  assert.match(page, /대화로 설정/);
+  assert.match(page, /OKR 시작 대화/);
+  assert.match(page, /OKR 만들기/);
   assert.match(page, /create_property/);
   assert.match(page, /set_property_value/);
   assert.match(page, /get_daily_scrum/);

@@ -129,6 +129,18 @@ type WorkspaceRules = {
   updatedAt: string;
 };
 
+type OnboardingPlan = {
+  objective: string;
+  keyResult: string;
+  initiative: string;
+  project: string;
+  tasks: string;
+  routineTitle: string;
+  routineTrigger: string;
+  routinePlace: string;
+  routineSteps: string;
+};
+
 type TeamMember = {
   id: string;
   email: string;
@@ -518,20 +530,69 @@ export default function Home() {
     showNotice(`${kindLabel(created.kind)}를 만들었습니다.`);
   }
 
-  async function saveWorkspaceRules(nextRules: WorkspaceRules) {
-    const response = await fetch("/api/workspace-rules", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...nextRules, configured: true }),
-    });
-    if (!response.ok) {
-      showNotice("규칙을 저장하지 못했습니다.");
+  async function createOnboardingPlan(plan: OnboardingPlan) {
+    const objectiveTitle = plan.objective.trim();
+    if (!objectiveTitle) {
+      showNotice("Objective를 먼저 적어 주세요.");
       return false;
     }
-    const data = await response.json() as { rules: WorkspaceRules };
-    setWorkspaceRules(data.rules);
-    showNotice("워크스페이스 규칙을 저장했습니다.");
-    return true;
+    const createdItems: OkrptrItem[] = [];
+    async function createPlannedItem(body: Record<string, unknown>) {
+      const response = await fetch("/api/items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error("item");
+      const data = await response.json() as { item: OkrptrItem };
+      createdItems.push(data.item);
+      return data.item;
+    }
+    try {
+      const objectiveItem = await createPlannedItem({ title: objectiveTitle, kind: "objective", status: "in_progress", progress: 0 });
+      const keyResultTitle = plan.keyResult.trim() || "첫 핵심 결과 정의";
+      const keyResultItem = await createPlannedItem({ title: keyResultTitle, kind: "key_result", parentId: objectiveItem.id, status: "todo" });
+      const initiativeTitle = plan.initiative.trim() || "첫 실행 흐름 만들기";
+      const initiativeItem = await createPlannedItem({ title: initiativeTitle, kind: "initiative", parentId: keyResultItem.id, status: "todo" });
+      const projectTitle = plan.project.trim() || "이번 주 실행 프로젝트";
+      const projectItem = await createPlannedItem({ title: projectTitle, kind: "project", parentId: initiativeItem.id, status: "in_progress" });
+      const taskTitles = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean);
+      for (const taskTitle of taskTitles.length ? taskTitles : ["첫 실행 Task 정리"]) {
+        await createPlannedItem({ title: taskTitle, kind: "task", parentId: projectItem.id, status: "todo" });
+      }
+      if (plan.routineTitle.trim()) {
+        await fetch("/api/routines", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: plan.routineTitle,
+            triggerPoint: plan.routineTrigger,
+            actionPlace: plan.routinePlace,
+            actionSteps: plan.routineSteps,
+            cadence: "daily",
+          }),
+        });
+      }
+      if (workspaceRules) {
+        const response = await fetch("/api/workspace-rules", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...workspaceRules, configured: true }),
+        });
+        if (response.ok) {
+          const data = await response.json() as { rules: WorkspaceRules };
+          setWorkspaceRules(data.rules);
+        }
+      }
+      setItems((current) => [...current, ...createdItems]);
+      setSetupChatOpen(false);
+      setActiveView("okr");
+      showNotice("OKR 시작 구성을 만들었습니다.");
+      return true;
+    } catch {
+      showNotice("OKR 구성을 만들지 못했습니다.");
+      return false;
+    }
   }
 
   return (
@@ -653,7 +714,7 @@ export default function Home() {
             </form>
           )}
 
-          {activeView === "home" && <HomeView objective={objective} items={taskItems} rules={workspaceRules} onSaveRules={saveWorkspaceRules} onOpenSetup={() => setSetupChatOpen(true)} onGoToWork={() => setActiveView("work")} onOpenTask={setSelectedTaskId} />}
+          {activeView === "home" && <HomeView objective={objective} items={taskItems} hasStarted={Boolean(workspaceRules?.configured)} onOpenSetup={() => setSetupChatOpen(true)} onGoToWork={() => setActiveView("work")} onOpenTask={setSelectedTaskId} />}
           {activeView === "inbox" && <InboxView items={inboxItems} onConnect={connectInbox} />}
           {activeView === "work" && (
             <TaskDatabase
@@ -699,11 +760,7 @@ export default function Home() {
       {integrationOpen && <IntegrationModal onClose={() => setIntegrationOpen(false)} />}
       {setupChatOpen && workspaceRules && (
         <SetupChatModal
-          rules={workspaceRules}
-          onSave={async (rules) => {
-            const saved = await saveWorkspaceRules(rules);
-            if (saved) setSetupChatOpen(false);
-          }}
+          onCreate={createOnboardingPlan}
           onClose={() => setSetupChatOpen(false)}
         />
       )}
@@ -1091,11 +1148,10 @@ function RecommendationsView({ onNavigate }: { onNavigate: (view: View) => void 
   return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{row.itemIds.length}개 항목 · 우선순위 {row.score}</small></div><button onClick={() => onNavigate(row.kind === "unlinked" ? "inbox" : row.kind === "empty_project" ? "okr" : "work")}><ChevronRight size={15} /></button></article>)}</section>;
 }
 
-function HomeView({ objective, items, rules, onSaveRules, onOpenSetup, onGoToWork, onOpenTask }: {
+function HomeView({ objective, items, hasStarted, onOpenSetup, onGoToWork, onOpenTask }: {
   objective?: OkrptrItem;
   items: OkrptrItem[];
-  rules: WorkspaceRules | null;
-  onSaveRules: (rules: WorkspaceRules) => Promise<boolean>;
+  hasStarted: boolean;
   onOpenSetup: () => void;
   onGoToWork: () => void;
   onOpenTask: (id: string) => void;
@@ -1108,7 +1164,13 @@ function HomeView({ objective, items, rules, onSaveRules, onOpenSetup, onGoToWor
           <header>현재 Objective<button onClick={onGoToWork}>작업 보기<ChevronRight size={13} /></button></header>
           {objective ? <div className="home-objective"><Target size={20} /><div><h2>{objective.title}</h2><span><i style={{ width: `${objective.progress}%` }} /></span><small>{objective.progress}% 진행</small></div></div> : <EmptyState icon={Target} title="Objective가 없습니다" />}
         </section>
-        {rules && <WorkspaceRulesPanel key={rules.updatedAt} rules={rules} onSave={onSaveRules} onOpenSetup={onOpenSetup} />}
+        <section className="okr-onboarding-card">
+          <header>
+            <div><b>OKR 시작 대화</b><span>{hasStarted ? "새 목표를 다시 잡거나 실행 구조를 추가" : "대화하면서 첫 OKR과 실행 항목 생성"}</span></div>
+            <button onClick={onOpenSetup}><Bot size={13} />대화 시작</button>
+          </header>
+          <p>목표, 측정 기준, 실행 프로젝트, 첫 Task, 반복 루틴을 한 번에 잡습니다. 저장하면 OKR 트리에 실제 항목이 생성됩니다.</p>
+        </section>
       </div>
       <section className="home-tasks">
         <header>진행 중 Task<b>{activeTasks.length}</b></header>
@@ -1118,89 +1180,61 @@ function HomeView({ objective, items, rules, onSaveRules, onOpenSetup, onGoToWor
   );
 }
 
-function WorkspaceRulesPanel({ rules, onSave, onOpenSetup }: { rules: WorkspaceRules; onSave: (rules: WorkspaceRules) => Promise<boolean>; onOpenSetup: () => void }) {
-  const [draft, setDraft] = useState(rules);
+function SetupChatModal({ onCreate, onClose }: { onCreate: (plan: OnboardingPlan) => Promise<boolean>; onClose: () => void }) {
+  const [plan, setPlan] = useState<OnboardingPlan>({
+    objective: "",
+    keyResult: "",
+    initiative: "",
+    project: "",
+    tasks: "",
+    routineTitle: "",
+    routineTrigger: "",
+    routinePlace: "",
+    routineSteps: "",
+  });
   const [saving, setSaving] = useState(false);
-  const changed = JSON.stringify(draft) !== JSON.stringify(rules);
-  async function save() {
-    setSaving(true);
-    await onSave(draft);
-    setSaving(false);
-  }
-  return (
-    <section className="workspace-rules-card">
-      <header>
-        <div><b>OKRPTR 규칙</b><span>웹 · API · MCP 공통 적용</span></div>
-        <button onClick={onOpenSetup}><Bot size={13} />대화로 설정</button>
-      </header>
-      <RuleFields rules={draft} onChange={setDraft} compact />
-      <footer>
-        <span>{draft.reviewBeforeCreate ? "불확실하면 확인 후 생성" : "명확하면 바로 생성"}</span>
-        <button className="primary-action" onClick={() => void save()} disabled={!changed || saving}><Check size={13} />저장</button>
-      </footer>
-    </section>
-  );
-}
-
-function SetupChatModal({ rules, onSave, onClose }: { rules: WorkspaceRules; onSave: (rules: WorkspaceRules) => Promise<void>; onClose: () => void }) {
-  const [draft, setDraft] = useState(rules);
-  const [message, setMessage] = useState("");
-  const [saving, setSaving] = useState(false);
-  function applyMessage() {
-    const text = message.trim();
-    if (!text) return;
-    setDraft((current) => ({
-      ...current,
-      captureInstruction: `${current.captureInstruction}\n${text}`.trim(),
-      configured: true,
-    }));
-    setMessage("");
+  function patch(field: keyof OnboardingPlan, value: string) {
+    setPlan((current) => ({ ...current, [field]: value }));
   }
   async function save() {
+    if (!plan.objective.trim()) return;
     setSaving(true);
-    await onSave({ ...draft, configured: true });
+    await onCreate(plan);
     setSaving(false);
   }
   return (
     <div className="modal-backdrop setup-backdrop">
       <section className="setup-chat" role="dialog" aria-modal="true" aria-labelledby="setup-title">
         <header>
-          <div><span className="brand-mark">O</span><div><h2 id="setup-title">OKRPTR 설정</h2><p>대화, 웹, MCP 입력이 따를 규칙을 정합니다.</p></div></div>
+          <div><span className="brand-mark">O</span><div><h2 id="setup-title">OKR 시작 대화</h2><p>목표를 말하면서 실행 구조를 만듭니다.</p></div></div>
           <button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button>
         </header>
         <div className="setup-chat-body">
           <div className="chat-thread">
-            <p className="assistant-message">처음 들어오는 일은 어떻게 정리할까요? 아래 규칙은 서비스 안의 빠른 입력과 외부 MCP 호출에 같이 적용됩니다.</p>
+            <p className="assistant-message">이번에 달성하고 싶은 목표를 적어 주세요. 아래 답을 저장하면 Objective부터 Task와 루틴까지 실제 OKR 구조로 만들어집니다.</p>
             <div className="chat-presets">
-              <button onClick={() => setDraft((current) => ({ ...current, captureInstruction: "모든 새 요청은 먼저 인박스에 저장하고, 하루 리뷰 때 Project에 연결합니다.", reviewBeforeCreate: true }))}>인박스 우선</button>
-              <button onClick={() => setDraft((current) => ({ ...current, structureInstruction: "Project가 명확하면 바로 Task로 만들고, Objective/Key Result가 언급되면 계층까지 함께 생성합니다.", reviewBeforeCreate: false }))}>명확하면 구조화</button>
-              <button onClick={() => setDraft((current) => ({ ...current, routineInstruction: "루틴은 반드시 트리거 포인트, 어디서, 무엇을 어떻게 하는지까지 물어보고 저장합니다." }))}>루틴 상세화</button>
+              <button onClick={() => setPlan((current) => ({ ...current, objective: "신규 사용자가 첫 주 안에 핵심 가치를 경험하게 만들기", keyResult: "첫 주 활성화율 35% 달성", initiative: "온보딩 활성화 개선", project: "가입 후 첫 실행 플로우 개선", tasks: "첫 화면 메시지 정리\n첫 Task 생성 흐름 QA\n신규 사용자 5명 인터뷰" }))}>제품 성장</button>
+              <button onClick={() => setPlan((current) => ({ ...current, objective: "팀의 주간 실행 리듬을 안정화하기", keyResult: "매주 금요일까지 주요 Task 90% 리뷰", initiative: "주간 운영 리듬 만들기", project: "주간 리뷰 프로세스 정착", tasks: "월요일 우선순위 정리\n수요일 막힘 확인\n금요일 회고 작성" }))}>팀 운영</button>
+              <button onClick={() => setPlan((current) => ({ ...current, routineTitle: "오늘의 최우선 Task 정리", routineTrigger: "매일 업무 시작 전", routinePlace: "OKRPTR 홈과 작업 탭", routineSteps: "1. 인박스를 확인한다\n2. 오늘 할 Task 3개를 고른다\n3. 막힌 항목을 데일리에 적는다" }))}>루틴 포함</button>
             </div>
-            <label className="chat-input"><span>자연어 규칙 추가</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={3} placeholder="예: 고객 관련 요청은 우선순위를 높게 보고, 매주 리뷰 대상으로 넣어줘" /></label>
-            <button className="chat-apply" onClick={applyMessage} disabled={!message.trim()}><Plus size={13} />규칙에 반영</button>
+            <label className="chat-input"><span>Objective</span><textarea value={plan.objective} onChange={(event) => patch("objective", event.target.value)} rows={3} placeholder="예: 신규 사용자가 첫 주 안에 핵심 가치를 경험하게 만들기" /></label>
+            <label className="chat-input"><span>Key Result</span><textarea value={plan.keyResult} onChange={(event) => patch("keyResult", event.target.value)} rows={2} placeholder="예: 첫 주 활성화율 35% 달성" /></label>
           </div>
-          <RuleFields rules={draft} onChange={setDraft} />
+          <div className="okr-setup-fields">
+            <label><span>Initiative</span><input value={plan.initiative} onChange={(event) => patch("initiative", event.target.value)} placeholder="예: 온보딩 활성화 개선" /></label>
+            <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="예: 가입 후 첫 실행 플로우 개선" /></label>
+            <label className="wide"><span>첫 Task</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder={"한 줄에 하나씩 입력\n예: 첫 화면 메시지 정리\n첫 Task 생성 흐름 QA"} /></label>
+            <label><span>루틴 이름</span><input value={plan.routineTitle} onChange={(event) => patch("routineTitle", event.target.value)} placeholder="예: 오늘의 최우선 Task 정리" /></label>
+            <label><span>루틴 트리거</span><input value={plan.routineTrigger} onChange={(event) => patch("routineTrigger", event.target.value)} placeholder="예: 매일 업무 시작 전" /></label>
+            <label><span>어디서</span><input value={plan.routinePlace} onChange={(event) => patch("routinePlace", event.target.value)} placeholder="예: OKRPTR 홈" /></label>
+            <label className="wide"><span>무엇을 어떻게</span><textarea value={plan.routineSteps} onChange={(event) => patch("routineSteps", event.target.value)} rows={3} placeholder="루틴 실행 방법" /></label>
+          </div>
         </div>
         <footer>
           <button className="welcome-secondary" onClick={onClose}>나중에</button>
-          <button className="welcome-primary" onClick={() => void save()} disabled={saving}>{saving ? "저장 중" : "설정 저장"}<ChevronRight size={14} /></button>
+          <button className="welcome-primary" onClick={() => void save()} disabled={saving || !plan.objective.trim()}>{saving ? "생성 중" : "OKR 만들기"}<ChevronRight size={14} /></button>
         </footer>
       </section>
-    </div>
-  );
-}
-
-function RuleFields({ rules, onChange, compact = false }: { rules: WorkspaceRules; onChange: (rules: WorkspaceRules) => void; compact?: boolean }) {
-  return (
-    <div className={compact ? "rule-fields compact" : "rule-fields"}>
-      <label><span>캡처 규칙</span><textarea value={rules.captureInstruction} onChange={(event) => onChange({ ...rules, captureInstruction: event.target.value })} rows={compact ? 2 : 3} /></label>
-      <label><span>구조화 규칙</span><textarea value={rules.structureInstruction} onChange={(event) => onChange({ ...rules, structureInstruction: event.target.value })} rows={compact ? 2 : 3} /></label>
-      <label><span>루틴 규칙</span><textarea value={rules.routineInstruction} onChange={(event) => onChange({ ...rules, routineInstruction: event.target.value })} rows={compact ? 2 : 3} /></label>
-      <div className="rule-controls">
-        <label><span>기본 우선순위</span><select value={rules.defaultPriority} onChange={(event) => onChange({ ...rules, defaultPriority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-        <label><span>기본 주기</span><select value={rules.defaultCadence} onChange={(event) => onChange({ ...rules, defaultCadence: event.target.value as Cadence })}>{Object.entries(cadenceLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-        <label className="rule-toggle"><input type="checkbox" checked={rules.reviewBeforeCreate} onChange={(event) => onChange({ ...rules, reviewBeforeCreate: event.target.checked })} /><span />불확실하면 확인</label>
-      </div>
     </div>
   );
 }
