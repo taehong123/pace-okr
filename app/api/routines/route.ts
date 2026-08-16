@@ -37,6 +37,9 @@ export async function POST(request: Request) {
     const routine = await createRoutine(authorization.ownerId, {
       title,
       description: asString(payload.description),
+      triggerPoint: asString(payload.triggerPoint),
+      actionPlace: asString(payload.actionPlace),
+      actionSteps: asString(payload.actionSteps),
       cadence,
       active: typeof payload.active === "boolean" ? payload.active : true,
     });
@@ -61,6 +64,9 @@ export async function PATCH(request: Request) {
     const routine = await updateRoutine(authorization.ownerId, id, {
       title: typeof payload.title === "string" ? payload.title : undefined,
       description: typeof payload.description === "string" ? payload.description : undefined,
+      triggerPoint: typeof payload.triggerPoint === "string" ? payload.triggerPoint : undefined,
+      actionPlace: typeof payload.actionPlace === "string" ? payload.actionPlace : undefined,
+      actionSteps: typeof payload.actionSteps === "string" ? payload.actionSteps : undefined,
       cadence,
       active: typeof payload.active === "boolean" ? payload.active : undefined,
     });

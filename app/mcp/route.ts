@@ -114,6 +114,9 @@ const routineOutput = z.object({
   id: z.string(),
   title: z.string(),
   description: z.string(),
+  triggerPoint: z.string(),
+  actionPlace: z.string(),
+  actionSteps: z.string(),
   cadence: z.string(),
   active: z.boolean(),
   sortOrder: z.number(),
@@ -170,7 +173,7 @@ function createOkrptrServer(authorization: RequestAuthorization) {
     { name: "okrptr", version: "0.6.0" },
     {
       instructions:
-        "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Routines are separate recurring work with dated completion records. Tasks are database rows with custom properties and internal checklists. Team access uses Owner, Admin, Member, and read-only Viewer roles. Workspace groups have @handles, open or private visibility, and Lead or Member roles. Use list_properties before setting unfamiliar property names.",
+        "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Routines are separate recurring work with trigger points, places/tools, concrete action steps, and dated completion records. Tasks are database rows with custom properties and internal checklists. Team access uses Owner, Admin, Member, and read-only Viewer roles. Workspace groups have @handles, open or private visibility, and Lead or Member roles. Use list_properties before setting unfamiliar property names.",
     },
   );
 
@@ -663,6 +666,9 @@ function createOkrptrServer(authorization: RequestAuthorization) {
       inputSchema: {
         title: z.string().min(1),
         description: z.string().optional(),
+        triggerPoint: z.string().optional().describe("The cue that starts the routine, for example a time, event, or state."),
+        actionPlace: z.string().optional().describe("Where or in which tool/context the routine should happen."),
+        actionSteps: z.string().optional().describe("Concrete steps for how to perform the routine."),
         cadence: z.enum(ROUTINE_CADENCES).optional(),
         active: z.boolean().optional(),
         date: z.string().optional().describe("Date used for the returned completion state"),
@@ -670,11 +676,14 @@ function createOkrptrServer(authorization: RequestAuthorization) {
       outputSchema: { routine: routineOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ title, description, cadence, active, date }) => {
+    async ({ title, description, triggerPoint, actionPlace, actionSteps, cadence, active, date }) => {
       const selectedDate = date ?? new Date().toISOString().slice(0, 10);
       const created = await createRoutine(ownerId, {
         title,
         description,
+        triggerPoint,
+        actionPlace,
+        actionSteps,
         cadence: cadence as RoutineCadence | undefined,
         active,
       });
@@ -695,6 +704,9 @@ function createOkrptrServer(authorization: RequestAuthorization) {
         id: z.string(),
         title: z.string().min(1).optional(),
         description: z.string().optional(),
+        triggerPoint: z.string().optional(),
+        actionPlace: z.string().optional(),
+        actionSteps: z.string().optional(),
         cadence: z.enum(ROUTINE_CADENCES).optional(),
         active: z.boolean().optional(),
         date: z.string().optional(),
@@ -702,11 +714,14 @@ function createOkrptrServer(authorization: RequestAuthorization) {
       outputSchema: { routine: routineOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ id, title, description, cadence, active, date }) => {
+    async ({ id, title, description, triggerPoint, actionPlace, actionSteps, cadence, active, date }) => {
       const selectedDate = date ?? new Date().toISOString().slice(0, 10);
       const updated = await updateRoutine(ownerId, id, {
         title,
         description,
+        triggerPoint,
+        actionPlace,
+        actionSteps,
         cadence: cadence as RoutineCadence | undefined,
         active,
       });

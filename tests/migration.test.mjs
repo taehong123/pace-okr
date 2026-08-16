@@ -136,3 +136,29 @@ test("allows one user to join and switch between multiple workspaces", async () 
   );
   db.close();
 });
+
+test("adds routine execution guide fields", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON;");
+  const [routineMigration, guideMigration] = await Promise.all([
+    readFile(new URL("../drizzle/0004_good_scarlet_witch.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0008_zippy_dormammu.sql", import.meta.url), "utf8"),
+  ]);
+  db.exec(routineMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec("INSERT INTO routines (id, owner_id, title, cadence) VALUES ('routine', 'owner', 'Daily planning', 'daily')");
+  db.exec(guideMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    UPDATE routines
+    SET trigger_point = '오전 9시',
+        action_place = 'OKRPTR 작업 탭',
+        action_steps = '인박스를 비우고 오늘 집중할 Task를 고른다'
+    WHERE id = 'routine'
+  `);
+
+  assert.deepEqual({ ...db.prepare("SELECT trigger_point, action_place, action_steps FROM routines WHERE id = 'routine'").get() }, {
+    trigger_point: "오전 9시",
+    action_place: "OKRPTR 작업 탭",
+    action_steps: "인박스를 비우고 오늘 집중할 Task를 고른다",
+  });
+  db.close();
+});

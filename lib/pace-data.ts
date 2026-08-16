@@ -68,8 +68,8 @@ const parentKind: Record<ItemKind, ItemKind | null> = {
 async function ensureSchema() {
   if (!schemaReady) {
     const d1 = (env as RuntimeEnv).DB;
-    schemaReady = d1
-      .batch([
+    schemaReady = (async () => {
+      await d1.batch([
         d1.prepare(`CREATE TABLE IF NOT EXISTS workspaces (
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
@@ -210,6 +210,9 @@ async function ensureSchema() {
           owner_id TEXT NOT NULL,
           title TEXT NOT NULL,
           description TEXT NOT NULL DEFAULT '',
+          trigger_point TEXT NOT NULL DEFAULT '',
+          action_place TEXT NOT NULL DEFAULT '',
+          action_steps TEXT NOT NULL DEFAULT '',
           cadence TEXT NOT NULL DEFAULT 'daily',
           active INTEGER NOT NULL DEFAULT 1,
           sort_order INTEGER NOT NULL DEFAULT 0,
@@ -229,8 +232,11 @@ async function ensureSchema() {
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_routine_completions_unique ON routine_completions(owner_id, routine_id, completion_date)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_routine_completions_owner_date ON routine_completions(owner_id, completion_date)"),
         d1.prepare("PRAGMA optimize"),
-      ])
-      .then(() => undefined)
+      ]);
+      await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN trigger_point TEXT NOT NULL DEFAULT ''");
+      await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN action_place TEXT NOT NULL DEFAULT ''");
+      await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN action_steps TEXT NOT NULL DEFAULT ''");
+    })()
       .catch((error: unknown) => {
         schemaReady = null;
         throw error;
@@ -238,6 +244,15 @@ async function ensureSchema() {
   }
 
   await schemaReady;
+}
+
+async function addColumnIfMissing(d1: RuntimeEnv["DB"], statement: string) {
+  try {
+    await d1.prepare(statement).run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/duplicate column|already exists/i.test(message)) throw error;
+  }
 }
 
 export async function ensureWorkspace(ownerId: string) {
@@ -1195,7 +1210,15 @@ export async function listRoutines(
 
 export async function createRoutine(
   ownerId: string,
-  input: { title: string; description?: string; cadence?: RoutineCadence; active?: boolean },
+  input: {
+    title: string;
+    description?: string;
+    triggerPoint?: string;
+    actionPlace?: string;
+    actionSteps?: string;
+    cadence?: RoutineCadence;
+    active?: boolean;
+  },
 ) {
   const title = input.title.trim();
   if (!title) throw new Error("Routine title is required");
@@ -1214,6 +1237,9 @@ export async function createRoutine(
       ownerId,
       title,
       description: input.description?.trim() ?? "",
+      triggerPoint: input.triggerPoint?.trim() ?? "",
+      actionPlace: input.actionPlace?.trim() ?? "",
+      actionSteps: input.actionSteps?.trim() ?? "",
       cadence,
       active: input.active ?? true,
       sortOrder: (last?.sortOrder ?? 0) + 10,
@@ -1225,7 +1251,15 @@ export async function createRoutine(
 export async function updateRoutine(
   ownerId: string,
   id: string,
-  patch: Partial<{ title: string; description: string; cadence: RoutineCadence; active: boolean }>,
+  patch: Partial<{
+    title: string;
+    description: string;
+    triggerPoint: string;
+    actionPlace: string;
+    actionSteps: string;
+    cadence: RoutineCadence;
+    active: boolean;
+  }>,
 ) {
   const current = await getRoutine(ownerId, id);
   if (!current) throw new Error("Routine not found");
@@ -1238,6 +1272,9 @@ export async function updateRoutine(
     .set({
       title: patch.title?.trim(),
       description: patch.description?.trim(),
+      triggerPoint: patch.triggerPoint?.trim(),
+      actionPlace: patch.actionPlace?.trim(),
+      actionSteps: patch.actionSteps?.trim(),
       cadence: patch.cadence,
       active: patch.active,
       updatedAt: new Date().toISOString(),
@@ -1310,6 +1347,9 @@ export function serializeRoutine(
     id: routine.id,
     title: routine.title,
     description: routine.description,
+    triggerPoint: routine.triggerPoint,
+    actionPlace: routine.actionPlace,
+    actionSteps: routine.actionSteps,
     cadence: routine.cadence,
     active: routine.active,
     sortOrder: routine.sortOrder,

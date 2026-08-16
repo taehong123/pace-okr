@@ -105,6 +105,9 @@ type Routine = {
   id: string;
   title: string;
   description: string;
+  triggerPoint: string;
+  actionPlace: string;
+  actionSteps: string;
   cadence: RoutineCadence;
   active: boolean;
   sortOrder: number;
@@ -860,7 +863,12 @@ function RoutineView({ onNotice }: { onNotice: (message: string) => void }) {
   const [date, setDate] = useState(localDate());
   const [rows, setRows] = useState<Routine[] | null>(null);
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [triggerPoint, setTriggerPoint] = useState("");
+  const [actionPlace, setActionPlace] = useState("");
+  const [actionSteps, setActionSteps] = useState("");
   const [cadence, setCadence] = useState<RoutineCadence>("daily");
+  const [drafts, setDrafts] = useState<Record<string, Pick<Routine, "description" | "triggerPoint" | "actionPlace" | "actionSteps">>>({});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -877,13 +885,17 @@ function RoutineView({ onNotice }: { onNotice: (message: string) => void }) {
     const response = await fetch("/api/routines", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, cadence, date }),
+      body: JSON.stringify({ title, description, triggerPoint, actionPlace, actionSteps, cadence, date }),
     });
     setSaving(false);
     if (!response.ok) return;
     const data = await response.json() as { routine: Routine };
     setRows((current) => [...(current ?? []), data.routine]);
     setTitle("");
+    setDescription("");
+    setTriggerPoint("");
+    setActionPlace("");
+    setActionSteps("");
     onNotice("루틴을 추가했습니다.");
   }
 
@@ -911,6 +923,49 @@ function RoutineView({ onNotice }: { onNotice: (message: string) => void }) {
     });
   }
 
+  function routineDraft(routine: Routine) {
+    return drafts[routine.id] ?? {
+      description: routine.description,
+      triggerPoint: routine.triggerPoint,
+      actionPlace: routine.actionPlace,
+      actionSteps: routine.actionSteps,
+    };
+  }
+
+  function updateDraft(routine: Routine, field: "description" | "triggerPoint" | "actionPlace" | "actionSteps", value: string) {
+    setDrafts((current) => ({ ...current, [routine.id]: { ...routineDraft(routine), [field]: value } }));
+  }
+
+  function hasDraftChange(routine: Routine) {
+    const draft = drafts[routine.id];
+    return Boolean(draft) && (
+      draft.description !== routine.description ||
+      draft.triggerPoint !== routine.triggerPoint ||
+      draft.actionPlace !== routine.actionPlace ||
+      draft.actionSteps !== routine.actionSteps
+    );
+  }
+
+  async function saveRoutineGuide(routine: Routine) {
+    const draft = routineDraft(routine);
+    setSaving(true);
+    const response = await fetch("/api/routines", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: routine.id, date, ...draft }),
+    });
+    setSaving(false);
+    if (!response.ok) return;
+    const data = await response.json() as { routine: Routine };
+    setRows((current) => current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? null);
+    setDrafts((current) => {
+      const next = { ...current };
+      delete next[routine.id];
+      return next;
+    });
+    onNotice("루틴 실행 방법을 저장했습니다.");
+  }
+
   async function remove(id: string) {
     const response = await fetch(`/api/routines?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     if (response.ok) {
@@ -919,7 +974,46 @@ function RoutineView({ onNotice }: { onNotice: (message: string) => void }) {
     }
   }
 
-  return <section className="routine-section"><div className="routine-toolbar"><label><CalendarDays size={14} /><input type="date" value={date} onChange={(event) => { setRows(null); setDate(event.target.value); }} /></label><form onSubmit={create}><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="새 루틴" aria-label="새 루틴 이름" /><select value={cadence} onChange={(event) => setCadence(event.target.value as RoutineCadence)} aria-label="반복 주기"><option value="daily">매일</option><option value="weekly">매주</option><option value="monthly">매월</option></select><button disabled={!title.trim() || saving} aria-label="루틴 추가" title="루틴 추가"><Plus size={14} /></button></form></div><div className="routine-list"><div className="routine-head"><span>완료</span><span>이름</span><span>반복</span><span>활성</span><span /></div>{rows === null ? <EmptyState icon={Repeat2} title="루틴을 불러오는 중입니다" /> : rows.length ? rows.map((routine) => <div className={`routine-row ${routine.active ? "" : "inactive"}`} key={routine.id}><button className={`task-check ${routine.completed ? "checked" : ""}`} disabled={!routine.active} onClick={() => void toggleCompletion(routine)} aria-label={routine.completed ? "완료 취소" : "완료 처리"}><Check size={12} /></button><div><b>{routine.title}</b>{routine.description && <small>{routine.description}</small>}</div><span>{routineCadenceLabel(routine.cadence)}</span><label className="routine-switch"><input type="checkbox" checked={routine.active} onChange={() => void toggleActive(routine)} /><span /><em className="sr-only">루틴 활성 상태</em></label><button className="icon-button" onClick={() => void remove(routine.id)} aria-label="루틴 삭제" title="루틴 삭제"><Trash2 size={13} /></button></div>) : <EmptyState icon={Repeat2} title="등록된 루틴이 없습니다" />}</div></section>;
+  return (
+    <section className="routine-section">
+      <div className="routine-toolbar">
+        <label><CalendarDays size={14} /><input type="date" value={date} onChange={(event) => { setRows(null); setDate(event.target.value); }} /></label>
+        <form className="routine-create" onSubmit={create}>
+          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="루틴 이름" aria-label="루틴 이름" />
+          <select value={cadence} onChange={(event) => setCadence(event.target.value as RoutineCadence)} aria-label="반복 주기"><option value="daily">매일</option><option value="weekly">매주</option><option value="monthly">매월</option></select>
+          <input value={triggerPoint} onChange={(event) => setTriggerPoint(event.target.value)} placeholder="트리거 포인트" aria-label="트리거 포인트" />
+          <input value={actionPlace} onChange={(event) => setActionPlace(event.target.value)} placeholder="어디서" aria-label="어디서 실행" />
+          <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="목적/메모" aria-label="루틴 목적" />
+          <textarea value={actionSteps} onChange={(event) => setActionSteps(event.target.value)} placeholder="무엇을 어떻게 할지" aria-label="실행 방법" rows={2} />
+          <button disabled={!title.trim() || saving} aria-label="루틴 추가" title="루틴 추가"><Plus size={14} /></button>
+        </form>
+      </div>
+      <div className="routine-cards">
+        {rows === null ? <EmptyState icon={Repeat2} title="루틴을 불러오는 중입니다" /> : rows.length ? rows.map((routine) => {
+          const draft = routineDraft(routine);
+          return (
+            <article className={`routine-card ${routine.active ? "" : "inactive"}`} key={routine.id}>
+              <header>
+                <button className={`task-check ${routine.completed ? "checked" : ""}`} disabled={!routine.active} onClick={() => void toggleCompletion(routine)} aria-label={routine.completed ? "완료 취소" : "완료 처리"}><Check size={12} /></button>
+                <div><b>{routine.title}</b><small>{routineCadenceLabel(routine.cadence)} · {routine.completed ? "오늘 완료" : "오늘 미완료"}</small></div>
+                <label className="routine-switch"><input type="checkbox" checked={routine.active} onChange={() => void toggleActive(routine)} /><span /><em className="sr-only">루틴 활성 상태</em></label>
+                <button className="icon-button" onClick={() => void remove(routine.id)} aria-label="루틴 삭제" title="루틴 삭제"><Trash2 size={13} /></button>
+              </header>
+              <div className="routine-guide-grid">
+                <label><span>트리거 포인트</span><input value={draft.triggerPoint} onChange={(event) => updateDraft(routine, "triggerPoint", event.target.value)} placeholder="예: 오전 9시, Slack 알림 확인 후" /></label>
+                <label><span>어디서</span><input value={draft.actionPlace} onChange={(event) => updateDraft(routine, "actionPlace", event.target.value)} placeholder="예: OKRPTR 작업 탭, 캘린더, 책상" /></label>
+                <label><span>목적/메모</span><input value={draft.description} onChange={(event) => updateDraft(routine, "description", event.target.value)} placeholder="왜 반복하는지" /></label>
+                <label className="routine-steps"><span>무엇을 어떻게</span><textarea value={draft.actionSteps} onChange={(event) => updateDraft(routine, "actionSteps", event.target.value)} placeholder="1. 확인할 것&#10;2. 실행할 것&#10;3. 끝났다고 판단하는 기준" rows={3} /></label>
+              </div>
+              <footer>
+                <button className="primary-action" disabled={!hasDraftChange(routine) || saving} onClick={() => void saveRoutineGuide(routine)}><Check size={14} />저장</button>
+              </footer>
+            </article>
+          );
+        }) : <EmptyState icon={Repeat2} title="등록된 루틴이 없습니다" />}
+      </div>
+    </section>
+  );
 }
 
 function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => void; onNotice: (message: string) => void }) {
