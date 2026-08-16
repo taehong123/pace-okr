@@ -36,11 +36,15 @@ test("server-renders the OKRPTR workspace", async () => {
   assert.match(html, /개인 워크스페이스/);
   assert.match(html, /그룹 관리/);
   assert.match(html, /OKR 대화/);
+  assert.match(html, /팀 OKR/);
+  assert.match(html, /개인 OKR/);
+  assert.match(html, /루틴부터/);
   assert.match(html, /Objective/);
   assert.match(html, /할 일을 입력하면 인박스에 저장됩니다/);
   assert.match(html, /데일리/);
   assert.match(html, /추천/);
   assert.match(html, /루틴/);
+  assert.doesNotMatch(html, /셀프 서브 도입|신규 사용자의 첫 주 활성화율|온보딩 체크리스트/);
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview|react-loading-skeleton/i);
 });
 
@@ -59,6 +63,9 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /OKR 대화/);
   assert.match(page, /정리하기/);
   assert.match(page, /OKR 만들기/);
+  assert.match(page, /팀 OKR/);
+  assert.match(page, /개인 OKR/);
+  assert.match(page, /루틴부터/);
   assert.match(page, /create_property/);
   assert.match(page, /set_property_value/);
   assert.match(page, /get_daily_scrum/);

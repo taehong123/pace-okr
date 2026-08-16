@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { and, asc, desc, eq, like, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, like, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   activityLog,
@@ -30,6 +30,20 @@ export const ITEM_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export const ITEM_CADENCES = ["daily", "weekly", "monthly", "quarterly"] as const;
 export const PROPERTY_TYPES = ["text", "number", "select", "date", "checkbox"] as const;
 export const ROUTINE_CADENCES = ["daily", "weekly", "monthly"] as const;
+const LEGACY_SEED_OBJECTIVE_TITLE = "셀프 서브 도입으로 팀의 성장 속도를 높인다";
+const LEGACY_SEED_ITEM_TITLES = [
+  LEGACY_SEED_OBJECTIVE_TITLE,
+  "신규 사용자의 첫 주 활성화율 32% → 48%",
+  "가입 후 10분 안에 첫 가치 경험 만들기",
+  "온보딩 활성화 개선",
+  "온보딩 체크리스트 실험",
+  "결제 화면 카피 확정",
+  "활성화 이벤트 QA",
+  "신규 사용자 5명 인터뷰",
+  "가격 정책 페이지 개선 아이디어",
+  "모바일 가입 이탈 구간 확인",
+];
+const LEGACY_SEED_ROUTINE_TITLES = ["오늘의 최우선 Task 정리", "주간 회고 작성"];
 export const TEAM_ROLES = ["owner", "admin", "member", "viewer"] as const;
 export const GROUP_COLORS = ["gray", "blue", "green", "yellow", "orange", "red", "purple"] as const;
 export const GROUP_VISIBILITIES = ["open", "private"] as const;
@@ -281,8 +295,7 @@ async function addColumnIfMissing(d1: RuntimeEnv["DB"], statement: string) {
 export async function ensureWorkspace(ownerId: string) {
   await ensureSchema();
   await migrateLegacyHierarchy(ownerId);
-  const [workspace] = await getDb().select().from(workspaces).where(eq(workspaces.id, ownerId)).limit(1);
-  if (workspace?.id === workspace?.ownerUserId) await seedWorkspace(ownerId);
+  await removeLegacySeedWorkspaceData(ownerId);
   await seedProperties(ownerId);
 }
 
@@ -1732,42 +1745,25 @@ async function migrateLegacyHierarchy(ownerId: string) {
   ]);
 }
 
-async function seedWorkspace(ownerId: string) {
-  const [result] = await getDb()
-    .select({ count: sql<number>`count(*)` })
+async function removeLegacySeedWorkspaceData(ownerId: string) {
+  const [legacyObjective] = await getDb()
+    .select({ id: items.id })
     .from(items)
-    .where(eq(items.ownerId, ownerId));
-  if (Number(result?.count ?? 0) > 0) return;
+    .where(and(eq(items.ownerId, ownerId), eq(items.kind, "objective"), eq(items.title, LEGACY_SEED_OBJECTIVE_TITLE)))
+    .limit(1);
+  if (!legacyObjective) return;
 
-  const objective = crypto.randomUUID();
-  const keyResult = crypto.randomUUID();
-  const initiative = crypto.randomUUID();
-  const project = crypto.randomUUID();
-  const firstTask = crypto.randomUUID();
-  const due = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
-
-  const seedRows = [
-    { id: objective, ownerId, kind: "objective", title: "셀프 서브 도입으로 팀의 성장 속도를 높인다", status: "in_progress", cadence: "quarterly", progress: 68, sortOrder: 10 },
-    { id: keyResult, ownerId, parentId: objective, kind: "key_result", title: "신규 사용자의 첫 주 활성화율 32% → 48%", status: "in_progress", cadence: "monthly", progress: 61, sortOrder: 20 },
-    { id: initiative, ownerId, parentId: keyResult, kind: "initiative", title: "가입 후 10분 안에 첫 가치 경험 만들기", status: "in_progress", cadence: "monthly", progress: 54, sortOrder: 30 },
-    { id: project, ownerId, parentId: initiative, kind: "project", title: "온보딩 활성화 개선", status: "in_progress", cadence: "monthly", progress: 52, sortOrder: 40 },
-    { id: firstTask, ownerId, parentId: project, kind: "task", title: "온보딩 체크리스트 실험", status: "in_progress", cadence: "weekly", progress: 75, dueDate: due(5), priority: "high", sortOrder: 50 },
-    { id: crypto.randomUUID(), ownerId, parentId: project, kind: "task", title: "결제 화면 카피 확정", status: "in_progress", cadence: "weekly", progress: 40, dueDate: due(0), priority: "high", sortOrder: 60 },
-    { id: crypto.randomUUID(), ownerId, parentId: project, kind: "task", title: "활성화 이벤트 QA", status: "todo", cadence: "weekly", progress: 0, dueDate: due(2), sortOrder: 70 },
-    { id: crypto.randomUUID(), ownerId, parentId: project, kind: "task", title: "신규 사용자 5명 인터뷰", status: "todo", cadence: "weekly", progress: 0, dueDate: due(4), sortOrder: 80 },
-    { id: crypto.randomUUID(), ownerId, kind: "task", title: "가격 정책 페이지 개선 아이디어", status: "inbox", cadence: "weekly", source: "mcp", sortOrder: 90 },
-    { id: crypto.randomUUID(), ownerId, kind: "task", title: "모바일 가입 이탈 구간 확인", status: "inbox", cadence: "weekly", source: "slack", sortOrder: 100 },
-  ];
-  await getDb().insert(items).values(seedRows.slice(0, 5));
-  await getDb().insert(items).values(seedRows.slice(5));
-  await getDb().insert(checklistItems).values([
-    { id: crypto.randomUUID(), ownerId, taskId: firstTask, title: "A/B 테스트 이벤트 정의", completed: true, sortOrder: 10 },
-    { id: crypto.randomUUID(), ownerId, taskId: firstTask, title: "실험군 이벤트 검증", completed: false, sortOrder: 20 },
-  ]);
-  await getDb().insert(routines).values([
-    { id: crypto.randomUUID(), ownerId, title: "오늘의 최우선 Task 정리", cadence: "daily", sortOrder: 10 },
-    { id: crypto.randomUUID(), ownerId, title: "주간 회고 작성", cadence: "weekly", sortOrder: 20 },
-  ]);
+  const seedItems = await getDb()
+    .select({ id: items.id })
+    .from(items)
+    .where(and(eq(items.ownerId, ownerId), inArray(items.title, LEGACY_SEED_ITEM_TITLES)));
+  const seedItemIds = seedItems.map((entry) => entry.id);
+  if (seedItemIds.length) {
+    await getDb().delete(checklistItems).where(and(eq(checklistItems.ownerId, ownerId), inArray(checklistItems.taskId, seedItemIds)));
+    await getDb().delete(itemPropertyValues).where(and(eq(itemPropertyValues.ownerId, ownerId), inArray(itemPropertyValues.itemId, seedItemIds)));
+    await getDb().delete(items).where(and(eq(items.ownerId, ownerId), inArray(items.id, seedItemIds)));
+  }
+  await getDb().delete(routines).where(and(eq(routines.ownerId, ownerId), inArray(routines.title, LEGACY_SEED_ROUTINE_TITLES)));
 }
 
 async function seedProperties(ownerId: string) {

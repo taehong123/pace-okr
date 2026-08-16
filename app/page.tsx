@@ -284,18 +284,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
   },
 };
 
-const fallbackItems: OkrptrItem[] = [
-  item("obj", null, "objective", "셀프 서브 도입으로 팀의 성장 속도를 높인다", "in_progress", "quarterly", 68),
-  item("kr", "obj", "key_result", "신규 사용자의 첫 주 활성화율 32% → 48%", "in_progress", "monthly", 61),
-  item("ini", "kr", "initiative", "가입 후 10분 안에 첫 가치 경험 만들기", "in_progress", "monthly", 54),
-  item("project", "ini", "project", "온보딩 활성화 개선", "in_progress", "monthly", 52),
-  item("task-1", "project", "task", "온보딩 체크리스트 실험", "in_progress", "weekly", 50, "2026-08-20", "web", "high"),
-  item("task-2", "project", "task", "결제 화면 카피 확정", "in_progress", "weekly", 40, "2026-08-15", "web", "high"),
-  item("task-3", "project", "task", "활성화 이벤트 QA", "todo", "weekly", 0, "2026-08-17"),
-  item("task-4", "project", "task", "신규 사용자 5명 인터뷰", "todo", "weekly", 0, "2026-08-19"),
-  item("capture-1", null, "task", "가격 정책 페이지 개선 아이디어", "inbox", "weekly", 0, null, "mcp"),
-  item("capture-2", null, "task", "모바일 가입 이탈 구간 확인", "inbox", "weekly", 0, null, "slack"),
-];
+const fallbackItems: OkrptrItem[] = [];
 
 const fallbackProperties: PropertyDefinition[] = [
   { id: "owner", name: "담당", type: "text", options: [], sortOrder: 10 },
@@ -303,12 +292,7 @@ const fallbackProperties: PropertyDefinition[] = [
   { id: "estimate", name: "예상 시간", type: "number", options: [], sortOrder: 30 },
 ];
 
-const fallbackValues: PropertyValueMap = {
-  "task-1": { owner: "태홍", sprint: "Sprint 18", estimate: 6 },
-  "task-2": { owner: "민지", sprint: "Sprint 18", estimate: 3 },
-  "task-3": { owner: "태홍", sprint: "Sprint 18", estimate: 4 },
-  "task-4": { owner: "유진", sprint: "Sprint 19", estimate: 5 },
-};
+const fallbackValues: PropertyValueMap = {};
 
 const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "home", label: "홈", icon: LayoutDashboard },
@@ -527,8 +511,9 @@ export default function Home() {
 
   async function createOnboardingPlan(plan: OnboardingPlan) {
     const objectiveTitle = plan.objective.trim();
-    if (!objectiveTitle) {
-      showNotice("Objective를 먼저 적어 주세요.");
+    const routineTitle = plan.routineTitle.trim();
+    if (!objectiveTitle && !routineTitle) {
+      showNotice("Objective나 루틴 이름을 먼저 적어 주세요.");
       return false;
     }
     const createdItems: OkrptrItem[] = [];
@@ -543,7 +528,39 @@ export default function Home() {
       createdItems.push(data.item);
       return data.item;
     }
+    async function createPlannedRoutine() {
+      if (!routineTitle) return;
+      const response = await fetch("/api/routines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: routineTitle,
+          triggerPoint: plan.routineTrigger,
+          actionPlace: plan.routinePlace,
+          actionSteps: plan.routineSteps,
+          cadence: "daily",
+        }),
+      });
+      if (!response.ok) throw new Error("routine");
+    }
     try {
+      if (!objectiveTitle) {
+        await createPlannedRoutine();
+        if (workspaceRules) {
+          const response = await fetch("/api/workspace-rules", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...workspaceRules, configured: true }),
+          });
+          if (response.ok) {
+            const data = await response.json() as { rules: WorkspaceRules };
+            setWorkspaceRules(data.rules);
+          }
+        }
+        setActiveView("routines");
+        showNotice("루틴을 만들었습니다.");
+        return true;
+      }
       const objectiveItem = await createPlannedItem({ title: objectiveTitle, kind: "objective", status: "in_progress", progress: 0 });
       const keyResultTitle = plan.keyResult.trim() || "첫 핵심 결과 정의";
       const keyResultItem = await createPlannedItem({ title: keyResultTitle, kind: "key_result", parentId: objectiveItem.id, status: "todo" });
@@ -555,19 +572,7 @@ export default function Home() {
       for (const taskTitle of taskTitles.length ? taskTitles : ["첫 실행 Task 정리"]) {
         await createPlannedItem({ title: taskTitle, kind: "task", parentId: projectItem.id, status: "todo" });
       }
-      if (plan.routineTitle.trim()) {
-        await fetch("/api/routines", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: plan.routineTitle,
-            triggerPoint: plan.routineTrigger,
-            actionPlace: plan.routinePlace,
-            actionSteps: plan.routineSteps,
-            cadence: "daily",
-          }),
-        });
-      }
+      await createPlannedRoutine();
       if (workspaceRules) {
         const response = await fetch("/api/workspace-rules", {
           method: "PUT",
@@ -1178,8 +1183,10 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
     ...emptyPlan,
   });
   const [assistantMessage, setAssistantMessage] = useState("OKR에 대해 편하게 적어 주세요. 목표, 지표, 실행 프로젝트, 할 일, 루틴 후보로 정리해드립니다.");
+  const [guideQuestions, setGuideQuestions] = useState<string[]>(["처음이면 아래 버튼으로 시작해도 됩니다."]);
   const [draftOpen, setDraftOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const saveLabel = !plan.objective.trim() && plan.routineTitle.trim() ? "루틴 만들기" : "OKR 만들기";
   function patch(field: keyof OnboardingPlan, value: string) {
     setPlan((current) => ({ ...current, [field]: value }));
   }
@@ -1199,9 +1206,35 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
     }));
     setDraftOpen(true);
     setAssistantMessage("말씀하신 내용을 OKR 초안으로 나눴습니다. 필요한 부분만 고친 뒤 실제 OKR로 만들 수 있습니다.");
+    setGuideQuestions([]);
+  }
+  function chooseGuide(kind: "team" | "personal" | "routine" | "free") {
+    setPlan({ ...emptyPlan });
+    setMessage("");
+    if (kind === "team") {
+      setAssistantMessage("팀 OKR로 시작하겠습니다. 팀이 이번 주기 끝에 달라져야 하는 상태부터 잡고, 공동 지표와 실행 책임을 나눕니다.");
+      setGuideQuestions(["팀이 달성해야 하는 결과는 무엇인가요?", "성공 여부를 숫자나 상태로 어떻게 확인할까요?", "어떤 프로젝트와 담당자가 먼저 움직여야 하나요?"]);
+      setDraftOpen(true);
+      return;
+    }
+    if (kind === "personal") {
+      setAssistantMessage("개인 OKR로 시작하겠습니다. 역할 안에서 만들고 싶은 변화, 측정 기준, 바로 실행할 일을 분리합니다.");
+      setGuideQuestions(["이번 주기 동안 본인이 만들고 싶은 변화는 무엇인가요?", "완료가 아니라 성과를 보여주는 기준은 무엇인가요?", "이번 주에 바로 시작할 일은 무엇인가요?"]);
+      setDraftOpen(true);
+      return;
+    }
+    if (kind === "routine") {
+      setAssistantMessage("루틴부터 정리하겠습니다. 반복할 시점, 장소나 도구, 실제 행동 순서를 먼저 잡고 필요하면 OKR에 연결합니다.");
+      setGuideQuestions(["언제 이 루틴이 시작돼야 하나요?", "어디서 또는 어떤 도구에서 실행하나요?", "무엇을 어떤 순서로 하면 되나요?"]);
+      setDraftOpen(true);
+      return;
+    }
+    setAssistantMessage("좋습니다. 정해진 양식 없이 지금 생각나는 대로 적어 주세요. 제가 OKR 구조로 나눠드립니다.");
+    setGuideQuestions([]);
+    setDraftOpen(false);
   }
   async function save() {
-    if (!plan.objective.trim()) {
+    if (!plan.objective.trim() && !plan.routineTitle.trim()) {
       organizeMessage();
       return;
     }
@@ -1211,6 +1244,7 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
     if (created) {
       setMessage("");
       setPlan({ ...emptyPlan });
+      setGuideQuestions(["다음 목표나 루틴도 이어서 이야기할 수 있습니다."]);
       setDraftOpen(false);
       setAssistantMessage("OKR 구조를 만들었습니다. 다음 목표나 루틴도 이어서 이야기할 수 있습니다.");
     }
@@ -1223,26 +1257,28 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
       <div className="home-chat-surface">
         <div className="chat-thread">
           <p className="assistant-message">{assistantMessage}</p>
-          <label className="chat-input"><span>지금 생각 중인 OKR</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={4} placeholder={"예: 이번 분기에는 신규 사용자가 첫 주 안에 제품 가치를 느끼게 만들고 싶어. 활성화율을 35%까지 올리고, 가입 후 첫 실행 흐름을 개선해야 해."} /></label>
+          {guideQuestions.length > 0 && <div className="guide-questions">{guideQuestions.map((question) => <span key={question}>{question}</span>)}</div>}
+          <label className="chat-input"><span>지금 생각 중인 OKR</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={4} placeholder="목표, 고민, 지표, 해야 할 일을 편하게 적어 주세요." /></label>
           <div className="chat-presets">
-            <button onClick={() => { setMessage("신규 사용자가 첫 주 안에 핵심 가치를 경험하게 만들기\n첫 주 활성화율 35% 달성\n온보딩 활성화 개선\n가입 후 첫 실행 플로우 개선\n첫 화면 메시지 정리\n첫 Task 생성 흐름 QA\n신규 사용자 5명 인터뷰"); setDraftOpen(false); }}>제품 성장</button>
-            <button onClick={() => { setMessage("팀의 주간 실행 리듬을 안정화하기\n매주 금요일까지 주요 Task 90% 리뷰\n주간 운영 리듬 만들기\n주간 리뷰 프로세스 정착\n월요일 우선순위 정리\n수요일 막힘 확인\n금요일 회고 작성"); setDraftOpen(false); }}>팀 운영</button>
-            <button onClick={() => setPlan((current) => ({ ...current, routineTitle: "오늘의 최우선 Task 정리", routineTrigger: "매일 업무 시작 전", routinePlace: "OKRPTR 홈과 작업 탭", routineSteps: "1. 인박스를 확인한다\n2. 오늘 할 Task 3개를 고른다\n3. 막힌 항목을 데일리에 적는다" }))}>루틴 포함</button>
+            <button onClick={() => chooseGuide("team")}>팀 OKR</button>
+            <button onClick={() => chooseGuide("personal")}>개인 OKR</button>
+            <button onClick={() => chooseGuide("routine")}>루틴부터</button>
+            <button onClick={() => chooseGuide("free")}>그냥 말하기</button>
           </div>
           <div className="chat-actions">
             <button className="chat-apply" onClick={organizeMessage} disabled={!message.trim()}><TextCursorInput size={13} />정리하기</button>
-            <button className="welcome-primary" onClick={() => void save()} disabled={saving || (!plan.objective.trim() && !message.trim())}>{saving ? "생성 중" : "OKR 만들기"}<ChevronRight size={14} /></button>
+            <button className="welcome-primary" onClick={() => void save()} disabled={saving || (!plan.objective.trim() && !plan.routineTitle.trim() && !message.trim())}>{saving ? "생성 중" : saveLabel}<ChevronRight size={14} /></button>
           </div>
         </div>
         {draftOpen && <div className="okr-setup-fields home-draft-fields">
-          <label><span>Objective</span><textarea value={plan.objective} onChange={(event) => patch("objective", event.target.value)} rows={3} placeholder="예: 신규 사용자가 첫 주 안에 핵심 가치를 경험하게 만들기" /></label>
-          <label><span>Key Result</span><textarea value={plan.keyResult} onChange={(event) => patch("keyResult", event.target.value)} rows={3} placeholder="예: 첫 주 활성화율 35% 달성" /></label>
-          <label><span>Initiative</span><input value={plan.initiative} onChange={(event) => patch("initiative", event.target.value)} placeholder="예: 온보딩 활성화 개선" /></label>
-          <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="예: 가입 후 첫 실행 플로우 개선" /></label>
-          <label className="wide"><span>첫 Task</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder={"한 줄에 하나씩 입력\n예: 첫 화면 메시지 정리\n첫 Task 생성 흐름 QA"} /></label>
-          <label><span>루틴 이름</span><input value={plan.routineTitle} onChange={(event) => patch("routineTitle", event.target.value)} placeholder="예: 오늘의 최우선 Task 정리" /></label>
-          <label><span>루틴 트리거</span><input value={plan.routineTrigger} onChange={(event) => patch("routineTrigger", event.target.value)} placeholder="예: 매일 업무 시작 전" /></label>
-          <label><span>어디서</span><input value={plan.routinePlace} onChange={(event) => patch("routinePlace", event.target.value)} placeholder="예: OKRPTR 홈" /></label>
+          <label><span>Objective</span><textarea value={plan.objective} onChange={(event) => patch("objective", event.target.value)} rows={3} placeholder="달성하고 싶은 결과" /></label>
+          <label><span>Key Result</span><textarea value={plan.keyResult} onChange={(event) => patch("keyResult", event.target.value)} rows={3} placeholder="성공을 확인할 수 있는 기준" /></label>
+          <label><span>Initiative</span><input value={plan.initiative} onChange={(event) => patch("initiative", event.target.value)} placeholder="성과를 만들 큰 방향" /></label>
+          <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="실제로 진행할 프로젝트" /></label>
+          <label className="wide"><span>첫 Task</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder="한 줄에 하나씩 입력" /></label>
+          <label><span>루틴 이름</span><input value={plan.routineTitle} onChange={(event) => patch("routineTitle", event.target.value)} placeholder="반복해서 할 일의 이름" /></label>
+          <label><span>루틴 트리거</span><input value={plan.routineTrigger} onChange={(event) => patch("routineTrigger", event.target.value)} placeholder="루틴이 시작되는 시점" /></label>
+          <label><span>어디서</span><input value={plan.routinePlace} onChange={(event) => patch("routinePlace", event.target.value)} placeholder="실행할 장소나 도구" /></label>
           <label className="wide"><span>무엇을 어떻게</span><textarea value={plan.routineSteps} onChange={(event) => patch("routineSteps", event.target.value)} rows={3} placeholder="루틴 실행 방법" /></label>
         </div>}
       </div>
