@@ -64,6 +64,13 @@
       "when": 1786879556910,
       "tag": "0008_zippy_dormammu",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1786881785122,
+      "tag": "0009_demonic_hitman",
+      "breakpoints": true
     }
   ]
 }

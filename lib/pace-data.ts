@@ -11,6 +11,7 @@ import {
   routineCompletions,
   routines,
   userWorkspacePreferences,
+  workspaceRules,
   workspaceGroupMembers,
   workspaceGroups,
   workspaceMembers,
@@ -20,6 +21,7 @@ import {
   type WorkspaceGroup,
   type WorkspaceGroupMember,
   type WorkspaceMember,
+  type WorkspaceRule,
 } from "@/db/schema";
 
 export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "task"] as const;
@@ -40,6 +42,15 @@ export type ItemCadence = (typeof ITEM_CADENCES)[number];
 export type PropertyType = (typeof PROPERTY_TYPES)[number];
 export type PropertyValue = string | number | boolean | null;
 export type RoutineCadence = (typeof ROUTINE_CADENCES)[number];
+export type WorkspaceRuleInput = Partial<{
+  captureInstruction: string;
+  structureInstruction: string;
+  routineInstruction: string;
+  defaultPriority: ItemPriority;
+  defaultCadence: ItemCadence;
+  reviewBeforeCreate: boolean;
+  configured: boolean;
+}>;
 export type TeamRole = (typeof TEAM_ROLES)[number];
 export type GroupColor = (typeof GROUP_COLORS)[number];
 export type GroupVisibility = (typeof GROUP_VISIBILITIES)[number];
@@ -102,6 +113,18 @@ async function ensureSchema() {
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_user_workspace_preferences_active ON user_workspace_preferences(active_workspace_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS workspace_rules (
+          workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+          capture_instruction TEXT NOT NULL DEFAULT '',
+          structure_instruction TEXT NOT NULL DEFAULT '',
+          routine_instruction TEXT NOT NULL DEFAULT '',
+          default_priority TEXT NOT NULL DEFAULT 'medium',
+          default_cadence TEXT NOT NULL DEFAULT 'weekly',
+          review_before_create INTEGER NOT NULL DEFAULT 1,
+          configured INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
         d1.prepare(`CREATE TABLE IF NOT EXISTS workspace_groups (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -261,6 +284,71 @@ export async function ensureWorkspace(ownerId: string) {
   const [workspace] = await getDb().select().from(workspaces).where(eq(workspaces.id, ownerId)).limit(1);
   if (workspace?.id === workspace?.ownerUserId) await seedWorkspace(ownerId);
   await seedProperties(ownerId);
+}
+
+export async function getWorkspaceRules(ownerId: string) {
+  const [saved] = await getDb().select().from(workspaceRules).where(eq(workspaceRules.workspaceId, ownerId)).limit(1);
+  if (saved) return serializeWorkspaceRules(saved);
+  const [created] = await getDb()
+    .insert(workspaceRules)
+    .values({
+      workspaceId: ownerId,
+      captureInstruction: "대화에서 나온 할 일은 우선 인박스에 저장하고, 바로 구조가 보일 때만 Project 아래 Task로 연결합니다.",
+      structureInstruction: "Objective > Key Result > Initiative > Project > Task 계층을 유지하고, 불확실한 항목은 인박스에 둡니다.",
+      routineInstruction: "루틴은 트리거 포인트, 어디서, 무엇을 어떻게 할지까지 함께 정리합니다.",
+      defaultPriority: "medium",
+      defaultCadence: "weekly",
+      reviewBeforeCreate: true,
+      configured: false,
+    })
+    .returning();
+  return serializeWorkspaceRules(created);
+}
+
+export async function saveWorkspaceRules(ownerId: string, input: WorkspaceRuleInput) {
+  const current = await getWorkspaceRules(ownerId);
+  const defaultPriority = input.defaultPriority ?? current.defaultPriority;
+  const defaultCadence = input.defaultCadence ?? current.defaultCadence;
+  if (!ITEM_PRIORITIES.includes(defaultPriority)) throw new Error("Unsupported default priority");
+  if (!ITEM_CADENCES.includes(defaultCadence)) throw new Error("Unsupported default cadence");
+  const values = {
+    captureInstruction: normalizeRuleText(input.captureInstruction ?? current.captureInstruction),
+    structureInstruction: normalizeRuleText(input.structureInstruction ?? current.structureInstruction),
+    routineInstruction: normalizeRuleText(input.routineInstruction ?? current.routineInstruction),
+    defaultPriority,
+    defaultCadence,
+    reviewBeforeCreate: input.reviewBeforeCreate ?? current.reviewBeforeCreate,
+    configured: input.configured ?? true,
+    updatedAt: new Date().toISOString(),
+  };
+  const [saved] = await getDb()
+    .insert(workspaceRules)
+    .values({ workspaceId: ownerId, ...values })
+    .onConflictDoUpdate({
+      target: workspaceRules.workspaceId,
+      set: values,
+    })
+    .returning();
+  return serializeWorkspaceRules(saved);
+}
+
+function normalizeRuleText(value: string) {
+  return value.trim().slice(0, 2000);
+}
+
+export function serializeWorkspaceRules(rule: WorkspaceRule) {
+  return {
+    workspaceId: rule.workspaceId,
+    captureInstruction: rule.captureInstruction,
+    structureInstruction: rule.structureInstruction,
+    routineInstruction: rule.routineInstruction,
+    defaultPriority: rule.defaultPriority as ItemPriority,
+    defaultCadence: rule.defaultCadence as ItemCadence,
+    reviewBeforeCreate: rule.reviewBeforeCreate,
+    configured: rule.configured,
+    createdAt: rule.createdAt,
+    updatedAt: rule.updatedAt,
+  };
 }
 
 export async function authorizeRequest(
@@ -845,6 +933,7 @@ export async function createItem(
   const kind = input.kind ?? "task";
   const status = input.status ?? (kind === "task" && !input.parentId ? "inbox" : "todo");
   await validateParent(ownerId, kind, input.parentId ?? null, status);
+  const rules = await getWorkspaceRules(ownerId);
 
   const id = crypto.randomUUID();
   const [created] = await getDb()
@@ -857,8 +946,8 @@ export async function createItem(
       title: input.title.trim(),
       description: input.description?.trim() ?? "",
       status,
-      priority: input.priority ?? "medium",
-      cadence: input.cadence ?? "weekly",
+      priority: input.priority ?? rules.defaultPriority,
+      cadence: input.cadence ?? rules.defaultCadence,
       progress: clampProgress(input.progress ?? 0),
       dueDate: input.dueDate ?? null,
       source: input.source ?? "web",

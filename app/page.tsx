@@ -117,6 +117,18 @@ type Routine = {
   note: string;
 };
 
+type WorkspaceRules = {
+  workspaceId: string;
+  captureInstruction: string;
+  structureInstruction: string;
+  routineInstruction: string;
+  defaultPriority: Priority;
+  defaultCadence: Cadence;
+  reviewBeforeCreate: boolean;
+  configured: boolean;
+  updatedAt: string;
+};
+
 type TeamMember = {
   id: string;
   email: string;
@@ -324,6 +336,7 @@ export default function Home() {
   const [teamPanelOpen, setTeamPanelOpen] = useState(false);
   const [teamPanelTab, setTeamPanelTab] = useState<"members" | "groups">("members");
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [workspaceRules, setWorkspaceRules] = useState<WorkspaceRules | null>(null);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [workspaceCreateOpen, setWorkspaceCreateOpen] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
@@ -332,6 +345,7 @@ export default function Home() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [setupChatOpen, setSetupChatOpen] = useState(false);
   const [introLanguage, setIntroLanguage] = useState<IntroLanguage>("ko");
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
@@ -340,24 +354,29 @@ export default function Home() {
       const savedLanguage = window.localStorage.getItem("okrptr.intro-language");
       const language = isIntroLanguage(savedLanguage) ? savedLanguage : preferredIntroLanguage();
       setIntroLanguage(language);
-      if (!window.localStorage.getItem("okrptr.intro-seen")) setOnboardingOpen(true);
     }, 0);
     return () => window.clearTimeout(timeout);
   }, []);
 
   useEffect(() => {
     let active = true;
-    Promise.all([fetch("/api/items"), fetch("/api/properties"), fetch("/api/workspaces")])
-      .then(async ([itemsResponse, propertiesResponse, workspacesResponse]) => {
-        if (!itemsResponse.ok || !propertiesResponse.ok || !workspacesResponse.ok) throw new Error("offline");
+    Promise.all([fetch("/api/items"), fetch("/api/properties"), fetch("/api/workspaces"), fetch("/api/workspace-rules")])
+      .then(async ([itemsResponse, propertiesResponse, workspacesResponse, rulesResponse]) => {
+        if (!itemsResponse.ok || !propertiesResponse.ok || !workspacesResponse.ok || !rulesResponse.ok) throw new Error("offline");
         const itemData = (await itemsResponse.json()) as { items: OkrptrItem[] };
         const propertyData = (await propertiesResponse.json()) as { properties: PropertyDefinition[]; values: PropertyValueMap };
         const workspaceData = (await workspacesResponse.json()) as { workspaces: WorkspaceSummary[] };
+        const rulesData = (await rulesResponse.json()) as { rules: WorkspaceRules };
         if (!active) return;
         setItems(itemData.items);
         setProperties(propertyData.properties);
         setPropertyValues(propertyData.values);
         setWorkspaces(workspaceData.workspaces);
+        setWorkspaceRules(rulesData.rules);
+        if (!rulesData.rules.configured) {
+          setActiveView("home");
+          setSetupChatOpen(true);
+        }
         setConnected(true);
       })
       .catch(() => setConnected(false));
@@ -499,6 +518,22 @@ export default function Home() {
     showNotice(`${kindLabel(created.kind)}를 만들었습니다.`);
   }
 
+  async function saveWorkspaceRules(nextRules: WorkspaceRules) {
+    const response = await fetch("/api/workspace-rules", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...nextRules, configured: true }),
+    });
+    if (!response.ok) {
+      showNotice("규칙을 저장하지 못했습니다.");
+      return false;
+    }
+    const data = await response.json() as { rules: WorkspaceRules };
+    setWorkspaceRules(data.rules);
+    showNotice("워크스페이스 규칙을 저장했습니다.");
+    return true;
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -618,7 +653,7 @@ export default function Home() {
             </form>
           )}
 
-          {activeView === "home" && <HomeView objective={objective} items={taskItems} onGoToWork={() => setActiveView("work")} onOpenTask={setSelectedTaskId} />}
+          {activeView === "home" && <HomeView objective={objective} items={taskItems} rules={workspaceRules} onSaveRules={saveWorkspaceRules} onOpenSetup={() => setSetupChatOpen(true)} onGoToWork={() => setActiveView("work")} onOpenTask={setSelectedTaskId} />}
           {activeView === "inbox" && <InboxView items={inboxItems} onConnect={connectInbox} />}
           {activeView === "work" && (
             <TaskDatabase
@@ -662,6 +697,16 @@ export default function Home() {
         />
       )}
       {integrationOpen && <IntegrationModal onClose={() => setIntegrationOpen(false)} />}
+      {setupChatOpen && workspaceRules && (
+        <SetupChatModal
+          rules={workspaceRules}
+          onSave={async (rules) => {
+            const saved = await saveWorkspaceRules(rules);
+            if (saved) setSetupChatOpen(false);
+          }}
+          onClose={() => setSetupChatOpen(false)}
+        />
+      )}
       {propertyPanelOpen && (
         <PropertyPanel
           properties={properties}
@@ -1046,8 +1091,118 @@ function RecommendationsView({ onNavigate }: { onNavigate: (view: View) => void 
   return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{row.itemIds.length}개 항목 · 우선순위 {row.score}</small></div><button onClick={() => onNavigate(row.kind === "unlinked" ? "inbox" : row.kind === "empty_project" ? "okr" : "work")}><ChevronRight size={15} /></button></article>)}</section>;
 }
 
-function HomeView({ objective, items, onGoToWork, onOpenTask }: { objective?: OkrptrItem; items: OkrptrItem[]; onGoToWork: () => void; onOpenTask: (id: string) => void }) {
-  return <div className="home-layout"><section className="home-focus"><header>현재 Objective<button onClick={onGoToWork}>작업 보기<ChevronRight size={13} /></button></header>{objective ? <div className="home-objective"><Target size={20} /><div><h2>{objective.title}</h2><span><i style={{ width: `${objective.progress}%` }} /></span><small>{objective.progress}% 진행</small></div></div> : <EmptyState icon={Target} title="Objective가 없습니다" />}</section><section className="home-tasks"><header>진행 중 Task<b>{items.filter((entry) => entry.status === "in_progress").length}</b></header>{items.filter((entry) => entry.status === "in_progress").slice(0, 6).map((entry) => <button key={entry.id} onClick={() => onOpenTask(entry.id)}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b><small>{dueLabel(entry.dueDate)}</small></button>)}</section></div>;
+function HomeView({ objective, items, rules, onSaveRules, onOpenSetup, onGoToWork, onOpenTask }: {
+  objective?: OkrptrItem;
+  items: OkrptrItem[];
+  rules: WorkspaceRules | null;
+  onSaveRules: (rules: WorkspaceRules) => Promise<boolean>;
+  onOpenSetup: () => void;
+  onGoToWork: () => void;
+  onOpenTask: (id: string) => void;
+}) {
+  const activeTasks = items.filter((entry) => entry.status === "in_progress");
+  return (
+    <div className="home-layout">
+      <div className="home-main">
+        <section className="home-focus">
+          <header>현재 Objective<button onClick={onGoToWork}>작업 보기<ChevronRight size={13} /></button></header>
+          {objective ? <div className="home-objective"><Target size={20} /><div><h2>{objective.title}</h2><span><i style={{ width: `${objective.progress}%` }} /></span><small>{objective.progress}% 진행</small></div></div> : <EmptyState icon={Target} title="Objective가 없습니다" />}
+        </section>
+        {rules && <WorkspaceRulesPanel key={rules.updatedAt} rules={rules} onSave={onSaveRules} onOpenSetup={onOpenSetup} />}
+      </div>
+      <section className="home-tasks">
+        <header>진행 중 Task<b>{activeTasks.length}</b></header>
+        {activeTasks.slice(0, 6).map((entry) => <button key={entry.id} onClick={() => onOpenTask(entry.id)}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b><small>{dueLabel(entry.dueDate)}</small></button>)}
+      </section>
+    </div>
+  );
+}
+
+function WorkspaceRulesPanel({ rules, onSave, onOpenSetup }: { rules: WorkspaceRules; onSave: (rules: WorkspaceRules) => Promise<boolean>; onOpenSetup: () => void }) {
+  const [draft, setDraft] = useState(rules);
+  const [saving, setSaving] = useState(false);
+  const changed = JSON.stringify(draft) !== JSON.stringify(rules);
+  async function save() {
+    setSaving(true);
+    await onSave(draft);
+    setSaving(false);
+  }
+  return (
+    <section className="workspace-rules-card">
+      <header>
+        <div><b>OKRPTR 규칙</b><span>웹 · API · MCP 공통 적용</span></div>
+        <button onClick={onOpenSetup}><Bot size={13} />대화로 설정</button>
+      </header>
+      <RuleFields rules={draft} onChange={setDraft} compact />
+      <footer>
+        <span>{draft.reviewBeforeCreate ? "불확실하면 확인 후 생성" : "명확하면 바로 생성"}</span>
+        <button className="primary-action" onClick={() => void save()} disabled={!changed || saving}><Check size={13} />저장</button>
+      </footer>
+    </section>
+  );
+}
+
+function SetupChatModal({ rules, onSave, onClose }: { rules: WorkspaceRules; onSave: (rules: WorkspaceRules) => Promise<void>; onClose: () => void }) {
+  const [draft, setDraft] = useState(rules);
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  function applyMessage() {
+    const text = message.trim();
+    if (!text) return;
+    setDraft((current) => ({
+      ...current,
+      captureInstruction: `${current.captureInstruction}\n${text}`.trim(),
+      configured: true,
+    }));
+    setMessage("");
+  }
+  async function save() {
+    setSaving(true);
+    await onSave({ ...draft, configured: true });
+    setSaving(false);
+  }
+  return (
+    <div className="modal-backdrop setup-backdrop">
+      <section className="setup-chat" role="dialog" aria-modal="true" aria-labelledby="setup-title">
+        <header>
+          <div><span className="brand-mark">O</span><div><h2 id="setup-title">OKRPTR 설정</h2><p>대화, 웹, MCP 입력이 따를 규칙을 정합니다.</p></div></div>
+          <button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button>
+        </header>
+        <div className="setup-chat-body">
+          <div className="chat-thread">
+            <p className="assistant-message">처음 들어오는 일은 어떻게 정리할까요? 아래 규칙은 서비스 안의 빠른 입력과 외부 MCP 호출에 같이 적용됩니다.</p>
+            <div className="chat-presets">
+              <button onClick={() => setDraft((current) => ({ ...current, captureInstruction: "모든 새 요청은 먼저 인박스에 저장하고, 하루 리뷰 때 Project에 연결합니다.", reviewBeforeCreate: true }))}>인박스 우선</button>
+              <button onClick={() => setDraft((current) => ({ ...current, structureInstruction: "Project가 명확하면 바로 Task로 만들고, Objective/Key Result가 언급되면 계층까지 함께 생성합니다.", reviewBeforeCreate: false }))}>명확하면 구조화</button>
+              <button onClick={() => setDraft((current) => ({ ...current, routineInstruction: "루틴은 반드시 트리거 포인트, 어디서, 무엇을 어떻게 하는지까지 물어보고 저장합니다." }))}>루틴 상세화</button>
+            </div>
+            <label className="chat-input"><span>자연어 규칙 추가</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={3} placeholder="예: 고객 관련 요청은 우선순위를 높게 보고, 매주 리뷰 대상으로 넣어줘" /></label>
+            <button className="chat-apply" onClick={applyMessage} disabled={!message.trim()}><Plus size={13} />규칙에 반영</button>
+          </div>
+          <RuleFields rules={draft} onChange={setDraft} />
+        </div>
+        <footer>
+          <button className="welcome-secondary" onClick={onClose}>나중에</button>
+          <button className="welcome-primary" onClick={() => void save()} disabled={saving}>{saving ? "저장 중" : "설정 저장"}<ChevronRight size={14} /></button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function RuleFields({ rules, onChange, compact = false }: { rules: WorkspaceRules; onChange: (rules: WorkspaceRules) => void; compact?: boolean }) {
+  return (
+    <div className={compact ? "rule-fields compact" : "rule-fields"}>
+      <label><span>캡처 규칙</span><textarea value={rules.captureInstruction} onChange={(event) => onChange({ ...rules, captureInstruction: event.target.value })} rows={compact ? 2 : 3} /></label>
+      <label><span>구조화 규칙</span><textarea value={rules.structureInstruction} onChange={(event) => onChange({ ...rules, structureInstruction: event.target.value })} rows={compact ? 2 : 3} /></label>
+      <label><span>루틴 규칙</span><textarea value={rules.routineInstruction} onChange={(event) => onChange({ ...rules, routineInstruction: event.target.value })} rows={compact ? 2 : 3} /></label>
+      <div className="rule-controls">
+        <label><span>기본 우선순위</span><select value={rules.defaultPriority} onChange={(event) => onChange({ ...rules, defaultPriority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+        <label><span>기본 주기</span><select value={rules.defaultCadence} onChange={(event) => onChange({ ...rules, defaultCadence: event.target.value as Cadence })}>{Object.entries(cadenceLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+        <label className="rule-toggle"><input type="checkbox" checked={rules.reviewBeforeCreate} onChange={(event) => onChange({ ...rules, reviewBeforeCreate: event.target.checked })} /><span />불확실하면 확인</label>
+      </div>
+    </div>
+  );
 }
 
 function TreeView({ objective, items, depths, onComplete }: { objective?: OkrptrItem; items: OkrptrItem[]; depths: Record<string, number>; onComplete: (id: string) => void }) {
@@ -1255,7 +1410,7 @@ function GroupDetail({ detail, team, onBack, onChange, onGroupChange, onDeleted,
 
 function IntegrationModal({ onClose }: { onClose: () => void }) {
   const endpoint = typeof window === "undefined" ? "/mcp" : `${window.location.origin}/mcp`;
-  const tools = ["capture_item", "create_item", "update_item", "list_items", "link_item", "review_period", "list_properties", "create_property", "set_property_value", "delete_property", "list_checklist_items", "add_checklist_item", "update_checklist_item", "get_daily_scrum", "save_daily_scrum", "get_recommendations", "list_routines", "create_routine", "update_routine", "complete_routine", "delete_routine", "list_team_members", "invite_team_member", "update_team_member", "remove_team_member", "list_groups", "create_group", "update_group", "archive_group", "delete_group", "list_group_members", "add_group_member", "update_group_member", "remove_group_member"];
+  const tools = ["get_workspace_rules", "update_workspace_rules", "capture_item", "create_item", "update_item", "list_items", "link_item", "review_period", "list_properties", "create_property", "set_property_value", "delete_property", "list_checklist_items", "add_checklist_item", "update_checklist_item", "get_daily_scrum", "save_daily_scrum", "get_recommendations", "list_routines", "create_routine", "update_routine", "complete_routine", "delete_routine", "list_team_members", "invite_team_member", "update_team_member", "remove_team_member", "list_groups", "create_group", "update_group", "archive_group", "delete_group", "list_group_members", "add_group_member", "update_group_member", "remove_group_member"];
   return <div className="modal-backdrop"><section className="integration-modal"><header><h2>MCP 연결</h2><button className="icon-button" onClick={onClose}><X size={17} /></button></header><div className="endpoint-row"><Bot size={18} /><div><b>Streamable HTTP</b><code>{endpoint}</code></div><button className="icon-button" onClick={() => void navigator.clipboard.writeText(endpoint)} title="주소 복사"><Copy size={14} /></button></div><div className="tool-list">{tools.map((tool) => <code key={tool}>{tool}</code>)}</div><footer><span><CheckCircle2 size={15} />Objective → Key Result → Initiative → Project → Task</span><button onClick={onClose}>닫기</button></footer></section></div>;
 }
 

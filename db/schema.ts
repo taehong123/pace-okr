@@ -47,6 +47,22 @@ export const userWorkspacePreferences = sqliteTable(
   (table) => [index("idx_user_workspace_preferences_active").on(table.activeWorkspaceId)],
 );
 
+export const workspaceRules = sqliteTable(
+  "workspace_rules",
+  {
+    workspaceId: text("workspace_id").primaryKey().references(() => workspaces.id, { onDelete: "cascade" }),
+    captureInstruction: text("capture_instruction").notNull().default(""),
+    structureInstruction: text("structure_instruction").notNull().default(""),
+    routineInstruction: text("routine_instruction").notNull().default(""),
+    defaultPriority: text("default_priority").notNull().default("medium"),
+    defaultCadence: text("default_cadence").notNull().default("weekly"),
+    reviewBeforeCreate: integer("review_before_create", { mode: "boolean" }).notNull().default(true),
+    configured: integer("configured", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+);
+
 export const workspaceGroups = sqliteTable(
   "workspace_groups",
   {
@@ -247,5 +263,6 @@ export type RoutineCompletion = typeof routineCompletions.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
 export type UserWorkspacePreference = typeof userWorkspacePreferences.$inferSelect;
+export type WorkspaceRule = typeof workspaceRules.$inferSelect;
 export type WorkspaceGroup = typeof workspaceGroups.$inferSelect;
 export type WorkspaceGroupMember = typeof workspaceGroupMembers.$inferSelect;

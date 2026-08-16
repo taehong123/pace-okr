@@ -159,7 +159,8 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .status-dot.status-done { background: #448361; }
 .status-dot.status-blocked { background: #d44c47; }
 
-.home-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, .75fr); gap: 42px; }
+.home-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, .75fr); gap: 42px; align-items: start; }
+.home-main { display: grid; gap: 24px; }
 .home-focus, .home-tasks { border-top: 1px solid var(--line); }
 .home-focus > header, .home-tasks > header { height: 44px; display: flex; align-items: center; color: var(--muted); font-size: 11px; }
 .home-focus > header button { margin-left: auto; display: flex; align-items: center; gap: 3px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
@@ -173,6 +174,44 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .home-tasks > button:hover { background: #fbfbfa; }
 .home-tasks b { overflow: hidden; font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .home-tasks small { color: var(--muted); font-size: 10px; }
+.workspace-rules-card { display: grid; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.workspace-rules-card > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.workspace-rules-card > header div { display: grid; gap: 2px; }
+.workspace-rules-card > header b { font-size: 13px; }
+.workspace-rules-card > header span, .workspace-rules-card footer span { color: var(--muted); font-size: 10px; }
+.workspace-rules-card > header button { height: 29px; display: inline-flex; align-items: center; gap: 5px; padding: 0 9px; border: 0; border-radius: 4px; background: var(--hover); color: var(--ink); font-size: 11px; cursor: pointer; }
+.workspace-rules-card footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.rule-fields { display: grid; gap: 9px; }
+.rule-fields label { min-width: 0; display: grid; gap: 4px; }
+.rule-fields label span, .rule-toggle { color: var(--muted); font-size: 10px; font-weight: 600; }
+.rule-fields textarea, .rule-fields select { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 4px; background: #fbfbfa; color: var(--ink); font-size: 11px; }
+.rule-fields textarea { min-height: 56px; padding: 7px; resize: vertical; }
+.rule-fields.compact textarea { min-height: 48px; }
+.rule-fields select { height: 30px; padding: 0 7px; }
+.rule-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 7px; align-items: end; }
+.rule-toggle { height: 30px; display: flex !important; align-items: center; gap: 7px; white-space: nowrap; }
+.rule-toggle input { position: absolute; opacity: 0; }
+.rule-toggle > span { width: 28px; height: 16px; position: relative; border-radius: 8px; background: #d7d7d4; }
+.rule-toggle > span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 10px; height: 10px; border-radius: 50%; background: white; transition: transform .15s ease; }
+.rule-toggle input:checked + span { background: var(--ink); }
+.rule-toggle input:checked + span::after { transform: translateX(12px); }
+
+.setup-chat { width: min(980px, 100%); max-height: calc(100vh - 36px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid #d6d6d3; border-radius: 7px; background: white; box-shadow: 0 18px 64px rgba(0, 0, 0, .2); }
+.setup-chat > header { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+.setup-chat > header > div { min-width: 0; display: flex; align-items: center; gap: 10px; }
+.setup-chat h2 { margin: 0; font-size: 15px; }
+.setup-chat p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
+.setup-chat-body { min-height: 0; display: grid; grid-template-columns: minmax(280px, .85fr) minmax(0, 1.15fr); gap: 14px; padding: 14px; overflow: auto; }
+.chat-thread { display: grid; align-content: start; gap: 10px; }
+.assistant-message { margin: 0; padding: 10px; border-radius: 6px; background: #f7f7f5; color: var(--ink); font-size: 12px; line-height: 1.55; }
+.chat-presets { display: flex; flex-wrap: wrap; gap: 5px; }
+.chat-presets button, .chat-apply { height: 29px; padding: 0 9px; border: 0; border-radius: 4px; background: var(--hover); color: var(--ink); font-size: 11px; cursor: pointer; }
+.chat-input { display: grid; gap: 4px; }
+.chat-input span { color: var(--muted); font-size: 10px; font-weight: 600; }
+.chat-input textarea { width: 100%; min-height: 86px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; background: white; color: var(--ink); font-size: 12px; resize: vertical; }
+.chat-apply { display: inline-flex; align-items: center; justify-content: center; gap: 5px; justify-self: start; }
+.chat-apply:disabled { opacity: .45; cursor: default; }
+.setup-chat > footer { min-height: 52px; display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding: 0 14px; border-top: 1px solid var(--line); }
 
 .outline-section, .inbox-list, .review-content { border-top: 1px solid var(--line); }
 .objective-row { min-height: 92px; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
@@ -501,6 +540,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
   .app-shell { grid-template-columns: 200px minmax(0, 1fr); }
   .page-body { padding: 30px 28px 56px; }
   .home-layout { grid-template-columns: 1fr; gap: 28px; }
+  .rule-controls { grid-template-columns: 1fr; }
   .database-actions button span { display: none; }
 }
 
@@ -516,6 +556,8 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
   .page-body { padding: 24px 14px 86px; }
   .page-header { min-height: 58px; }
   .page-header h1 { font-size: 24px; }
+  .setup-chat { max-height: calc(100vh - 16px); }
+  .setup-chat-body { grid-template-columns: 1fr; }
   .cadence-switch { overflow-x: auto; max-width: 220px; }
   .quick-capture { margin-bottom: 20px; }
   .routine-toolbar { grid-template-columns: 1fr; gap: 7px; padding: 8px 0; }

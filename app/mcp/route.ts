@@ -27,6 +27,7 @@ import {
   getItemPropertiesByName,
   getPeriodReview,
   getRecommendations,
+  getWorkspaceRules,
   listChecklistItems,
   listGroupMembers,
   listGroups,
@@ -37,6 +38,7 @@ import {
   removeTeamMember,
   removeGroupMember,
   saveDailyScrum,
+  saveWorkspaceRules,
   serializeChecklistItem,
   serializeItem,
   serializePropertyDefinition,
@@ -128,6 +130,19 @@ const routineOutput = z.object({
   updatedAt: z.string(),
 });
 
+const workspaceRulesOutput = z.object({
+  workspaceId: z.string(),
+  captureInstruction: z.string(),
+  structureInstruction: z.string(),
+  routineInstruction: z.string(),
+  defaultPriority: z.string(),
+  defaultCadence: z.string(),
+  reviewBeforeCreate: z.boolean(),
+  configured: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
 const teamMemberOutput = z.object({
   id: z.string(),
   email: z.string(),
@@ -167,13 +182,68 @@ const groupMemberOutput = z.object({
   createdAt: z.string(),
 });
 
-function createOkrptrServer(authorization: RequestAuthorization) {
+async function createOkrptrServer(authorization: RequestAuthorization) {
   const { ownerId } = authorization;
+  const rules = await getWorkspaceRules(ownerId);
   const server = new McpServer(
     { name: "okrptr", version: "0.6.0" },
     {
       instructions:
-        "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Routines are separate recurring work with trigger points, places/tools, concrete action steps, and dated completion records. Tasks are database rows with custom properties and internal checklists. Team access uses Owner, Admin, Member, and read-only Viewer roles. Workspace groups have @handles, open or private visibility, and Lead or Member roles. Use list_properties before setting unfamiliar property names.",
+        [
+          "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Routines are separate recurring work with trigger points, places/tools, concrete action steps, and dated completion records. Tasks are database rows with custom properties and internal checklists. Team access uses Owner, Admin, Member, and read-only Viewer roles. Workspace groups have @handles, open or private visibility, and Lead or Member roles. Use list_properties before setting unfamiliar property names.",
+          `Workspace capture rule: ${rules.captureInstruction}`,
+          `Workspace structure rule: ${rules.structureInstruction}`,
+          `Workspace routine rule: ${rules.routineInstruction}`,
+          `Default Task priority: ${rules.defaultPriority}. Default cadence: ${rules.defaultCadence}. ${rules.reviewBeforeCreate ? "Ask before creating structured items when the hierarchy is uncertain." : "Create structured items directly when the hierarchy is clear."}`,
+        ].join("\n"),
+    },
+  );
+
+  server.registerTool(
+    "get_workspace_rules",
+    {
+      title: "Get OKRPTR workspace rules",
+      description: "Read the shared rules that guide web, API, and MCP capture behavior for the active workspace.",
+      inputSchema: {},
+      outputSchema: { rules: workspaceRulesOutput },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async () => ({
+      structuredContent: { rules: await getWorkspaceRules(ownerId) },
+      content: [{ type: "text", text: "Returned the active OKRPTR workspace rules." }],
+    }),
+  );
+
+  server.registerTool(
+    "update_workspace_rules",
+    {
+      title: "Update OKRPTR workspace rules",
+      description: "Update the shared rules that guide web, API, and MCP capture behavior for the active workspace.",
+      inputSchema: {
+        captureInstruction: z.string().optional(),
+        structureInstruction: z.string().optional(),
+        routineInstruction: z.string().optional(),
+        defaultPriority: z.enum(ITEM_PRIORITIES).optional(),
+        defaultCadence: z.enum(ITEM_CADENCES).optional(),
+        reviewBeforeCreate: z.boolean().optional(),
+      },
+      outputSchema: { rules: workspaceRulesOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ captureInstruction, structureInstruction, routineInstruction, defaultPriority, defaultCadence, reviewBeforeCreate }) => {
+      const updated = await saveWorkspaceRules(ownerId, {
+        captureInstruction,
+        structureInstruction,
+        routineInstruction,
+        defaultPriority: defaultPriority as ItemPriority | undefined,
+        defaultCadence: defaultCadence as ItemCadence | undefined,
+        reviewBeforeCreate,
+        configured: true,
+      });
+      return {
+        structuredContent: { rules: updated },
+        content: [{ type: "text", text: "Updated the OKRPTR workspace rules." }],
+      };
     },
   );
 
@@ -1035,7 +1105,7 @@ async function handleMcp(request: Request) {
   try {
     await ensureWorkspace(authorization.ownerId);
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
-    const server = createOkrptrServer(authorization);
+    const server = await createOkrptrServer(authorization);
     await server.connect(transport);
     return withCors(await transport.handleRequest(request));
   } catch (error) {

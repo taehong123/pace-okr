@@ -162,3 +162,33 @@ test("adds routine execution guide fields", async () => {
   });
   db.close();
 });
+
+test("creates workspace rules that follow workspace ownership", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON;");
+  const [teamMigration, rulesMigration] = await Promise.all([
+    readFile(new URL("../drizzle/0005_wet_roland_deschain.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0009_demonic_hitman.sql", import.meta.url), "utf8"),
+  ]);
+  db.exec(teamMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(rulesMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
+    INSERT INTO workspace_rules (
+      workspace_id, capture_instruction, structure_instruction, routine_instruction,
+      default_priority, default_cadence, review_before_create, configured
+    ) VALUES (
+      'workspace', '인박스 우선', 'Project가 명확하면 연결', '트리거와 방법을 묻기',
+      'high', 'daily', 1, 1
+    );
+  `);
+
+  assert.deepEqual({ ...db.prepare("SELECT default_priority, default_cadence, configured FROM workspace_rules WHERE workspace_id = 'workspace'").get() }, {
+    default_priority: "high",
+    default_cadence: "daily",
+    configured: 1,
+  });
+  db.exec("DELETE FROM workspaces WHERE id = 'workspace'");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM workspace_rules").get().count, 0);
+  db.close();
+});
