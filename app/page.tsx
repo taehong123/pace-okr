@@ -12,7 +12,6 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   CircleHelp,
   Columns3,
@@ -318,6 +317,7 @@ export default function Home() {
   const [integrationOpen, setIntegrationOpen] = useState(false);
   const [propertyPanelOpen, setPropertyPanelOpen] = useState(false);
   const [teamPanelOpen, setTeamPanelOpen] = useState(false);
+  const [teamPanelTab, setTeamPanelTab] = useState<"members" | "groups">("members");
   const [createItemOpen, setCreateItemOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
@@ -449,11 +449,10 @@ export default function Home() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <button className="workspace-switcher">
+        <div className="brand-lockup">
           <span className="brand-mark">O</span>
-          <span><strong>OKRPTR</strong><small>Execution Workspace</small></span>
-          <ChevronDown size={14} />
-        </button>
+          <span><strong>OKRPTR</strong><small>목표·실행 관리</small></span>
+        </div>
         <nav>
           {navItems.map((entry) => {
             const Icon = entry.icon;
@@ -475,7 +474,8 @@ export default function Home() {
         </div>
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Bot size={16} /><span>MCP 연결</span><i className={connected ? "connection-live" : "connection-local"} /></button>
-          <button className="nav-item" onClick={() => setTeamPanelOpen(true)}><Users size={16} /><span>팀 멤버</span></button>
+          <button className="nav-item" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={16} /><span>팀 멤버</span></button>
+          <button className="nav-item" onClick={() => { setTeamPanelTab("groups"); setTeamPanelOpen(true); }}><AtSign size={16} /><span>그룹 관리</span></button>
           <button className="nav-item" onClick={() => setPropertyPanelOpen(true)}><Settings2 size={16} /><span>속성 관리</span></button>
           <button className="profile-row"><span className="avatar">T</span><span>태홍</span><MoreHorizontal size={15} /></button>
         </div>
@@ -484,7 +484,7 @@ export default function Home() {
       <section className="workspace">
         <header className="workspace-topbar">
           <span>OKRPTR</span><ChevronRight size={13} /><b>{viewTitles[activeView]}</b>
-          <div><button aria-label="팀 멤버" title="팀 멤버" onClick={() => setTeamPanelOpen(true)}><Users size={15} /></button><button aria-label="알림" title="알림"><Bell size={15} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
+          <div><button aria-label="팀 멤버" title="팀 멤버" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={15} /></button><button aria-label="알림" title="알림"><Bell size={15} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
         </header>
         <div className="page-body">
           <header className="page-header">
@@ -557,7 +557,7 @@ export default function Home() {
           onNotice={showNotice}
         />
       )}
-      {teamPanelOpen && <TeamPanel onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
+      {teamPanelOpen && <TeamPanel initialTab={teamPanelTab} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
       {createItemOpen && <CreateItemPanel items={items} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
       {selectedTask && (
         <TaskDetailPanel
@@ -871,10 +871,10 @@ function PropertyPanel({ properties, onClose, onCreated, onDeleted, onNotice }: 
   return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>Task 속성</h2><p>{properties.length}개 열</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header><div className="property-list">{properties.map((property) => <div className="property-row" key={property.id}><span className="property-type-icon">{property.type === "number" ? <Hash size={14} /> : <TextCursorInput size={14} />}</span><div><b>{property.name}</b><small>{propertyTypeLabel(property.type)}</small></div><button onClick={() => void remove(property.id)} aria-label="속성 삭제"><Trash2 size={13} /></button></div>)}</div><form className="property-form" onSubmit={create}><h3>속성 추가</h3><label><span>이름</span><input value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>유형</span><select value={type} onChange={(event) => setType(event.target.value as PropertyType)}>{(["text", "number", "select", "date", "checkbox"] as PropertyType[]).map((entry) => <option value={entry} key={entry}>{propertyTypeLabel(entry)}</option>)}</select></label>{type === "select" && <label><span>옵션</span><input value={options} onChange={(event) => setOptions(event.target.value)} placeholder="쉼표로 구분" /></label>}<button><Plus size={14} />추가</button></form></aside></div>;
 }
 
-function TeamPanel({ onClose, onNotice }: { onClose: () => void; onNotice: (message: string) => void }) {
+function TeamPanel({ initialTab, onClose, onNotice }: { initialTab: "members" | "groups"; onClose: () => void; onNotice: (message: string) => void }) {
   const [team, setTeam] = useState<TeamData | null>(null);
   const [groups, setGroups] = useState<WorkspaceGroup[] | null>(null);
-  const [tab, setTab] = useState<"members" | "groups">("members");
+  const [tab, setTab] = useState<"members" | "groups">(initialTab);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [groupDetail, setGroupDetail] = useState<GroupDetailData | null>(null);
   const [showArchived, setShowArchived] = useState(false);
