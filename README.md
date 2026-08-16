@@ -22,6 +22,7 @@ a bot webhook. Unstructured captures land in the Inbox and can be linked later.
 - Data-driven recommendations for blocked, overdue, unlinked, and due-soon work
 - Daily, weekly, monthly, and quarterly reviews
 - Shared workspaces with Owner, Admin, Member, and Viewer roles
+- A personal workspace for every account, plus additional team workspaces with switching
 - Open and private workspace groups with `@handles`, Leads, invited members, and archive/restore lifecycle
 - D1 persistence and a Streamable HTTP MCP endpoint at `/mcp`
 - Generic bot capture webhook at `/api/webhooks/capture`
@@ -66,7 +67,11 @@ npm test
 
 Set `OKRPTR_MCP_URL` to run the MCP smoke test against a different endpoint.
 Hosted writes use the signed-in Sites user or a bearer token configured as
-`OKRPTR_API_TOKEN`. Bot clients can send `X-Okrptr-User-Id` to select a workspace.
+`OKRPTR_API_TOKEN`. Clients can send `X-Okrptr-Workspace-Id` to target a
+workspace; the previous `X-Okrptr-User-Id` selection header remains supported
+for token integrations. Signed-in users otherwise use their most recently
+selected workspace, and the web app also stores that selection in an HTTP-only
+cookie.
 The previous `OKITA_API_TOKEN`, `X-Okita-User-Id`, `PACE_API_TOKEN`, and
 `X-Pace-User-Id` names remain supported for
 existing integrations.

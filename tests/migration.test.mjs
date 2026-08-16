@@ -107,3 +107,32 @@ test("creates groups with unique handles and cascading memberships", async () =>
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM workspace_group_members").get().count, 0);
   db.close();
 });
+
+test("allows one user to join and switch between multiple workspaces", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON;");
+  const [teamMigration, workspaceMigration] = await Promise.all([
+    readFile(new URL("../drizzle/0005_wet_roland_deschain.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0007_remarkable_epoch.sql", import.meta.url), "utf8"),
+  ]);
+  db.exec(teamMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(workspaceMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('user', '개인 워크스페이스', 'user');
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('team', '제품 팀', 'user');
+    INSERT INTO workspace_members (id, workspace_id, user_id, display_name, role, status)
+      VALUES ('personal-member', 'user', 'user', 'User', 'owner', 'active');
+    INSERT INTO workspace_members (id, workspace_id, user_id, display_name, role, status)
+      VALUES ('team-member', 'team', 'user', 'User', 'owner', 'active');
+    INSERT INTO user_workspace_preferences (user_id, active_workspace_id)
+      VALUES ('user', 'team');
+  `);
+
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM workspace_members WHERE user_id = 'user'").get().count, 2);
+  assert.equal(db.prepare("SELECT active_workspace_id FROM user_workspace_preferences WHERE user_id = 'user'").get().active_workspace_id, "team");
+  assert.throws(
+    () => db.exec("INSERT INTO workspace_members (id, workspace_id, user_id, display_name, role, status) VALUES ('duplicate', 'team', 'user', 'User', 'member', 'active')"),
+    /UNIQUE/i,
+  );
+  db.close();
+});

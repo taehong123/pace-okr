@@ -10,6 +10,7 @@ import {
   propertyDefinitions,
   routineCompletions,
   routines,
+  userWorkspacePreferences,
   workspaceGroupMembers,
   workspaceGroups,
   workspaceMembers,
@@ -76,7 +77,8 @@ async function ensureSchema() {
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
-        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_owner_user ON workspaces(owner_user_id)"),
+        d1.prepare("DROP INDEX IF EXISTS idx_workspaces_owner_user"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspaces_owner ON workspaces(owner_user_id)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS workspace_members (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -89,9 +91,17 @@ async function ensureSchema() {
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
-        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_members_user ON workspace_members(user_id)"),
+        d1.prepare("DROP INDEX IF EXISTS idx_workspace_members_user"),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_members_workspace_user ON workspace_members(workspace_id, user_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspace_members_user_lookup ON workspace_members(user_id, status)"),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_members_workspace_email ON workspace_members(workspace_id, email)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace_status ON workspace_members(workspace_id, status)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS user_workspace_preferences (
+          user_id TEXT PRIMARY KEY,
+          active_workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_user_workspace_preferences_active ON user_workspace_preferences(active_workspace_id)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS workspace_groups (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -232,24 +242,30 @@ async function ensureSchema() {
 
 export async function ensureWorkspace(ownerId: string) {
   await ensureSchema();
-  await ensureWorkspaceShell(ownerId);
   await migrateLegacyHierarchy(ownerId);
-  await seedWorkspace(ownerId);
+  const [workspace] = await getDb().select().from(workspaces).where(eq(workspaces.id, ownerId)).limit(1);
+  if (workspace?.id === workspace?.ownerUserId) await seedWorkspace(ownerId);
   await seedProperties(ownerId);
 }
 
-export async function authorizeRequest(request: Request): Promise<RequestAuthorization | Response> {
+export async function authorizeRequest(
+  request: Request,
+  options: { allowViewerWrite?: boolean } = {},
+): Promise<RequestAuthorization | Response> {
   const userId = request.headers.get("oai-authenticated-user-id");
   const configuredToken = (env as RuntimeEnv).OKRPTR_API_TOKEN ?? (env as RuntimeEnv).OKITA_API_TOKEN ?? (env as RuntimeEnv).PACE_API_TOKEN;
   const suppliedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (configuredToken && suppliedToken === configuredToken) {
-    const ownerId = request.headers.get("x-okrptr-user-id") || request.headers.get("x-okita-user-id") || request.headers.get("x-pace-user-id") || "api-workspace";
+    const ownerId = requestedWorkspaceId(request) || request.headers.get("x-okrptr-user-id") || request.headers.get("x-okita-user-id") || request.headers.get("x-pace-user-id") || "api-workspace";
+    await ensureWorkspaceShell(ownerId, null, "API");
     return { ownerId, userId: "api-token", email: null, displayName: "API", role: "owner", apiToken: true };
   }
 
   const hostname = new URL(request.url).hostname;
   if (hostname === "localhost" || hostname === "127.0.0.1") {
-    return { ownerId: "local-user", userId: "local-user", email: "local@okrptr.com", displayName: "Local Owner", role: "owner", apiToken: false };
+    await ensureSchema();
+    const membership = await resolveWorkspaceMembership("local-user", "local@okrptr.com", "Local Owner", requestedWorkspaceId(request));
+    return { ownerId: membership?.workspaceId ?? "local-user", userId: "local-user", email: "local@okrptr.com", displayName: "Local Owner", role: (membership?.role as TeamRole | undefined) ?? "owner", apiToken: false };
   }
 
   if (userId) {
@@ -257,12 +273,12 @@ export async function authorizeRequest(request: Request): Promise<RequestAuthori
       await ensureSchema();
       const email = normalizeEmail(request.headers.get("oai-authenticated-user-email"));
       const displayName = authenticatedDisplayName(request) || email?.split("@")[0] || "Member";
-      const membership = await resolveWorkspaceMembership(userId, email, displayName);
+      const membership = await resolveWorkspaceMembership(userId, email, displayName, requestedWorkspaceId(request));
       if (!membership || membership.status !== "active") {
         return Response.json({ error: "This account is not an active workspace member." }, { status: 403 });
       }
       const role = membership.role as TeamRole;
-      if (role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+      if (!options.allowViewerWrite && role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
         return Response.json({ error: "Viewer access is read-only." }, { status: 403 });
       }
       return { ownerId: membership.workspaceId, userId, email, displayName, role, apiToken: false };
@@ -280,8 +296,12 @@ export async function authorizeRequest(request: Request): Promise<RequestAuthori
 
 async function ensureWorkspaceShell(ownerId: string, email: string | null = null, displayName = "Workspace Owner") {
   const now = new Date().toISOString();
-  const workspaceName = displayName && displayName !== "Workspace Owner" ? `${displayName} Workspace` : "OKRPTR Workspace";
+  const workspaceName = displayName && displayName !== "Workspace Owner" ? `${displayName}의 개인 워크스페이스` : "개인 워크스페이스";
   await getDb().insert(workspaces).values({ id: ownerId, name: workspaceName, ownerUserId: ownerId, createdAt: now, updatedAt: now }).onConflictDoNothing();
+  const [personalWorkspace] = await getDb().select().from(workspaces).where(and(eq(workspaces.id, ownerId), eq(workspaces.ownerUserId, ownerId))).limit(1);
+  if (personalWorkspace && (personalWorkspace.name === "OKRPTR Workspace" || personalWorkspace.name.endsWith(" Workspace"))) {
+    await getDb().update(workspaces).set({ name: workspaceName, updatedAt: now }).where(eq(workspaces.id, ownerId));
+  }
   await getDb().insert(workspaceMembers).values({
     id: crypto.randomUUID(),
     workspaceId: ownerId,
@@ -295,25 +315,74 @@ async function ensureWorkspaceShell(ownerId: string, email: string | null = null
   }).onConflictDoNothing();
 }
 
-async function resolveWorkspaceMembership(userId: string, email: string | null, displayName: string) {
-  const [existing] = await getDb().select().from(workspaceMembers).where(eq(workspaceMembers.userId, userId)).limit(1);
-  if (existing) {
-    await getDb().update(workspaceMembers).set({ email: email ?? existing.email, displayName, updatedAt: new Date().toISOString() }).where(eq(workspaceMembers.id, existing.id));
-    return { ...existing, email: email ?? existing.email, displayName };
-  }
-
+async function resolveWorkspaceMembership(userId: string, email: string | null, displayName: string, requestedId: string | null) {
+  await ensureWorkspaceShell(userId, email, displayName);
   if (email) {
-    const [invitation] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.email, email), eq(workspaceMembers.status, "invited"))).orderBy(asc(workspaceMembers.createdAt)).limit(1);
-    if (invitation) {
-      const updated = { ...invitation, userId, displayName, status: "active", updatedAt: new Date().toISOString() };
-      await getDb().update(workspaceMembers).set({ userId, displayName, status: "active", updatedAt: updated.updatedAt }).where(eq(workspaceMembers.id, invitation.id));
-      return updated;
+    const invitations = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.email, email), eq(workspaceMembers.status, "invited"))).orderBy(asc(workspaceMembers.createdAt));
+    for (const invitation of invitations) {
+      const [existingMembership] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, invitation.workspaceId), eq(workspaceMembers.userId, userId))).limit(1);
+      if (existingMembership) continue;
+      await getDb().update(workspaceMembers).set({ userId, displayName, status: "active", updatedAt: new Date().toISOString() }).where(eq(workspaceMembers.id, invitation.id));
     }
   }
 
-  await ensureWorkspaceShell(userId, email, displayName);
-  const [created] = await getDb().select().from(workspaceMembers).where(eq(workspaceMembers.userId, userId)).limit(1);
-  return created ?? null;
+  const memberships = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, "active"))).orderBy(asc(workspaceMembers.createdAt));
+  const now = new Date().toISOString();
+  await getDb().update(workspaceMembers).set({ email, displayName, updatedAt: now }).where(eq(workspaceMembers.userId, userId));
+  const [preference] = await getDb().select().from(userWorkspacePreferences).where(eq(userWorkspacePreferences.userId, userId)).limit(1);
+  return memberships.find((entry) => entry.workspaceId === requestedId)
+    ?? memberships.find((entry) => entry.workspaceId === preference?.activeWorkspaceId)
+    ?? memberships.find((entry) => entry.workspaceId === userId)
+    ?? memberships[0]
+    ?? null;
+}
+
+function requestedWorkspaceId(request: Request) {
+  const header = request.headers.get("x-okrptr-workspace-id")?.trim();
+  if (header) return header;
+  const cookie = request.headers.get("cookie")
+    ?.split(";")
+    .map((entry) => entry.trim().split("="))
+    .find(([name]) => name === "okrptr_workspace_id")?.[1];
+  return cookie ? decodeURIComponent(cookie) : null;
+}
+
+export async function listUserWorkspaces(userId: string, currentWorkspaceId: string) {
+  const rows = await getDb()
+    .select({ workspace: workspaces, membership: workspaceMembers })
+    .from(workspaceMembers)
+    .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
+    .where(and(eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, "active")))
+    .orderBy(asc(workspaces.createdAt));
+  return rows.map(({ workspace, membership }) => ({
+    id: workspace.id,
+    name: workspace.name,
+    personal: workspace.id === workspace.ownerUserId,
+    role: membership.role as TeamRole,
+    current: workspace.id === currentWorkspaceId,
+  }));
+}
+
+export async function createWorkspaceForUser(userId: string, email: string | null, displayName: string, nameInput: string) {
+  const name = nameInput.trim();
+  if (!name) throw new Error("Workspace name is required");
+  if (name.length > 80) throw new Error("Workspace name must be 80 characters or fewer");
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await getDb().insert(workspaces).values({ id, name, ownerUserId: userId, createdAt: now, updatedAt: now });
+  await getDb().insert(workspaceMembers).values({ id: crypto.randomUUID(), workspaceId: id, userId, email, displayName, role: "owner", status: "active", createdAt: now, updatedAt: now });
+  await setActiveWorkspace(userId, id);
+  return { id, name, personal: false, role: "owner" as TeamRole, current: true };
+}
+
+export async function setActiveWorkspace(userId: string, workspaceId: string) {
+  const [membership] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, "active"))).limit(1);
+  if (!membership) throw new Error("Workspace not found or access denied");
+  await getDb().insert(userWorkspacePreferences).values({ userId, activeWorkspaceId: workspaceId, updatedAt: new Date().toISOString() }).onConflictDoUpdate({
+    target: userWorkspacePreferences.userId,
+    set: { activeWorkspaceId: workspaceId, updatedAt: new Date().toISOString() },
+  });
+  return membership;
 }
 
 function normalizeEmail(value: string | null) {

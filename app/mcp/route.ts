@@ -1033,7 +1033,7 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, X-Okrptr-User-Id, X-Okita-User-Id, X-Pace-User-Id",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, X-Okrptr-Workspace-Id, X-Okrptr-User-Id, X-Okita-User-Id, X-Pace-User-Id",
     "Access-Control-Expose-Headers": "MCP-Protocol-Version, MCP-Session-Id",
   };
 }

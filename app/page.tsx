@@ -12,6 +12,7 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   CircleHelp,
   Columns3,
@@ -154,6 +155,7 @@ type GroupMember = {
 
 type TeamData = { workspace: { id: string; name: string }; members: TeamMember[]; currentRole: TeamRole; canManage: boolean };
 type GroupDetailData = { group: WorkspaceGroup; members: GroupMember[]; canManageMembers: boolean };
+type WorkspaceSummary = { id: string; name: string; personal: boolean; role: TeamRole; current: boolean };
 
 type IntroLanguage = "ko" | "en" | "ja" | "zh" | "es";
 
@@ -318,6 +320,10 @@ export default function Home() {
   const [propertyPanelOpen, setPropertyPanelOpen] = useState(false);
   const [teamPanelOpen, setTeamPanelOpen] = useState(false);
   const [teamPanelTab, setTeamPanelTab] = useState<"members" | "groups">("members");
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [createItemOpen, setCreateItemOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
@@ -336,15 +342,17 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([fetch("/api/items"), fetch("/api/properties")])
-      .then(async ([itemsResponse, propertiesResponse]) => {
-        if (!itemsResponse.ok || !propertiesResponse.ok) throw new Error("offline");
+    Promise.all([fetch("/api/items"), fetch("/api/properties"), fetch("/api/workspaces")])
+      .then(async ([itemsResponse, propertiesResponse, workspacesResponse]) => {
+        if (!itemsResponse.ok || !propertiesResponse.ok || !workspacesResponse.ok) throw new Error("offline");
         const itemData = (await itemsResponse.json()) as { items: OkrptrItem[] };
         const propertyData = (await propertiesResponse.json()) as { properties: PropertyDefinition[]; values: PropertyValueMap };
+        const workspaceData = (await workspacesResponse.json()) as { workspaces: WorkspaceSummary[] };
         if (!active) return;
-        if (itemData.items.length) setItems(itemData.items);
+        setItems(itemData.items);
         setProperties(propertyData.properties);
         setPropertyValues(propertyData.values);
+        setWorkspaces(workspaceData.workspaces);
         setConnected(true);
       })
       .catch(() => setConnected(false));
@@ -365,6 +373,42 @@ export default function Home() {
     : 0;
   const depths = useMemo(() => buildDepths(structuredItems), [structuredItems]);
   const selectedTask = items.find((entry) => entry.id === selectedTaskId && entry.kind === "task");
+  const currentWorkspace = workspaces.find((entry) => entry.current) ?? workspaces[0];
+
+  async function switchWorkspace(workspaceId: string) {
+    if (workspaceSaving || workspaceId === currentWorkspace?.id) {
+      setWorkspaceMenuOpen(false);
+      return;
+    }
+    setWorkspaceSaving(true);
+    const response = await fetch("/api/workspaces", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId }),
+    });
+    if (response.ok) window.location.reload();
+    else {
+      setWorkspaceSaving(false);
+      showNotice("워크스페이스를 전환하지 못했습니다.");
+    }
+  }
+
+  async function createWorkspace(event: FormEvent) {
+    event.preventDefault();
+    const name = newWorkspaceName.trim();
+    if (!name || workspaceSaving) return;
+    setWorkspaceSaving(true);
+    const response = await fetch("/api/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (response.ok) window.location.reload();
+    else {
+      setWorkspaceSaving(false);
+      showNotice("워크스페이스를 만들지 못했습니다.");
+    }
+  }
 
   async function submitCapture(event: FormEvent) {
     event.preventDefault();
@@ -449,9 +493,30 @@ export default function Home() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div className="brand-lockup">
-          <span className="brand-mark">O</span>
-          <span><strong>OKRPTR</strong><small>목표·실행 관리</small></span>
+        <div className="workspace-control">
+          <button className="workspace-switcher" onClick={() => setWorkspaceMenuOpen((open) => !open)} aria-expanded={workspaceMenuOpen}>
+            <span className="brand-mark">{currentWorkspace?.name.slice(0, 1).toLocaleUpperCase() || "O"}</span>
+            <span><strong>{currentWorkspace?.name || "개인 워크스페이스"}</strong><small>{currentWorkspace?.personal ? "개인 워크스페이스" : "팀 워크스페이스"}</small></span>
+            <ChevronDown size={14} />
+          </button>
+          {workspaceMenuOpen && (
+            <div className="workspace-menu">
+              <header><b>워크스페이스</b><span>{workspaces.length}</span></header>
+              <div className="workspace-list">
+                {workspaces.map((workspace) => (
+                  <button key={workspace.id} onClick={() => void switchWorkspace(workspace.id)} disabled={workspaceSaving}>
+                    <span className="workspace-avatar">{workspace.name.slice(0, 1).toLocaleUpperCase()}</span>
+                    <span><b>{workspace.name}</b><small>{workspace.personal ? "개인" : teamRoleLabel(workspace.role)}</small></span>
+                    {workspace.current && <Check size={14} />}
+                  </button>
+                ))}
+              </div>
+              <form onSubmit={createWorkspace}>
+                <input value={newWorkspaceName} onChange={(event) => setNewWorkspaceName(event.target.value)} placeholder="새 팀 워크스페이스" maxLength={80} />
+                <button disabled={!newWorkspaceName.trim() || workspaceSaving} aria-label="워크스페이스 만들기" title="워크스페이스 만들기"><Plus size={14} /></button>
+              </form>
+            </div>
+          )}
         </div>
         <nav>
           {navItems.map((entry) => {

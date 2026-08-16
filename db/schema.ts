@@ -11,7 +11,7 @@ export const workspaces = sqliteTable(
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
-    uniqueIndex("idx_workspaces_owner_user").on(table.ownerUserId),
+    index("idx_workspaces_owner").on(table.ownerUserId),
   ],
 );
 
@@ -30,10 +30,21 @@ export const workspaceMembers = sqliteTable(
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
-    uniqueIndex("idx_workspace_members_user").on(table.userId),
+    uniqueIndex("idx_workspace_members_workspace_user").on(table.workspaceId, table.userId),
+    index("idx_workspace_members_user_lookup").on(table.userId, table.status),
     uniqueIndex("idx_workspace_members_workspace_email").on(table.workspaceId, table.email),
     index("idx_workspace_members_workspace_status").on(table.workspaceId, table.status),
   ],
+);
+
+export const userWorkspacePreferences = sqliteTable(
+  "user_workspace_preferences",
+  {
+    userId: text("user_id").primaryKey(),
+    activeWorkspaceId: text("active_workspace_id").references(() => workspaces.id, { onDelete: "set null" }),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("idx_user_workspace_preferences_active").on(table.activeWorkspaceId)],
 );
 
 export const workspaceGroups = sqliteTable(
@@ -232,5 +243,6 @@ export type Routine = typeof routines.$inferSelect;
 export type RoutineCompletion = typeof routineCompletions.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
+export type UserWorkspacePreference = typeof userWorkspacePreferences.$inferSelect;
 export type WorkspaceGroup = typeof workspaceGroups.$inferSelect;
 export type WorkspaceGroupMember = typeof workspaceGroupMembers.$inferSelect;

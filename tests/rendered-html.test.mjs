@@ -33,7 +33,8 @@ test("server-renders the OKRPTR workspace", async () => {
   const html = await response.text();
   assert.match(html, /<title>OKRPTR - 목표를 오늘의 실행으로<\/title>/);
   assert.match(html, /OKRPTR/);
-  assert.match(html, /Execution Workspace/);
+  assert.match(html, /개인 워크스페이스/);
+  assert.match(html, /그룹 관리/);
   assert.match(html, /테이블/);
   assert.match(html, /Objective/);
   assert.match(html, /할 일을 입력하면 인박스에 저장됩니다/);
