@@ -42,7 +42,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 
 type View = "home" | "inbox" | "work" | "routines" | "okr" | "scrum" | "recommendations" | "reviews";
 type Cadence = "daily" | "weekly" | "monthly" | "quarterly";
@@ -322,6 +322,7 @@ export default function Home() {
   const [teamPanelTab, setTeamPanelTab] = useState<"members" | "groups">("members");
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [workspaceCreateOpen, setWorkspaceCreateOpen] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [createItemOpen, setCreateItemOpen] = useState(false);
@@ -329,6 +330,7 @@ export default function Home() {
   const [connected, setConnected] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [introLanguage, setIntroLanguage] = useState<IntroLanguage>("ko");
+  const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -358,6 +360,10 @@ export default function Home() {
       .catch(() => setConnected(false));
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (workspaceMenuOpen && workspaceCreateOpen) workspaceNameInputRef.current?.focus();
+  }, [workspaceMenuOpen, workspaceCreateOpen]);
 
   const inboxItems = items.filter((entry) => entry.status === "inbox");
   const taskItems = items.filter((entry) => entry.kind === "task");
@@ -494,7 +500,20 @@ export default function Home() {
     <main className="app-shell">
       <aside className="sidebar">
         <div className="workspace-control">
-          <button className="workspace-switcher" onClick={() => setWorkspaceMenuOpen((open) => !open)} aria-expanded={workspaceMenuOpen}>
+          <button
+            className="workspace-switcher"
+            onClick={() => {
+              setWorkspaceMenuOpen((open) => {
+                const nextOpen = !open;
+                if (!nextOpen) {
+                  setWorkspaceCreateOpen(false);
+                  setNewWorkspaceName("");
+                }
+                return nextOpen;
+              });
+            }}
+            aria-expanded={workspaceMenuOpen}
+          >
             <span className="brand-mark">{currentWorkspace?.name.slice(0, 1).toLocaleUpperCase() || "O"}</span>
             <span><strong>{currentWorkspace?.name || "개인 워크스페이스"}</strong><small>{currentWorkspace?.personal ? "개인 워크스페이스" : "팀 워크스페이스"}</small></span>
             <ChevronDown size={14} />
@@ -511,10 +530,37 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              <form onSubmit={createWorkspace}>
-                <input value={newWorkspaceName} onChange={(event) => setNewWorkspaceName(event.target.value)} placeholder="새 팀 워크스페이스" maxLength={80} />
-                <button disabled={!newWorkspaceName.trim() || workspaceSaving} aria-label="워크스페이스 만들기" title="워크스페이스 만들기"><Plus size={14} /></button>
-              </form>
+              <div className="workspace-create">
+                {workspaceCreateOpen ? (
+                  <form className="workspace-create-form" onSubmit={createWorkspace}>
+                    <input
+                      value={newWorkspaceName}
+                      onChange={(event) => setNewWorkspaceName(event.target.value)}
+                      placeholder="팀 워크스페이스 이름"
+                      aria-label="팀 워크스페이스 이름"
+                      maxLength={80}
+                      ref={workspaceNameInputRef}
+                    />
+                    <button disabled={!newWorkspaceName.trim() || workspaceSaving} aria-label="워크스페이스 만들기" title="워크스페이스 만들기"><Check size={14} /></button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWorkspaceCreateOpen(false);
+                        setNewWorkspaceName("");
+                      }}
+                      aria-label="취소"
+                      title="취소"
+                    >
+                      <X size={14} />
+                    </button>
+                  </form>
+                ) : (
+                  <button className="workspace-create-trigger" onClick={() => setWorkspaceCreateOpen(true)}>
+                    <Plus size={14} />
+                    <span>새 팀 워크스페이스</span>
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
