@@ -337,7 +337,7 @@ export default function Home() {
   const [items, setItems] = useState<OkrptrItem[]>(fallbackItems);
   const [properties, setProperties] = useState<PropertyDefinition[]>(fallbackProperties);
   const [propertyValues, setPropertyValues] = useState<PropertyValueMap>(fallbackValues);
-  const [activeView, setActiveView] = useState<View>("work");
+  const [activeView, setActiveView] = useState<View>("home");
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [taskDisplay, setTaskDisplay] = useState<"table" | "board">("table");
   const [capture, setCapture] = useState("");
@@ -357,7 +357,6 @@ export default function Home() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
-  const [setupChatOpen, setSetupChatOpen] = useState(false);
   const [introLanguage, setIntroLanguage] = useState<IntroLanguage>("ko");
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
@@ -385,10 +384,6 @@ export default function Home() {
         setPropertyValues(propertyData.values);
         setWorkspaces(workspaceData.workspaces);
         setWorkspaceRules(rulesData.rules);
-        if (!rulesData.rules.configured) {
-          setActiveView("home");
-          setSetupChatOpen(true);
-        }
         setConnected(true);
       })
       .catch(() => setConnected(false));
@@ -585,7 +580,6 @@ export default function Home() {
         }
       }
       setItems((current) => [...current, ...createdItems]);
-      setSetupChatOpen(false);
       setActiveView("okr");
       showNotice("OKR 시작 구성을 만들었습니다.");
       return true;
@@ -714,7 +708,7 @@ export default function Home() {
             </form>
           )}
 
-          {activeView === "home" && <HomeView objective={objective} items={taskItems} hasStarted={Boolean(workspaceRules?.configured)} onOpenSetup={() => setSetupChatOpen(true)} onGoToWork={() => setActiveView("work")} onOpenTask={setSelectedTaskId} />}
+          {activeView === "home" && <HomeView objective={objective} items={taskItems} onCreatePlan={createOnboardingPlan} onGoToWork={() => setActiveView("work")} onOpenTask={setSelectedTaskId} />}
           {activeView === "inbox" && <InboxView items={inboxItems} onConnect={connectInbox} />}
           {activeView === "work" && (
             <TaskDatabase
@@ -758,12 +752,6 @@ export default function Home() {
         />
       )}
       {integrationOpen && <IntegrationModal onClose={() => setIntegrationOpen(false)} />}
-      {setupChatOpen && workspaceRules && (
-        <SetupChatModal
-          onCreate={createOnboardingPlan}
-          onClose={() => setSetupChatOpen(false)}
-        />
-      )}
       {propertyPanelOpen && (
         <PropertyPanel
           properties={properties}
@@ -1148,11 +1136,10 @@ function RecommendationsView({ onNavigate }: { onNavigate: (view: View) => void 
   return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{row.itemIds.length}개 항목 · 우선순위 {row.score}</small></div><button onClick={() => onNavigate(row.kind === "unlinked" ? "inbox" : row.kind === "empty_project" ? "okr" : "work")}><ChevronRight size={15} /></button></article>)}</section>;
 }
 
-function HomeView({ objective, items, hasStarted, onOpenSetup, onGoToWork, onOpenTask }: {
+function HomeView({ objective, items, onCreatePlan, onGoToWork, onOpenTask }: {
   objective?: OkrptrItem;
   items: OkrptrItem[];
-  hasStarted: boolean;
-  onOpenSetup: () => void;
+  onCreatePlan: (plan: OnboardingPlan) => Promise<boolean>;
   onGoToWork: () => void;
   onOpenTask: (id: string) => void;
 }) {
@@ -1160,16 +1147,10 @@ function HomeView({ objective, items, hasStarted, onOpenSetup, onGoToWork, onOpe
   return (
     <div className="home-layout">
       <div className="home-main">
+        <HomeOkrChat onCreate={onCreatePlan} />
         <section className="home-focus">
           <header>현재 Objective<button onClick={onGoToWork}>작업 보기<ChevronRight size={13} /></button></header>
           {objective ? <div className="home-objective"><Target size={20} /><div><h2>{objective.title}</h2><span><i style={{ width: `${objective.progress}%` }} /></span><small>{objective.progress}% 진행</small></div></div> : <EmptyState icon={Target} title="Objective가 없습니다" />}
-        </section>
-        <section className="okr-onboarding-card">
-          <header>
-            <div><b>OKR 시작 대화</b><span>{hasStarted ? "새 목표를 다시 잡거나 실행 구조를 추가" : "대화하면서 첫 OKR과 실행 항목 생성"}</span></div>
-            <button onClick={onOpenSetup}><Bot size={13} />대화 시작</button>
-          </header>
-          <p>목표, 측정 기준, 실행 프로젝트, 첫 Task, 반복 루틴을 한 번에 잡습니다. 저장하면 OKR 트리에 실제 항목이 생성됩니다.</p>
         </section>
       </div>
       <section className="home-tasks">
@@ -1180,8 +1161,8 @@ function HomeView({ objective, items, hasStarted, onOpenSetup, onGoToWork, onOpe
   );
 }
 
-function SetupChatModal({ onCreate, onClose }: { onCreate: (plan: OnboardingPlan) => Promise<boolean>; onClose: () => void }) {
-  const [plan, setPlan] = useState<OnboardingPlan>({
+function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise<boolean> }) {
+  const emptyPlan: OnboardingPlan = {
     objective: "",
     keyResult: "",
     initiative: "",
@@ -1191,51 +1172,81 @@ function SetupChatModal({ onCreate, onClose }: { onCreate: (plan: OnboardingPlan
     routineTrigger: "",
     routinePlace: "",
     routineSteps: "",
+  };
+  const [message, setMessage] = useState("");
+  const [plan, setPlan] = useState<OnboardingPlan>({
+    ...emptyPlan,
   });
+  const [assistantMessage, setAssistantMessage] = useState("OKR에 대해 편하게 적어 주세요. 목표, 지표, 실행 프로젝트, 할 일, 루틴 후보로 정리해드립니다.");
+  const [draftOpen, setDraftOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   function patch(field: keyof OnboardingPlan, value: string) {
     setPlan((current) => ({ ...current, [field]: value }));
   }
+  function organizeMessage() {
+    const text = message.trim();
+    if (!text) return;
+    const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+    const metricLine = lines.find((line) => /kr|key result|핵심|지표|측정|%|명|건|회|원/i.test(line));
+    const actionLines = lines.filter((line) => /해야|하기|정리|확인|만들|준비|진행|검토|배포|인터뷰|실험|측정|개선/i.test(line));
+    setPlan((current) => ({
+      ...current,
+      objective: current.objective || lines[0] || text,
+      keyResult: current.keyResult || metricLine || "",
+      initiative: current.initiative || lines[1] || "",
+      project: current.project || lines[2] || "",
+      tasks: current.tasks || actionLines.slice(0, 5).join("\n"),
+    }));
+    setDraftOpen(true);
+    setAssistantMessage("말씀하신 내용을 OKR 초안으로 나눴습니다. 필요한 부분만 고친 뒤 실제 OKR로 만들 수 있습니다.");
+  }
   async function save() {
-    if (!plan.objective.trim()) return;
+    if (!plan.objective.trim()) {
+      organizeMessage();
+      return;
+    }
     setSaving(true);
-    await onCreate(plan);
+    const created = await onCreate(plan);
     setSaving(false);
+    if (created) {
+      setMessage("");
+      setPlan({ ...emptyPlan });
+      setDraftOpen(false);
+      setAssistantMessage("OKR 구조를 만들었습니다. 다음 목표나 루틴도 이어서 이야기할 수 있습니다.");
+    }
   }
   return (
-    <div className="modal-backdrop setup-backdrop">
-      <section className="setup-chat" role="dialog" aria-modal="true" aria-labelledby="setup-title">
-        <header>
-          <div><span className="brand-mark">O</span><div><h2 id="setup-title">OKR 시작 대화</h2><p>목표를 말하면서 실행 구조를 만듭니다.</p></div></div>
-          <button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button>
-        </header>
-        <div className="setup-chat-body">
-          <div className="chat-thread">
-            <p className="assistant-message">이번에 달성하고 싶은 목표를 적어 주세요. 아래 답을 저장하면 Objective부터 Task와 루틴까지 실제 OKR 구조로 만들어집니다.</p>
-            <div className="chat-presets">
-              <button onClick={() => setPlan((current) => ({ ...current, objective: "신규 사용자가 첫 주 안에 핵심 가치를 경험하게 만들기", keyResult: "첫 주 활성화율 35% 달성", initiative: "온보딩 활성화 개선", project: "가입 후 첫 실행 플로우 개선", tasks: "첫 화면 메시지 정리\n첫 Task 생성 흐름 QA\n신규 사용자 5명 인터뷰" }))}>제품 성장</button>
-              <button onClick={() => setPlan((current) => ({ ...current, objective: "팀의 주간 실행 리듬을 안정화하기", keyResult: "매주 금요일까지 주요 Task 90% 리뷰", initiative: "주간 운영 리듬 만들기", project: "주간 리뷰 프로세스 정착", tasks: "월요일 우선순위 정리\n수요일 막힘 확인\n금요일 회고 작성" }))}>팀 운영</button>
-              <button onClick={() => setPlan((current) => ({ ...current, routineTitle: "오늘의 최우선 Task 정리", routineTrigger: "매일 업무 시작 전", routinePlace: "OKRPTR 홈과 작업 탭", routineSteps: "1. 인박스를 확인한다\n2. 오늘 할 Task 3개를 고른다\n3. 막힌 항목을 데일리에 적는다" }))}>루틴 포함</button>
-            </div>
-            <label className="chat-input"><span>Objective</span><textarea value={plan.objective} onChange={(event) => patch("objective", event.target.value)} rows={3} placeholder="예: 신규 사용자가 첫 주 안에 핵심 가치를 경험하게 만들기" /></label>
-            <label className="chat-input"><span>Key Result</span><textarea value={plan.keyResult} onChange={(event) => patch("keyResult", event.target.value)} rows={2} placeholder="예: 첫 주 활성화율 35% 달성" /></label>
+    <section className="home-okr-chat" aria-labelledby="home-okr-chat-title">
+      <header>
+        <div><Bot size={16} /><div><h2 id="home-okr-chat-title">OKR 대화</h2><p>자유롭게 이야기하면 목표, 지표, 프로젝트, 할 일, 루틴으로 정리해드립니다.</p></div></div>
+      </header>
+      <div className="home-chat-surface">
+        <div className="chat-thread">
+          <p className="assistant-message">{assistantMessage}</p>
+          <label className="chat-input"><span>지금 생각 중인 OKR</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={4} placeholder={"예: 이번 분기에는 신규 사용자가 첫 주 안에 제품 가치를 느끼게 만들고 싶어. 활성화율을 35%까지 올리고, 가입 후 첫 실행 흐름을 개선해야 해."} /></label>
+          <div className="chat-presets">
+            <button onClick={() => { setMessage("신규 사용자가 첫 주 안에 핵심 가치를 경험하게 만들기\n첫 주 활성화율 35% 달성\n온보딩 활성화 개선\n가입 후 첫 실행 플로우 개선\n첫 화면 메시지 정리\n첫 Task 생성 흐름 QA\n신규 사용자 5명 인터뷰"); setDraftOpen(false); }}>제품 성장</button>
+            <button onClick={() => { setMessage("팀의 주간 실행 리듬을 안정화하기\n매주 금요일까지 주요 Task 90% 리뷰\n주간 운영 리듬 만들기\n주간 리뷰 프로세스 정착\n월요일 우선순위 정리\n수요일 막힘 확인\n금요일 회고 작성"); setDraftOpen(false); }}>팀 운영</button>
+            <button onClick={() => setPlan((current) => ({ ...current, routineTitle: "오늘의 최우선 Task 정리", routineTrigger: "매일 업무 시작 전", routinePlace: "OKRPTR 홈과 작업 탭", routineSteps: "1. 인박스를 확인한다\n2. 오늘 할 Task 3개를 고른다\n3. 막힌 항목을 데일리에 적는다" }))}>루틴 포함</button>
           </div>
-          <div className="okr-setup-fields">
-            <label><span>Initiative</span><input value={plan.initiative} onChange={(event) => patch("initiative", event.target.value)} placeholder="예: 온보딩 활성화 개선" /></label>
-            <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="예: 가입 후 첫 실행 플로우 개선" /></label>
-            <label className="wide"><span>첫 Task</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder={"한 줄에 하나씩 입력\n예: 첫 화면 메시지 정리\n첫 Task 생성 흐름 QA"} /></label>
-            <label><span>루틴 이름</span><input value={plan.routineTitle} onChange={(event) => patch("routineTitle", event.target.value)} placeholder="예: 오늘의 최우선 Task 정리" /></label>
-            <label><span>루틴 트리거</span><input value={plan.routineTrigger} onChange={(event) => patch("routineTrigger", event.target.value)} placeholder="예: 매일 업무 시작 전" /></label>
-            <label><span>어디서</span><input value={plan.routinePlace} onChange={(event) => patch("routinePlace", event.target.value)} placeholder="예: OKRPTR 홈" /></label>
-            <label className="wide"><span>무엇을 어떻게</span><textarea value={plan.routineSteps} onChange={(event) => patch("routineSteps", event.target.value)} rows={3} placeholder="루틴 실행 방법" /></label>
+          <div className="chat-actions">
+            <button className="chat-apply" onClick={organizeMessage} disabled={!message.trim()}><TextCursorInput size={13} />정리하기</button>
+            <button className="welcome-primary" onClick={() => void save()} disabled={saving || (!plan.objective.trim() && !message.trim())}>{saving ? "생성 중" : "OKR 만들기"}<ChevronRight size={14} /></button>
           </div>
         </div>
-        <footer>
-          <button className="welcome-secondary" onClick={onClose}>나중에</button>
-          <button className="welcome-primary" onClick={() => void save()} disabled={saving || !plan.objective.trim()}>{saving ? "생성 중" : "OKR 만들기"}<ChevronRight size={14} /></button>
-        </footer>
-      </section>
-    </div>
+        {draftOpen && <div className="okr-setup-fields home-draft-fields">
+          <label><span>Objective</span><textarea value={plan.objective} onChange={(event) => patch("objective", event.target.value)} rows={3} placeholder="예: 신규 사용자가 첫 주 안에 핵심 가치를 경험하게 만들기" /></label>
+          <label><span>Key Result</span><textarea value={plan.keyResult} onChange={(event) => patch("keyResult", event.target.value)} rows={3} placeholder="예: 첫 주 활성화율 35% 달성" /></label>
+          <label><span>Initiative</span><input value={plan.initiative} onChange={(event) => patch("initiative", event.target.value)} placeholder="예: 온보딩 활성화 개선" /></label>
+          <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="예: 가입 후 첫 실행 플로우 개선" /></label>
+          <label className="wide"><span>첫 Task</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder={"한 줄에 하나씩 입력\n예: 첫 화면 메시지 정리\n첫 Task 생성 흐름 QA"} /></label>
+          <label><span>루틴 이름</span><input value={plan.routineTitle} onChange={(event) => patch("routineTitle", event.target.value)} placeholder="예: 오늘의 최우선 Task 정리" /></label>
+          <label><span>루틴 트리거</span><input value={plan.routineTrigger} onChange={(event) => patch("routineTrigger", event.target.value)} placeholder="예: 매일 업무 시작 전" /></label>
+          <label><span>어디서</span><input value={plan.routinePlace} onChange={(event) => patch("routinePlace", event.target.value)} placeholder="예: OKRPTR 홈" /></label>
+          <label className="wide"><span>무엇을 어떻게</span><textarea value={plan.routineSteps} onChange={(event) => patch("routineSteps", event.target.value)} rows={3} placeholder="루틴 실행 방법" /></label>
+        </div>}
+      </div>
+    </section>
   );
 }
 
