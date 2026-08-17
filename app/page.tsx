@@ -141,6 +141,12 @@ type OnboardingPlan = {
   routineSteps: string;
 };
 
+type OrganizedOkr = {
+  assistantMessage: string;
+  questions: string[];
+  plan: OnboardingPlan;
+};
+
 type TeamMember = {
   id: string;
   email: string;
@@ -1175,9 +1181,7 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
   function patch(field: keyof OnboardingPlan, value: string) {
     setPlan((current) => ({ ...current, [field]: value }));
   }
-  function organizeMessage() {
-    const text = message.trim();
-    if (!text) return;
+  function organizeLocally(text: string) {
     const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
     const metricLine = lines.find((line) => /kr|key result|핵심|지표|측정|%|명|건|회|원/i.test(line));
     const actionLines = lines.filter((line) => /해야|하기|정리|확인|만들|준비|진행|검토|배포|인터뷰|실험|측정|개선/i.test(line));
@@ -1190,8 +1194,30 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
       tasks: current.tasks || actionLines.slice(0, 5).join("\n"),
     }));
     setDraftOpen(true);
-    setAssistantMessage("말씀하신 내용을 OKR 초안으로 나눴습니다. 필요한 부분만 고친 뒤 실제 OKR로 만들 수 있습니다.");
+    setAssistantMessage("말씀하신 내용을 기본 방식으로 OKR 초안으로 나눴습니다. OpenAI API 키가 설정되면 문맥을 더 깊게 읽어 정리합니다.");
     setGuideQuestions([]);
+  }
+  async function organizeMessage() {
+    const text = message.trim();
+    if (!text) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/okr-organize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text, plan }),
+      });
+      if (!response.ok) throw new Error("organize failed");
+      const data = await response.json() as { organized: OrganizedOkr };
+      setPlan(data.organized.plan);
+      setDraftOpen(true);
+      setAssistantMessage(data.organized.assistantMessage);
+      setGuideQuestions(data.organized.questions);
+    } catch {
+      organizeLocally(text);
+    } finally {
+      setSaving(false);
+    }
   }
   function chooseGuide(kind: "team" | "personal" | "routine" | "free") {
     setPlan({ ...emptyPlan });
@@ -1220,7 +1246,7 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
   }
   async function save() {
     if (!plan.objective.trim() && !plan.routineTitle.trim()) {
-      organizeMessage();
+      await organizeMessage();
       return;
     }
     setSaving(true);
@@ -1251,7 +1277,7 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
             <button onClick={() => chooseGuide("free")}>그냥 말하기</button>
           </div>
           <div className="chat-actions">
-            <button className="chat-apply" onClick={organizeMessage} disabled={!message.trim()}><TextCursorInput size={13} />정리하기</button>
+            <button className="chat-apply" onClick={() => void organizeMessage()} disabled={saving || !message.trim()}><TextCursorInput size={13} />{saving ? "정리 중" : "정리하기"}</button>
             <button className="welcome-primary" onClick={() => void save()} disabled={saving || (!plan.objective.trim() && !plan.routineTitle.trim() && !message.trim())}>{saving ? "생성 중" : saveLabel}<ChevronRight size={14} /></button>
           </div>
         </div>

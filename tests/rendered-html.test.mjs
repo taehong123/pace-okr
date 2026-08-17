@@ -61,6 +61,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /capture_item/);
   assert.match(page, /get_workspace_rules/);
   assert.match(page, /update_workspace_rules/);
+  assert.match(page, /\/api\/okr-organize/);
   assert.match(page, /OKR 대화/);
   assert.match(page, /정리하기/);
   assert.match(page, /OKR 만들기/);
