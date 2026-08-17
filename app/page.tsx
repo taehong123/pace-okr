@@ -696,16 +696,16 @@ export default function Home() {
           <div><button aria-label="팀 멤버" title="팀 멤버" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={15} /></button><button aria-label="알림" title="알림"><Bell size={15} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
         </header>
         <div className="page-body">
-          <header className="page-header">
+          {activeView !== "home" && <header className="page-header">
             <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setCreateItemOpen(true)}><Plus size={14} />새 항목</button>
             ) : !["scrum", "recommendations", "inbox", "routines"].includes(activeView) ? (
               <CadenceSwitch value={cadence} onChange={setCadence} />
             ) : null}
-          </header>
+          </header>}
 
-          {(activeView === "home" || activeView === "inbox" || activeView === "work") && (
+          {(activeView === "inbox" || activeView === "work") && (
             <form className="quick-capture" onSubmit={submitCapture}>
               <Plus size={15} />
               <input value={capture} onChange={(event) => setCapture(event.target.value)} placeholder="할 일을 입력하면 인박스에 저장됩니다" aria-label="인박스에 할 일 추가" />
@@ -713,7 +713,7 @@ export default function Home() {
             </form>
           )}
 
-          {activeView === "home" && <HomeView objective={objective} items={taskItems} onCreatePlan={createOnboardingPlan} onGoToWork={() => setActiveView("work")} onOpenTask={setSelectedTaskId} />}
+          {activeView === "home" && <HomeView onCreatePlan={createOnboardingPlan} />}
           {activeView === "inbox" && <InboxView items={inboxItems} onConnect={connectInbox} />}
           {activeView === "work" && (
             <TaskDatabase
@@ -1141,27 +1141,12 @@ function RecommendationsView({ onNavigate }: { onNavigate: (view: View) => void 
   return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{row.itemIds.length}개 항목 · 우선순위 {row.score}</small></div><button onClick={() => onNavigate(row.kind === "unlinked" ? "inbox" : row.kind === "empty_project" ? "okr" : "work")}><ChevronRight size={15} /></button></article>)}</section>;
 }
 
-function HomeView({ objective, items, onCreatePlan, onGoToWork, onOpenTask }: {
-  objective?: OkrptrItem;
-  items: OkrptrItem[];
+function HomeView({ onCreatePlan }: {
   onCreatePlan: (plan: OnboardingPlan) => Promise<boolean>;
-  onGoToWork: () => void;
-  onOpenTask: (id: string) => void;
 }) {
-  const activeTasks = items.filter((entry) => entry.status === "in_progress");
   return (
     <div className="home-layout">
-      <div className="home-main">
-        <HomeOkrChat onCreate={onCreatePlan} />
-        <section className="home-focus">
-          <header>현재 Objective<button onClick={onGoToWork}>작업 보기<ChevronRight size={13} /></button></header>
-          {objective ? <div className="home-objective"><Target size={20} /><div><h2>{objective.title}</h2><span><i style={{ width: `${objective.progress}%` }} /></span><small>{objective.progress}% 진행</small></div></div> : <EmptyState icon={Target} title="Objective가 없습니다" />}
-        </section>
-      </div>
-      <section className="home-tasks">
-        <header>진행 중 Task<b>{activeTasks.length}</b></header>
-        {activeTasks.slice(0, 6).map((entry) => <button key={entry.id} onClick={() => onOpenTask(entry.id)}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b><small>{dueLabel(entry.dueDate)}</small></button>)}
-      </section>
+      <HomeOkrChat onCreate={onCreatePlan} />
     </div>
   );
 }

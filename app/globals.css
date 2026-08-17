@@ -159,7 +159,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .status-dot.status-done { background: #448361; }
 .status-dot.status-blocked { background: #d44c47; }
 
-.home-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, .75fr); gap: 42px; align-items: start; }
+.home-layout { max-width: 920px; margin: 0 auto; }
 .home-main { display: grid; gap: 24px; }
 .home-focus, .home-tasks { border-top: 1px solid var(--line); }
 .home-focus > header, .home-tasks > header { height: 44px; display: flex; align-items: center; color: var(--muted); font-size: 11px; }
@@ -174,7 +174,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .home-tasks > button:hover { background: #fbfbfa; }
 .home-tasks b { overflow: hidden; font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .home-tasks small { color: var(--muted); font-size: 10px; }
-.home-okr-chat { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: #fbfbfa; }
+.home-okr-chat { min-height: calc(100vh - 130px); display: grid; align-content: start; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: #fbfbfa; }
 .home-okr-chat > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .home-okr-chat > header > div { min-width: 0; display: flex; align-items: center; gap: 9px; }
 .home-okr-chat h2 { margin: 0; font-size: 14px; line-height: 1.3; }

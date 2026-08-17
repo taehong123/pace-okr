@@ -39,8 +39,9 @@ test("server-renders the OKRPTR workspace", async () => {
   assert.match(html, /팀 OKR/);
   assert.match(html, /개인 OKR/);
   assert.match(html, /루틴부터/);
-  assert.match(html, /Objective/);
-  assert.match(html, /할 일을 입력하면 인박스에 저장됩니다/);
+  assert.match(html, /처음이면 아래 버튼으로 시작해도 됩니다/);
+  assert.match(html, /목표, 고민, 지표, 해야 할 일을 편하게 적어 주세요/);
+  assert.doesNotMatch(html, /할 일을 입력하면 인박스에 저장됩니다/);
   assert.match(html, /데일리/);
   assert.match(html, /추천/);
   assert.match(html, /루틴/);
