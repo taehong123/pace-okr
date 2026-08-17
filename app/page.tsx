@@ -147,6 +147,13 @@ type OrganizedOkr = {
   plan: OnboardingPlan;
 };
 
+type OrganizeError = {
+  code?: string;
+  error?: string;
+  usage?: { spentWon?: number; budgetWon?: number; remainingWon?: number; requestsToday?: number };
+  options?: string[];
+};
+
 type TeamMember = {
   id: string;
   email: string;
@@ -1207,8 +1214,16 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text, plan }),
       });
-      if (!response.ok) throw new Error("organize failed");
-      const data = await response.json() as { organized: OrganizedOkr };
+      const data = await response.json() as ({ organized: OrganizedOkr } & OrganizeError);
+      if (!response.ok) {
+        if (data.code?.startsWith("ai_")) {
+          organizeLocally(text);
+          setAssistantMessage(aiLimitMessage(data));
+          setGuideQuestions(data.options?.length ? data.options : ["유료 플랜으로 서버 AI 정리 계속 사용", "개인 OpenAI API 키 연결", "ChatGPT에서 OKRPTR MCP로 연결해 직접 정리"]);
+          return;
+        }
+        throw new Error("organize failed");
+      }
       setPlan(data.organized.plan);
       setDraftOpen(true);
       setAssistantMessage(data.organized.assistantMessage);
@@ -1295,6 +1310,15 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
       </div>
     </section>
   );
+}
+
+function aiLimitMessage(error: OrganizeError) {
+  if (error.code === "ai_rate_limited") {
+    return "AI 정리 요청이 너무 빠르게 반복되고 있습니다. 지금 화면에는 비용이 들지 않는 기본 정리만 반영했습니다. 잠시 후 다시 시도해 주세요.";
+  }
+  const spent = typeof error.usage?.spentWon === "number" ? `${error.usage.spentWon.toLocaleString()}원` : "무료 사용량";
+  const budget = typeof error.usage?.budgetWon === "number" ? `${error.usage.budgetWon.toLocaleString()}원` : "무료 한도";
+  return `무료 AI 정리 예산을 다 썼습니다. 지금 화면에는 비용이 들지 않는 기본 정리만 반영했습니다. 현재 사용량은 ${spent} / ${budget} 기준입니다.`;
 }
 
 function TreeView({ objective, items, depths, onComplete }: { objective?: OkrptrItem; items: OkrptrItem[]; depths: Record<string, number>; onComplete: (id: string) => void }) {

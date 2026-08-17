@@ -192,3 +192,24 @@ test("creates workspace rules that follow workspace ownership", async () => {
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM workspace_rules").get().count, 0);
   db.close();
 });
+
+test("records AI usage events for cost limits", async () => {
+  const db = new DatabaseSync(":memory:");
+  const migration = await readFile(new URL("../drizzle/0010_sturdy_firelord.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO ai_usage_events (
+      id, owner_id, user_id, model, source, input_chars, input_tokens,
+      output_tokens, estimated_cost_won_micros
+    ) VALUES (
+      'usage-1', 'workspace', 'user', 'gpt-5.6-luna', 'web', 120,
+      60, 200, 25000000
+    );
+  `);
+
+  assert.deepEqual({ ...db.prepare("SELECT COUNT(*) AS count, SUM(estimated_cost_won_micros) AS spent FROM ai_usage_events WHERE owner_id = 'workspace' AND user_id = 'user'").get() }, {
+    count: 1,
+    spent: 25000000,
+  });
+  db.close();
+});

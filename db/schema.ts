@@ -252,6 +252,26 @@ export const routineCompletions = sqliteTable(
   ],
 );
 
+export const aiUsageEvents = sqliteTable(
+  "ai_usage_events",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    userId: text("user_id").notNull(),
+    model: text("model").notNull(),
+    source: text("source").notNull().default("web"),
+    inputChars: integer("input_chars").notNull().default(0),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    estimatedCostWonMicros: integer("estimated_cost_won_micros").notNull().default(0),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_ai_usage_owner_created").on(table.ownerId, table.createdAt),
+    index("idx_ai_usage_user_created").on(table.userId, table.createdAt),
+  ],
+);
+
 export type PaceItem = typeof items.$inferSelect;
 export type NewPaceItem = typeof items.$inferInsert;
 export type PropertyDefinition = typeof propertyDefinitions.$inferSelect;
@@ -266,3 +286,4 @@ export type UserWorkspacePreference = typeof userWorkspacePreferences.$inferSele
 export type WorkspaceRule = typeof workspaceRules.$inferSelect;
 export type WorkspaceGroup = typeof workspaceGroups.$inferSelect;
 export type WorkspaceGroupMember = typeof workspaceGroupMembers.$inferSelect;
+export type AiUsageEvent = typeof aiUsageEvents.$inferSelect;

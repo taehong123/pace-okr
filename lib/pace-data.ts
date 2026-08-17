@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, like, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   activityLog,
+  aiUsageEvents,
   checklistItems,
   dailyScrums,
   itemPropertyValues,
@@ -69,6 +70,11 @@ export type TeamRole = (typeof TEAM_ROLES)[number];
 export type GroupColor = (typeof GROUP_COLORS)[number];
 export type GroupVisibility = (typeof GROUP_VISIBILITIES)[number];
 export type GroupRole = (typeof GROUP_ROLES)[number];
+export type AiUsageSummary = {
+  spentWonMicros: number;
+  requestsToday: number;
+  requestsThisMinute: number;
+};
 
 export type RequestAuthorization = {
   ownerId: string;
@@ -268,6 +274,20 @@ async function ensureSchema() {
         )`),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_routine_completions_unique ON routine_completions(owner_id, routine_id, completion_date)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_routine_completions_owner_date ON routine_completions(owner_id, completion_date)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS ai_usage_events (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          model TEXT NOT NULL,
+          source TEXT NOT NULL DEFAULT 'web',
+          input_chars INTEGER NOT NULL DEFAULT 0,
+          input_tokens INTEGER NOT NULL DEFAULT 0,
+          output_tokens INTEGER NOT NULL DEFAULT 0,
+          estimated_cost_won_micros INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_ai_usage_owner_created ON ai_usage_events(owner_id, created_at)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_ai_usage_user_created ON ai_usage_events(user_id, created_at)"),
         d1.prepare("PRAGMA optimize"),
       ]);
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN trigger_point TEXT NOT NULL DEFAULT ''");
@@ -362,6 +382,52 @@ export function serializeWorkspaceRules(rule: WorkspaceRule) {
     createdAt: rule.createdAt,
     updatedAt: rule.updatedAt,
   };
+}
+
+export async function getAiUsageSummary(ownerId: string, userId: string): Promise<AiUsageSummary> {
+  await ensureSchema();
+  const ownerAndUser = and(eq(aiUsageEvents.ownerId, ownerId), eq(aiUsageEvents.userId, userId));
+  const [lifetime] = await getDb()
+    .select({ spentWonMicros: sql<number>`coalesce(sum(${aiUsageEvents.estimatedCostWonMicros}), 0)` })
+    .from(aiUsageEvents)
+    .where(ownerAndUser);
+  const [today] = await getDb()
+    .select({ requestsToday: sql<number>`count(*)` })
+    .from(aiUsageEvents)
+    .where(and(ownerAndUser, sql`${aiUsageEvents.createdAt} >= datetime('now', 'start of day')`));
+  const [minute] = await getDb()
+    .select({ requestsThisMinute: sql<number>`count(*)` })
+    .from(aiUsageEvents)
+    .where(and(ownerAndUser, sql`${aiUsageEvents.createdAt} >= datetime('now', '-1 minute')`));
+  return {
+    spentWonMicros: Number(lifetime?.spentWonMicros ?? 0),
+    requestsToday: Number(today?.requestsToday ?? 0),
+    requestsThisMinute: Number(minute?.requestsThisMinute ?? 0),
+  };
+}
+
+export async function recordAiUsageEvent(input: {
+  ownerId: string;
+  userId: string;
+  model: string;
+  source?: string;
+  inputChars: number;
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCostWonMicros: number;
+}) {
+  await ensureSchema();
+  await getDb().insert(aiUsageEvents).values({
+    id: crypto.randomUUID(),
+    ownerId: input.ownerId,
+    userId: input.userId,
+    model: input.model,
+    source: input.source ?? "web",
+    inputChars: Math.max(0, Math.round(input.inputChars)),
+    inputTokens: Math.max(0, Math.round(input.inputTokens)),
+    outputTokens: Math.max(0, Math.round(input.outputTokens)),
+    estimatedCostWonMicros: Math.max(0, Math.round(input.estimatedCostWonMicros)),
+  });
 }
 
 export async function authorizeRequest(

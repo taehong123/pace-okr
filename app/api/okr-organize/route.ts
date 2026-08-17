@@ -1,10 +1,16 @@
 import { env } from "cloudflare:workers";
-import { authorizeRequest, ensureWorkspace } from "@/lib/pace-data";
+import { authorizeRequest, ensureWorkspace, getAiUsageSummary, recordAiUsageEvent } from "@/lib/pace-data";
 
 type RuntimeEnv = typeof env & {
   OPENAI_API_KEY?: string;
   OPENAI_MODEL?: string;
   OKRPTR_OPENAI_MODEL?: string;
+  OKRPTR_AI_FREE_BUDGET_WON?: string;
+  OKRPTR_AI_MAX_REQUESTS_PER_DAY?: string;
+  OKRPTR_AI_MAX_REQUESTS_PER_MINUTE?: string;
+  OKRPTR_AI_MIN_CALL_COST_WON?: string;
+  OKRPTR_AI_INPUT_WON_PER_1K_TOKENS?: string;
+  OKRPTR_AI_OUTPUT_WON_PER_1K_TOKENS?: string;
 };
 
 type OrganizedOkr = {
@@ -22,6 +28,8 @@ type OrganizedOkr = {
     routineSteps: string;
   };
 };
+
+const maxOutputTokens = 1800;
 
 const okrSchema = {
   type: "object",
@@ -81,6 +89,10 @@ export async function POST(request: Request) {
     }
 
     const model = runtime.OKRPTR_OPENAI_MODEL || runtime.OPENAI_MODEL || "gpt-5.6-luna";
+    const inputChars = message.length + JSON.stringify(currentPlan).length;
+    const limit = await checkAiUsageLimit(runtime, authorization.ownerId, authorization.userId, inputChars);
+    if (limit) return limit;
+
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -90,7 +102,6 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         model,
         reasoning: { effort: "low" },
-        max_output_tokens: 1800,
         input: [
           {
             role: "system",
@@ -115,6 +126,7 @@ export async function POST(request: Request) {
             schema: okrSchema,
           },
         },
+        max_output_tokens: maxOutputTokens,
       }),
     });
 
@@ -123,6 +135,17 @@ export async function POST(request: Request) {
     }
 
     const data = await response.json() as Record<string, unknown>;
+    const usage = extractUsage(data, inputChars);
+    await recordAiUsageEvent({
+      ownerId: authorization.ownerId,
+      userId: authorization.userId,
+      model,
+      source: "web",
+      inputChars,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      estimatedCostWonMicros: estimateCostWonMicros(runtime, usage.inputTokens, usage.outputTokens),
+    });
     const text = extractOutputText(data);
     if (!text) return Response.json({ error: "OpenAI response was empty", code: "empty_openai_response" }, { status: 502 });
 
@@ -132,6 +155,92 @@ export async function POST(request: Request) {
     const status = /required|not configured/i.test(message) ? 400 : 500;
     return Response.json({ error: message }, { status });
   }
+}
+
+async function checkAiUsageLimit(runtime: RuntimeEnv, ownerId: string, userId: string, inputChars: number) {
+  const budgetWon = envNumber(runtime.OKRPTR_AI_FREE_BUDGET_WON, 500);
+  const dailyLimit = Math.max(1, Math.round(envNumber(runtime.OKRPTR_AI_MAX_REQUESTS_PER_DAY, 40)));
+  const minuteLimit = Math.max(1, Math.round(envNumber(runtime.OKRPTR_AI_MAX_REQUESTS_PER_MINUTE, 5)));
+  const budgetWonMicros = Math.round(budgetWon * 1_000_000);
+  const summary = await getAiUsageSummary(ownerId, userId);
+
+  if (summary.requestsThisMinute >= minuteLimit) {
+    return Response.json({
+      error: "AI 호출이 너무 빠르게 반복되고 있습니다. 잠시 후 다시 시도해 주세요.",
+      code: "ai_rate_limited",
+    }, { status: 429 });
+  }
+
+  if (summary.requestsToday >= dailyLimit) {
+    return Response.json({
+      error: "오늘의 무료 AI 정리 횟수를 모두 사용했습니다.",
+      code: "ai_daily_limit_reached",
+      usage: usagePayload(summary.spentWonMicros, budgetWonMicros, summary.requestsToday),
+      options: limitOptions(),
+    }, { status: 429 });
+  }
+
+  const reservedCostWonMicros = estimateCostWonMicros(
+    runtime,
+    estimateTokensFromChars(inputChars) + 200,
+    maxOutputTokens,
+  );
+  if (summary.spentWonMicros + reservedCostWonMicros > budgetWonMicros) {
+    return Response.json({
+      error: "무료 AI 정리 예산을 모두 사용했습니다.",
+      code: "ai_free_limit_reached",
+      usage: usagePayload(summary.spentWonMicros, budgetWonMicros, summary.requestsToday),
+      options: limitOptions(),
+    }, { status: 402 });
+  }
+
+  return null;
+}
+
+function usagePayload(spentWonMicros: number, budgetWonMicros: number, requestsToday: number) {
+  return {
+    spentWon: Math.round(spentWonMicros / 10_000) / 100,
+    budgetWon: Math.round(budgetWonMicros / 10_000) / 100,
+    remainingWon: Math.max(0, Math.round((budgetWonMicros - spentWonMicros) / 10_000) / 100),
+    requestsToday,
+  };
+}
+
+function limitOptions() {
+  return [
+    "유료 플랜으로 서버 AI 정리 계속 사용",
+    "개인 OpenAI API 키 연결",
+    "ChatGPT에서 OKRPTR MCP로 연결해 직접 정리",
+  ];
+}
+
+function extractUsage(data: Record<string, unknown>, inputChars: number) {
+  const usage = data.usage && typeof data.usage === "object" ? data.usage as Record<string, unknown> : {};
+  const inputTokens = numberValue(usage.input_tokens) || numberValue(usage.prompt_tokens) || estimateTokensFromChars(inputChars);
+  const outputTokens = numberValue(usage.output_tokens) || numberValue(usage.completion_tokens) || 600;
+  return { inputTokens, outputTokens };
+}
+
+function estimateTokensFromChars(chars: number) {
+  return Math.max(1, Math.ceil(chars / 2));
+}
+
+function estimateCostWonMicros(runtime: RuntimeEnv, inputTokens: number, outputTokens: number) {
+  const inputWonPerThousand = envNumber(runtime.OKRPTR_AI_INPUT_WON_PER_1K_TOKENS, 0.2);
+  const outputWonPerThousand = envNumber(runtime.OKRPTR_AI_OUTPUT_WON_PER_1K_TOKENS, 2);
+  const minimumCallWon = envNumber(runtime.OKRPTR_AI_MIN_CALL_COST_WON, 25);
+  const tokenCostWon = (inputTokens / 1000 * inputWonPerThousand) + (outputTokens / 1000 * outputWonPerThousand);
+  return Math.round(Math.max(minimumCallWon, tokenCostWon) * 1_000_000);
+}
+
+function envNumber(value: string | undefined, fallback: number) {
+  if (!value) return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function extractOutputText(data: Record<string, unknown>) {
