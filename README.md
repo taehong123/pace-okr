@@ -26,6 +26,7 @@ a bot webhook. Unstructured captures land in the Inbox and can be linked later.
 - Open and private workspace groups with `@handles`, Leads, invited members, and archive/restore lifecycle
 - D1 persistence and a Streamable HTTP MCP endpoint at `/mcp`
 - Generic bot capture webhook at `/api/webhooks/capture`
+- Google Calendar connection for sending due-dated Tasks to a user's primary calendar
 
 ## MCP tools
 
@@ -75,6 +76,21 @@ cookie.
 The previous `OKITA_API_TOKEN`, `X-Okita-User-Id`, `PACE_API_TOKEN`, and
 `X-Pace-User-Id` names remain supported for
 existing integrations.
+
+## Google Calendar
+
+Google Calendar integration uses Google's OAuth 2.0 web server flow. Configure
+these hosted runtime values before enabling it in production:
+
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_TOKEN_ENCRYPTION_KEY`
+- `GOOGLE_OAUTH_REDIRECT_URI`, usually `https://okrptr.com/api/google/callback`
+
+The OAuth client must allow that redirect URI and the Calendar API must be
+enabled in the Google Cloud project. OKRPTR requests Google profile identity
+and `https://www.googleapis.com/auth/calendar.events`, then stores the refresh
+token encrypted with `GOOGLE_TOKEN_ENCRYPTION_KEY`.
 
 ## Data
 

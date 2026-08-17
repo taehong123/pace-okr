@@ -6,6 +6,9 @@ import {
   aiUsageEvents,
   checklistItems,
   dailyScrums,
+  googleCalendarEvents,
+  googleConnections,
+  googleOAuthStates,
   itemPropertyValues,
   items,
   propertyDefinitions,
@@ -23,6 +26,7 @@ import {
   type WorkspaceGroupMember,
   type WorkspaceMember,
   type WorkspaceRule,
+  type GoogleConnection,
 } from "@/db/schema";
 
 export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "task"] as const;
@@ -288,6 +292,41 @@ async function ensureSchema() {
         )`),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_ai_usage_owner_created ON ai_usage_events(owner_id, created_at)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_ai_usage_user_created ON ai_usage_events(user_id, created_at)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS google_connections (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          google_account_id TEXT NOT NULL DEFAULT '',
+          email TEXT NOT NULL DEFAULT '',
+          display_name TEXT NOT NULL DEFAULT '',
+          encrypted_refresh_token TEXT NOT NULL,
+          scope TEXT NOT NULL DEFAULT '',
+          connected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_google_connections_owner_user ON google_connections(owner_id, user_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_google_connections_user ON google_connections(user_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS google_oauth_states (
+          state TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          return_to TEXT NOT NULL DEFAULT '/',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          expires_at TEXT NOT NULL
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_google_oauth_states_expires ON google_oauth_states(expires_at)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS google_calendar_events (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+          calendar_id TEXT NOT NULL DEFAULT 'primary',
+          google_event_id TEXT NOT NULL,
+          html_link TEXT NOT NULL DEFAULT '',
+          synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_google_calendar_events_item ON google_calendar_events(owner_id, user_id, item_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_google_calendar_events_owner ON google_calendar_events(owner_id)"),
         d1.prepare("PRAGMA optimize"),
       ]);
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN trigger_point TEXT NOT NULL DEFAULT ''");
@@ -430,6 +469,138 @@ export async function recordAiUsageEvent(input: {
   });
 }
 
+export async function createGoogleOAuthState(ownerId: string, userId: string, returnTo = "/") {
+  await ensureSchema();
+  const state = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  await getDb().delete(googleOAuthStates).where(lte(googleOAuthStates.expiresAt, new Date().toISOString()));
+  await getDb().insert(googleOAuthStates).values({
+    state,
+    ownerId,
+    userId,
+    returnTo: normalizeReturnTo(returnTo),
+    expiresAt,
+  });
+  return state;
+}
+
+export async function consumeGoogleOAuthState(state: string) {
+  await ensureSchema();
+  const [saved] = await getDb().select().from(googleOAuthStates).where(eq(googleOAuthStates.state, state)).limit(1);
+  if (!saved) return null;
+  await getDb().delete(googleOAuthStates).where(eq(googleOAuthStates.state, state));
+  if (saved.expiresAt <= new Date().toISOString()) return null;
+  return saved;
+}
+
+export async function getGoogleConnection(ownerId: string, userId: string) {
+  await ensureSchema();
+  const [connection] = await getDb()
+    .select()
+    .from(googleConnections)
+    .where(and(eq(googleConnections.ownerId, ownerId), eq(googleConnections.userId, userId)))
+    .limit(1);
+  return connection ?? null;
+}
+
+export async function saveGoogleConnection(input: {
+  ownerId: string;
+  userId: string;
+  googleAccountId: string;
+  email: string;
+  displayName: string;
+  encryptedRefreshToken: string;
+  scope: string;
+}) {
+  await ensureSchema();
+  const now = new Date().toISOString();
+  const values = {
+    googleAccountId: input.googleAccountId,
+    email: input.email,
+    displayName: input.displayName,
+    encryptedRefreshToken: input.encryptedRefreshToken,
+    scope: input.scope,
+    updatedAt: now,
+  };
+  const [connection] = await getDb()
+    .insert(googleConnections)
+    .values({
+      id: crypto.randomUUID(),
+      ownerId: input.ownerId,
+      userId: input.userId,
+      connectedAt: now,
+      ...values,
+    })
+    .onConflictDoUpdate({
+      target: [googleConnections.ownerId, googleConnections.userId],
+      set: values,
+    })
+    .returning();
+  return connection;
+}
+
+export async function deleteGoogleConnection(ownerId: string, userId: string) {
+  await ensureSchema();
+  const current = await getGoogleConnection(ownerId, userId);
+  await getDb().delete(googleConnections).where(and(eq(googleConnections.ownerId, ownerId), eq(googleConnections.userId, userId)));
+  return current;
+}
+
+export function serializeGoogleConnection(connection: GoogleConnection | null, configured: boolean) {
+  return {
+    configured,
+    connected: Boolean(connection),
+    email: connection?.email ?? null,
+    displayName: connection?.displayName ?? null,
+    scope: connection?.scope ?? "",
+    connectedAt: connection?.connectedAt ?? null,
+    updatedAt: connection?.updatedAt ?? null,
+  };
+}
+
+export async function getGoogleCalendarEvent(ownerId: string, userId: string, itemId: string) {
+  await ensureSchema();
+  const [event] = await getDb()
+    .select()
+    .from(googleCalendarEvents)
+    .where(and(eq(googleCalendarEvents.ownerId, ownerId), eq(googleCalendarEvents.userId, userId), eq(googleCalendarEvents.itemId, itemId)))
+    .limit(1);
+  return event ?? null;
+}
+
+export async function saveGoogleCalendarEvent(input: {
+  ownerId: string;
+  userId: string;
+  itemId: string;
+  calendarId: string;
+  googleEventId: string;
+  htmlLink: string;
+}) {
+  await ensureSchema();
+  const syncedAt = new Date().toISOString();
+  const values = {
+    calendarId: input.calendarId,
+    googleEventId: input.googleEventId,
+    htmlLink: input.htmlLink,
+    syncedAt,
+  };
+  const [event] = await getDb()
+    .insert(googleCalendarEvents)
+    .values({
+      id: crypto.randomUUID(),
+      ownerId: input.ownerId,
+      userId: input.userId,
+      itemId: input.itemId,
+      ...values,
+    })
+    .onConflictDoUpdate({
+      target: [googleCalendarEvents.ownerId, googleCalendarEvents.userId, googleCalendarEvents.itemId],
+      set: values,
+    })
+    .returning();
+  return event;
+}
+
 export async function authorizeRequest(
   request: Request,
   options: { allowViewerWrite?: boolean } = {},
@@ -527,6 +698,11 @@ function requestedWorkspaceId(request: Request) {
     .map((entry) => entry.trim().split("="))
     .find(([name]) => name === "okrptr_workspace_id")?.[1];
   return cookie ? decodeURIComponent(cookie) : null;
+}
+
+function normalizeReturnTo(value: string) {
+  if (!value.startsWith("/") || value.startsWith("//")) return "/";
+  return value.slice(0, 200);
 }
 
 export async function listUserWorkspaces(userId: string, currentWorkspaceId: string) {

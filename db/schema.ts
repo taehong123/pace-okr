@@ -272,6 +272,59 @@ export const aiUsageEvents = sqliteTable(
   ],
 );
 
+export const googleConnections = sqliteTable(
+  "google_connections",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    userId: text("user_id").notNull(),
+    googleAccountId: text("google_account_id").notNull().default(""),
+    email: text("email").notNull().default(""),
+    displayName: text("display_name").notNull().default(""),
+    encryptedRefreshToken: text("encrypted_refresh_token").notNull(),
+    scope: text("scope").notNull().default(""),
+    connectedAt: text("connected_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_google_connections_owner_user").on(table.ownerId, table.userId),
+    index("idx_google_connections_user").on(table.userId),
+  ],
+);
+
+export const googleOAuthStates = sqliteTable(
+  "google_oauth_states",
+  {
+    state: text("state").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    userId: text("user_id").notNull(),
+    returnTo: text("return_to").notNull().default("/"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    expiresAt: text("expires_at").notNull(),
+  },
+  (table) => [
+    index("idx_google_oauth_states_expires").on(table.expiresAt),
+  ],
+);
+
+export const googleCalendarEvents = sqliteTable(
+  "google_calendar_events",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    userId: text("user_id").notNull(),
+    itemId: text("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    calendarId: text("calendar_id").notNull().default("primary"),
+    googleEventId: text("google_event_id").notNull(),
+    htmlLink: text("html_link").notNull().default(""),
+    syncedAt: text("synced_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_google_calendar_events_item").on(table.ownerId, table.userId, table.itemId),
+    index("idx_google_calendar_events_owner").on(table.ownerId),
+  ],
+);
+
 export type PaceItem = typeof items.$inferSelect;
 export type NewPaceItem = typeof items.$inferInsert;
 export type PropertyDefinition = typeof propertyDefinitions.$inferSelect;
@@ -287,3 +340,6 @@ export type WorkspaceRule = typeof workspaceRules.$inferSelect;
 export type WorkspaceGroup = typeof workspaceGroups.$inferSelect;
 export type WorkspaceGroupMember = typeof workspaceGroupMembers.$inferSelect;
 export type AiUsageEvent = typeof aiUsageEvents.$inferSelect;
+export type GoogleConnection = typeof googleConnections.$inferSelect;
+export type GoogleOAuthState = typeof googleOAuthStates.$inferSelect;
+export type GoogleCalendarEvent = typeof googleCalendarEvents.$inferSelect;

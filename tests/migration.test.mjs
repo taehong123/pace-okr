@@ -213,3 +213,40 @@ test("records AI usage events for cost limits", async () => {
   });
   db.close();
 });
+
+test("creates Google OAuth and Calendar sync tables", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON;");
+  const [itemsMigration, googleMigration] = await Promise.all([
+    readFile(new URL("../drizzle/0000_eminent_mandroid.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0011_little_leo.sql", import.meta.url), "utf8"),
+  ]);
+  db.exec(itemsMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(googleMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO items (id, owner_id, kind, title, status)
+      VALUES ('task', 'workspace', 'task', 'Prepare launch review', 'todo');
+    INSERT INTO google_connections (
+      id, owner_id, user_id, google_account_id, email, display_name, encrypted_refresh_token, scope
+    ) VALUES (
+      'connection', 'workspace', 'user', 'google-user', 'user@example.com', 'User', 'encrypted', 'calendar.events'
+    );
+    INSERT INTO google_oauth_states (state, owner_id, user_id, expires_at)
+      VALUES ('state', 'workspace', 'user', '2099-01-01T00:00:00.000Z');
+    INSERT INTO google_calendar_events (
+      id, owner_id, user_id, item_id, google_event_id, html_link
+    ) VALUES (
+      'event', 'workspace', 'user', 'task', 'google-event', 'https://calendar.google.com/event'
+    );
+  `);
+
+  assert.equal(db.prepare("SELECT email FROM google_connections WHERE owner_id = 'workspace'").get().email, "user@example.com");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM google_oauth_states").get().count, 1);
+  assert.throws(
+    () => db.exec("INSERT INTO google_calendar_events (id, owner_id, user_id, item_id, google_event_id) VALUES ('duplicate', 'workspace', 'user', 'task', 'other')"),
+    /UNIQUE/i,
+  );
+  db.exec("DELETE FROM items WHERE id = 'task'");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM google_calendar_events").get().count, 0);
+  db.close();
+});
