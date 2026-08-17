@@ -27,6 +27,7 @@ a bot webhook. Unstructured captures land in the Inbox and can be linked later.
 - D1 persistence and a Streamable HTTP MCP endpoint at `/mcp`
 - Generic bot capture webhook at `/api/webhooks/capture`
 - Google Calendar connection for sending due-dated Tasks to a user's primary calendar
+- Slack bot installation with a `/okrptr` slash command for capturing work into Inbox Tasks
 
 ## MCP tools
 
@@ -91,6 +92,22 @@ The OAuth client must allow that redirect URI and the Calendar API must be
 enabled in the Google Cloud project. OKRPTR requests Google profile identity
 and `https://www.googleapis.com/auth/calendar.events`, then stores the refresh
 token encrypted with `GOOGLE_TOKEN_ENCRYPTION_KEY`.
+
+## Slack bot
+
+Slack integration uses Slack OAuth v2 and a slash command endpoint. Configure
+these hosted runtime values before enabling it in production:
+
+- `SLACK_CLIENT_ID`
+- `SLACK_CLIENT_SECRET`
+- `SLACK_SIGNING_SECRET`
+- `SLACK_TOKEN_ENCRYPTION_KEY`
+- `SLACK_OAUTH_REDIRECT_URI`, usually `https://okrptr.com/api/slack/callback`
+
+In the Slack app settings, add the redirect URL above and create a slash command
+that points to `https://okrptr.com/api/slack/commands`. OKRPTR requests the
+`commands` and `chat:write` bot scopes, verifies Slack request signatures, and
+stores the bot token encrypted with `SLACK_TOKEN_ENCRYPTION_KEY`.
 
 ## Data
 

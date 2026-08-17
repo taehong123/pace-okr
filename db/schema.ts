@@ -325,6 +325,43 @@ export const googleCalendarEvents = sqliteTable(
   ],
 );
 
+export const slackConnections = sqliteTable(
+  "slack_connections",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    userId: text("user_id").notNull(),
+    teamId: text("team_id").notNull(),
+    teamName: text("team_name").notNull().default(""),
+    botUserId: text("bot_user_id").notNull().default(""),
+    appId: text("app_id").notNull().default(""),
+    encryptedBotToken: text("encrypted_bot_token").notNull(),
+    scope: text("scope").notNull().default(""),
+    connectedAt: text("connected_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_slack_connections_owner_user").on(table.ownerId, table.userId),
+    uniqueIndex("idx_slack_connections_team").on(table.teamId),
+    index("idx_slack_connections_owner").on(table.ownerId),
+  ],
+);
+
+export const slackOAuthStates = sqliteTable(
+  "slack_oauth_states",
+  {
+    state: text("state").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    userId: text("user_id").notNull(),
+    returnTo: text("return_to").notNull().default("/"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    expiresAt: text("expires_at").notNull(),
+  },
+  (table) => [
+    index("idx_slack_oauth_states_expires").on(table.expiresAt),
+  ],
+);
+
 export type PaceItem = typeof items.$inferSelect;
 export type NewPaceItem = typeof items.$inferInsert;
 export type PropertyDefinition = typeof propertyDefinitions.$inferSelect;
@@ -343,3 +380,5 @@ export type AiUsageEvent = typeof aiUsageEvents.$inferSelect;
 export type GoogleConnection = typeof googleConnections.$inferSelect;
 export type GoogleOAuthState = typeof googleOAuthStates.$inferSelect;
 export type GoogleCalendarEvent = typeof googleCalendarEvents.$inferSelect;
+export type SlackConnection = typeof slackConnections.$inferSelect;
+export type SlackOAuthState = typeof slackOAuthStates.$inferSelect;

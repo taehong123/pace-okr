@@ -205,6 +205,18 @@ type GoogleConnectionStatus = {
   connectedAt: string | null;
   updatedAt: string | null;
 };
+type SlackConnectionStatus = {
+  configured: boolean;
+  connected: boolean;
+  teamName: string | null;
+  teamId: string | null;
+  botUserId: string | null;
+  scope: string;
+  connectedAt: string | null;
+  updatedAt: string | null;
+  redirectUrl: string;
+  commandUrl: string;
+};
 
 type IntroLanguage = "ko" | "en" | "ja" | "zh" | "es";
 
@@ -363,6 +375,7 @@ export default function Home() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null);
+  const [slackStatus, setSlackStatus] = useState<SlackConnectionStatus | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [introLanguage, setIntroLanguage] = useState<IntroLanguage>("ko");
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
@@ -399,13 +412,20 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
-    fetch("/api/google/status")
+    void fetch("/api/google/status")
       .then(async (response) => {
         if (!response.ok) throw new Error("google unavailable");
         return response.json() as Promise<{ google: GoogleConnectionStatus }>;
       })
       .then((data) => { if (active) setGoogleStatus(data.google); })
       .catch(() => { if (active) setGoogleStatus(null); });
+    void fetch("/api/slack/status")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("slack unavailable");
+        return response.json() as Promise<{ slack: SlackConnectionStatus }>;
+      })
+      .then((data) => { if (active) setSlackStatus(data.slack); })
+      .catch(() => { if (active) setSlackStatus(null); });
     return () => { active = false; };
   }, []);
 
@@ -717,7 +737,7 @@ export default function Home() {
           ))}
         </div>
         <div className="sidebar-bottom">
-          <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>연동</span><i className={googleStatus?.connected ? "connection-live" : connected ? "connection-local" : "connection-local"} /></button>
+          <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>연동</span><i className={googleStatus?.connected || slackStatus?.connected ? "connection-live" : connected ? "connection-local" : "connection-local"} /></button>
           <button className="nav-item" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={16} /><span>팀 멤버</span></button>
           <button className="nav-item" onClick={() => { setTeamPanelTab("groups"); setTeamPanelOpen(true); }}><AtSign size={16} /><span>그룹 관리</span></button>
           <button className="nav-item" onClick={() => setPropertyPanelOpen(true)}><Settings2 size={16} /><span>속성 관리</span></button>
@@ -791,7 +811,7 @@ export default function Home() {
           }}
         />
       )}
-      {integrationOpen && <IntegrationModal connected={connected} google={googleStatus} onGoogleChange={setGoogleStatus} onNotice={showNotice} onClose={() => setIntegrationOpen(false)} />}
+      {integrationOpen && <IntegrationModal connected={connected} google={googleStatus} slack={slackStatus} onGoogleChange={setGoogleStatus} onSlackChange={setSlackStatus} onNotice={showNotice} onClose={() => setIntegrationOpen(false)} />}
       {propertyPanelOpen && (
         <PropertyPanel
           properties={properties}
@@ -1574,10 +1594,11 @@ function GroupDetail({ detail, team, onBack, onChange, onGroupChange, onDeleted,
   return <div className="group-detail"><header className="group-detail-head"><button className="icon-button" onClick={onBack} aria-label="그룹 목록" title="그룹 목록"><ArrowLeft size={16} /></button><i className={`group-swatch group-${detail.group.color}`} /><div><b>{detail.group.name}</b><small>@{detail.group.handle}</small></div>{detail.group.archived && <span className="group-archived">보관됨</span>}</header>{detail.group.canEdit ? <form className="group-detail-form" onSubmit={save}><label><span>이름</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label><label><span>핸들</span><div className="handle-input"><AtSign size={13} /><input value={handle} onChange={(event) => setHandle(event.target.value)} maxLength={32} /></div></label><label><span>설명</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} rows={3} /></label><div className="group-setting-row"><span>색상</span><div className="color-swatches">{groupColors.map((entry) => <button type="button" className={color === entry ? "active" : ""} key={entry} onClick={() => setColor(entry)} title={groupColorLabel(entry)} aria-label={groupColorLabel(entry)}><i className={`group-swatch group-${entry}`} /></button>)}</div></div><div className="group-setting-row"><span>공개 범위</span><div className="visibility-control"><button type="button" className={visibility === "open" ? "active" : ""} onClick={() => setVisibility("open")}><Users size={12} />공개</button><button type="button" className={visibility === "private" ? "active" : ""} onClick={() => setVisibility("private")}><LockKeyhole size={12} />비공개</button></div></div>{error && <p className="form-error">{error}</p>}<div className="group-form-actions"><button className="save-group" disabled={!name.trim() || !handle.trim() || saving}><Check size={13} />저장</button>{detail.group.canArchive && (detail.group.archived ? <><button type="button" onClick={() => void setArchived(false)}><RotateCcw size={13} />복구</button><button type="button" className="danger" onClick={() => void permanentlyDelete()}><Trash2 size={13} />영구 삭제</button></> : <button type="button" onClick={() => void setArchived(true)}><Archive size={13} />보관</button>)}</div></form> : <div className="group-summary"><p>{detail.group.description || "설명 없음"}</p><span>{detail.group.visibility === "private" ? <LockKeyhole size={12} /> : <Users size={12} />}{detail.group.visibility === "private" ? "비공개" : "공개"}</span></div>}<section className="group-members"><header><b>멤버</b><span>{detail.members.length}</span></header>{detail.canManageMembers && <form className="group-member-add" onSubmit={addMember}><select value={memberId} onChange={(event) => { const nextMember = team.members.find((member) => member.id === event.target.value); setMemberId(event.target.value); if (nextMember?.role === "viewer") setMemberRole("member"); }} aria-label="추가할 멤버"><option value="">멤버 선택</option>{availableMembers.map((member) => <option value={member.id} key={member.id}>{member.displayName}{member.status === "invited" ? " (초대 대기)" : ""}</option>)}</select><select value={memberRole} onChange={(event) => setMemberRole(event.target.value as GroupRole)} aria-label="그룹 역할"><option value="member">Member</option><option value="lead" disabled={selectedWorkspaceMember?.role === "viewer"}>Lead</option></select><button disabled={!memberId} aria-label="그룹에 추가" title="그룹에 추가"><UserPlus size={13} /></button></form>}<div className="group-member-list">{detail.members.map((member) => <div className="group-member-row" key={member.memberId}><span className="team-avatar">{member.displayName.slice(0, 1).toLocaleUpperCase()}</span><div><b>{member.displayName}{member.isCurrent && <em>나</em>}</b><small>{member.status === "invited" ? `${member.email} · 초대 대기` : member.email || teamRoleLabel(member.workspaceRole)}</small></div>{detail.canManageMembers ? <select value={member.groupRole} onChange={(event) => void changeGroupRole(member, event.target.value as GroupRole)} aria-label={`${member.displayName} 그룹 역할`}><option value="lead" disabled={member.workspaceRole === "viewer"}>Lead</option><option value="member">Member</option></select> : <span className="member-role">{member.groupRole === "lead" ? "Lead" : "Member"}</span>}{detail.canManageMembers && <button className="icon-button danger" onClick={() => void removeMember(member)} aria-label="그룹에서 제거" title="그룹에서 제거"><X size={13} /></button>}</div>)}{!detail.members.length && <EmptyState icon={Users} title="그룹 멤버가 없습니다" />}</div></section></div>;
 }
 
-function IntegrationModal({ connected, google, onGoogleChange, onNotice, onClose }: { connected: boolean; google: GoogleConnectionStatus | null; onGoogleChange: (status: GoogleConnectionStatus | null) => void; onNotice: (message: string) => void; onClose: () => void }) {
+function IntegrationModal({ connected, google, slack, onGoogleChange, onSlackChange, onNotice, onClose }: { connected: boolean; google: GoogleConnectionStatus | null; slack: SlackConnectionStatus | null; onGoogleChange: (status: GoogleConnectionStatus | null) => void; onSlackChange: (status: SlackConnectionStatus | null) => void; onNotice: (message: string) => void; onClose: () => void }) {
   const endpoint = typeof window === "undefined" ? "/mcp" : `${window.location.origin}/mcp`;
   const tools = ["get_workspace_rules", "update_workspace_rules", "capture_item", "create_item", "update_item", "list_items", "link_item", "review_period", "list_properties", "create_property", "set_property_value", "delete_property", "list_checklist_items", "add_checklist_item", "update_checklist_item", "get_daily_scrum", "save_daily_scrum", "get_recommendations", "list_routines", "create_routine", "update_routine", "complete_routine", "delete_routine", "list_team_members", "invite_team_member", "update_team_member", "remove_team_member", "list_groups", "create_group", "update_group", "archive_group", "delete_group", "list_group_members", "add_group_member", "update_group_member", "remove_group_member"];
   const [disconnecting, setDisconnecting] = useState(false);
+  const [disconnectingSlack, setDisconnectingSlack] = useState(false);
   async function disconnectGoogle() {
     setDisconnecting(true);
     const response = await fetch("/api/google/disconnect", { method: "POST" });
@@ -1587,7 +1608,23 @@ function IntegrationModal({ connected, google, onGoogleChange, onNotice, onClose
     onGoogleChange(next);
     onNotice("Google Calendar 연결을 해제했습니다.");
   }
-  return <div className="modal-backdrop"><section className="integration-modal"><header><h2>연동</h2><button className="icon-button" onClick={onClose}><X size={17} /></button></header><div className="integration-sections"><section className="integration-card"><header><CalendarDays size={18} /><div><b>Google Calendar</b><p>{google?.connected ? `${google.email} 계정으로 연결됨` : google?.configured ? "Task 기한을 Google Calendar 이벤트로 보냅니다" : "Google OAuth 설정이 필요합니다"}</p></div><span className={google?.connected ? "connection-live" : "connection-local"} /></header><div className="integration-actions">{google?.connected ? <button onClick={() => void disconnectGoogle()} disabled={disconnecting}>{disconnecting ? "해제 중" : "연결 해제"}</button> : <button onClick={() => { if (!google?.configured) { onNotice("GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET 설정이 필요합니다."); return; } window.location.href = `/api/google/auth?returnTo=${encodeURIComponent("/")}`; }}>Google로 연결</button>}<small>권한: Google 계정 확인, Calendar 이벤트 생성/수정</small></div></section><section className="integration-card"><header><Bot size={18} /><div><b>ChatGPT MCP</b><p>ChatGPT에서 OKRPTR 워크스페이스를 직접 조작합니다</p></div><span className={connected ? "connection-live" : "connection-local"} /></header><div className="endpoint-row"><div><b>Streamable HTTP</b><code>{endpoint}</code></div><button className="icon-button" onClick={() => void navigator.clipboard.writeText(endpoint)} title="주소 복사"><Copy size={14} /></button></div><div className="tool-list">{tools.map((tool) => <code key={tool}>{tool}</code>)}</div></section></div><footer><span><CheckCircle2 size={15} />Objective → Key Result → Initiative → Project → Task</span><button onClick={onClose}>닫기</button></footer></section></div>;
+  async function disconnectSlack() {
+    setDisconnectingSlack(true);
+    const response = await fetch("/api/slack/disconnect", { method: "POST" });
+    setDisconnectingSlack(false);
+    if (!response.ok) { onNotice("Slack 연결을 해제하지 못했습니다."); return; }
+    const next = slack ? { ...slack, connected: false, teamName: null, teamId: null, botUserId: null, connectedAt: null, updatedAt: null } : null;
+    onSlackChange(next);
+    onNotice("Slack bot 연결을 해제했습니다.");
+  }
+  function connectSlack() {
+    if (!slack?.configured) {
+      onNotice("SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET 설정이 필요합니다.");
+      return;
+    }
+    window.location.href = `/api/slack/auth?returnTo=${encodeURIComponent("/")}`;
+  }
+  return <div className="modal-backdrop"><section className="integration-modal"><header><h2>연동</h2><button className="icon-button" onClick={onClose}><X size={17} /></button></header><div className="integration-sections"><section className="integration-card"><header><CalendarDays size={18} /><div><b>Google Calendar</b><p>{google?.connected ? `${google.email} 계정으로 연결됨` : google?.configured ? "Task 기한을 Google Calendar 이벤트로 보냅니다" : "Google OAuth 설정이 필요합니다"}</p></div><span className={google?.connected ? "connection-live" : "connection-local"} /></header><div className="integration-actions">{google?.connected ? <button onClick={() => void disconnectGoogle()} disabled={disconnecting}>{disconnecting ? "해제 중" : "연결 해제"}</button> : <button onClick={() => { if (!google?.configured) { onNotice("GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET 설정이 필요합니다."); return; } window.location.href = `/api/google/auth?returnTo=${encodeURIComponent("/")}`; }}>Google로 연결</button>}<small>권한: Google 계정 확인, Calendar 이벤트 생성/수정</small></div></section><section className="integration-card"><header><Hash size={18} /><div><b>Slack bot</b><p>{slack?.connected ? `${slack.teamName} 워크스페이스에 설치됨` : slack?.configured ? "/okrptr 명령으로 인박스 Task를 만듭니다" : "Slack 앱 설정이 필요합니다"}</p></div><span className={slack?.connected ? "connection-live" : "connection-local"} /></header><div className="integration-actions">{slack?.connected ? <button onClick={() => void disconnectSlack()} disabled={disconnectingSlack}>{disconnectingSlack ? "해제 중" : "연결 해제"}</button> : <button onClick={connectSlack}>Slack에 설치</button>}<small>권한: slash command, bot 메시지 작성</small></div><div className="integration-url-grid"><div><b>OAuth Redirect URL</b><code>{slack?.redirectUrl ?? "/api/slack/callback"}</code></div><button className="icon-button" onClick={() => void navigator.clipboard.writeText(slack?.redirectUrl ?? `${window.location.origin}/api/slack/callback`)} title="주소 복사"><Copy size={14} /></button><div><b>Slash Command URL</b><code>{slack?.commandUrl ?? "/api/slack/commands"}</code></div><button className="icon-button" onClick={() => void navigator.clipboard.writeText(slack?.commandUrl ?? `${window.location.origin}/api/slack/commands`)} title="주소 복사"><Copy size={14} /></button></div></section><section className="integration-card"><header><Bot size={18} /><div><b>ChatGPT MCP</b><p>ChatGPT에서 OKRPTR 워크스페이스를 직접 조작합니다</p></div><span className={connected ? "connection-live" : "connection-local"} /></header><div className="endpoint-row"><div><b>Streamable HTTP</b><code>{endpoint}</code></div><button className="icon-button" onClick={() => void navigator.clipboard.writeText(endpoint)} title="주소 복사"><Copy size={14} /></button></div><div className="tool-list">{tools.map((tool) => <code key={tool}>{tool}</code>)}</div></section></div><footer><span><CheckCircle2 size={15} />Objective → Key Result → Initiative → Project → Task</span><button onClick={onClose}>닫기</button></footer></section></div>;
 }
 
 function EmptyState({ icon: Icon, title }: { icon: LucideIcon; title: string }) { return <div className="empty-state"><Icon size={22} /><span>{title}</span></div>; }

@@ -14,6 +14,8 @@ import {
   propertyDefinitions,
   routineCompletions,
   routines,
+  slackConnections,
+  slackOAuthStates,
   userWorkspacePreferences,
   workspaceRules,
   workspaceGroupMembers,
@@ -27,6 +29,7 @@ import {
   type WorkspaceMember,
   type WorkspaceRule,
   type GoogleConnection,
+  type SlackConnection,
 } from "@/db/schema";
 
 export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "task"] as const;
@@ -327,6 +330,31 @@ async function ensureSchema() {
         )`),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_google_calendar_events_item ON google_calendar_events(owner_id, user_id, item_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_google_calendar_events_owner ON google_calendar_events(owner_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_connections (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          team_id TEXT NOT NULL,
+          team_name TEXT NOT NULL DEFAULT '',
+          bot_user_id TEXT NOT NULL DEFAULT '',
+          app_id TEXT NOT NULL DEFAULT '',
+          encrypted_bot_token TEXT NOT NULL,
+          scope TEXT NOT NULL DEFAULT '',
+          connected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_connections_owner_user ON slack_connections(owner_id, user_id)"),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_connections_team ON slack_connections(team_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_connections_owner ON slack_connections(owner_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_oauth_states (
+          state TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          return_to TEXT NOT NULL DEFAULT '/',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          expires_at TEXT NOT NULL
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_oauth_states_expires ON slack_oauth_states(expires_at)"),
         d1.prepare("PRAGMA optimize"),
       ]);
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN trigger_point TEXT NOT NULL DEFAULT ''");
@@ -599,6 +627,111 @@ export async function saveGoogleCalendarEvent(input: {
     })
     .returning();
   return event;
+}
+
+export async function createSlackOAuthState(ownerId: string, userId: string, returnTo = "/") {
+  await ensureSchema();
+  const state = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  await getDb().delete(slackOAuthStates).where(lte(slackOAuthStates.expiresAt, new Date().toISOString()));
+  await getDb().insert(slackOAuthStates).values({
+    state,
+    ownerId,
+    userId,
+    returnTo: normalizeReturnTo(returnTo),
+    expiresAt,
+  });
+  return state;
+}
+
+export async function consumeSlackOAuthState(state: string) {
+  await ensureSchema();
+  const [saved] = await getDb().select().from(slackOAuthStates).where(eq(slackOAuthStates.state, state)).limit(1);
+  if (!saved) return null;
+  await getDb().delete(slackOAuthStates).where(eq(slackOAuthStates.state, state));
+  if (saved.expiresAt <= new Date().toISOString()) return null;
+  return saved;
+}
+
+export async function getSlackConnection(ownerId: string, userId: string) {
+  await ensureSchema();
+  const [connection] = await getDb()
+    .select()
+    .from(slackConnections)
+    .where(and(eq(slackConnections.ownerId, ownerId), eq(slackConnections.userId, userId)))
+    .limit(1);
+  return connection ?? null;
+}
+
+export async function getSlackConnectionByTeam(teamId: string) {
+  await ensureSchema();
+  const [connection] = await getDb()
+    .select()
+    .from(slackConnections)
+    .where(eq(slackConnections.teamId, teamId))
+    .limit(1);
+  return connection ?? null;
+}
+
+export async function saveSlackConnection(input: {
+  ownerId: string;
+  userId: string;
+  teamId: string;
+  teamName: string;
+  botUserId: string;
+  appId: string;
+  encryptedBotToken: string;
+  scope: string;
+}) {
+  await ensureSchema();
+  const now = new Date().toISOString();
+  const values = {
+    userId: input.userId,
+    teamId: input.teamId,
+    teamName: input.teamName,
+    botUserId: input.botUserId,
+    appId: input.appId,
+    encryptedBotToken: input.encryptedBotToken,
+    scope: input.scope,
+    updatedAt: now,
+  };
+  await getDb().delete(slackConnections).where(and(eq(slackConnections.ownerId, input.ownerId), eq(slackConnections.userId, input.userId)));
+  const [connection] = await getDb()
+    .insert(slackConnections)
+    .values({
+      id: crypto.randomUUID(),
+      ownerId: input.ownerId,
+      connectedAt: now,
+      ...values,
+    })
+    .onConflictDoUpdate({
+      target: slackConnections.teamId,
+      set: { ...values, ownerId: input.ownerId },
+    })
+    .returning();
+  return connection;
+}
+
+export async function deleteSlackConnection(ownerId: string, userId: string) {
+  await ensureSchema();
+  const current = await getSlackConnection(ownerId, userId);
+  await getDb().delete(slackConnections).where(and(eq(slackConnections.ownerId, ownerId), eq(slackConnections.userId, userId)));
+  return current;
+}
+
+export function serializeSlackConnection(connection: SlackConnection | null, configured: boolean, urls: { redirectUrl: string; commandUrl: string }) {
+  return {
+    configured,
+    connected: Boolean(connection),
+    teamName: connection?.teamName ?? null,
+    teamId: connection?.teamId ?? null,
+    botUserId: connection?.botUserId ?? null,
+    scope: connection?.scope ?? "",
+    connectedAt: connection?.connectedAt ?? null,
+    updatedAt: connection?.updatedAt ?? null,
+    redirectUrl: urls.redirectUrl,
+    commandUrl: urls.commandUrl,
+  };
 }
 
 export async function authorizeRequest(
