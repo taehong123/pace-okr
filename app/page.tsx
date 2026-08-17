@@ -1167,8 +1167,8 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
   const [plan, setPlan] = useState<OnboardingPlan>({
     ...emptyPlan,
   });
-  const [assistantMessage, setAssistantMessage] = useState("OKR에 대해 편하게 적어 주세요. 목표, 지표, 실행 프로젝트, 할 일, 루틴 후보로 정리해드립니다.");
-  const [guideQuestions, setGuideQuestions] = useState<string[]>(["처음이면 아래 버튼으로 시작해도 됩니다."]);
+  const [assistantMessage, setAssistantMessage] = useState("OKR에 대해 편하게 적어 주세요. 목표, 지표, 실행 프로젝트, 할 일, 루틴 후보로 정리해드립니다. 처음이면 아래 버튼으로 시작해도 됩니다.");
+  const [guideQuestions, setGuideQuestions] = useState<string[]>([]);
   const [draftOpen, setDraftOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const saveLabel = !plan.objective.trim() && plan.routineTitle.trim() ? "루틴 만들기" : "OKR 만들기";
@@ -1229,7 +1229,7 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
     if (created) {
       setMessage("");
       setPlan({ ...emptyPlan });
-      setGuideQuestions(["다음 목표나 루틴도 이어서 이야기할 수 있습니다."]);
+      setGuideQuestions([]);
       setDraftOpen(false);
       setAssistantMessage("OKR 구조를 만들었습니다. 다음 목표나 루틴도 이어서 이야기할 수 있습니다.");
     }
@@ -1242,7 +1242,7 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
       <div className="home-chat-surface">
         <div className="chat-thread">
           <p className="assistant-message">{assistantMessage}</p>
-          {guideQuestions.length > 0 && <div className="guide-questions">{guideQuestions.map((question) => <span key={question}>{question}</span>)}</div>}
+          {guideQuestions.length > 0 && <div className="assistant-followups">{guideQuestions.map((question) => <p className="assistant-message followup-message" key={question}>{question}</p>)}</div>}
           <label className="chat-input"><span>지금 생각 중인 OKR</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={4} placeholder="목표, 고민, 지표, 해야 할 일을 편하게 적어 주세요." /></label>
           <div className="chat-presets">
             <button onClick={() => chooseGuide("team")}>팀 OKR</button>
