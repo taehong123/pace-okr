@@ -1182,6 +1182,51 @@ export async function createWorkspaceForUser(userId: string, email: string | nul
   return { id, name, personal: false, role: "owner" as TeamRole, current: true };
 }
 
+export async function deleteWorkspaceForUser(userId: string, workspaceId: string) {
+  await ensureSchema();
+  const id = workspaceId.trim();
+  if (!id) throw new Error("workspaceId is required");
+  const [row] = await getDb()
+    .select({ workspace: workspaces, membership: workspaceMembers })
+    .from(workspaceMembers)
+    .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
+    .where(and(eq(workspaceMembers.workspaceId, id), eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, "active")))
+    .limit(1);
+  if (!row) throw new Error("Workspace not found or access denied");
+  if (row.membership.role !== "owner") throw new Error("Only the workspace owner can delete a workspace");
+  if (row.workspace.id === row.workspace.ownerUserId) throw new Error("Personal workspace cannot be deleted");
+
+  const remaining = (await listUserWorkspaces(userId, id)).filter((workspace) => workspace.id !== id);
+  if (!remaining.length) throw new Error("Create or keep another workspace before deleting this one");
+  const nextWorkspace = remaining.find((workspace) => workspace.personal) ?? remaining[0];
+  const now = new Date().toISOString();
+  const groupRows = await getDb().select({ id: workspaceGroups.id }).from(workspaceGroups).where(eq(workspaceGroups.workspaceId, id));
+  if (groupRows.length) await getDb().delete(workspaceGroupMembers).where(inArray(workspaceGroupMembers.groupId, groupRows.map((group) => group.id)));
+  await getDb().delete(googleCalendarEvents).where(eq(googleCalendarEvents.ownerId, id));
+  await getDb().delete(googleConnections).where(eq(googleConnections.ownerId, id));
+  await getDb().delete(googleOAuthStates).where(eq(googleOAuthStates.ownerId, id));
+  await getDb().delete(slackConnections).where(eq(slackConnections.ownerId, id));
+  await getDb().delete(slackOAuthStates).where(eq(slackOAuthStates.ownerId, id));
+  await getDb().delete(aiUsageEvents).where(eq(aiUsageEvents.ownerId, id));
+  await getDb().delete(activityLog).where(eq(activityLog.ownerId, id));
+  await getDb().delete(routineCompletions).where(eq(routineCompletions.ownerId, id));
+  await getDb().delete(routines).where(eq(routines.ownerId, id));
+  await getDb().delete(checklistItems).where(eq(checklistItems.ownerId, id));
+  await getDb().delete(itemPropertyValues).where(eq(itemPropertyValues.ownerId, id));
+  await getDb().delete(propertyDefinitions).where(eq(propertyDefinitions.ownerId, id));
+  await getDb().delete(dailyScrums).where(eq(dailyScrums.ownerId, id));
+  await getDb().delete(trashRecords).where(eq(trashRecords.ownerId, id));
+  await getDb().delete(items).where(eq(items.ownerId, id));
+  await getDb().delete(okrCycles).where(eq(okrCycles.ownerId, id));
+  await getDb().delete(workspaceRules).where(eq(workspaceRules.workspaceId, id));
+  await getDb().delete(workspaceGroups).where(eq(workspaceGroups.workspaceId, id));
+  await getDb().delete(workspaceMembers).where(eq(workspaceMembers.workspaceId, id));
+  await getDb().delete(workspaces).where(eq(workspaces.id, id));
+  await getDb().update(userWorkspacePreferences).set({ activeWorkspaceId: null, updatedAt: now }).where(eq(userWorkspacePreferences.activeWorkspaceId, id));
+  await setActiveWorkspace(userId, nextWorkspace.id);
+  return { deleted: true, id, nextWorkspaceId: nextWorkspace.id, nextWorkspace };
+}
+
 export async function setActiveWorkspace(userId: string, workspaceId: string) {
   const [membership] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, "active"))).limit(1);
   if (!membership) throw new Error("Workspace not found or access denied");

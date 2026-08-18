@@ -527,6 +527,19 @@ export default function Home() {
     }
   }
 
+  async function deleteWorkspace(workspace: WorkspaceSummary) {
+    if (workspace.personal || workspace.role !== "owner" || workspaceSaving) return;
+    if (!window.confirm(`'${workspace.name}' 워크스페이스를 삭제할까요?\n멤버, 그룹, OKR, Task, 루틴, 연동 데이터가 함께 삭제됩니다.`)) return;
+    setWorkspaceSaving(true);
+    const response = await fetch(`/api/workspaces?workspaceId=${encodeURIComponent(workspace.id)}`, { method: "DELETE" });
+    if (response.ok) window.location.reload();
+    else {
+      const data = await response.json().catch(() => ({})) as { error?: string };
+      setWorkspaceSaving(false);
+      showNotice(data.error ?? "워크스페이스를 삭제하지 못했습니다.");
+    }
+  }
+
   async function submitCapture(event: FormEvent) {
     event.preventDefault();
     const title = capture.trim();
@@ -726,11 +739,18 @@ export default function Home() {
               <header><b>워크스페이스</b><span>{workspaces.length}</span></header>
               <div className="workspace-list">
                 {workspaces.map((workspace) => (
-                  <button key={workspace.id} onClick={() => void switchWorkspace(workspace.id)} disabled={workspaceSaving}>
-                    <span className="workspace-avatar">{workspace.name.slice(0, 1).toLocaleUpperCase()}</span>
-                    <span><b>{workspace.name}</b><small>{workspace.personal ? "개인" : teamRoleLabel(workspace.role)}</small></span>
-                    {workspace.current && <Check size={14} />}
-                  </button>
+                  <div className="workspace-row" key={workspace.id}>
+                    <button onClick={() => void switchWorkspace(workspace.id)} disabled={workspaceSaving}>
+                      <span className="workspace-avatar">{workspace.name.slice(0, 1).toLocaleUpperCase()}</span>
+                      <span><b>{workspace.name}</b><small>{workspace.personal ? "개인" : teamRoleLabel(workspace.role)}</small></span>
+                      {workspace.current && <Check size={14} />}
+                    </button>
+                    {!workspace.personal && workspace.role === "owner" && (
+                      <button className="workspace-delete" onClick={() => void deleteWorkspace(workspace)} disabled={workspaceSaving} aria-label={`${workspace.name} 워크스페이스 삭제`} title="워크스페이스 삭제">
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
               <div className="workspace-create">

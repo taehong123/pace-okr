@@ -1,6 +1,7 @@
 import {
   authorizeRequest,
   createWorkspaceForUser,
+  deleteWorkspaceForUser,
   ensureWorkspace,
   listUserWorkspaces,
   setActiveWorkspace,
@@ -49,6 +50,19 @@ export async function PATCH(request: Request) {
   }
 }
 
+export async function DELETE(request: Request) {
+  const authorization = await authorizeRequest(request, { allowViewerWrite: true });
+  if (authorization instanceof Response) return authorization;
+  try {
+    const workspaceId = new URL(request.url).searchParams.get("workspaceId")?.trim() ?? "";
+    if (!workspaceId) return Response.json({ error: "workspaceId is required" }, { status: 400 });
+    const result = await deleteWorkspaceForUser(authorization.userId, workspaceId);
+    return withWorkspaceCookie(Response.json(result), result.nextWorkspaceId, request);
+  } catch (error) {
+    return routeError(error);
+  }
+}
+
 function withWorkspaceCookie(response: Response, workspaceId: string, request: Request) {
   const headers = new Headers(response.headers);
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
@@ -61,6 +75,10 @@ function withWorkspaceCookie(response: Response, workspaceId: string, request: R
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
-  const status = /required|characters|not found|access denied/i.test(message) ? 400 : 500;
+  const status = /owner|personal|access/i.test(message)
+    ? 403
+    : /required|characters|not found|keep another/i.test(message)
+      ? 400
+      : 500;
   return Response.json({ error: message }, { status });
 }
