@@ -798,14 +798,6 @@ export default function Home() {
             );
           })}
         </nav>
-        <div className="sidebar-section">
-          <span>주기</span>
-          {(Object.keys(cadenceLabels) as Cadence[]).map((entry) => (
-            <button className="nav-item" key={entry} onClick={() => { setCadence(entry); setActiveView("reviews"); }}>
-              <CalendarDays size={15} /><span>{cadenceLabels[entry]}</span>
-            </button>
-          ))}
-        </div>
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>ChatGPT 연동</span><i className={connected ? "connection-live" : "connection-local"} /></button>
           <button className="nav-item" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={16} /><span>팀 멤버</span></button>
@@ -825,7 +817,7 @@ export default function Home() {
             <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setCreateItemOpen(true)}><Plus size={14} />새 항목</button>
-            ) : !["scrum", "recommendations", "inbox", "routines", "trash"].includes(activeView) ? (
+            ) : activeView === "reviews" ? (
               <CadenceSwitch value={cadence} onChange={setCadence} />
             ) : null}
           </header>}
