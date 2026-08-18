@@ -24,7 +24,7 @@ a bot webhook. Unstructured captures land in the Inbox and can be linked later.
 - Shared workspaces with Owner, Admin, Member, and Viewer roles
 - A personal workspace for every account, plus additional team workspaces with switching
 - Open and private workspace groups with `@handles`, Leads, invited members, and archive/restore lifecycle
-- D1 persistence and a Streamable HTTP MCP endpoint at `/mcp`
+- D1 persistence and a Streamable HTTP MCP endpoint at `/api/mcp`
 - Generic bot capture webhook at `/api/webhooks/capture`
 - Google Calendar connection for sending due-dated Tasks to a user's primary calendar
 - Slack bot installation with a `/okrptr` slash command for capturing work into Inbox Tasks
