@@ -476,6 +476,13 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .group-detail-head b, .group-detail-head small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-detail-head b { font-size: 12px; }
 .group-detail-head small { color: var(--muted); font-size: 9px; }
+.group-head-actions { display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
+.group-head-actions .icon-button { width: 28px; height: 28px; }
+.group-head-actions .danger:hover { color: var(--red); }
+.group-address-row { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; gap: 8px; padding: 10px 18px; border-bottom: 1px solid var(--line); background: #fbfbfa; }
+.group-address-row > div { min-width: 0; display: grid; gap: 4px; }
+.group-address-row b { color: var(--muted); font-size: 9px; }
+.group-address-row code { overflow: hidden; color: var(--ink); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .group-detail-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
 .group-detail-form > label { min-width: 0; display: grid; gap: 6px; }
 .group-detail-form > label:nth-child(3), .group-detail-form > .group-setting-row, .group-detail-form > .form-error, .group-detail-form > .group-form-actions { grid-column: 1 / -1; }
