@@ -471,6 +471,7 @@ export async function cleanupWorkspaceExecutionData(ownerId: string) {
     getDb().select({ count: sql<number>`count(*)` }).from(routines).where(eq(routines.ownerId, ownerId)),
     getDb().select({ count: sql<number>`count(*)` }).from(okrCycles).where(eq(okrCycles.ownerId, ownerId)),
   ]);
+  const protectedBefore = await protectedWorkspaceCounts(ownerId);
 
   await getDb().delete(checklistItems).where(eq(checklistItems.ownerId, ownerId));
   await getDb().delete(itemPropertyValues).where(eq(itemPropertyValues.ownerId, ownerId));
@@ -483,11 +484,52 @@ export async function cleanupWorkspaceExecutionData(ownerId: string) {
   await getDb().delete(okrCycles).where(eq(okrCycles.ownerId, ownerId));
 
   const activeCycle = await ensureActiveOkrCycle(ownerId);
+  const protectedAfter = await protectedWorkspaceCounts(ownerId);
+  for (const key of Object.keys(protectedBefore) as Array<keyof typeof protectedBefore>) {
+    if (protectedAfter[key] < protectedBefore[key]) {
+      throw new Error("Cleanup touched protected workspace data");
+    }
+  }
   return {
     deletedItems: itemCount[0]?.count ?? 0,
     deletedRoutines: routineCount[0]?.count ?? 0,
     deletedCycles: cycleCount[0]?.count ?? 0,
+    protectedData: protectedAfter,
     activeCycle: serializeOkrCycle(activeCycle),
+  };
+}
+
+async function protectedWorkspaceCounts(ownerId: string) {
+  const [
+    workspaceCount,
+    memberCount,
+    groupCount,
+    groupMemberCount,
+    propertyCount,
+    googleConnectionCount,
+    slackConnectionCount,
+  ] = await Promise.all([
+    getDb().select({ count: sql<number>`count(*)` }).from(workspaces).where(eq(workspaces.id, ownerId)),
+    getDb().select({ count: sql<number>`count(*)` }).from(workspaceMembers).where(eq(workspaceMembers.workspaceId, ownerId)),
+    getDb().select({ count: sql<number>`count(*)` }).from(workspaceGroups).where(eq(workspaceGroups.workspaceId, ownerId)),
+    getDb()
+      .select({ count: sql<number>`count(*)` })
+      .from(workspaceGroupMembers)
+      .innerJoin(workspaceGroups, eq(workspaceGroupMembers.groupId, workspaceGroups.id))
+      .where(eq(workspaceGroups.workspaceId, ownerId)),
+    getDb().select({ count: sql<number>`count(*)` }).from(propertyDefinitions).where(eq(propertyDefinitions.ownerId, ownerId)),
+    getDb().select({ count: sql<number>`count(*)` }).from(googleConnections).where(eq(googleConnections.ownerId, ownerId)),
+    getDb().select({ count: sql<number>`count(*)` }).from(slackConnections).where(eq(slackConnections.ownerId, ownerId)),
+  ]);
+
+  return {
+    workspaces: workspaceCount[0]?.count ?? 0,
+    members: memberCount[0]?.count ?? 0,
+    groups: groupCount[0]?.count ?? 0,
+    groupMembers: groupMemberCount[0]?.count ?? 0,
+    properties: propertyCount[0]?.count ?? 0,
+    googleConnections: googleConnectionCount[0]?.count ?? 0,
+    slackConnections: slackConnectionCount[0]?.count ?? 0,
   };
 }
 

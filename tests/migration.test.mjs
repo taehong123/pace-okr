@@ -312,3 +312,102 @@ test("creates OKR cycles and links OKR items to a cycle", async () => {
   assert.equal(db.prepare("SELECT cycle_id FROM items WHERE id = 'objective'").get().cycle_id, null);
   db.close();
 });
+
+test("cleanup removes execution data while preserving workspace groups", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON;");
+  const migrations = await Promise.all([
+    "0000_eminent_mandroid.sql",
+    "0001_groovy_annihilus.sql",
+    "0002_charming_prodigy.sql",
+    "0004_good_scarlet_witch.sql",
+    "0005_wet_roland_deschain.sql",
+    "0006_rich_spitfire.sql",
+    "0007_remarkable_epoch.sql",
+    "0008_zippy_dormammu.sql",
+    "0009_demonic_hitman.sql",
+    "0010_sturdy_firelord.sql",
+    "0011_little_leo.sql",
+    "0012_parallel_vindicator.sql",
+    "0013_calm_james_howlett.sql",
+  ].map((file) => readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8")));
+  for (const migration of migrations) {
+    db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  }
+
+  db.exec(`
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
+    INSERT INTO workspace_members (id, workspace_id, user_id, display_name, role, status)
+      VALUES ('owner-member', 'workspace', 'owner', 'Owner', 'owner', 'active');
+    INSERT INTO workspace_groups (id, workspace_id, name, handle, color, visibility)
+      VALUES ('group', 'workspace', 'Product', 'product', 'blue', 'open');
+    INSERT INTO workspace_group_members (id, group_id, member_id, role)
+      VALUES ('group-member', 'group', 'owner-member', 'lead');
+    INSERT INTO property_definitions (id, owner_id, name, type)
+      VALUES ('property', 'workspace', 'Owner', 'text');
+    INSERT INTO okr_cycles (id, owner_id, name, version, start_date, end_date, status)
+      VALUES ('cycle', 'workspace', '2026 Q3 OKR v1', 1, '2026-07-01', '2026-09-30', 'active');
+    INSERT INTO items (id, owner_id, cycle_id, kind, title, status)
+      VALUES ('task', 'workspace', 'cycle', 'task', 'Ship cleanup', 'todo');
+    INSERT INTO item_property_values (id, owner_id, item_id, property_id, value)
+      VALUES ('property-value', 'workspace', 'task', 'property', '"owner"');
+    INSERT INTO checklist_items (id, owner_id, task_id, title)
+      VALUES ('checklist', 'workspace', 'task', 'Confirm cleanup');
+    INSERT INTO activity_log (id, owner_id, item_id, action)
+      VALUES ('activity', 'workspace', 'task', 'created');
+    INSERT INTO daily_scrums (id, owner_id, scrum_date, today_note)
+      VALUES ('scrum', 'workspace', '2026-08-18', 'Cleanup');
+    INSERT INTO routines (id, owner_id, title, cadence)
+      VALUES ('routine', 'workspace', 'Daily review', 'daily');
+    INSERT INTO routine_completions (id, owner_id, routine_id, completion_date)
+      VALUES ('routine-completion', 'workspace', 'routine', '2026-08-18');
+    INSERT INTO google_connections (id, owner_id, user_id, google_account_id, email, encrypted_refresh_token)
+      VALUES ('google', 'workspace', 'owner', 'google-owner', 'owner@example.com', 'encrypted');
+    INSERT INTO google_calendar_events (id, owner_id, user_id, item_id, google_event_id)
+      VALUES ('event', 'workspace', 'owner', 'task', 'google-event');
+    INSERT INTO slack_connections (id, owner_id, user_id, team_id, encrypted_bot_token)
+      VALUES ('slack', 'workspace', 'owner', 'T123', 'encrypted');
+  `);
+
+  db.exec(`
+    DELETE FROM checklist_items WHERE owner_id = 'workspace';
+    DELETE FROM item_property_values WHERE owner_id = 'workspace';
+    DELETE FROM google_calendar_events WHERE owner_id = 'workspace';
+    DELETE FROM activity_log WHERE owner_id = 'workspace';
+    DELETE FROM daily_scrums WHERE owner_id = 'workspace';
+    DELETE FROM routine_completions WHERE owner_id = 'workspace';
+    DELETE FROM routines WHERE owner_id = 'workspace';
+    DELETE FROM items WHERE owner_id = 'workspace';
+    DELETE FROM okr_cycles WHERE owner_id = 'workspace';
+  `);
+
+  assert.deepEqual({
+    workspaces: db.prepare("SELECT COUNT(*) AS count FROM workspaces WHERE id = 'workspace'").get().count,
+    members: db.prepare("SELECT COUNT(*) AS count FROM workspace_members WHERE workspace_id = 'workspace'").get().count,
+    groups: db.prepare("SELECT COUNT(*) AS count FROM workspace_groups WHERE workspace_id = 'workspace'").get().count,
+    groupMembers: db.prepare("SELECT COUNT(*) AS count FROM workspace_group_members WHERE group_id = 'group'").get().count,
+    properties: db.prepare("SELECT COUNT(*) AS count FROM property_definitions WHERE owner_id = 'workspace'").get().count,
+    googleConnections: db.prepare("SELECT COUNT(*) AS count FROM google_connections WHERE owner_id = 'workspace'").get().count,
+    slackConnections: db.prepare("SELECT COUNT(*) AS count FROM slack_connections WHERE owner_id = 'workspace'").get().count,
+  }, {
+    workspaces: 1,
+    members: 1,
+    groups: 1,
+    groupMembers: 1,
+    properties: 1,
+    googleConnections: 1,
+    slackConnections: 1,
+  });
+  assert.deepEqual({
+    items: db.prepare("SELECT COUNT(*) AS count FROM items WHERE owner_id = 'workspace'").get().count,
+    cycles: db.prepare("SELECT COUNT(*) AS count FROM okr_cycles WHERE owner_id = 'workspace'").get().count,
+    routines: db.prepare("SELECT COUNT(*) AS count FROM routines WHERE owner_id = 'workspace'").get().count,
+    scrums: db.prepare("SELECT COUNT(*) AS count FROM daily_scrums WHERE owner_id = 'workspace'").get().count,
+  }, {
+    items: 0,
+    cycles: 0,
+    routines: 0,
+    scrums: 0,
+  });
+  db.close();
+});
