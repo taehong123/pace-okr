@@ -474,6 +474,23 @@ export default function Home() {
     if (workspaceMenuOpen && workspaceCreateOpen) workspaceNameInputRef.current?.focus();
   }, [workspaceMenuOpen, workspaceCreateOpen]);
 
+  useEffect(() => {
+    function closeTopmost(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (selectedTaskId) { setSelectedTaskId(null); return; }
+      if (cleanupOpen) { setCleanupOpen(false); return; }
+      if (createItemOpen) { setCreateItemOpen(false); return; }
+      if (teamPanelOpen) { setTeamPanelOpen(false); return; }
+      if (propertyPanelOpen) { setPropertyPanelOpen(false); return; }
+      if (integrationOpen) { setIntegrationOpen(false); return; }
+      if (onboardingOpen) { setOnboardingOpen(false); return; }
+      if (workspaceCreateOpen) { setWorkspaceCreateOpen(false); setNewWorkspaceName(""); return; }
+      if (workspaceMenuOpen) setWorkspaceMenuOpen(false);
+    }
+    window.addEventListener("keydown", closeTopmost);
+    return () => window.removeEventListener("keydown", closeTopmost);
+  }, [cleanupOpen, createItemOpen, integrationOpen, onboardingOpen, propertyPanelOpen, selectedTaskId, teamPanelOpen, workspaceCreateOpen, workspaceMenuOpen]);
+
   const inboxItems = items.filter((entry) => entry.status === "inbox");
   const executionItems = items.filter((entry) => entry.kind === "project" || entry.kind === "task");
   const structuredItems = items.filter((entry) => entry.status !== "inbox");
@@ -802,8 +819,8 @@ export default function Home() {
           <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>ChatGPT 연동</span><i className={connected ? "connection-live" : "connection-local"} /></button>
           <button className="nav-item" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={16} /><span>팀 멤버</span></button>
           <button className="nav-item" onClick={() => { setTeamPanelTab("groups"); setTeamPanelOpen(true); }}><AtSign size={16} /><span>그룹 관리</span></button>
-          <button className="nav-item" onClick={() => setPropertyPanelOpen(true)}><Settings2 size={16} /><span>설정</span></button>
-          <button className="profile-row"><span className="avatar">T</span><span>태홍</span><MoreHorizontal size={15} /></button>
+          <button className="nav-item" onClick={() => setPropertyPanelOpen(true)}><Settings2 size={16} /><span>내 설정</span></button>
+          <button className="profile-row" onClick={() => setPropertyPanelOpen(true)}><span className="avatar">T</span><span>태홍</span><MoreHorizontal size={15} /></button>
         </div>
       </aside>
 
@@ -878,8 +895,13 @@ export default function Home() {
       {propertyPanelOpen && (
         <PropertyPanel
           properties={properties}
+          currentWorkspace={currentWorkspace}
+          workspaceCount={workspaces.length}
           onClose={() => setPropertyPanelOpen(false)}
           onCleanup={() => { setPropertyPanelOpen(false); setCleanupOpen(true); }}
+          onOpenWorkspaceMenu={() => { setPropertyPanelOpen(false); setWorkspaceMenuOpen(true); }}
+          onOpenTeamMembers={() => { setPropertyPanelOpen(false); setTeamPanelTab("members"); setTeamPanelOpen(true); }}
+          onOpenGroups={() => { setPropertyPanelOpen(false); setTeamPanelTab("groups"); setTeamPanelOpen(true); }}
           onCreated={(property) => setProperties((current) => [...current, property])}
           onDeleted={(id) => setProperties((current) => current.filter((entry) => entry.id !== id))}
           onNotice={showNotice}
@@ -1581,11 +1603,11 @@ function ReviewView({ items, cadence, completed, blocked, averageProgress }: { i
   return <section className="review-content"><div className="metrics-row"><div><span>완료</span><strong>{completed}<small> / {items.length}</small></strong></div><div><span>평균 진행</span><strong>{averageProgress}<small>%</small></strong></div><div><span>막힘</span><strong>{blocked}</strong></div></div><div className="review-progress"><div><b>{cadenceLabels[cadence]} 진행률</b><span>{averageProgress}%</span></div><span><i style={{ width: `${averageProgress}%` }} /></span></div><div className="review-list"><span>검토할 항목</span>{items.slice(0, 7).map((entry) => <div key={entry.id}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b><em>{entry.progress}%</em></div>)}</div></section>;
 }
 
-function PropertyPanel({ properties, onClose, onCleanup, onCreated, onDeleted, onNotice }: { properties: PropertyDefinition[]; onClose: () => void; onCleanup: () => void; onCreated: (property: PropertyDefinition) => void; onDeleted: (id: string) => void; onNotice: (message: string) => void }) {
+function PropertyPanel({ properties, currentWorkspace, workspaceCount, onClose, onCleanup, onOpenWorkspaceMenu, onOpenTeamMembers, onOpenGroups, onCreated, onDeleted, onNotice }: { properties: PropertyDefinition[]; currentWorkspace?: WorkspaceSummary; workspaceCount: number; onClose: () => void; onCleanup: () => void; onOpenWorkspaceMenu: () => void; onOpenTeamMembers: () => void; onOpenGroups: () => void; onCreated: (property: PropertyDefinition) => void; onDeleted: (id: string) => void; onNotice: (message: string) => void }) {
   const [name, setName] = useState(""); const [type, setType] = useState<PropertyType>("text"); const [options, setOptions] = useState("");
   async function create(event: FormEvent) { event.preventDefault(); if (!name.trim()) return; const response = await fetch("/api/properties", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, type, options: options.split(",").map((entry) => entry.trim()).filter(Boolean) }) }); if (!response.ok) return; const data = await response.json() as { property: PropertyDefinition }; onCreated(data.property); setName(""); setOptions(""); onNotice("속성을 추가했습니다."); }
   async function remove(id: string) { const response = await fetch(`/api/properties?id=${encodeURIComponent(id)}`, { method: "DELETE" }); if (response.ok) { onDeleted(id); onNotice("속성을 삭제했습니다."); } }
-  return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>설정</h2><p>Task 속성 · 데이터 정리</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header><section className="settings-section"><h3>Task 속성</h3><div className="property-list">{properties.map((property) => <div className="property-row" key={property.id}><span className="property-type-icon">{property.type === "number" ? <Hash size={14} /> : <TextCursorInput size={14} />}</span><div><b>{property.name}</b><small>{propertyTypeLabel(property.type)}</small></div><button onClick={() => void remove(property.id)} aria-label="속성 삭제"><Trash2 size={13} /></button></div>)}</div></section><form className="property-form" onSubmit={create}><h3>속성 추가</h3><label><span>이름</span><input value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>유형</span><select value={type} onChange={(event) => setType(event.target.value as PropertyType)}>{(["text", "number", "select", "date", "checkbox"] as PropertyType[]).map((entry) => <option value={entry} key={entry}>{propertyTypeLabel(entry)}</option>)}</select></label>{type === "select" && <label><span>옵션</span><input value={options} onChange={(event) => setOptions(event.target.value)} placeholder="쉼표로 구분" /></label>}<button><Plus size={14} />추가</button></form><section className="settings-danger-zone"><div><b>OKR 데이터 정리</b><p>워크스페이스와 그룹은 남기고 OKR 실행 데이터를 휴지통으로 보냅니다.</p></div><button onClick={onCleanup}><Trash2 size={13} />클린업 열기</button></section></aside></div>;
+  return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>내 설정</h2><p>워크스페이스 · 팀 · 작업 데이터베이스</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header><section className="settings-section"><h3>워크스페이스</h3><div className="settings-workspace-card"><span className="workspace-avatar">{currentWorkspace?.name.slice(0, 1).toLocaleUpperCase() || "O"}</span><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : `${teamRoleLabel(currentWorkspace?.role ?? "member")} · 전체 ${workspaceCount}개`}</small></div></div><div className="settings-action-grid"><button onClick={onOpenWorkspaceMenu}><Columns3 size={13} />워크스페이스 관리</button><button onClick={onOpenTeamMembers}><Users size={13} />멤버 관리</button><button onClick={onOpenGroups}><AtSign size={13} />그룹 관리</button></div></section><section className="settings-section"><h3>작업 데이터베이스 속성</h3><div className="property-list">{properties.map((property) => <div className="property-row" key={property.id}><span className="property-type-icon">{property.type === "number" ? <Hash size={14} /> : <TextCursorInput size={14} />}</span><div><b>{property.name}</b><small>{propertyTypeLabel(property.type)}</small></div><button onClick={() => void remove(property.id)} aria-label="속성 삭제"><Trash2 size={13} /></button></div>)}</div></section><form className="property-form" onSubmit={create}><h3>속성 추가</h3><label><span>이름</span><input value={name} onChange={(event) => setName(event.target.value)} /></label><label><span>유형</span><select value={type} onChange={(event) => setType(event.target.value as PropertyType)}>{(["text", "number", "select", "date", "checkbox"] as PropertyType[]).map((entry) => <option value={entry} key={entry}>{propertyTypeLabel(entry)}</option>)}</select></label>{type === "select" && <label><span>옵션</span><input value={options} onChange={(event) => setOptions(event.target.value)} placeholder="쉼표로 구분" /></label>}<button><Plus size={14} />추가</button></form><section className="settings-danger-zone"><div><b>OKR 데이터 정리</b><p>워크스페이스와 그룹은 남기고 OKR 실행 데이터를 휴지통으로 보냅니다.</p></div><button onClick={onCleanup}><Trash2 size={13} />클린업 열기</button></section></aside></div>;
 }
 
 function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { initialTab: "members" | "groups"; initialGroupHandle: string | null; onClose: () => void; onNotice: (message: string) => void }) {

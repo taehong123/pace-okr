@@ -400,6 +400,14 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .property-form > button:disabled { opacity: .55; cursor: default; }
 .settings-section { border-bottom: 1px solid var(--line); }
 .settings-section h3 { margin: 0; padding: 14px 18px 4px; color: var(--muted); font-size: 10px; }
+.settings-workspace-card { min-height: 52px; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 9px; margin: 6px 18px 10px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; background: #fbfbfa; }
+.settings-workspace-card > div { min-width: 0; display: grid; gap: 3px; }
+.settings-workspace-card b, .settings-workspace-card small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-workspace-card b { font-size: 12px; }
+.settings-workspace-card small { color: var(--muted); font-size: 10px; }
+.settings-action-grid { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 0 18px 14px; }
+.settings-action-grid button { height: 32px; display: flex; align-items: center; justify-content: flex-start; gap: 7px; padding: 0 10px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--ink); font-size: 10px; cursor: pointer; }
+.settings-action-grid button:hover { background: var(--hover); }
 .settings-danger-zone { display: grid; gap: 10px; margin: 14px 18px 18px; padding: 12px; border: 1px solid #ead8d5; border-radius: 5px; background: #fffafa; }
 .settings-danger-zone b { font-size: 11px; }
 .settings-danger-zone p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
