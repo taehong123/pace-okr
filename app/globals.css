@@ -300,6 +300,16 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .integration-card b { font-size: 12px; }
 .integration-card p { margin: 2px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .integration-card > header span { width: 8px; height: 8px; border-radius: 50%; }
+.chatgpt-card { gap: 12px; }
+.connector-steps { display: grid; gap: 6px; }
+.connector-steps > div { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 8px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 5px; background: #fbfbfa; }
+.connector-steps span { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: var(--ink); color: white; font-size: 9px; font-weight: 700; }
+.connector-steps p { margin: 0; color: var(--ink); font-size: 10px; line-height: 1.45; }
+.connector-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.connector-actions button, .connector-actions a { height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; border-radius: 4px; font-size: 10px; text-decoration: none; cursor: pointer; }
+.connector-actions .copy-primary { border: 0; background: var(--ink); color: white; }
+.connector-actions a { border: 1px solid var(--line); background: white; color: var(--ink); }
+.connector-note { margin: 0; padding: 8px; border-radius: 5px; background: #f7f7f5; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .integration-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .integration-actions button { height: 30px; padding: 0 10px; border: 0; border-radius: 4px; background: var(--ink); color: white; font-size: 10px; cursor: pointer; }
 .integration-actions button:disabled { opacity: .5; cursor: default; }
@@ -315,6 +325,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .endpoint-row code { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .tool-list { padding: 14px 17px; display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--line); }
 .integration-card .tool-list { max-height: 160px; overflow: auto; padding: 0; border-bottom: 0; }
+.tool-list.compact { max-height: 96px; }
 .tool-list code { padding: 4px 6px; border-radius: 3px; background: #f1f1ef; color: #5f5e5b; font-size: 9px; }
 .integration-modal footer { min-height: 57px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 17px; }
 .integration-modal footer span { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 9px; }
