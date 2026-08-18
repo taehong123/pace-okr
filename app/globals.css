@@ -308,6 +308,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .connector-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .connector-actions button, .connector-actions a { height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; border-radius: 4px; font-size: 10px; text-decoration: none; cursor: pointer; }
 .connector-actions .copy-primary { border: 0; background: var(--ink); color: white; }
+.connector-actions .secondary-action { border: 1px solid var(--line); background: white; color: var(--ink); }
 .connector-actions a { border: 1px solid var(--line); background: white; color: var(--ink); }
 .connector-note { margin: 0; padding: 8px; border-radius: 5px; background: #f7f7f5; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .integration-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
