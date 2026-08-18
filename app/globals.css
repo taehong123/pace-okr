@@ -58,8 +58,6 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .nav-item i { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; }
 .nav-item:hover, .nav-item.active { background: var(--hover); color: var(--ink); }
 .nav-item.active { font-weight: 600; }
-.danger-nav { color: var(--red); }
-.danger-nav svg { color: var(--red); }
 .sidebar-section { display: grid; gap: 1px; margin-top: 20px; }
 .sidebar-section > span { padding: 0 9px 6px; color: var(--faint); font-size: 10px; font-weight: 600; }
 .sidebar-bottom { margin-top: auto; display: grid; gap: 1px; }
@@ -398,6 +396,13 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .property-form input:focus, .property-form select:focus { border-color: #bcbcb9; box-shadow: 0 0 0 1px #bcbcb9; }
 .property-form > button { height: 34px; display: flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 4px; background: var(--ink); color: white; font-size: 11px; cursor: pointer; }
 .property-form > button:disabled { opacity: .55; cursor: default; }
+.settings-section { border-bottom: 1px solid var(--line); }
+.settings-section h3 { margin: 0; padding: 14px 18px 4px; color: var(--muted); font-size: 10px; }
+.settings-danger-zone { display: grid; gap: 10px; margin: 14px 18px 18px; padding: 12px; border: 1px solid #ead8d5; border-radius: 5px; background: #fffafa; }
+.settings-danger-zone b { font-size: 11px; }
+.settings-danger-zone p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.settings-danger-zone button { width: fit-content; height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; border: 1px solid #e0c1bd; border-radius: 4px; background: white; color: var(--red); font-size: 10px; cursor: pointer; }
+.settings-danger-zone button:hover { background: #fff4f2; }
 
 .team-panel { width: min(500px, 100vw); }
 .team-tabs { height: 42px; display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0; padding: 0 12px; border-bottom: 1px solid var(--line); }
