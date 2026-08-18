@@ -46,7 +46,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 
 type View = "home" | "inbox" | "work" | "routines" | "okr" | "scrum" | "recommendations" | "reviews";
 type Cadence = "daily" | "weekly" | "monthly" | "quarterly";
-type ItemStatus = "inbox" | "todo" | "in_progress" | "done" | "blocked";
+type ItemStatus = "inbox" | "backlog" | "todo" | "policy_discussion" | "in_progress" | "developing" | "development_done" | "done" | "blocked";
 type ItemKind = "objective" | "key_result" | "initiative" | "project" | "task";
 type Priority = "low" | "medium" | "high" | "urgent";
 type PropertyType = "text" | "number" | "select" | "date" | "checkbox";
@@ -59,6 +59,7 @@ type GroupRole = "lead" | "member";
 
 type OkrptrItem = {
   id: string;
+  cycleId: string | null;
   parentId: string | null;
   kind: ItemKind;
   title: string;
@@ -69,6 +70,17 @@ type OkrptrItem = {
   progress: number;
   dueDate: string | null;
   source: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type OkrCycle = {
+  id: string;
+  name: string;
+  version: number;
+  startDate: string;
+  endDate: string;
+  status: "planned" | "active" | "closed";
   createdAt: string;
   updatedAt: string;
 };
@@ -355,6 +367,7 @@ export default function Home() {
   const [items, setItems] = useState<OkrptrItem[]>(fallbackItems);
   const [properties, setProperties] = useState<PropertyDefinition[]>(fallbackProperties);
   const [propertyValues, setPropertyValues] = useState<PropertyValueMap>(fallbackValues);
+  const [okrCycles, setOkrCycles] = useState<OkrCycle[]>([]);
   const [activeView, setActiveView] = useState<View>("home");
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [taskDisplay, setTaskDisplay] = useState<"table" | "board">("table");
@@ -391,19 +404,21 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([fetch("/api/items"), fetch("/api/properties"), fetch("/api/workspaces"), fetch("/api/workspace-rules")])
-      .then(async ([itemsResponse, propertiesResponse, workspacesResponse, rulesResponse]) => {
-        if (!itemsResponse.ok || !propertiesResponse.ok || !workspacesResponse.ok || !rulesResponse.ok) throw new Error("offline");
+    Promise.all([fetch("/api/items"), fetch("/api/properties"), fetch("/api/workspaces"), fetch("/api/workspace-rules"), fetch("/api/okr-cycles")])
+      .then(async ([itemsResponse, propertiesResponse, workspacesResponse, rulesResponse, cyclesResponse]) => {
+        if (!itemsResponse.ok || !propertiesResponse.ok || !workspacesResponse.ok || !rulesResponse.ok || !cyclesResponse.ok) throw new Error("offline");
         const itemData = (await itemsResponse.json()) as { items: OkrptrItem[] };
         const propertyData = (await propertiesResponse.json()) as { properties: PropertyDefinition[]; values: PropertyValueMap };
         const workspaceData = (await workspacesResponse.json()) as { workspaces: WorkspaceSummary[] };
         const rulesData = (await rulesResponse.json()) as { rules: WorkspaceRules };
+        const cyclesData = (await cyclesResponse.json()) as { cycles: OkrCycle[] };
         if (!active) return;
         setItems(itemData.items);
         setProperties(propertyData.properties);
         setPropertyValues(propertyData.values);
         setWorkspaces(workspaceData.workspaces);
         setWorkspaceRules(rulesData.rules);
+        setOkrCycles(cyclesData.cycles);
         setConnected(true);
       })
       .catch(() => setConnected(false));
@@ -436,16 +451,18 @@ export default function Home() {
   const inboxItems = items.filter((entry) => entry.status === "inbox");
   const executionItems = items.filter((entry) => entry.kind === "project" || entry.kind === "task");
   const structuredItems = items.filter((entry) => entry.status !== "inbox");
+  const activeOkrCycle = okrCycles.find((cycle) => cycle.status === "active") ?? okrCycles[0] ?? null;
+  const okrTreeItems = useMemo(() => filterTreeItemsByCycle(structuredItems, activeOkrCycle?.id ?? null), [structuredItems, activeOkrCycle?.id]);
   const periodItems = items.filter(
     (entry) => entry.status !== "inbox" && (cadence === "quarterly" || entry.cadence === cadence || entry.kind === "objective"),
   );
-  const objective = items.find((entry) => entry.kind === "objective");
-  const completed = periodItems.filter((entry) => entry.status === "done").length;
+  const objective = okrTreeItems.find((entry) => entry.kind === "objective");
+  const completed = periodItems.filter((entry) => isCompletedStatus(entry.status)).length;
   const blocked = periodItems.filter((entry) => entry.status === "blocked").length;
   const averageProgress = periodItems.length
     ? Math.round(periodItems.reduce((sum, entry) => sum + entry.progress, 0) / periodItems.length)
     : 0;
-  const depths = useMemo(() => buildDepths(structuredItems), [structuredItems]);
+  const depths = useMemo(() => buildDepths(okrTreeItems), [okrTreeItems]);
   const selectedTask = items.find((entry) => entry.id === selectedTaskId && entry.kind === "task");
   const currentWorkspace = workspaces.find((entry) => entry.current) ?? workspaces[0];
 
@@ -792,7 +809,7 @@ export default function Home() {
             />
           )}
           {activeView === "routines" && <RoutineView onNotice={showNotice} />}
-          {activeView === "okr" && <TreeView objective={objective} items={structuredItems} depths={depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} />}
+          {activeView === "okr" && <><OkrCycleStrip cycle={activeOkrCycle} /><TreeView objective={objective} items={okrTreeItems} depths={depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} /></>}
           {activeView === "scrum" && <DailyScrumView onOpenTask={setSelectedTaskId} onNotice={showNotice} />}
           {activeView === "recommendations" && <RecommendationsView onNavigate={setActiveView} />}
           {activeView === "reviews" && <ReviewView items={periodItems} cadence={cadence} completed={completed} blocked={blocked} averageProgress={averageProgress} />}
@@ -933,7 +950,7 @@ function TaskDatabase({ items, allItems, properties, values, display, onDisplayC
             </div>
             {visible.map((entry) => (
               <div className="task-table-row" key={entry.id}>
-                <div className="name-cell"><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><button className={`task-check ${entry.status === "done" ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: entry.status === "done" ? "todo" : "done", progress: entry.status === "done" ? entry.progress : 100 })}><Check size={12} /></button><input defaultValue={entry.title} onBlur={(event) => event.target.value.trim() !== entry.title && void onPatch(entry.id, { title: event.target.value })} /></div>
+                <div className="name-cell"><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><button className={`task-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })}><Check size={12} /></button><input defaultValue={entry.title} onBlur={(event) => event.target.value.trim() !== entry.title && void onPatch(entry.id, { title: event.target.value })} /></div>
                 <select className={`status-select status-${entry.status}`} value={entry.status} onChange={(event) => void onPatch(entry.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <select className={`priority-${entry.priority}`} value={entry.priority} onChange={(event) => void onPatch(entry.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <input className="date-cell" type="date" value={entry.dueDate ?? ""} onChange={(event) => void onPatch(entry.id, { dueDate: event.target.value || null })} />
@@ -1398,13 +1415,26 @@ function aiLimitMessage(error: OrganizeError) {
   return `무료 AI 정리 예산을 다 썼습니다. 지금 화면에는 비용이 들지 않는 기본 정리만 반영했습니다. 현재 사용량은 ${spent} / ${budget} 기준입니다.`;
 }
 
+function OkrCycleStrip({ cycle }: { cycle: OkrCycle | null }) {
+  if (!cycle) return null;
+  return <section className="okr-cycle-strip"><div><span>OKR version</span><b>v{cycle.version}</b></div><div><span>기간</span><b>{cycle.startDate} - {cycle.endDate}</b></div><div><span>상태</span><b>{cycleStatusLabel(cycle.status)}</b></div></section>;
+}
+
 function TreeView({ objective, items, depths, onComplete }: { objective?: OkrptrItem; items: OkrptrItem[]; depths: Record<string, number>; onComplete: (id: string) => void }) {
   if (!objective) return <EmptyState icon={Target} title="Objective가 없습니다" />;
-  return <section className="outline-section"><div className="objective-row"><Target size={18} /><div><span>Objective</span><h2>{objective.title}</h2></div><b>{objective.progress}%</b></div><div className="hierarchy">{items.filter((entry) => entry.id !== objective.id).map((entry) => <div className="hierarchy-row" key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as CSSProperties}><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><span className="hierarchy-copy"><small>{kindLabel(entry.kind)}</small><b>{entry.title}</b></span><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span><em>{entry.progress}%</em>{entry.status !== "done" && ["project", "task"].includes(entry.kind) ? <button className="row-action" aria-label="완료 처리" title="완료 처리" onClick={() => onComplete(entry.id)}><Check size={13} /></button> : <ChevronRight className="row-chevron" size={15} />}</div>)}</div></section>;
+  return <section className="outline-section"><div className="objective-row"><Target size={18} /><div><span>Objective</span><h2>{objective.title}</h2></div><b>{objective.progress}%</b></div><div className="hierarchy">{items.filter((entry) => entry.id !== objective.id).map((entry) => <div className="hierarchy-row" key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as CSSProperties}><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><span className="hierarchy-copy"><small>{kindLabel(entry.kind)}</small><b>{entry.title}</b></span><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span><em>{entry.progress}%</em>{!isCompletedStatus(entry.status) && ["project", "task"].includes(entry.kind) ? <button className="row-action" aria-label="완료 처리" title="완료 처리" onClick={() => onComplete(entry.id)}><Check size={13} /></button> : <ChevronRight className="row-chevron" size={15} />}</div>)}</div></section>;
 }
 
 function BoardView({ items, onOpenTask }: { items: OkrptrItem[]; onOpenTask: (id: string) => void }) {
-  const columns: { status: ItemStatus; label: string }[] = [{ status: "todo", label: "할 일" }, { status: "in_progress", label: "진행 중" }, { status: "done", label: "완료" }];
+  const columns: { status: ItemStatus; label: string }[] = [
+    { status: "backlog", label: "백로그" },
+    { status: "todo", label: "할 일" },
+    { status: "policy_discussion", label: "정책 논의" },
+    { status: "in_progress", label: "진행 중" },
+    { status: "developing", label: "개발 중" },
+    { status: "development_done", label: "개발 완료" },
+    { status: "blocked", label: "막힘" },
+  ];
   return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <button className="board-item" key={entry.id} onClick={() => onOpenTask(entry.id)}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
 }
 
@@ -1636,15 +1666,18 @@ function IntegrationModal({ connected, google, slack, onGoogleChange, onSlackCha
 
 function EmptyState({ icon: Icon, title }: { icon: LucideIcon; title: string }) { return <div className="empty-state"><Icon size={22} /><span>{title}</span></div>; }
 
-const statusLabels: Record<ItemStatus, string> = { inbox: "인박스", todo: "할 일", in_progress: "진행 중", done: "완료", blocked: "막힘" };
+const statusLabels: Record<ItemStatus, string> = { inbox: "\uC778\uBC15\uC2A4", backlog: "\uBC31\uB85C\uADF8", todo: "\uD560 \uC77C", policy_discussion: "\uC815\uCC45 \uB17C\uC758 \uC911", in_progress: "\uC9C4\uD589 \uC911", developing: "\uAC1C\uBC1C \uC911", development_done: "\uAC1C\uBC1C \uC644\uB8CC", done: "\uC644\uB8CC", blocked: "\uB9C9\uD798" };
 const priorityLabels: Record<Priority, string> = { low: "낮음", medium: "보통", high: "높음", urgent: "긴급" };
 const groupColors: GroupColor[] = ["gray", "blue", "green", "yellow", "orange", "red", "purple"];
 
-function item(id: string, parentId: string | null, kind: ItemKind, title: string, status: ItemStatus, cadence: Cadence, progress: number, dueDate: string | null = null, source = "web", priority: Priority = "medium"): OkrptrItem { return { id, parentId, kind, title, description: "", status, priority, cadence, progress, dueDate, source, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; }
+function item(id: string, parentId: string | null, kind: ItemKind, title: string, status: ItemStatus, cadence: Cadence, progress: number, dueDate: string | null = null, source = "web", priority: Priority = "medium"): OkrptrItem { return { id, cycleId: null, parentId, kind, title, description: "", status, priority, cadence, progress, dueDate, source, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; }
 function buildDepths(items: OkrptrItem[]) { const byId = new Map(items.map((entry) => [entry.id, entry])); const result: Record<string, number> = {}; for (const entry of items) { let depth = 0; let current = entry; while (current.parentId && depth < 5) { depth += 1; const parent = byId.get(current.parentId); if (!parent) break; current = parent; } result[entry.id] = depth; } return result; }
+function filterTreeItemsByCycle(items: OkrptrItem[], cycleId: string | null) { if (!cycleId) return items; const byParent = new Map<string | null, OkrptrItem[]>(); for (const entry of items) { const rows = byParent.get(entry.parentId) ?? []; rows.push(entry); byParent.set(entry.parentId, rows); } const roots = items.filter((entry) => ["objective", "key_result", "initiative"].includes(entry.kind) && entry.cycleId === cycleId); const included = new Set<string>(); const visit = (entry: OkrptrItem) => { if (included.has(entry.id)) return; included.add(entry.id); for (const child of byParent.get(entry.id) ?? []) visit(child); }; roots.forEach(visit); return items.filter((entry) => included.has(entry.id)); }
 function kindAbbr(kind: ItemKind) { return { objective: "O", key_result: "KR", initiative: "I", project: "P", task: "T" }[kind]; }
 function kindLabel(kind: ItemKind) { return { objective: "Objective", key_result: "Key Result", initiative: "Initiative", project: "Project", task: "Task" }[kind]; }
 function statusLabel(status: ItemStatus) { return statusLabels[status]; }
+function isCompletedStatus(status: ItemStatus) { return status === "done" || status === "development_done"; }
+function cycleStatusLabel(status: OkrCycle["status"]) { return { planned: "\uC608\uC815", active: "\uC9C4\uD589 \uC911", closed: "\uC885\uB8CC" }[status]; }
 function sourceLabel(source: string) { return { mcp: "MCP", slack: "Slack", discord: "Discord", telegram: "Telegram", web: "Web" }[source] ?? "Bot"; }
 function propertyTypeLabel(type: PropertyType) { return { text: "텍스트", number: "숫자", select: "선택", date: "날짜", checkbox: "체크박스" }[type]; }
 function teamRoleLabel(role: TeamRole) { return { owner: "Owner", admin: "Admin", member: "Member", viewer: "Viewer" }[role]; }

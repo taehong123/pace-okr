@@ -56,6 +56,7 @@ export async function POST(request: Request) {
       title,
       description: asString(payload.description),
       kind: asValue(payload.kind, ITEM_KINDS) as ItemKind | undefined,
+      cycleId: asNullableString(payload.cycleId),
       parentId: asNullableString(payload.parentId),
       status: asValue(payload.status, ITEM_STATUSES) as ItemStatus | undefined,
       priority: asValue(payload.priority, ITEM_PRIORITIES) as ItemPriority | undefined,
@@ -84,6 +85,7 @@ export async function PATCH(request: Request) {
     const item = await updateItem(authorization.ownerId, id, {
       title: asOptionalString(payload.title),
       description: asOptionalString(payload.description),
+      cycleId: payload.cycleId === undefined ? undefined : asNullableString(payload.cycleId),
       status: asValue(payload.status, ITEM_STATUSES),
       priority: asValue(payload.priority, ITEM_PRIORITIES),
       cadence: asValue(payload.cadence, ITEM_CADENCES),

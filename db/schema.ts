@@ -63,6 +63,25 @@ export const workspaceRules = sqliteTable(
   },
 );
 
+export const okrCycles = sqliteTable(
+  "okr_cycles",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    version: integer("version").notNull().default(1),
+    startDate: text("start_date").notNull(),
+    endDate: text("end_date").notNull(),
+    status: text("status").notNull().default("active"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_okr_cycles_owner_status").on(table.ownerId, table.status),
+    uniqueIndex("idx_okr_cycles_owner_version").on(table.ownerId, table.version),
+  ],
+);
+
 export const workspaceGroups = sqliteTable(
   "workspace_groups",
   {
@@ -106,6 +125,7 @@ export const items = sqliteTable(
   {
     id: text("id").primaryKey(),
     ownerId: text("owner_id").notNull(),
+    cycleId: text("cycle_id").references(() => okrCycles.id, { onDelete: "set null" }),
     parentId: text("parent_id"),
     kind: text("kind").notNull(),
     title: text("title").notNull(),
@@ -125,6 +145,7 @@ export const items = sqliteTable(
     index("idx_items_owner_status").on(table.ownerId, table.status),
     index("idx_items_owner_parent").on(table.ownerId, table.parentId),
     index("idx_items_owner_cadence").on(table.ownerId, table.cadence),
+    index("idx_items_owner_cycle").on(table.ownerId, table.cycleId),
   ],
 );
 
@@ -374,6 +395,7 @@ export type Workspace = typeof workspaces.$inferSelect;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
 export type UserWorkspacePreference = typeof userWorkspacePreferences.$inferSelect;
 export type WorkspaceRule = typeof workspaceRules.$inferSelect;
+export type OkrCycle = typeof okrCycles.$inferSelect;
 export type WorkspaceGroup = typeof workspaceGroups.$inferSelect;
 export type WorkspaceGroupMember = typeof workspaceGroupMembers.$inferSelect;
 export type AiUsageEvent = typeof aiUsageEvents.$inferSelect;

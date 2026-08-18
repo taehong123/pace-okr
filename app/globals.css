@@ -123,8 +123,12 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .task-table-row select:hover, .task-table-row > input:hover, .relation-cell:hover, .property-input:hover { background-color: #f7f7f5; }
 .status-select { font-weight: 600; }
 .status-inbox { color: #787774 !important; }
+.status-backlog { color: #787774 !important; }
 .status-todo { color: #337ea9 !important; }
+.status-policy_discussion { color: #9065b0 !important; }
 .status-in_progress { color: #d9730d !important; }
+.status-developing { color: #d9730d !important; }
+.status-development_done { color: #448361 !important; }
 .status-done { color: #448361 !important; }
 .status-blocked { color: #d44c47 !important; }
 .priority-low { color: #787774 !important; }
@@ -154,8 +158,12 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .board-item span { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
 .empty-column { padding: 15px; color: var(--faint); font-size: 10px; text-align: center; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #b4b4b1; }
+.status-dot.status-backlog { background: #b4b4b1; }
 .status-dot.status-todo { background: #529cca; }
+.status-dot.status-policy_discussion { background: #9065b0; }
 .status-dot.status-in_progress { background: #d9730d; }
+.status-dot.status-developing { background: #d9730d; }
+.status-dot.status-development_done { background: #448361; }
 .status-dot.status-done { background: #448361; }
 .status-dot.status-blocked { background: #d44c47; }
 
@@ -213,6 +221,10 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .setup-chat > footer { min-height: 52px; display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding: 0 14px; border-top: 1px solid var(--line); }
 
 .outline-section, .inbox-list, .review-content { border-top: 1px solid var(--line); }
+.okr-cycle-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.okr-cycle-strip > div { min-height: 48px; display: grid; align-content: center; gap: 4px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: white; }
+.okr-cycle-strip span { color: var(--muted); font-size: 10px; }
+.okr-cycle-strip b { overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .objective-row { min-height: 92px; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
 .objective-row span { color: var(--muted); font-size: 10px; }
 .objective-row h2 { margin: 5px 0 0; font-size: 17px; line-height: 1.4; }

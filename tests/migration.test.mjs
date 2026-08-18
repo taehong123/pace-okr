@@ -280,3 +280,35 @@ test("creates Slack bot connection and OAuth state tables", async () => {
   );
   db.close();
 });
+
+test("creates OKR cycles and links OKR items to a cycle", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON;");
+  const [itemsMigration, workspaceMigration, cycleMigration] = await Promise.all([
+    readFile(new URL("../drizzle/0000_eminent_mandroid.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0005_wet_roland_deschain.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0013_calm_james_howlett.sql", import.meta.url), "utf8"),
+  ]);
+  db.exec(itemsMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(workspaceMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(cycleMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
+    INSERT INTO okr_cycles (id, owner_id, name, version, start_date, end_date, status)
+      VALUES ('cycle', 'workspace', '2026 Q3 OKR v1', 1, '2026-07-01', '2026-09-30', 'active');
+    INSERT INTO items (id, owner_id, cycle_id, kind, title, status)
+      VALUES ('objective', 'workspace', 'cycle', 'objective', 'Grow retention', 'in_progress');
+    INSERT INTO items (id, owner_id, kind, title, status)
+      VALUES ('project', 'workspace', 'project', 'Billing policy rollout', 'policy_discussion');
+  `);
+
+  assert.deepEqual({ ...db.prepare("SELECT version, status FROM okr_cycles WHERE owner_id = 'workspace'").get() }, {
+    version: 1,
+    status: "active",
+  });
+  assert.equal(db.prepare("SELECT cycle_id FROM items WHERE id = 'objective'").get().cycle_id, "cycle");
+  assert.equal(db.prepare("SELECT cycle_id FROM items WHERE id = 'project'").get().cycle_id, null);
+  db.exec("DELETE FROM okr_cycles WHERE id = 'cycle'");
+  assert.equal(db.prepare("SELECT cycle_id FROM items WHERE id = 'objective'").get().cycle_id, null);
+  db.close();
+});

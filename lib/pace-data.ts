@@ -11,6 +11,7 @@ import {
   googleOAuthStates,
   itemPropertyValues,
   items,
+  okrCycles,
   propertyDefinitions,
   routineCompletions,
   routines,
@@ -28,14 +29,16 @@ import {
   type WorkspaceGroupMember,
   type WorkspaceMember,
   type WorkspaceRule,
+  type OkrCycle,
   type GoogleConnection,
   type SlackConnection,
 } from "@/db/schema";
 
 export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "task"] as const;
-export const ITEM_STATUSES = ["inbox", "todo", "in_progress", "done", "blocked"] as const;
+export const ITEM_STATUSES = ["inbox", "backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked"] as const;
 export const ITEM_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export const ITEM_CADENCES = ["daily", "weekly", "monthly", "quarterly"] as const;
+export const OKR_CYCLE_STATUSES = ["planned", "active", "closed"] as const;
 export const PROPERTY_TYPES = ["text", "number", "select", "date", "checkbox"] as const;
 export const ROUTINE_CADENCES = ["daily", "weekly", "monthly"] as const;
 const LEGACY_SEED_OBJECTIVE_TITLE = "셀프 서브 도입으로 팀의 성장 속도를 높인다";
@@ -61,6 +64,7 @@ export type ItemKind = (typeof ITEM_KINDS)[number];
 export type ItemStatus = (typeof ITEM_STATUSES)[number];
 export type ItemPriority = (typeof ITEM_PRIORITIES)[number];
 export type ItemCadence = (typeof ITEM_CADENCES)[number];
+export type OkrCycleStatus = (typeof OKR_CYCLE_STATUSES)[number];
 export type PropertyType = (typeof PROPERTY_TYPES)[number];
 export type PropertyValue = string | number | boolean | null;
 export type RoutineCadence = (typeof ROUTINE_CADENCES)[number];
@@ -102,6 +106,8 @@ const parentKind: Record<ItemKind, ItemKind | null> = {
   project: "initiative",
   task: "project",
 };
+const completedStatuses = new Set<ItemStatus>(["done", "development_done"]);
+const okrKinds = new Set<ItemKind>(["objective", "key_result", "initiative"]);
 
 async function ensureSchema() {
   if (!schemaReady) {
@@ -152,6 +158,19 @@ async function ensureSchema() {
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS okr_cycles (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1,
+          start_date TEXT NOT NULL,
+          end_date TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_okr_cycles_owner_status ON okr_cycles(owner_id, status)"),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_okr_cycles_owner_version ON okr_cycles(owner_id, version)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS workspace_groups (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -181,6 +200,7 @@ async function ensureSchema() {
         d1.prepare(`CREATE TABLE IF NOT EXISTS items (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL,
+          cycle_id TEXT REFERENCES okr_cycles(id) ON DELETE SET NULL,
           parent_id TEXT,
           kind TEXT NOT NULL,
           title TEXT NOT NULL,
@@ -199,6 +219,7 @@ async function ensureSchema() {
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_status ON items(owner_id, status)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_parent ON items(owner_id, parent_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_cadence ON items(owner_id, cadence)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_cycle ON items(owner_id, cycle_id)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS activity_log (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL,
@@ -360,6 +381,7 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN trigger_point TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN action_place TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN action_steps TEXT NOT NULL DEFAULT ''");
+      await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN cycle_id TEXT REFERENCES okr_cycles(id) ON DELETE SET NULL");
     })()
       .catch((error: unknown) => {
         schemaReady = null;
@@ -384,6 +406,125 @@ export async function ensureWorkspace(ownerId: string) {
   await migrateLegacyHierarchy(ownerId);
   await removeLegacySeedWorkspaceData(ownerId);
   await seedProjectExecutionProperties(ownerId);
+  await ensureActiveOkrCycle(ownerId);
+}
+
+export async function listOkrCycles(ownerId: string) {
+  await ensureSchema();
+  await ensureActiveOkrCycle(ownerId);
+  const rows = await getDb()
+    .select()
+    .from(okrCycles)
+    .where(eq(okrCycles.ownerId, ownerId))
+    .orderBy(desc(okrCycles.version), desc(okrCycles.createdAt));
+  return rows.map(serializeOkrCycle);
+}
+
+export async function getActiveOkrCycle(ownerId: string) {
+  await ensureSchema();
+  return ensureActiveOkrCycle(ownerId);
+}
+
+export async function createOkrCycle(ownerId: string, input: { name?: string; startDate?: string; endDate?: string; status?: OkrCycleStatus }) {
+  await ensureSchema();
+  const existing = await getDb().select().from(okrCycles).where(eq(okrCycles.ownerId, ownerId));
+  const version = (existing.reduce((max, cycle) => Math.max(max, cycle.version), 0) || 0) + 1;
+  const period = defaultQuarterPeriod(new Date());
+  const [created] = await getDb()
+    .insert(okrCycles)
+    .values({
+      id: crypto.randomUUID(),
+      ownerId,
+      name: normalizeCycleName(input.name, version, period),
+      version,
+      startDate: input.startDate || period.startDate,
+      endDate: input.endDate || period.endDate,
+      status: input.status ?? "planned",
+    })
+    .returning();
+  return serializeOkrCycle(created);
+}
+
+export async function updateOkrCycle(ownerId: string, id: string, patch: Partial<{ name: string; startDate: string; endDate: string; status: OkrCycleStatus }>) {
+  await ensureSchema();
+  if (patch.status !== undefined && !OKR_CYCLE_STATUSES.includes(patch.status)) throw new Error("Unsupported OKR cycle status");
+  const values = {
+    name: patch.name?.trim(),
+    startDate: patch.startDate,
+    endDate: patch.endDate,
+    status: patch.status,
+    updatedAt: new Date().toISOString(),
+  };
+  const [updated] = await getDb()
+    .update(okrCycles)
+    .set(values)
+    .where(and(eq(okrCycles.ownerId, ownerId), eq(okrCycles.id, id)))
+    .returning();
+  if (!updated) throw new Error("OKR cycle not found");
+  return serializeOkrCycle(updated);
+}
+
+async function ensureActiveOkrCycle(ownerId: string) {
+  const [active] = await getDb()
+    .select()
+    .from(okrCycles)
+    .where(and(eq(okrCycles.ownerId, ownerId), eq(okrCycles.status, "active")))
+    .orderBy(desc(okrCycles.version))
+    .limit(1);
+  if (active) return active;
+
+  const existing = await getDb().select().from(okrCycles).where(eq(okrCycles.ownerId, ownerId));
+  const version = (existing.reduce((max, cycle) => Math.max(max, cycle.version), 0) || 0) + 1;
+  const period = defaultQuarterPeriod(new Date());
+  const [created] = await getDb()
+    .insert(okrCycles)
+    .values({
+      id: crypto.randomUUID(),
+      ownerId,
+      name: normalizeCycleName(undefined, version, period),
+      version,
+      startDate: period.startDate,
+      endDate: period.endDate,
+      status: "active",
+    })
+    .returning();
+  return created;
+}
+
+async function defaultCycleIdForKind(ownerId: string, kind: ItemKind) {
+  if (!okrKinds.has(kind)) return null;
+  const cycle = await ensureActiveOkrCycle(ownerId);
+  return cycle.id;
+}
+
+function serializeOkrCycle(cycle: OkrCycle) {
+  return {
+    id: cycle.id,
+    name: cycle.name,
+    version: cycle.version,
+    startDate: cycle.startDate,
+    endDate: cycle.endDate,
+    status: cycle.status as OkrCycleStatus,
+    createdAt: cycle.createdAt,
+    updatedAt: cycle.updatedAt,
+  };
+}
+
+function defaultQuarterPeriod(date: Date) {
+  const year = date.getFullYear();
+  const quarter = Math.floor(date.getMonth() / 3) + 1;
+  const start = new Date(Date.UTC(year, (quarter - 1) * 3, 1));
+  const end = new Date(Date.UTC(year, quarter * 3, 0));
+  return {
+    year,
+    quarter,
+    startDate: start.toISOString().slice(0, 10),
+    endDate: end.toISOString().slice(0, 10),
+  };
+}
+
+function normalizeCycleName(name: string | undefined, version: number, period: ReturnType<typeof defaultQuarterPeriod>) {
+  return name?.trim() || `${period.year} Q${period.quarter} OKR v${version}`;
 }
 
 export async function getWorkspaceRules(ownerId: string) {
@@ -1307,6 +1448,7 @@ export async function createItem(
   input: {
     title: string;
     kind?: ItemKind;
+    cycleId?: string | null;
     parentId?: string | null;
     description?: string;
     status?: ItemStatus;
@@ -1322,6 +1464,7 @@ export async function createItem(
   const status = input.status ?? (kind === "task" && !input.parentId ? "inbox" : "todo");
   await validateParent(ownerId, kind, input.parentId ?? null, status);
   const rules = await getWorkspaceRules(ownerId);
+  const cycleId = input.cycleId === undefined ? await defaultCycleIdForKind(ownerId, kind) : input.cycleId;
 
   const id = crypto.randomUUID();
   const [created] = await getDb()
@@ -1329,6 +1472,7 @@ export async function createItem(
     .values({
       id,
       ownerId,
+      cycleId,
       parentId: input.parentId ?? null,
       kind,
       title: input.title.trim(),
@@ -1354,6 +1498,7 @@ export async function updateItem(
     title: string;
     description: string;
     status: ItemStatus;
+    cycleId: string | null;
     priority: ItemPriority;
     cadence: ItemCadence;
     progress: number;
@@ -1380,7 +1525,7 @@ export async function updateItem(
     title: patch.title?.trim(),
     description: patch.description?.trim(),
     progress:
-      nextStatus === "done" ? 100 : patch.progress === undefined ? undefined : clampProgress(patch.progress),
+      completedStatuses.has(nextStatus) ? 100 : patch.progress === undefined ? undefined : clampProgress(patch.progress),
     updatedAt: new Date().toISOString(),
   };
 
@@ -1572,7 +1717,7 @@ export async function getPeriodReview(ownerId: string, cadence: ItemCadence) {
     .orderBy(asc(items.dueDate), asc(items.sortOrder))
     .limit(100);
 
-  const completed = rows.filter((item) => item.status === "done").length;
+  const completed = rows.filter((item) => completedStatuses.has(item.status as ItemStatus)).length;
   const blocked = rows.filter((item) => item.status === "blocked").length;
   const averageProgress = rows.length
     ? Math.round(rows.reduce((sum, item) => sum + item.progress, 0) / rows.length)
@@ -2237,6 +2382,7 @@ function normalizePropertyValue(property: PropertyDefinition, value: PropertyVal
 export function serializeItem(item: PaceItem, properties: Record<string, PropertyValue> = {}) {
   return {
     id: item.id,
+    cycleId: item.cycleId,
     parentId: item.parentId,
     kind: item.kind,
     title: item.title,
