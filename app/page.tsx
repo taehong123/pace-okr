@@ -434,7 +434,7 @@ export default function Home() {
   }, [workspaceMenuOpen, workspaceCreateOpen]);
 
   const inboxItems = items.filter((entry) => entry.status === "inbox");
-  const taskItems = items.filter((entry) => entry.kind === "task");
+  const executionItems = items.filter((entry) => entry.kind === "project" || entry.kind === "task");
   const structuredItems = items.filter((entry) => entry.status !== "inbox");
   const periodItems = items.filter(
     (entry) => entry.status !== "inbox" && (cadence === "quarterly" || entry.cadence === cadence || entry.kind === "objective"),
@@ -619,13 +619,20 @@ export default function Home() {
       const objectiveItem = await createPlannedItem({ title: objectiveTitle, kind: "objective", status: "in_progress", progress: 0 });
       const keyResultTitle = plan.keyResult.trim() || "첫 핵심 결과 정의";
       const keyResultItem = await createPlannedItem({ title: keyResultTitle, kind: "key_result", parentId: objectiveItem.id, status: "todo" });
-      const initiativeTitle = plan.initiative.trim() || "첫 실행 흐름 만들기";
+      const initiativeTitle = plan.initiative.trim() || "첫 실행 방향 정리";
       const initiativeItem = await createPlannedItem({ title: initiativeTitle, kind: "initiative", parentId: keyResultItem.id, status: "todo" });
-      const projectTitle = plan.project.trim() || "이번 주 실행 프로젝트";
-      const projectItem = await createPlannedItem({ title: projectTitle, kind: "project", parentId: initiativeItem.id, status: "in_progress" });
+      const projectTitle = plan.project.trim();
+      const projectItem = projectTitle
+        ? await createPlannedItem({ title: projectTitle, kind: "project", parentId: initiativeItem.id, status: "in_progress" })
+        : null;
       const taskTitles = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean);
-      for (const taskTitle of taskTitles.length ? taskTitles : ["첫 실행 Task 정리"]) {
-        await createPlannedItem({ title: taskTitle, kind: "task", parentId: projectItem.id, status: "todo" });
+      for (const taskTitle of taskTitles) {
+        await createPlannedItem({
+          title: taskTitle,
+          kind: "task",
+          parentId: projectItem?.id,
+          status: projectItem ? "todo" : "inbox",
+        });
       }
       await createPlannedRoutine();
       if (workspaceRules) {
@@ -772,7 +779,7 @@ export default function Home() {
           {activeView === "inbox" && <InboxView items={inboxItems} onConnect={connectInbox} />}
           {activeView === "work" && (
             <TaskDatabase
-              items={taskItems}
+              items={executionItems}
               allItems={items}
               properties={properties}
               values={propertyValues}
@@ -926,13 +933,13 @@ function TaskDatabase({ items, allItems, properties, values, display, onDisplayC
             </div>
             {visible.map((entry) => (
               <div className="task-table-row" key={entry.id}>
-                <div className="name-cell"><button className={`task-check ${entry.status === "done" ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: entry.status === "done" ? "todo" : "done", progress: entry.status === "done" ? entry.progress : 100 })}><Check size={12} /></button><input defaultValue={entry.title} onBlur={(event) => event.target.value.trim() !== entry.title && void onPatch(entry.id, { title: event.target.value })} /></div>
+                <div className="name-cell"><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><button className={`task-check ${entry.status === "done" ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: entry.status === "done" ? "todo" : "done", progress: entry.status === "done" ? entry.progress : 100 })}><Check size={12} /></button><input defaultValue={entry.title} onBlur={(event) => event.target.value.trim() !== entry.title && void onPatch(entry.id, { title: event.target.value })} /></div>
                 <select className={`status-select status-${entry.status}`} value={entry.status} onChange={(event) => void onPatch(entry.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <select className={`priority-${entry.priority}`} value={entry.priority} onChange={(event) => void onPatch(entry.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <input className="date-cell" type="date" value={entry.dueDate ?? ""} onChange={(event) => void onPatch(entry.id, { dueDate: event.target.value || null })} />
                 <span className="relation-cell">{entry.parentId ? byId.get(entry.parentId)?.title ?? "연결 없음" : "인박스"}</span>
                 {properties.map((property) => <PropertyCell key={property.id} itemId={entry.id} property={property} value={values[entry.id]?.[property.id] ?? null} onChange={onPropertyChange} />)}
-                <button className="row-menu" aria-label="Task 상세" title="Task 상세" onClick={() => onOpenTask(entry.id)}><MoreHorizontal size={15} /></button>
+                {entry.kind === "task" ? <button className="row-menu" aria-label="Task detail" title="Task detail" onClick={() => onOpenTask(entry.id)}><MoreHorizontal size={15} /></button> : <span className="row-menu" />}
               </div>
             ))}
             {!visible.length && <div className="table-empty">표시할 Task가 없습니다.</div>}
@@ -1267,7 +1274,7 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
       objective: current.objective || lines[0] || text,
       keyResult: current.keyResult || metricLine || "",
       initiative: current.initiative || lines[1] || "",
-      project: current.project || lines[2] || "",
+      project: current.project || "",
       tasks: current.tasks || actionLines.slice(0, 5).join("\n"),
     }));
     setDraftOpen(true);

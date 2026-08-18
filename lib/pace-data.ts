@@ -383,7 +383,7 @@ export async function ensureWorkspace(ownerId: string) {
   await ensureSchema();
   await migrateLegacyHierarchy(ownerId);
   await removeLegacySeedWorkspaceData(ownerId);
-  await seedProperties(ownerId);
+  await seedProjectExecutionProperties(ownerId);
 }
 
 export async function getWorkspaceRules(ownerId: string) {
@@ -393,9 +393,9 @@ export async function getWorkspaceRules(ownerId: string) {
     .insert(workspaceRules)
     .values({
       workspaceId: ownerId,
-      captureInstruction: "대화에서 나온 할 일은 우선 인박스에 저장하고, 바로 구조가 보일 때만 Project 아래 Task로 연결합니다.",
-      structureInstruction: "Objective > Key Result > Initiative > Project > Task 계층을 유지하고, 불확실한 항목은 인박스에 둡니다.",
-      routineInstruction: "루틴은 트리거 포인트, 어디서, 무엇을 어떻게 할지까지 함께 정리합니다.",
+      captureInstruction: "대화에서 나온 일은 우선 있는 그대로 잡고, 실행 구조가 명확할 때만 Project 아래 Task로 연결합니다.",
+      structureInstruction: "Objective > Key Result > Initiative까지 먼저 정리합니다. Project는 담당자, 시기, 범위, KR 기여 예상치가 보일 때 나중에 만들고, Initiative와 비슷하면 Project는 비워둡니다.",
+      routineInstruction: "루틴은 트리거 포인트, 어디서/어떤 도구로, 무엇을 어떻게 할지까지 함께 정리합니다.",
       defaultPriority: "medium",
       defaultCadence: "weekly",
       reviewBeforeCreate: true,
@@ -2141,54 +2141,29 @@ async function removeLegacySeedWorkspaceData(ownerId: string) {
   await getDb().delete(routines).where(and(eq(routines.ownerId, ownerId), inArray(routines.title, LEGACY_SEED_ROUTINE_TITLES)));
 }
 
-async function seedProperties(ownerId: string) {
+async function seedProjectExecutionProperties(ownerId: string) {
   const existing = await listPropertyDefinitions(ownerId);
-  if (existing.length) return;
+  const existingNames = new Set(existing.map((property) => property.name.toLocaleLowerCase()));
+  const defaults: { name: string; type: PropertyType; options?: string[] }[] = [
+    { name: "담당자", type: "text" },
+    { name: "시기", type: "select", options: ["이번 주", "이번 달", "이번 분기", "다음 분기", "미정"] },
+    { name: "KR 기여 예상치", type: "number" },
+    { name: "예상 기간", type: "number" },
+  ];
+  const missing = defaults.filter((property) => !existingNames.has(property.name.toLocaleLowerCase()));
+  if (!missing.length) return;
 
-  const ownerProperty = crypto.randomUUID();
-  const sprintProperty = crypto.randomUUID();
-  const estimateProperty = crypto.randomUUID();
-  await getDb().insert(propertyDefinitions).values([
-    { id: ownerProperty, ownerId, name: "담당", type: "text", sortOrder: 10 },
-    {
-      id: sprintProperty,
-      ownerId,
-      name: "스프린트",
-      type: "select",
-      options: JSON.stringify(["Sprint 18", "Sprint 19", "Backlog"]),
-      sortOrder: 20,
-    },
-    { id: estimateProperty, ownerId, name: "예상 시간", type: "number", sortOrder: 30 },
-  ]);
-
-  const tasks = await listItems(ownerId, { kind: "task", limit: 4 });
-  const owners = ["태홍", "민지", "태홍", "유진"];
-  const sprints = ["Sprint 18", "Sprint 18", "Sprint 18", "Sprint 19"];
-  const estimates = [6, 3, 4, 5];
-  const values = tasks.flatMap((task, index) => [
-    {
+  const baseSortOrder = existing.at(-1)?.sortOrder ?? 0;
+  await getDb().insert(propertyDefinitions).values(
+    missing.map((property, index) => ({
       id: crypto.randomUUID(),
       ownerId,
-      itemId: task.id,
-      propertyId: ownerProperty,
-      value: JSON.stringify(owners[index] ?? "태홍"),
-    },
-    {
-      id: crypto.randomUUID(),
-      ownerId,
-      itemId: task.id,
-      propertyId: sprintProperty,
-      value: JSON.stringify(sprints[index] ?? "Backlog"),
-    },
-    {
-      id: crypto.randomUUID(),
-      ownerId,
-      itemId: task.id,
-      propertyId: estimateProperty,
-      value: JSON.stringify(estimates[index] ?? 2),
-    },
-  ]);
-  if (values.length) await getDb().insert(itemPropertyValues).values(values);
+      name: property.name,
+      type: property.type,
+      options: JSON.stringify(normalizeOptions(property.options ?? [])),
+      sortOrder: baseSortOrder + ((index + 1) * 10),
+    })),
+  );
 }
 
 async function logActivity(

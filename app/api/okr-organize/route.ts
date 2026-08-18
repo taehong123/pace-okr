@@ -106,14 +106,15 @@ export async function POST(request: Request) {
           {
             role: "system",
             content:
-              "You organize messy Korean or multilingual work notes into practical OKR execution structure. Infer intent semantically, not by keyword. Prefer user language. Do not invent specific metrics unless implied; ask concise follow-up questions when information is missing. Keep routines separate from the OKR hierarchy. Tasks must be concrete next actions, one per line.",
+              "You organize messy Korean or multilingual work notes into practical OKR execution structure. Infer intent semantically, not by keyword. Prefer user language. Do not invent specific metrics unless implied; ask concise follow-up questions when information is missing. Keep routines separate from the OKR hierarchy. Treat Initiative as the strategic execution direction under a Key Result. Do not create a Project unless the user clearly describes a concrete project with owner/timing/scope; leave project as an empty string when it is still ambiguous or overlaps with the Initiative. Tasks must be concrete next actions, one per line.",
           },
           {
             role: "user",
             content: JSON.stringify({
               message,
               currentPlan,
-              desiredHierarchy: "Objective > Key Result > Initiative > Project > Task",
+              desiredHierarchy: "Objective > Key Result > Initiative, then optional Project > Task during execution planning",
+              projectRule: "If Project and Initiative would be similar, keep the idea as Initiative and leave Project empty.",
               routineShape: "trigger point, where/tool, what/how steps",
             }),
           },
