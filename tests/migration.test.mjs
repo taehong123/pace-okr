@@ -330,6 +330,7 @@ test("cleanup removes execution data while preserving workspace groups", async (
     "0011_little_leo.sql",
     "0012_parallel_vindicator.sql",
     "0013_calm_james_howlett.sql",
+    "0014_clean_starlord.sql",
   ].map((file) => readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8")));
   for (const migration of migrations) {
     db.exec(migration.replaceAll("--> statement-breakpoint", ""));
@@ -367,6 +368,13 @@ test("cleanup removes execution data while preserving workspace groups", async (
       VALUES ('event', 'workspace', 'owner', 'task', 'google-event');
     INSERT INTO slack_connections (id, owner_id, user_id, team_id, encrypted_bot_token)
       VALUES ('slack', 'workspace', 'owner', 'T123', 'encrypted');
+    INSERT INTO trash_records (
+      id, owner_id, category, title, payload, item_count, routine_count, cycle_count, created_by_user_id
+    ) VALUES (
+      'trash', 'workspace', 'workspace_cleanup', 'OKR cleanup 2026-08-18',
+      '{"items":[{"id":"task"}],"routines":[{"id":"routine"}],"okrCycles":[{"id":"cycle"}]}',
+      1, 1, 1, 'owner'
+    );
   `);
 
   db.exec(`
@@ -389,6 +397,7 @@ test("cleanup removes execution data while preserving workspace groups", async (
     properties: db.prepare("SELECT COUNT(*) AS count FROM property_definitions WHERE owner_id = 'workspace'").get().count,
     googleConnections: db.prepare("SELECT COUNT(*) AS count FROM google_connections WHERE owner_id = 'workspace'").get().count,
     slackConnections: db.prepare("SELECT COUNT(*) AS count FROM slack_connections WHERE owner_id = 'workspace'").get().count,
+    trashRecords: db.prepare("SELECT COUNT(*) AS count FROM trash_records WHERE owner_id = 'workspace'").get().count,
   }, {
     workspaces: 1,
     members: 1,
@@ -397,6 +406,7 @@ test("cleanup removes execution data while preserving workspace groups", async (
     properties: 1,
     googleConnections: 1,
     slackConnections: 1,
+    trashRecords: 1,
   });
   assert.deepEqual({
     items: db.prepare("SELECT COUNT(*) AS count FROM items WHERE owner_id = 'workspace'").get().count,

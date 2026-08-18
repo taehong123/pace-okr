@@ -45,7 +45,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 
-type View = "home" | "inbox" | "work" | "routines" | "okr" | "scrum" | "recommendations" | "reviews";
+type View = "home" | "inbox" | "work" | "routines" | "okr" | "scrum" | "recommendations" | "reviews" | "trash";
 type Cadence = "daily" | "weekly" | "monthly" | "quarterly";
 type ItemStatus = "inbox" | "backlog" | "todo" | "policy_discussion" | "in_progress" | "developing" | "development_done" | "done" | "blocked";
 type ItemKind = "objective" | "key_result" | "initiative" | "project" | "task";
@@ -231,6 +231,16 @@ type SlackConnectionStatus = {
   commandUrl: string;
 };
 
+type TrashRecord = {
+  id: string;
+  category: string;
+  title: string;
+  itemCount: number;
+  routineCount: number;
+  cycleCount: number;
+  archivedAt: string;
+};
+
 type IntroLanguage = "ko" | "en" | "ja" | "zh" | "es";
 
 type IntroCopy = {
@@ -350,6 +360,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "scrum", label: "데일리", icon: CalendarCheck },
   { id: "recommendations", label: "추천", icon: Lightbulb },
   { id: "reviews", label: "리뷰", icon: Activity },
+  { id: "trash", label: "휴지통", icon: Trash2 },
 ];
 
 const cadenceLabels: Record<Cadence, string> = { daily: "일간", weekly: "주간", monthly: "월간", quarterly: "분기" };
@@ -362,6 +373,7 @@ const viewTitles: Record<View, string> = {
   scrum: "데일리 스크럼",
   recommendations: "추천",
   reviews: "리뷰",
+  trash: "휴지통",
 };
 
 export default function Home() {
@@ -782,7 +794,7 @@ export default function Home() {
             <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setCreateItemOpen(true)}><Plus size={14} />새 항목</button>
-            ) : !["scrum", "recommendations", "inbox", "routines"].includes(activeView) ? (
+            ) : !["scrum", "recommendations", "inbox", "routines", "trash"].includes(activeView) ? (
               <CadenceSwitch value={cadence} onChange={setCadence} />
             ) : null}
           </header>}
@@ -816,6 +828,7 @@ export default function Home() {
           {activeView === "scrum" && <DailyScrumView onOpenTask={setSelectedTaskId} onNotice={showNotice} />}
           {activeView === "recommendations" && <RecommendationsView onNavigate={setActiveView} />}
           {activeView === "reviews" && <ReviewView items={periodItems} cadence={cadence} completed={completed} blocked={blocked} averageProgress={averageProgress} />}
+          {activeView === "trash" && <TrashView onNotice={showNotice} />}
         </div>
       </section>
 
@@ -850,7 +863,7 @@ export default function Home() {
       )}
       {teamPanelOpen && <TeamPanel initialTab={teamPanelTab} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
       {createItemOpen && <CreateItemPanel items={items} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
-      {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setPropertyValues({}); setOkrCycles([cycle]); setSelectedTaskId(null); setActiveView("home"); setCleanupOpen(false); showNotice("현재 워크스페이스의 OKR 데이터를 정리했습니다."); }} onNotice={showNotice} />}
+      {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setPropertyValues({}); setOkrCycles([cycle]); setSelectedTaskId(null); setActiveView("trash"); setCleanupOpen(false); showNotice("OKR 데이터를 휴지통에 보관하고 정리했습니다."); }} onNotice={showNotice} />}
       {selectedTask && (
         <TaskDetailPanel
           task={selectedTask}
@@ -944,8 +957,8 @@ function CleanupModal({ onClose, onCleaned, onNotice }: { onClose: () => void; o
           <button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button>
         </header>
         <p>
-          현재 워크스페이스의 Objective, Key Result, Initiative, Project, Task, Routine, Scrum 기록을 모두 삭제합니다.
-          워크스페이스, 멤버, 그룹, 연동, 속성 설정은 유지됩니다.
+          현재 워크스페이스의 Objective, Key Result, Initiative, Project, Task, Routine, Scrum 기록을 휴지통에 보관한 뒤 작업 화면에서 비웁니다.
+          워크스페이스, 멤버, 그룹, 연동, 속성 설정은 그대로 유지됩니다.
         </p>
         <label>
           <span>확인 문구</span>
@@ -954,7 +967,7 @@ function CleanupModal({ onClose, onCleaned, onNotice }: { onClose: () => void; o
         <footer>
           <button onClick={onClose}>취소</button>
           <button className="danger" disabled={confirm !== confirmationText || cleaning} onClick={() => void clean()}>
-            {cleaning ? "정리 중" : "싹 지우기"}
+            {cleaning ? "정리 중" : "휴지통으로 이동"}
           </button>
         </footer>
       </section>
@@ -1498,6 +1511,48 @@ function InboxView({ items, onConnect }: { items: OkrptrItem[]; onConnect: (item
   return <section className="inbox-list"><div className="list-head"><span>이름</span><span>등록 경로</span><span /></div>{items.map((entry) => <article className="inbox-item" key={entry.id}><div><span className="page-icon"><ListChecks size={15} /></span><h3>{entry.title}</h3></div><span className={`source-badge source-${entry.source}`}>{sourceLabel(entry.source)}</span><button onClick={() => onConnect(entry)}><Link2 size={14} />연결</button></article>)}</section>;
 }
 
+function TrashView({ onNotice }: { onNotice: (message: string) => void }) {
+  const [rows, setRows] = useState<TrashRecord[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    fetch("/api/trash")
+      .then(async (response) => response.ok ? response.json() as Promise<{ trash: TrashRecord[] }> : Promise.reject())
+      .then((data) => { if (active) setRows(data.trash); })
+      .catch(() => { if (active) setRows([]); });
+    return () => { active = false; };
+  }, []);
+
+  async function permanentlyDelete(record: TrashRecord) {
+    if (!window.confirm(`'${record.title}' 휴지통 기록을 영구 삭제할까요?`)) return;
+    const response = await fetch(`/api/trash?id=${encodeURIComponent(record.id)}`, { method: "DELETE" });
+    if (!response.ok) {
+      onNotice("휴지통 기록을 삭제하지 못했습니다.");
+      return;
+    }
+    setRows((current) => current?.filter((entry) => entry.id !== record.id) ?? []);
+    onNotice("휴지통 기록을 영구 삭제했습니다.");
+  }
+
+  if (rows === null) return <EmptyState icon={Trash2} title="휴지통을 불러오는 중입니다" />;
+  if (!rows.length) return <EmptyState icon={Trash2} title="휴지통이 비어 있습니다" />;
+
+  return (
+    <section className="trash-list">
+      {rows.map((record) => (
+        <article className="trash-record" key={record.id}>
+          <span className="trash-icon"><Archive size={15} /></span>
+          <div>
+            <h3>{record.title}</h3>
+            <p>{trashSummary(record)}</p>
+            <small>{formatDateTime(record.archivedAt)}</small>
+          </div>
+          <button className="danger" onClick={() => void permanentlyDelete(record)}><Trash2 size={13} />영구 삭제</button>
+        </article>
+      ))}
+    </section>
+  );
+}
+
 function ReviewView({ items, cadence, completed, blocked, averageProgress }: { items: OkrptrItem[]; cadence: Cadence; completed: number; blocked: number; averageProgress: number }) {
   return <section className="review-content"><div className="metrics-row"><div><span>완료</span><strong>{completed}<small> / {items.length}</small></strong></div><div><span>평균 진행</span><strong>{averageProgress}<small>%</small></strong></div><div><span>막힘</span><strong>{blocked}</strong></div></div><div className="review-progress"><div><b>{cadenceLabels[cadence]} 진행률</b><span>{averageProgress}%</span></div><span><i style={{ width: `${averageProgress}%` }} /></span></div><div className="review-list"><span>검토할 항목</span>{items.slice(0, 7).map((entry) => <div key={entry.id}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b><em>{entry.progress}%</em></div>)}</div></section>;
 }
@@ -1738,6 +1793,12 @@ function propertyTypeLabel(type: PropertyType) { return { text: "텍스트", num
 function teamRoleLabel(role: TeamRole) { return { owner: "Owner", admin: "Admin", member: "Member", viewer: "Viewer" }[role]; }
 function groupColorLabel(color: GroupColor) { return { gray: "회색", blue: "파랑", green: "초록", yellow: "노랑", orange: "주황", red: "빨강", purple: "보라" }[color]; }
 function dueLabel(value: string | null) { if (!value) return "기한 없음"; const due = new Date(`${value}T00:00:00`); return `${due.getMonth() + 1}월 ${due.getDate()}일`; }
+function trashSummary(record: TrashRecord) { return `OKR ${record.cycleCount}개, 작업 ${record.itemCount}개, 루틴 ${record.routineCount}개 보관`; }
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("ko-KR", { dateStyle: "medium", timeStyle: "short" });
+}
 function localDate() { const now = new Date(); const offset = now.getTimezoneOffset() * 60_000; return new Date(now.getTime() - offset).toISOString().slice(0, 10); }
 function isIntroLanguage(value: string | null): value is IntroLanguage { return introLanguages.some((entry) => entry.id === value); }
 function preferredIntroLanguage(): IntroLanguage {
@@ -1748,6 +1809,6 @@ function preferredIntroLanguage(): IntroLanguage {
   if (language.startsWith("es")) return "es";
   return "en";
 }
-function pageSubtitle(view: View) { return { home: "지금 집중할 목표와 작업", inbox: "아직 Project에 연결하지 않은 Task", work: "Project에 연결된 Task 데이터베이스", routines: "반복되는 실행을 날짜별로 기록", okr: "Objective부터 Task까지의 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘" }[view]; }
+function pageSubtitle(view: View) { return { home: "지금 집중할 목표와 작업", inbox: "아직 Project에 연결하지 않은 Task", work: "Project에 연결된 Task 데이터베이스", routines: "반복되는 실행을 날짜별로 기록", okr: "Objective부터 Task까지의 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "클린업으로 보관한 OKR 실행 데이터" }[view]; }
 function routineCadenceLabel(cadence: RoutineCadence) { return { daily: "매일", weekly: "매주", monthly: "매월" }[cadence]; }
 function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "unlinked") return "↗"; if (kind === "due_soon") return "3"; return "P"; }

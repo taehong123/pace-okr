@@ -255,6 +255,16 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .source-slack, .source-discord, .source-telegram { background: #faebdd; color: #d9730d; }
 .inbox-item > button { height: 27px; display: flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--muted); font-size: 10px; cursor: pointer; }
 .inbox-item > button:hover { background: var(--hover); color: var(--ink); }
+.trash-list { display: grid; border-top: 1px solid var(--line); }
+.trash-record { min-height: 68px; display: grid; grid-template-columns: 32px minmax(0, 1fr) 86px; align-items: center; gap: 12px; padding: 9px 8px; border-bottom: 1px solid var(--line); }
+.trash-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 4px; background: #f1f1ef; color: var(--muted); }
+.trash-record > div { min-width: 0; display: grid; gap: 3px; }
+.trash-record h3 { overflow: hidden; margin: 0; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.trash-record p { margin: 0; color: var(--muted); font-size: 10px; }
+.trash-record small { color: var(--faint); font-size: 9px; }
+.trash-record button { height: 29px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--muted); font-size: 10px; cursor: pointer; }
+.trash-record button:hover { background: var(--hover); color: var(--ink); }
+.trash-record button.danger:hover { color: var(--red); }
 
 .review-content { padding-top: 18px; }
 .metrics-row { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--line); }
@@ -596,7 +606,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
   .app-shell { display: block; }
   .sidebar { position: fixed; z-index: 20; top: auto; bottom: 0; width: 100%; height: 58px; padding: 5px 8px; border-top: 1px solid var(--line); border-right: 0; }
   .workspace-control, .sidebar-section, .sidebar-bottom { display: none; }
-  nav { width: 100%; height: 100%; margin: 0; display: grid; grid-template-columns: repeat(8, 1fr); }
+  nav { width: 100%; height: 100%; margin: 0; display: grid; grid-template-columns: repeat(9, 1fr); }
   .nav-item { height: 47px; justify-content: center; display: grid; justify-items: center; gap: 2px; padding: 3px; }
   .nav-item span { font-size: 9px; }
   .nav-item b { position: absolute; margin: -18px 0 0 22px; }

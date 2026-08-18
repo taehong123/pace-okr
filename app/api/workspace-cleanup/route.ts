@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     }
 
     await ensureWorkspace(authorization.ownerId);
-    const result = await cleanupWorkspaceExecutionData(authorization.ownerId);
+    const result = await cleanupWorkspaceExecutionData(authorization.ownerId, authorization.userId);
     return Response.json({ cleaned: true, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

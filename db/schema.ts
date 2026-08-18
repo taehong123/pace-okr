@@ -383,6 +383,25 @@ export const slackOAuthStates = sqliteTable(
   ],
 );
 
+export const trashRecords = sqliteTable(
+  "trash_records",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    category: text("category").notNull(),
+    title: text("title").notNull(),
+    payload: text("payload").notNull(),
+    itemCount: integer("item_count").notNull().default(0),
+    routineCount: integer("routine_count").notNull().default(0),
+    cycleCount: integer("cycle_count").notNull().default(0),
+    createdByUserId: text("created_by_user_id"),
+    archivedAt: text("archived_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_trash_records_owner_archived").on(table.ownerId, table.archivedAt),
+  ],
+);
+
 export type PaceItem = typeof items.$inferSelect;
 export type NewPaceItem = typeof items.$inferInsert;
 export type PropertyDefinition = typeof propertyDefinitions.$inferSelect;
@@ -404,3 +423,4 @@ export type GoogleOAuthState = typeof googleOAuthStates.$inferSelect;
 export type GoogleCalendarEvent = typeof googleCalendarEvents.$inferSelect;
 export type SlackConnection = typeof slackConnections.$inferSelect;
 export type SlackOAuthState = typeof slackOAuthStates.$inferSelect;
+export type TrashRecord = typeof trashRecords.$inferSelect;

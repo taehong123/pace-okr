@@ -17,6 +17,7 @@ import {
   routines,
   slackConnections,
   slackOAuthStates,
+  trashRecords,
   userWorkspacePreferences,
   workspaceRules,
   workspaceGroupMembers,
@@ -32,6 +33,7 @@ import {
   type OkrCycle,
   type GoogleConnection,
   type SlackConnection,
+  type TrashRecord,
 } from "@/db/schema";
 
 export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "task"] as const;
@@ -376,6 +378,19 @@ async function ensureSchema() {
           expires_at TEXT NOT NULL
         )`),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_oauth_states_expires ON slack_oauth_states(expires_at)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS trash_records (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          category TEXT NOT NULL,
+          title TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          item_count INTEGER NOT NULL DEFAULT 0,
+          routine_count INTEGER NOT NULL DEFAULT 0,
+          cycle_count INTEGER NOT NULL DEFAULT 0,
+          created_by_user_id TEXT,
+          archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_trash_records_owner_archived ON trash_records(owner_id, archived_at)"),
         d1.prepare("PRAGMA optimize"),
       ]);
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN trigger_point TEXT NOT NULL DEFAULT ''");
@@ -464,7 +479,7 @@ export async function updateOkrCycle(ownerId: string, id: string, patch: Partial
   return serializeOkrCycle(updated);
 }
 
-export async function cleanupWorkspaceExecutionData(ownerId: string) {
+export async function cleanupWorkspaceExecutionData(ownerId: string, createdByUserId: string | null = null) {
   await ensureSchema();
   const [itemCount, routineCount, cycleCount] = await Promise.all([
     getDb().select({ count: sql<number>`count(*)` }).from(items).where(eq(items.ownerId, ownerId)),
@@ -472,6 +487,7 @@ export async function cleanupWorkspaceExecutionData(ownerId: string) {
     getDb().select({ count: sql<number>`count(*)` }).from(okrCycles).where(eq(okrCycles.ownerId, ownerId)),
   ]);
   const protectedBefore = await protectedWorkspaceCounts(ownerId);
+  const archivedRecord = await archiveWorkspaceExecutionData(ownerId, createdByUserId);
 
   await getDb().delete(checklistItems).where(eq(checklistItems.ownerId, ownerId));
   await getDb().delete(itemPropertyValues).where(eq(itemPropertyValues.ownerId, ownerId));
@@ -494,9 +510,63 @@ export async function cleanupWorkspaceExecutionData(ownerId: string) {
     deletedItems: itemCount[0]?.count ?? 0,
     deletedRoutines: routineCount[0]?.count ?? 0,
     deletedCycles: cycleCount[0]?.count ?? 0,
+    archivedRecord: archivedRecord ? serializeTrashRecord(archivedRecord) : null,
     protectedData: protectedAfter,
     activeCycle: serializeOkrCycle(activeCycle),
   };
+}
+
+async function archiveWorkspaceExecutionData(ownerId: string, createdByUserId: string | null) {
+  const [
+    itemRows,
+    propertyValueRows,
+    checklistRows,
+    calendarEventRows,
+    activityRows,
+    scrumRows,
+    routineCompletionRows,
+    routineRows,
+    cycleRows,
+  ] = await Promise.all([
+    getDb().select().from(items).where(eq(items.ownerId, ownerId)),
+    getDb().select().from(itemPropertyValues).where(eq(itemPropertyValues.ownerId, ownerId)),
+    getDb().select().from(checklistItems).where(eq(checklistItems.ownerId, ownerId)),
+    getDb().select().from(googleCalendarEvents).where(eq(googleCalendarEvents.ownerId, ownerId)),
+    getDb().select().from(activityLog).where(eq(activityLog.ownerId, ownerId)),
+    getDb().select().from(dailyScrums).where(eq(dailyScrums.ownerId, ownerId)),
+    getDb().select().from(routineCompletions).where(eq(routineCompletions.ownerId, ownerId)),
+    getDb().select().from(routines).where(eq(routines.ownerId, ownerId)),
+    getDb().select().from(okrCycles).where(eq(okrCycles.ownerId, ownerId)),
+  ]);
+  if (!itemRows.length && !routineRows.length && !cycleRows.length && !scrumRows.length) return null;
+
+  const archivedAt = new Date().toISOString();
+  const [record] = await getDb()
+    .insert(trashRecords)
+    .values({
+      id: crypto.randomUUID(),
+      ownerId,
+      category: "workspace_cleanup",
+      title: `OKR cleanup ${archivedAt.slice(0, 10)}`,
+      payload: JSON.stringify({
+        items: itemRows,
+        itemPropertyValues: propertyValueRows,
+        checklistItems: checklistRows,
+        googleCalendarEvents: calendarEventRows,
+        activityLog: activityRows,
+        dailyScrums: scrumRows,
+        routineCompletions: routineCompletionRows,
+        routines: routineRows,
+        okrCycles: cycleRows,
+      }),
+      itemCount: itemRows.length,
+      routineCount: routineRows.length,
+      cycleCount: cycleRows.length,
+      createdByUserId,
+      archivedAt,
+    })
+    .returning();
+  return record;
 }
 
 async function protectedWorkspaceCounts(ownerId: string) {
@@ -508,6 +578,7 @@ async function protectedWorkspaceCounts(ownerId: string) {
     propertyCount,
     googleConnectionCount,
     slackConnectionCount,
+    trashRecordCount,
   ] = await Promise.all([
     getDb().select({ count: sql<number>`count(*)` }).from(workspaces).where(eq(workspaces.id, ownerId)),
     getDb().select({ count: sql<number>`count(*)` }).from(workspaceMembers).where(eq(workspaceMembers.workspaceId, ownerId)),
@@ -520,6 +591,7 @@ async function protectedWorkspaceCounts(ownerId: string) {
     getDb().select({ count: sql<number>`count(*)` }).from(propertyDefinitions).where(eq(propertyDefinitions.ownerId, ownerId)),
     getDb().select({ count: sql<number>`count(*)` }).from(googleConnections).where(eq(googleConnections.ownerId, ownerId)),
     getDb().select({ count: sql<number>`count(*)` }).from(slackConnections).where(eq(slackConnections.ownerId, ownerId)),
+    getDb().select({ count: sql<number>`count(*)` }).from(trashRecords).where(eq(trashRecords.ownerId, ownerId)),
   ]);
 
   return {
@@ -530,6 +602,40 @@ async function protectedWorkspaceCounts(ownerId: string) {
     properties: propertyCount[0]?.count ?? 0,
     googleConnections: googleConnectionCount[0]?.count ?? 0,
     slackConnections: slackConnectionCount[0]?.count ?? 0,
+    trashRecords: trashRecordCount[0]?.count ?? 0,
+  };
+}
+
+export async function listTrashRecords(ownerId: string) {
+  await ensureSchema();
+  const rows = await getDb()
+    .select()
+    .from(trashRecords)
+    .where(eq(trashRecords.ownerId, ownerId))
+    .orderBy(desc(trashRecords.archivedAt))
+    .limit(100);
+  return rows.map(serializeTrashRecord);
+}
+
+export async function deleteTrashRecord(ownerId: string, id: string) {
+  await ensureSchema();
+  const [record] = await getDb()
+    .delete(trashRecords)
+    .where(and(eq(trashRecords.ownerId, ownerId), eq(trashRecords.id, id)))
+    .returning();
+  if (!record) throw new Error("Trash record not found");
+  return serializeTrashRecord(record);
+}
+
+export function serializeTrashRecord(record: TrashRecord) {
+  return {
+    id: record.id,
+    category: record.category,
+    title: record.title,
+    itemCount: record.itemCount,
+    routineCount: record.routineCount,
+    cycleCount: record.cycleCount,
+    archivedAt: record.archivedAt,
   };
 }
 
