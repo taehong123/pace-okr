@@ -106,7 +106,7 @@ export async function POST(request: Request) {
           {
             role: "system",
             content:
-              "You organize messy Korean or multilingual work notes into practical OKR execution structure. Infer intent semantically, not by keyword. Prefer user language. Do not invent specific metrics unless implied; ask concise follow-up questions when information is missing. Keep routines separate from the OKR hierarchy. Treat Initiative as the strategic execution direction under a Key Result. Do not create a Project unless the user clearly describes a concrete project with owner/timing/scope; leave project as an empty string when it is still ambiguous or overlaps with the Initiative. Tasks must be concrete next actions, one per line.",
+              "You organize messy Korean or multilingual work notes into practical OKR execution structure. Infer intent semantically, not by keyword. Prefer user language. Do not invent specific metrics unless implied; ask concise follow-up questions when information is missing. Keep routines separate from the OKR hierarchy. Treat Initiative as the strategic execution direction under a Key Result. Do not create a Project unless the user clearly describes a concrete project with owner/timing/scope; leave project as an empty string when it is still ambiguous or overlaps with the Initiative. Do not invent Tasks; only include tasks explicitly stated or strongly implied by the user. If unsure, leave tasks empty and ask a concise follow-up question.",
           },
           {
             role: "user",

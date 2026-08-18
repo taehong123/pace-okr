@@ -464,6 +464,33 @@ export async function updateOkrCycle(ownerId: string, id: string, patch: Partial
   return serializeOkrCycle(updated);
 }
 
+export async function cleanupWorkspaceExecutionData(ownerId: string) {
+  await ensureSchema();
+  const [itemCount, routineCount, cycleCount] = await Promise.all([
+    getDb().select({ count: sql<number>`count(*)` }).from(items).where(eq(items.ownerId, ownerId)),
+    getDb().select({ count: sql<number>`count(*)` }).from(routines).where(eq(routines.ownerId, ownerId)),
+    getDb().select({ count: sql<number>`count(*)` }).from(okrCycles).where(eq(okrCycles.ownerId, ownerId)),
+  ]);
+
+  await getDb().delete(checklistItems).where(eq(checklistItems.ownerId, ownerId));
+  await getDb().delete(itemPropertyValues).where(eq(itemPropertyValues.ownerId, ownerId));
+  await getDb().delete(googleCalendarEvents).where(eq(googleCalendarEvents.ownerId, ownerId));
+  await getDb().delete(activityLog).where(eq(activityLog.ownerId, ownerId));
+  await getDb().delete(dailyScrums).where(eq(dailyScrums.ownerId, ownerId));
+  await getDb().delete(routineCompletions).where(eq(routineCompletions.ownerId, ownerId));
+  await getDb().delete(routines).where(eq(routines.ownerId, ownerId));
+  await getDb().delete(items).where(eq(items.ownerId, ownerId));
+  await getDb().delete(okrCycles).where(eq(okrCycles.ownerId, ownerId));
+
+  const activeCycle = await ensureActiveOkrCycle(ownerId);
+  return {
+    deletedItems: itemCount[0]?.count ?? 0,
+    deletedRoutines: routineCount[0]?.count ?? 0,
+    deletedCycles: cycleCount[0]?.count ?? 0,
+    activeCycle: serializeOkrCycle(activeCycle),
+  };
+}
+
 async function ensureActiveOkrCycle(ownerId: string) {
   const [active] = await getDb()
     .select()

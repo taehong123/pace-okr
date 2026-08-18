@@ -36,6 +36,7 @@ import {
   Target,
   TextCursorInput,
   Trash2,
+  AlertTriangle,
   UserPlus,
   Users,
   X,
@@ -385,6 +386,7 @@ export default function Home() {
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [createItemOpen, setCreateItemOpen] = useState(false);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null);
@@ -765,6 +767,7 @@ export default function Home() {
           <button className="nav-item" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={16} /><span>팀 멤버</span></button>
           <button className="nav-item" onClick={() => { setTeamPanelTab("groups"); setTeamPanelOpen(true); }}><AtSign size={16} /><span>그룹 관리</span></button>
           <button className="nav-item" onClick={() => setPropertyPanelOpen(true)}><Settings2 size={16} /><span>속성 관리</span></button>
+          <button className="nav-item danger-nav" onClick={() => setCleanupOpen(true)}><Trash2 size={16} /><span>OKR 클린업</span></button>
           <button className="profile-row"><span className="avatar">T</span><span>태홍</span><MoreHorizontal size={15} /></button>
         </div>
       </aside>
@@ -847,6 +850,7 @@ export default function Home() {
       )}
       {teamPanelOpen && <TeamPanel initialTab={teamPanelTab} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
       {createItemOpen && <CreateItemPanel items={items} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
+      {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setPropertyValues({}); setOkrCycles([cycle]); setSelectedTaskId(null); setActiveView("home"); setCleanupOpen(false); showNotice("현재 워크스페이스의 OKR 데이터를 정리했습니다."); }} onNotice={showNotice} />}
       {selectedTask && (
         <TaskDetailPanel
           task={selectedTask}
@@ -901,6 +905,57 @@ function WelcomeModal({ language, onLanguageChange, onClose, onOpenMcp }: {
         <footer className="welcome-actions">
           <button className="welcome-secondary" onClick={onOpenMcp}><Bot size={14} />{copy.mcpAction}</button>
           <button className="welcome-primary" onClick={onClose}>{copy.startAction}<ChevronRight size={14} /></button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function CleanupModal({ onClose, onCleaned, onNotice }: { onClose: () => void; onCleaned: (cycle: OkrCycle) => void; onNotice: (message: string) => void }) {
+  const confirmationText = "DELETE OKR DATA";
+  const [confirm, setConfirm] = useState("");
+  const [cleaning, setCleaning] = useState(false);
+
+  async function clean() {
+    if (confirm !== confirmationText || cleaning) return;
+    setCleaning(true);
+    const response = await fetch("/api/workspace-cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmation: confirmationText }),
+    });
+    setCleaning(false);
+    if (!response.ok) {
+      onNotice("OKR 데이터를 정리하지 못했습니다.");
+      return;
+    }
+    const data = await response.json() as { activeCycle: OkrCycle };
+    onCleaned(data.activeCycle);
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <section className="cleanup-modal" role="dialog" aria-modal="true" aria-labelledby="cleanup-title">
+        <header>
+          <div>
+            <AlertTriangle size={18} />
+            <h2 id="cleanup-title">OKR 데이터 클린업</h2>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button>
+        </header>
+        <p>
+          현재 워크스페이스의 Objective, Key Result, Initiative, Project, Task, Routine, Scrum 기록을 모두 삭제합니다.
+          워크스페이스, 멤버, 그룹, 연동, 속성 설정은 유지됩니다.
+        </p>
+        <label>
+          <span>확인 문구</span>
+          <input value={confirm} onChange={(event) => setConfirm(event.target.value)} placeholder={confirmationText} />
+        </label>
+        <footer>
+          <button onClick={onClose}>취소</button>
+          <button className="danger" disabled={confirm !== confirmationText || cleaning} onClick={() => void clean()}>
+            {cleaning ? "정리 중" : "싹 지우기"}
+          </button>
         </footer>
       </section>
     </div>

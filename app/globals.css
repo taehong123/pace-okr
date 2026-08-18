@@ -58,6 +58,8 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .nav-item i { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; }
 .nav-item:hover, .nav-item.active { background: var(--hover); color: var(--ink); }
 .nav-item.active { font-weight: 600; }
+.danger-nav { color: var(--red); }
+.danger-nav svg { color: var(--red); }
 .sidebar-section { display: grid; gap: 1px; margin-top: 20px; }
 .sidebar-section > span { padding: 0 9px 6px; color: var(--faint); font-size: 10px; font-weight: 600; }
 .sidebar-bottom { margin-top: auto; display: grid; gap: 1px; }
@@ -307,6 +309,19 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .integration-modal footer { min-height: 57px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 17px; }
 .integration-modal footer span { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 9px; }
 .integration-modal footer button { height: 30px; padding: 0 12px; border: 0; border-radius: 4px; background: var(--ink); color: white; font-size: 11px; cursor: pointer; }
+.cleanup-modal { width: min(460px, 100%); overflow: hidden; border: 1px solid #d9d9d7; border-radius: 7px; background: white; box-shadow: 0 14px 50px rgba(0, 0, 0, .18); }
+.cleanup-modal > header { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 17px; border-bottom: 1px solid var(--line); }
+.cleanup-modal > header > div { min-width: 0; display: flex; align-items: center; gap: 9px; color: var(--red); }
+.cleanup-modal h2 { margin: 0; color: var(--ink); font-size: 16px; }
+.cleanup-modal p { margin: 0; padding: 17px; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.cleanup-modal label { display: grid; gap: 7px; padding: 0 17px 17px; }
+.cleanup-modal label span { color: var(--muted); font-size: 10px; font-weight: 600; }
+.cleanup-modal input { height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 4px; outline: 0; font-size: 12px; }
+.cleanup-modal input:focus { border-color: #b9b9b6; box-shadow: 0 0 0 2px rgba(15, 15, 15, .06); }
+.cleanup-modal footer { min-height: 57px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 17px; border-top: 1px solid var(--line); }
+.cleanup-modal footer button { height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--ink); font-size: 11px; cursor: pointer; }
+.cleanup-modal footer button.danger { border-color: var(--red); background: var(--red); color: white; }
+.cleanup-modal footer button:disabled { opacity: .45; cursor: default; }
 
 .welcome-backdrop { z-index: 60; background: rgba(15, 15, 15, .34); }
 .welcome-modal { width: min(760px, 100%); max-height: calc(100vh - 36px); overflow: auto; border: 1px solid #d6d6d3; border-radius: 7px; background: white; box-shadow: 0 18px 64px rgba(0, 0, 0, .2); }
