@@ -402,6 +402,7 @@ export default function Home() {
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [createItemOpen, setCreateItemOpen] = useState(false);
+  const [okrListOpen, setOkrListOpen] = useState(false);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
@@ -483,6 +484,7 @@ export default function Home() {
       if (event.key !== "Escape") return;
       if (selectedTaskId) { setSelectedTaskId(null); return; }
       if (cleanupOpen) { setCleanupOpen(false); return; }
+      if (okrListOpen) { setOkrListOpen(false); return; }
       if (createItemOpen) { setCreateItemOpen(false); return; }
       if (teamPanelOpen) { setTeamPanelOpen(false); return; }
       if (propertyPanelOpen) { setPropertyPanelOpen(false); return; }
@@ -493,7 +495,7 @@ export default function Home() {
     }
     window.addEventListener("keydown", closeTopmost);
     return () => window.removeEventListener("keydown", closeTopmost);
-  }, [cleanupOpen, createItemOpen, integrationOpen, onboardingOpen, propertyPanelOpen, selectedTaskId, teamPanelOpen, workspaceCreateOpen, workspaceMenuOpen]);
+  }, [cleanupOpen, createItemOpen, integrationOpen, okrListOpen, onboardingOpen, propertyPanelOpen, selectedTaskId, teamPanelOpen, workspaceCreateOpen, workspaceMenuOpen]);
 
   const inboxItems = items.filter((entry) => entry.status === "inbox");
   const executionItems = items.filter((entry) => entry.kind === "project" || entry.kind === "task");
@@ -954,7 +956,9 @@ export default function Home() {
         <div className="page-body">
           {activeView !== "home" && <header className="page-header">
             <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
-            {activeView === "reviews" ? (
+            {activeView === "okr" ? (
+              <button className="primary-action" onClick={() => setOkrListOpen(true)}><Archive size={14} />목록보기</button>
+            ) : activeView === "reviews" ? (
               <CadenceSwitch value={cadence} onChange={setCadence} />
             ) : null}
           </header>}
@@ -986,19 +990,6 @@ export default function Home() {
           {activeView === "routines" && <RoutineView onNotice={showNotice} />}
           {activeView === "okr" && (
             <section className="okr-workbench">
-              <OkrFileManager
-                cycles={okrCycles}
-                selectedCycle={selectedOkrCycle}
-                visibleCycleIds={visibleOkrCycleIds}
-                itemCounts={okrCycleItemCounts}
-                onSelect={setSelectedOkrCycleId}
-                onRename={(id, name) => void renameOkrFile(id, name)}
-                onDepartmentChange={(id, department) => void setOkrFileDepartment(id, department)}
-                onToggleVisible={toggleOkrFileVisible}
-                onSetDefault={(id) => void setDefaultOkrFile(id)}
-                onDelete={(id) => void deleteOkrFile(id)}
-                onCreate={() => void createOkrFile()}
-              />
               <section className="okr-document">
                 {displayedOkrCycles.length ? displayedOkrCycles.map((cycle) => {
                   const view = okrViews[cycle.id] ?? { items: [], depths: {} };
@@ -1020,6 +1011,27 @@ export default function Home() {
       </section>
 
       {notice && <div className="toast">{notice}</div>}
+      {okrListOpen && (
+        <div className="modal-backdrop align-right">
+          <OkrFileManager
+            cycles={okrCycles}
+            selectedCycle={selectedOkrCycle}
+            visibleCycleIds={visibleOkrCycleIds}
+            itemCounts={okrCycleItemCounts}
+            onSelect={(id) => {
+              setSelectedOkrCycleId(id);
+              setVisibleOkrCycleIds((current) => current.includes(id) ? current : [id]);
+            }}
+            onRename={(id, name) => void renameOkrFile(id, name)}
+            onDepartmentChange={(id, department) => void setOkrFileDepartment(id, department)}
+            onToggleVisible={toggleOkrFileVisible}
+            onSetDefault={(id) => void setDefaultOkrFile(id)}
+            onDelete={(id) => void deleteOkrFile(id)}
+            onCreate={() => void createOkrFile()}
+            onClose={() => setOkrListOpen(false)}
+          />
+        </div>
+      )}
       {onboardingOpen && (
         <WelcomeModal
           language={introLanguage}
@@ -1688,6 +1700,7 @@ function OkrFileManager({
   onSetDefault,
   onDelete,
   onCreate,
+  onClose,
 }: {
   cycles: OkrCycle[];
   selectedCycle: OkrCycle | null;
@@ -1700,12 +1713,16 @@ function OkrFileManager({
   onSetDefault: (id: string) => void;
   onDelete: (id: string) => void;
   onCreate: () => void;
+  onClose: () => void;
 }) {
   return (
     <section className="okr-file-manager">
       <header>
         <div><b>OKR 파일</b><span>{cycles.length}개</span></div>
-        <button type="button" onClick={onCreate}><Plus size={13} />새로 만들기</button>
+        <div>
+          <button type="button" onClick={onCreate}><Plus size={13} />새로 만들기</button>
+          <button className="icon-button" type="button" onClick={onClose} aria-label="목록 닫기" title="목록 닫기"><X size={15} /></button>
+        </div>
       </header>
       <div className="okr-file-list" aria-label="OKR 파일 목록">
         {cycles.map((cycle, index) => (
