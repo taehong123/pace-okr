@@ -353,11 +353,11 @@ const fallbackProperties: PropertyDefinition[] = [
 const fallbackValues: PropertyValueMap = {};
 
 const navItems: { id: View; label: string; icon: LucideIcon }[] = [
-  { id: "home", label: "홈", icon: LayoutDashboard },
-  { id: "inbox", label: "인박스", icon: Inbox },
-  { id: "work", label: "작업", icon: Table2 },
-  { id: "routines", label: "루틴", icon: Repeat2 },
   { id: "okr", label: "OKR", icon: Target },
+  { id: "work", label: "Project", icon: Table2 },
+  { id: "inbox", label: "Task", icon: Inbox },
+  { id: "home", label: "홈", icon: LayoutDashboard },
+  { id: "routines", label: "루틴", icon: Repeat2 },
   { id: "scrum", label: "데일리", icon: CalendarCheck },
   { id: "recommendations", label: "추천", icon: Lightbulb },
   { id: "reviews", label: "리뷰", icon: Activity },
@@ -367,8 +367,8 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
 const cadenceLabels: Record<Cadence, string> = { daily: "일간", weekly: "주간", monthly: "월간", quarterly: "분기" };
 const viewTitles: Record<View, string> = {
   home: "홈",
-  inbox: "인박스",
-  work: "작업",
+  inbox: "Task",
+  work: "Project",
   routines: "루틴",
   okr: "OKR",
   scrum: "데일리 스크럼",
@@ -2287,6 +2287,6 @@ function preferredIntroLanguage(): IntroLanguage {
   if (language.startsWith("es")) return "es";
   return "en";
 }
-function pageSubtitle(view: View) { return { home: "지금 집중할 목표와 작업", inbox: "아직 Project에 연결하지 않은 Task", work: "Project에 연결된 Task 데이터베이스", routines: "반복되는 실행을 날짜별로 기록", okr: "Objective부터 Task까지의 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "클린업으로 보관한 OKR 실행 데이터" }[view]; }
+function pageSubtitle(view: View) { return { home: "지금 집중할 목표와 작업", inbox: "아직 Project에 연결하지 않은 Task", work: "Project와 연결된 실행 작업", routines: "반복되는 실행을 날짜별로 기록", okr: "Objective부터 Task까지의 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "클린업으로 보관한 OKR 실행 데이터" }[view]; }
 function routineCadenceLabel(cadence: RoutineCadence) { return { daily: "매일", weekly: "매주", monthly: "매월" }[cadence]; }
 function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "unlinked") return "↗"; if (kind === "due_soon") return "3"; return "P"; }
