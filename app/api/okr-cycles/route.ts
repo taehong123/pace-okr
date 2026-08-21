@@ -27,6 +27,7 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as Record<string, unknown>;
     const cycle = await createOkrCycle(authorization.ownerId, {
       name: asOptionalString(payload.name),
+      department: asString(payload.department),
       startDate: asOptionalString(payload.startDate),
       endDate: asOptionalString(payload.endDate),
       status: asCycleStatus(payload.status) ?? "planned",
@@ -48,6 +49,7 @@ export async function PATCH(request: Request) {
     if (!id) return Response.json({ error: "id is required" }, { status: 400 });
     const cycle = await updateOkrCycle(authorization.ownerId, id, {
       name: asOptionalString(payload.name),
+      department: payload.department === undefined ? undefined : asString(payload.department),
       startDate: asOptionalString(payload.startDate),
       endDate: asOptionalString(payload.endDate),
       status: asCycleStatus(payload.status),
@@ -75,6 +77,10 @@ export async function DELETE(request: Request) {
 
 function asOptionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value.trim() : undefined;
 }
 
 function asCycleStatus(value: unknown): OkrCycleStatus | undefined {

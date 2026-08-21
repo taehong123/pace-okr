@@ -231,7 +231,8 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .okr-file-manager > header span { color: var(--muted); font-size: 9px; }
 .okr-file-manager > header button { height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: #fbfbfa; color: var(--ink); font-size: 10px; cursor: pointer; white-space: nowrap; }
 .okr-file-manager > header button:hover { background: var(--hover); }
-.okr-document { min-width: 0; display: grid; gap: 12px; }
+.okr-document { min-width: 0; display: grid; gap: 14px; }
+.okr-document-card { min-width: 0; display: grid; gap: 0; }
 .okr-document-header { min-height: 76px; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: white; }
 .okr-file-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 5px; background: #f1f1ef; color: var(--muted); }
 .okr-document-header > div { min-width: 0; }
@@ -240,6 +241,10 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .okr-file-title input { width: 100%; min-width: 0; height: 26px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--ink); font-size: 16px; font-weight: 650; outline: 0; text-overflow: ellipsis; }
 .okr-file-title input:focus { padding: 0 6px; background: #f6f6f4; box-shadow: inset 0 0 0 1px var(--line); }
 .okr-document-header p { margin: 0; color: var(--muted); font-size: 11px; }
+.okr-document-department { max-width: 220px; display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 6px; margin-top: 7px; }
+.okr-document-department span, .okr-department-input span { color: var(--muted); font-size: 9px; font-weight: 600; }
+.okr-document-department input, .okr-department-input input { width: 100%; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid var(--line); border-radius: 3px; background: #fbfbfa; color: var(--ink); font-size: 10px; outline: 0; }
+.okr-document-department input:focus, .okr-department-input input:focus { background: white; box-shadow: inset 0 0 0 1px #b8d8e6; }
 .okr-document-header > button { height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--ink); font-size: 10px; cursor: pointer; white-space: nowrap; }
 .okr-document-header > button:hover { background: var(--hover); }
 .okr-file-list { display: grid; gap: 4px; }
@@ -252,10 +257,14 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .okr-file-row-main input { width: 100%; min-width: 0; height: 22px; padding: 0 3px; border: 0; border-radius: 3px; background: transparent; color: var(--ink); font-size: 11px; font-weight: 600; outline: 0; text-overflow: ellipsis; }
 .okr-file-row-main input:focus { background: white; box-shadow: inset 0 0 0 1px var(--line); }
 .okr-file-row small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.okr-department-input { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 4px; margin-top: 2px; }
+.okr-department-input input { height: 22px; }
 .okr-file-row-actions { grid-column: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .okr-file-row-actions button, .okr-file-row-actions em { height: 21px; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px; border: 1px solid var(--line); border-radius: 3px; background: white; color: var(--muted); font-size: 9px; font-style: normal; cursor: pointer; white-space: nowrap; }
 .okr-file-row-actions button:hover:not(:disabled) { color: var(--ink); background: #fbfbfa; }
+.okr-file-row-actions button.is-on { border-color: #b8d8e6; background: #f3fafc; color: #337ea9; }
 .okr-file-row-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.okr-document-card + .okr-document-card { padding-top: 14px; border-top: 1px solid var(--line); }
 .objective-row { min-height: 92px; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
 .objective-row span { color: var(--muted); font-size: 10px; }
 .objective-row h2 { margin: 5px 0 0; font-size: 17px; line-height: 1.4; }

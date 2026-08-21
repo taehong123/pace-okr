@@ -69,6 +69,7 @@ export const okrCycles = sqliteTable(
     id: text("id").primaryKey(),
     ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    department: text("department").notNull().default(""),
     version: integer("version").notNull().default(1),
     startDate: text("start_date").notNull(),
     endDate: text("end_date").notNull(),

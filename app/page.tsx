@@ -78,6 +78,7 @@ type OkrptrItem = {
 type OkrCycle = {
   id: string;
   name: string;
+  department: string;
   version: number;
   startDate: string;
   endDate: string;
@@ -382,6 +383,7 @@ export default function Home() {
   const [propertyValues, setPropertyValues] = useState<PropertyValueMap>(fallbackValues);
   const [okrCycles, setOkrCycles] = useState<OkrCycle[]>([]);
   const [selectedOkrCycleId, setSelectedOkrCycleId] = useState<string | null>(null);
+  const [visibleOkrCycleIds, setVisibleOkrCycleIds] = useState<string[]>([]);
   const [activeView, setActiveView] = useState<View>("home");
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [taskDisplay, setTaskDisplay] = useState<"table" | "board">("table");
@@ -435,6 +437,7 @@ export default function Home() {
         setWorkspaces(workspaceData.workspaces);
         setWorkspaceRules(rulesData.rules);
         setOkrCycles(cyclesData.cycles);
+        setVisibleOkrCycleIds(cyclesData.cycles.find((cycle) => cycle.status === "active") ? [cyclesData.cycles.find((cycle) => cycle.status === "active")!.id] : cyclesData.cycles[0] ? [cyclesData.cycles[0].id] : []);
         setConnected(true);
       })
       .catch(() => setConnected(false));
@@ -497,7 +500,16 @@ export default function Home() {
   const structuredItems = items.filter((entry) => entry.status !== "inbox");
   const defaultOkrCycle = okrCycles.find((cycle) => cycle.status === "active") ?? okrCycles[0] ?? null;
   const selectedOkrCycle = okrCycles.find((cycle) => cycle.id === selectedOkrCycleId) ?? defaultOkrCycle;
-  const okrTreeItems = useMemo(() => filterTreeItemsByCycle(structuredItems, selectedOkrCycle?.id ?? null), [structuredItems, selectedOkrCycle?.id]);
+  const visibleOkrCycles = okrCycles.filter((cycle) => visibleOkrCycleIds.includes(cycle.id));
+  const displayedOkrCycles = visibleOkrCycles.length ? visibleOkrCycles : selectedOkrCycle ? [selectedOkrCycle] : [];
+  const okrViews = useMemo(() => {
+    const views: Record<string, { items: OkrptrItem[]; objective?: OkrptrItem; depths: Record<string, number> }> = {};
+    for (const cycle of okrCycles) {
+      const cycleItems = filterTreeItemsByCycle(structuredItems, cycle.id);
+      views[cycle.id] = { items: cycleItems, objective: cycleItems.find((entry) => entry.kind === "objective"), depths: buildDepths(cycleItems) };
+    }
+    return views;
+  }, [okrCycles, structuredItems]);
   const okrCycleItemCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const cycle of okrCycles) counts[cycle.id] = filterTreeItemsByCycle(structuredItems, cycle.id).length;
@@ -506,13 +518,11 @@ export default function Home() {
   const periodItems = items.filter(
     (entry) => entry.status !== "inbox" && (cadence === "quarterly" || entry.cadence === cadence || entry.kind === "objective"),
   );
-  const objective = okrTreeItems.find((entry) => entry.kind === "objective");
   const completed = periodItems.filter((entry) => isCompletedStatus(entry.status)).length;
   const blocked = periodItems.filter((entry) => entry.status === "blocked").length;
   const averageProgress = periodItems.length
     ? Math.round(periodItems.reduce((sum, entry) => sum + entry.progress, 0) / periodItems.length)
     : 0;
-  const depths = useMemo(() => buildDepths(okrTreeItems), [okrTreeItems]);
   const selectedTask = items.find((entry) => entry.id === selectedTaskId && entry.kind === "task");
   const currentWorkspace = workspaces.find((entry) => entry.current) ?? workspaces[0];
 
@@ -655,6 +665,7 @@ export default function Home() {
       const data = await response.json() as { cycle: OkrCycle };
       setOkrCycles((current) => [data.cycle, ...current]);
       setSelectedOkrCycleId(data.cycle.id);
+      setVisibleOkrCycleIds((current) => current.includes(data.cycle.id) ? current : [data.cycle.id, ...current]);
       setActiveView("okr");
       showNotice("새 OKR 파일을 만들었습니다.");
     } catch {
@@ -681,10 +692,35 @@ export default function Home() {
     }
   }
 
+  async function setOkrFileDepartment(id: string, department: string) {
+    const previous = okrCycles;
+    setOkrCycles((current) => current.map((cycle) => cycle.id === id ? { ...cycle, department } : cycle));
+    try {
+      const response = await fetch("/api/okr-cycles", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, department }),
+      });
+      if (!response.ok) throw new Error("cycle");
+      const data = await response.json() as { cycle: OkrCycle };
+      setOkrCycles((current) => current.map((cycle) => cycle.id === id ? data.cycle : cycle));
+      showNotice("OKR 부서를 저장했습니다.");
+    } catch {
+      setOkrCycles(previous);
+      showNotice("OKR 부서를 저장하지 못했습니다.");
+    }
+  }
+
+  function toggleOkrFileVisible(id: string) {
+    setSelectedOkrCycleId(id);
+    setVisibleOkrCycleIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]);
+  }
+
   async function setDefaultOkrFile(id: string) {
     const previous = okrCycles;
     setOkrCycles((current) => current.map((cycle) => ({ ...cycle, status: cycle.id === id ? "active" : cycle.status === "active" ? "planned" : cycle.status })));
     setSelectedOkrCycleId(id);
+    setVisibleOkrCycleIds((current) => current.includes(id) ? current : [id, ...current]);
     try {
       const response = await fetch("/api/okr-cycles", {
         method: "PATCH",
@@ -715,6 +751,7 @@ export default function Home() {
       const data = await response.json() as { cycles: OkrCycle[] };
       setOkrCycles(data.cycles);
       if (selectedOkrCycle?.id === id) setSelectedOkrCycleId(data.cycles.find((entry) => entry.status === "active")?.id ?? data.cycles[0]?.id ?? null);
+      setVisibleOkrCycleIds((current) => current.filter((entry) => entry !== id));
       setItems((current) => current.map((entry) => entry.cycleId === id ? { ...entry, cycleId: null } : entry));
       showNotice("OKR 파일을 삭제했습니다.");
     } catch {
@@ -952,16 +989,26 @@ export default function Home() {
               <OkrFileManager
                 cycles={okrCycles}
                 selectedCycle={selectedOkrCycle}
+                visibleCycleIds={visibleOkrCycleIds}
                 itemCounts={okrCycleItemCounts}
                 onSelect={setSelectedOkrCycleId}
                 onRename={(id, name) => void renameOkrFile(id, name)}
+                onDepartmentChange={(id, department) => void setOkrFileDepartment(id, department)}
+                onToggleVisible={toggleOkrFileVisible}
                 onSetDefault={(id) => void setDefaultOkrFile(id)}
                 onDelete={(id) => void deleteOkrFile(id)}
                 onCreate={() => void createOkrFile()}
               />
               <section className="okr-document">
-                {selectedOkrCycle ? <OkrCurrentFile key={selectedOkrCycle.id} cycle={selectedOkrCycle} onRename={(id, name) => void renameOkrFile(id, name)} onAddItem={() => setCreateItemOpen(true)} /> : <EmptyState icon={Archive} title="OKR 파일이 없습니다" />}
-                <TreeView objective={objective} items={okrTreeItems} depths={depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} />
+                {displayedOkrCycles.length ? displayedOkrCycles.map((cycle) => {
+                  const view = okrViews[cycle.id] ?? { items: [], depths: {} };
+                  return (
+                    <article className="okr-document-card" key={cycle.id}>
+                      <OkrCurrentFile key={`${cycle.id}-${cycle.name}-${cycle.department}`} cycle={cycle} onRename={(id, name) => void renameOkrFile(id, name)} onDepartmentChange={(id, department) => void setOkrFileDepartment(id, department)} onAddItem={() => setCreateItemOpen(true)} />
+                      <TreeView objective={view.objective} items={view.items} depths={view.depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} />
+                    </article>
+                  );
+                }) : <EmptyState icon={Archive} title="OKR 파일이 없습니다" />}
               </section>
             </section>
           )}
@@ -1009,7 +1056,7 @@ export default function Home() {
       )}
       {teamPanelOpen && <TeamPanel initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
       {createItemOpen && <CreateItemPanel items={items} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
-      {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setPropertyValues({}); setOkrCycles([cycle]); setSelectedTaskId(null); setActiveView("trash"); setCleanupOpen(false); showNotice("OKR 데이터를 휴지통에 보관하고 정리했습니다."); }} onNotice={showNotice} />}
+      {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setPropertyValues({}); setOkrCycles([cycle]); setVisibleOkrCycleIds([cycle.id]); setSelectedTaskId(null); setActiveView("trash"); setCleanupOpen(false); showNotice("OKR 데이터를 휴지통에 보관하고 정리했습니다."); }} onNotice={showNotice} />}
       {selectedTask && (
         <TaskDetailPanel
           task={selectedTask}
@@ -1632,18 +1679,24 @@ function aiLimitMessage(error: OrganizeError) {
 function OkrFileManager({
   cycles,
   selectedCycle,
+  visibleCycleIds,
   itemCounts,
   onSelect,
   onRename,
+  onDepartmentChange,
+  onToggleVisible,
   onSetDefault,
   onDelete,
   onCreate,
 }: {
   cycles: OkrCycle[];
   selectedCycle: OkrCycle | null;
+  visibleCycleIds: string[];
   itemCounts: Record<string, number>;
   onSelect: (id: string) => void;
   onRename: (id: string, name: string) => void;
+  onDepartmentChange: (id: string, department: string) => void;
+  onToggleVisible: (id: string) => void;
   onSetDefault: (id: string) => void;
   onDelete: (id: string) => void;
   onCreate: () => void;
@@ -1657,14 +1710,17 @@ function OkrFileManager({
       <div className="okr-file-list" aria-label="OKR 파일 목록">
         {cycles.map((cycle, index) => (
           <OkrFileRow
-            key={cycle.id}
+            key={`${cycle.id}-${cycle.name}-${cycle.department}`}
             cycle={cycle}
             selected={cycle.id === selectedCycle?.id}
+            visible={visibleCycleIds.includes(cycle.id)}
             latest={index === 0}
             itemCount={itemCounts[cycle.id] ?? 0}
             canDelete={cycles.length > 1}
             onSelect={onSelect}
             onRename={onRename}
+            onDepartmentChange={onDepartmentChange}
+            onToggleVisible={onToggleVisible}
             onSetDefault={onSetDefault}
             onDelete={onDelete}
           />
@@ -1678,25 +1734,32 @@ function OkrFileManager({
 function OkrFileRow({
   cycle,
   selected,
+  visible,
   latest,
   itemCount,
   canDelete,
   onSelect,
   onRename,
+  onDepartmentChange,
+  onToggleVisible,
   onSetDefault,
   onDelete,
 }: {
   cycle: OkrCycle;
   selected: boolean;
+  visible: boolean;
   latest: boolean;
   itemCount: number;
   canDelete: boolean;
   onSelect: (id: string) => void;
   onRename: (id: string, name: string) => void;
+  onDepartmentChange: (id: string, department: string) => void;
+  onToggleVisible: (id: string) => void;
   onSetDefault: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   const [nameDraft, setNameDraft] = useState(cycle.name);
+  const [departmentDraft, setDepartmentDraft] = useState(cycle.department);
 
   function commitName() {
     const name = nameDraft.trim();
@@ -1705,6 +1768,11 @@ function OkrFileRow({
       return;
     }
     if (name !== cycle.name) onRename(cycle.id, name);
+  }
+
+  function commitDepartment() {
+    const department = departmentDraft.trim();
+    if (department !== cycle.department) onDepartmentChange(cycle.id, department);
   }
 
   return (
@@ -1728,8 +1796,27 @@ function OkrFileRow({
           aria-label="OKR 파일 이름"
         />
         <small>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {itemCount}개 항목</small>
+        <label className="okr-department-input">
+          <span>부서</span>
+          <input
+            value={departmentDraft}
+            onFocus={() => onSelect(cycle.id)}
+            onChange={(event) => setDepartmentDraft(event.target.value)}
+            onBlur={commitDepartment}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+              if (event.key === "Escape") {
+                setDepartmentDraft(cycle.department);
+                event.currentTarget.blur();
+              }
+            }}
+            placeholder="부서 미지정"
+            aria-label="OKR 담당 부서"
+          />
+        </label>
       </div>
       <div className="okr-file-row-actions">
+        <button type="button" className={visible ? "is-on" : ""} onClick={() => onToggleVisible(cycle.id)}>{visible ? "보는 중" : "보기"}</button>
         {cycle.status === "active" ? <em>기본</em> : <button type="button" onClick={() => onSetDefault(cycle.id)}>기본</button>}
         {latest && <em>최신</em>}
         <button type="button" onClick={() => onDelete(cycle.id)} disabled={!canDelete} aria-label={`${cycle.name} 삭제`} title={canDelete ? "삭제" : "마지막 파일은 삭제할 수 없습니다"}><Trash2 size={12} /></button>
@@ -1738,8 +1825,9 @@ function OkrFileRow({
   );
 }
 
-function OkrCurrentFile({ cycle, onRename, onAddItem }: { cycle: OkrCycle; onRename: (id: string, name: string) => void; onAddItem: () => void }) {
+function OkrCurrentFile({ cycle, onRename, onDepartmentChange, onAddItem }: { cycle: OkrCycle; onRename: (id: string, name: string) => void; onDepartmentChange: (id: string, department: string) => void; onAddItem: () => void }) {
   const [nameDraft, setNameDraft] = useState(cycle.name);
+  const [departmentDraft, setDepartmentDraft] = useState(cycle.department);
 
   function commitName() {
     const name = nameDraft.trim();
@@ -1748,6 +1836,11 @@ function OkrCurrentFile({ cycle, onRename, onAddItem }: { cycle: OkrCycle; onRen
       return;
     }
     if (name !== cycle.name) onRename(cycle.id, name);
+  }
+
+  function commitDepartment() {
+    const department = departmentDraft.trim();
+    if (department !== cycle.department) onDepartmentChange(cycle.id, department);
   }
 
   return (
@@ -1770,7 +1863,24 @@ function OkrCurrentFile({ cycle, onRename, onAddItem }: { cycle: OkrCycle; onRen
           aria-label="OKR 파일 이름"
         />
       </label>
-      <p>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {cycleStatusLabel(cycle.status)}</p>
+      <p>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {cycleStatusLabel(cycle.status)} · {cycle.department || "부서 미지정"}</p>
+      <label className="okr-document-department">
+        <span>부서</span>
+        <input
+          value={departmentDraft}
+          onChange={(event) => setDepartmentDraft(event.target.value)}
+          onBlur={commitDepartment}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") {
+              setDepartmentDraft(cycle.department);
+              event.currentTarget.blur();
+            }
+          }}
+          placeholder="부서 미지정"
+          aria-label="OKR 담당 부서"
+        />
+      </label>
       </div>
       <button type="button" onClick={onAddItem}><Plus size={13} />항목 추가</button>
     </header>

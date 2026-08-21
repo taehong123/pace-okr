@@ -164,6 +164,7 @@ async function ensureSchema() {
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
           name TEXT NOT NULL,
+          department TEXT NOT NULL DEFAULT '',
           version INTEGER NOT NULL DEFAULT 1,
           start_date TEXT NOT NULL,
           end_date TEXT NOT NULL,
@@ -396,6 +397,7 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN trigger_point TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN action_place TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN action_steps TEXT NOT NULL DEFAULT ''");
+      await addColumnIfMissing(d1, "ALTER TABLE okr_cycles ADD COLUMN department TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN cycle_id TEXT REFERENCES okr_cycles(id) ON DELETE SET NULL");
     })()
       .catch((error: unknown) => {
@@ -440,7 +442,7 @@ export async function getActiveOkrCycle(ownerId: string) {
   return ensureActiveOkrCycle(ownerId);
 }
 
-export async function createOkrCycle(ownerId: string, input: { name?: string; startDate?: string; endDate?: string; status?: OkrCycleStatus }) {
+export async function createOkrCycle(ownerId: string, input: { name?: string; department?: string; startDate?: string; endDate?: string; status?: OkrCycleStatus }) {
   await ensureSchema();
   const existing = await getDb().select().from(okrCycles).where(eq(okrCycles.ownerId, ownerId));
   const version = (existing.reduce((max, cycle) => Math.max(max, cycle.version), 0) || 0) + 1;
@@ -451,6 +453,7 @@ export async function createOkrCycle(ownerId: string, input: { name?: string; st
       id: crypto.randomUUID(),
       ownerId,
       name: normalizeCycleName(input.name, version, period),
+      department: input.department?.trim() ?? "",
       version,
       startDate: input.startDate || period.startDate,
       endDate: input.endDate || period.endDate,
@@ -460,7 +463,7 @@ export async function createOkrCycle(ownerId: string, input: { name?: string; st
   return serializeOkrCycle(created);
 }
 
-export async function updateOkrCycle(ownerId: string, id: string, patch: Partial<{ name: string; startDate: string; endDate: string; status: OkrCycleStatus }>) {
+export async function updateOkrCycle(ownerId: string, id: string, patch: Partial<{ name: string; department: string; startDate: string; endDate: string; status: OkrCycleStatus }>) {
   await ensureSchema();
   if (patch.status !== undefined && !OKR_CYCLE_STATUSES.includes(patch.status)) throw new Error("Unsupported OKR cycle status");
   if (patch.status === "active") {
@@ -471,6 +474,7 @@ export async function updateOkrCycle(ownerId: string, id: string, patch: Partial
   }
   const values = {
     name: patch.name?.trim(),
+    department: patch.department?.trim(),
     startDate: patch.startDate,
     endDate: patch.endDate,
     status: patch.status,
@@ -713,6 +717,7 @@ function serializeOkrCycle(cycle: OkrCycle) {
   return {
     id: cycle.id,
     name: cycle.name,
+    department: cycle.department,
     version: cycle.version,
     startDate: cycle.startDate,
     endDate: cycle.endDate,
