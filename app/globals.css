@@ -118,6 +118,8 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .name-cell { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 8px; }
 .name-cell > input { width: 100%; min-width: 0; height: 37px; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 12px; font-weight: 500; }
 .name-cell > input:focus { background: #fbfbfa; }
+.name-open-button { min-width: 0; overflow: hidden; padding: 0; border: 0; background: transparent; color: var(--ink); font-size: 12px; font-weight: 600; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.name-open-button:hover { color: var(--blue); }
 .task-check { width: 17px; height: 17px; flex: 0 0 auto; padding: 0; display: grid; place-items: center; border: 1px solid #c7c7c5; border-radius: 3px; background: white; color: white; cursor: pointer; }
 .task-check.checked { background: var(--blue); border-color: var(--blue); }
 .task-table-row select, .task-table-row > input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 11px; }
@@ -595,6 +597,19 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .task-detail-panel > header { min-height: 78px; height: auto; }
 .task-detail-panel > header > div { min-width: 0; padding: 12px 0; }
 .task-detail-panel h2 { overflow-wrap: anywhere; font-size: 15px; line-height: 1.4; }
+.project-detail-panel { width: min(500px, 100vw); }
+.project-detail-panel > header { min-height: 78px; height: auto; }
+.project-detail-panel > header > div { min-width: 0; padding: 12px 0; }
+.project-detail-panel h2 { overflow-wrap: anywhere; font-size: 15px; line-height: 1.4; }
+.project-detail-form { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.project-custom-properties { display: grid; gap: 10px; padding: 13px 18px 24px; }
+.project-custom-properties > header { display: flex; align-items: center; justify-content: space-between; }
+.project-custom-properties > header b { font-size: 11px; }
+.project-custom-properties > header span { color: var(--muted); font-size: 10px; }
+.project-property-field { display: grid; gap: 5px; }
+.project-property-field span { color: var(--muted); font-size: 10px; }
+.project-property-field input, .project-property-field select { width: 100%; height: 32px; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--ink); font-size: 11px; box-sizing: border-box; }
+.project-property-field input[type="checkbox"] { width: 18px; justify-self: start; }
 .task-meta { min-height: 47px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); }
 .task-meta > span:nth-child(2) { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
 .task-meta b { font-size: 11px; }

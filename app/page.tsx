@@ -411,6 +411,7 @@ export default function Home() {
   const [okrListOpen, setOkrListOpen] = useState(false);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null);
   const [slackStatus, setSlackStatus] = useState<SlackConnectionStatus | null>(null);
@@ -490,6 +491,7 @@ export default function Home() {
   useEffect(() => {
     function closeTopmost(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
+      if (selectedProjectId) { setSelectedProjectId(null); return; }
       if (selectedTaskId) { setSelectedTaskId(null); return; }
       if (cleanupOpen) { setCleanupOpen(false); return; }
       if (okrListOpen) { setOkrListOpen(false); return; }
@@ -503,7 +505,7 @@ export default function Home() {
     }
     window.addEventListener("keydown", closeTopmost);
     return () => window.removeEventListener("keydown", closeTopmost);
-  }, [cleanupOpen, createItemOpen, integrationOpen, okrListOpen, onboardingOpen, propertyPanelOpen, selectedTaskId, teamPanelOpen, workspaceCreateOpen, workspaceMenuOpen]);
+  }, [cleanupOpen, createItemOpen, integrationOpen, okrListOpen, onboardingOpen, propertyPanelOpen, selectedProjectId, selectedTaskId, teamPanelOpen, workspaceCreateOpen, workspaceMenuOpen]);
 
   const inboxItems = items.filter((entry) => entry.status === "inbox");
   const taskItems = items.filter((entry) => entry.kind === "task");
@@ -535,6 +537,7 @@ export default function Home() {
     ? Math.round(periodItems.reduce((sum, entry) => sum + entry.progress, 0) / periodItems.length)
     : 0;
   const selectedTask = items.find((entry) => entry.id === selectedTaskId && entry.kind === "task");
+  const selectedProject = items.find((entry) => entry.id === selectedProjectId && entry.kind === "project");
   const currentWorkspace = workspaces.find((entry) => entry.current) ?? workspaces[0];
 
   async function switchWorkspace(workspaceId: string) {
@@ -1013,6 +1016,7 @@ export default function Home() {
               onPropertyChange={setPropertyValue}
               onOpenProperties={() => setPropertyPanelOpen(true)}
               onOpenTask={setSelectedTaskId}
+              onOpenProject={setSelectedProjectId}
             />
           )}
           {activeView === "routines" && <RoutineView onNotice={showNotice} onRoutinesChange={setRoutines} />}
@@ -1099,6 +1103,17 @@ export default function Home() {
       {teamPanelOpen && <TeamPanel initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
       {createItemOpen && <CreateItemPanel initialKind={createItemKind} items={items} routines={routines} properties={properties} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
       {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setPropertyValues({}); setOkrCycles([cycle]); setVisibleOkrCycleIds([cycle.id]); setSelectedTaskId(null); setActiveView("trash"); setCleanupOpen(false); showNotice("OKR 데이터를 휴지통에 보관하고 정리했습니다."); }} onNotice={showNotice} />}
+      {selectedProject && (
+        <ProjectDetailPanel
+          project={selectedProject}
+          allItems={items}
+          properties={properties}
+          propertyValues={propertyValues}
+          onClose={() => setSelectedProjectId(null)}
+          onPatch={patchItem}
+          onPropertyChange={setPropertyValue}
+        />
+      )}
       {selectedTask && (
         <TaskDetailPanel
           task={selectedTask}
@@ -1217,7 +1232,7 @@ function CadenceSwitch({ value, onChange }: { value: Cadence; onChange: (value: 
   return <div className="cadence-switch">{(Object.keys(cadenceLabels) as Cadence[]).map((entry) => <button className={value === entry ? "selected" : ""} key={entry} onClick={() => onChange(entry)}>{cadenceLabels[entry]}</button>)}</div>;
 }
 
-function TaskDatabase({ items, allItems, properties, values, display, onDisplayChange, onPatch, onPropertyChange, onOpenProperties, onOpenTask }: {
+function TaskDatabase({ items, allItems, properties, values, display, onDisplayChange, onPatch, onPropertyChange, onOpenProperties, onOpenTask, onOpenProject }: {
   items: OkrptrItem[];
   allItems: OkrptrItem[];
   properties: PropertyDefinition[];
@@ -1228,10 +1243,12 @@ function TaskDatabase({ items, allItems, properties, values, display, onDisplayC
   onPropertyChange: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void>;
   onOpenProperties: () => void;
   onOpenTask: (id: string) => void;
+  onOpenProject: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const visible = items.filter((entry) => entry.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
+  const emptyLabel = items.every((entry) => entry.kind === "project") ? "Project" : "Task";
   return (
     <section className="database-section">
       <div className="database-toolbar">
@@ -1246,7 +1263,7 @@ function TaskDatabase({ items, allItems, properties, values, display, onDisplayC
           <button onClick={onOpenProperties}><Plus size={13} /><span>속성</span></button>
         </div>
       </div>
-      {display === "board" ? <BoardView items={visible} onOpenTask={onOpenTask} /> : (
+      {display === "board" ? <BoardView items={visible} onOpenItem={(entry) => entry.kind === "project" ? onOpenProject(entry.id) : onOpenTask(entry.id)} /> : (
         <div className="database-scroll">
           <div className="task-table" style={{ "--custom-columns": properties.length } as CSSProperties}>
             <div className="task-table-row task-table-head">
@@ -1256,16 +1273,16 @@ function TaskDatabase({ items, allItems, properties, values, display, onDisplayC
             </div>
             {visible.map((entry) => (
               <div className="task-table-row" key={entry.id}>
-                <div className="name-cell"><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><button className={`task-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })}><Check size={12} /></button><input defaultValue={entry.title} onBlur={(event) => event.target.value.trim() !== entry.title && void onPatch(entry.id, { title: event.target.value })} /></div>
+                <div className="name-cell"><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><button className={`task-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })}><Check size={12} /></button>{entry.kind === "project" ? <button className="name-open-button" onClick={() => onOpenProject(entry.id)}>{entry.title}</button> : <input defaultValue={entry.title} onBlur={(event) => event.target.value.trim() !== entry.title && void onPatch(entry.id, { title: event.target.value })} />}</div>
                 <select className={`status-select status-${entry.status}`} value={entry.status} onChange={(event) => void onPatch(entry.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <select className={`priority-${entry.priority}`} value={entry.priority} onChange={(event) => void onPatch(entry.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <input className="date-cell" type="date" value={entry.dueDate ?? ""} onChange={(event) => void onPatch(entry.id, { dueDate: event.target.value || null })} />
                 <span className="relation-cell">{entry.parentId ? byId.get(entry.parentId)?.title ?? "연결 없음" : "인박스"}</span>
                 {properties.map((property) => <PropertyCell key={property.id} itemId={entry.id} property={property} value={values[entry.id]?.[property.id] ?? null} onChange={onPropertyChange} />)}
-                {entry.kind === "task" ? <button className="row-menu" aria-label="Task detail" title="Task detail" onClick={() => onOpenTask(entry.id)}><MoreHorizontal size={15} /></button> : <span className="row-menu" />}
+                {entry.kind === "task" ? <button className="row-menu" aria-label="Task detail" title="Task detail" onClick={() => onOpenTask(entry.id)}><MoreHorizontal size={15} /></button> : entry.kind === "project" ? <button className="row-menu" aria-label="Project 속성" title="Project 속성" onClick={() => onOpenProject(entry.id)}><MoreHorizontal size={15} /></button> : <span className="row-menu" />}
               </div>
             ))}
-            {!visible.length && <div className="table-empty">표시할 Task가 없습니다.</div>}
+            {!visible.length && <div className="table-empty">표시할 {emptyLabel}가 없습니다.</div>}
           </div>
         </div>
       )}
@@ -1277,6 +1294,65 @@ function PropertyCell({ itemId, property, value, onChange }: { itemId: string; p
   if (property.type === "checkbox") return <label className="property-checkbox"><input type="checkbox" checked={Boolean(value)} onChange={(event) => void onChange(itemId, property.id, event.target.checked)} /><span><Check size={11} /></span></label>;
   if (property.type === "select") return <select className="property-input" value={typeof value === "string" ? value : ""} onChange={(event) => void onChange(itemId, property.id, event.target.value || null)}><option value="">-</option>{property.options.map((option) => <option key={option}>{option}</option>)}</select>;
   return <input className="property-input" type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => { const raw = event.target.value; void onChange(itemId, property.id, property.type === "number" ? (raw ? Number(raw) : null) : raw || null); }} />;
+}
+
+function ProjectDetailPanel({ project, allItems, properties, propertyValues, onClose, onPatch, onPropertyChange }: {
+  project: OkrptrItem;
+  allItems: OkrptrItem[];
+  properties: PropertyDefinition[];
+  propertyValues: PropertyValueMap;
+  onClose: () => void;
+  onPatch: (id: string, patch: Partial<OkrptrItem>) => Promise<void>;
+  onPropertyChange: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void>;
+}) {
+  const byId = new Map(allItems.map((entry) => [entry.id, entry]));
+  const initiative = project.parentId ? byId.get(project.parentId) : undefined;
+  const keyResult = initiative?.parentId ? byId.get(initiative.parentId) : undefined;
+  const objective = keyResult?.parentId ? byId.get(keyResult.parentId) : undefined;
+  const initiatives = allItems.filter((entry) => entry.kind === "initiative");
+  return (
+    <div className="modal-backdrop align-right">
+      <aside className="property-panel project-detail-panel">
+        <header><div><p>Project 속성</p><h2>{project.title}</h2></div><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header>
+        <form className="property-form project-detail-form">
+          <label><span>이름</span><input defaultValue={project.title} onBlur={(event) => event.target.value.trim() !== project.title && void onPatch(project.id, { title: event.target.value })} /></label>
+          <label><span>설명</span><textarea defaultValue={project.description} rows={4} placeholder="범위, 배경, 성공 기준" onBlur={(event) => event.target.value.trim() !== project.description && void onPatch(project.id, { description: event.target.value })} /></label>
+          <label><span>상위 Initiative</span><select value={project.parentId ?? ""} onChange={(event) => void onPatch(project.id, { parentId: event.target.value || null })}><option value="">선택</option>{initiatives.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>
+          <div className="project-field-grid">
+            <label><span>우선순위</span><select className={`priority-${project.priority}`} value={project.priority} onChange={(event) => void onPatch(project.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+            <label><span>상태</span><select value={project.status} onChange={(event) => void onPatch(project.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "inbox").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+            <label><span>주기</span><select value={project.cadence} onChange={(event) => void onPatch(project.id, { cadence: event.target.value as Cadence })}>{Object.entries(cadenceLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+            <label><span>기한</span><input type="date" value={project.dueDate ?? ""} onChange={(event) => void onPatch(project.id, { dueDate: event.target.value || null })} /></label>
+          </div>
+        </form>
+        <section className="task-lineage">
+          <header><b>상위 OKR</b><span>Objective → KR → Initiative</span></header>
+          <LineageRow label="Objective" value={objective?.title ?? "미연결"} />
+          <LineageRow label="Key Result" value={keyResult?.title ?? "미연결"} />
+          <LineageRow label="Initiative" value={initiative?.title ?? "미연결"} />
+        </section>
+        <section className="project-custom-properties">
+          <header><b>커스텀 속성</b><span>변경 즉시 저장</span></header>
+          {properties.length ? properties.map((property) => <ProjectPropertyField key={property.id} projectId={project.id} property={property} value={propertyValues[project.id]?.[property.id] ?? null} onChange={onPropertyChange} />) : <EmptyState icon={Settings2} title="내 설정에서 속성을 추가할 수 있습니다" />}
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+function ProjectPropertyField({ projectId, property, value, onChange }: { projectId: string; property: PropertyDefinition; value: PropertyValue; onChange: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void> }) {
+  return (
+    <label className="project-property-field">
+      <span>{property.name}</span>
+      {property.type === "checkbox" ? (
+        <input type="checkbox" checked={Boolean(value)} onChange={(event) => void onChange(projectId, property.id, event.target.checked)} />
+      ) : property.type === "select" ? (
+        <select value={typeof value === "string" ? value : ""} onChange={(event) => void onChange(projectId, property.id, event.target.value || null)}><option value="">선택 안 함</option>{property.options.map((option) => <option key={option}>{option}</option>)}</select>
+      ) : (
+        <input type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => { const raw = event.target.value; void onChange(projectId, property.id, property.type === "number" ? (raw ? Number(raw) : null) : raw || null); }} />
+      )}
+    </label>
+  );
 }
 
 function TaskDetailPanel({ task, allItems, routines, properties, propertyValues, onClose, onProgress, onNotice }: {
@@ -2105,7 +2181,7 @@ function TreeView({ objective, items, depths, onComplete }: { objective?: Okrptr
   return <section className="outline-section"><div className="objective-row"><Target size={18} /><div><span>Objective</span><h2>{objective.title}</h2></div><b>{objective.progress}%</b></div><div className="hierarchy">{items.filter((entry) => entry.id !== objective.id).map((entry) => <div className="hierarchy-row" key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as CSSProperties}><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><span className="hierarchy-copy"><small>{kindLabel(entry.kind)}</small><b>{entry.title}</b></span><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span><em>{entry.progress}%</em>{!isCompletedStatus(entry.status) && ["project", "task"].includes(entry.kind) ? <button className="row-action" aria-label="완료 처리" title="완료 처리" onClick={() => onComplete(entry.id)}><Check size={13} /></button> : <ChevronRight className="row-chevron" size={15} />}</div>)}</div></section>;
 }
 
-function BoardView({ items, onOpenTask }: { items: OkrptrItem[]; onOpenTask: (id: string) => void }) {
+function BoardView({ items, onOpenItem }: { items: OkrptrItem[]; onOpenItem: (item: OkrptrItem) => void }) {
   const columns: { status: ItemStatus; label: string }[] = [
     { status: "backlog", label: "백로그" },
     { status: "todo", label: "할 일" },
@@ -2115,7 +2191,7 @@ function BoardView({ items, onOpenTask }: { items: OkrptrItem[]; onOpenTask: (id
     { status: "development_done", label: "개발 완료" },
     { status: "blocked", label: "막힘" },
   ];
-  return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <button className="board-item" key={entry.id} onClick={() => onOpenTask(entry.id)}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
+  return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <button className="board-item" key={entry.id} onClick={() => onOpenItem(entry)}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
 }
 
 function TaskListView({ items, allItems, routines, onOpenTask, onConnect }: { items: OkrptrItem[]; allItems: OkrptrItem[]; routines: Routine[]; onOpenTask: (id: string) => void; onConnect: (item: OkrptrItem) => void }) {
