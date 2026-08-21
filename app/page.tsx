@@ -26,6 +26,7 @@ import {
   ListChecks,
   Languages,
   LockKeyhole,
+  LoaderCircle,
   MoreHorizontal,
   Plus,
   Repeat2,
@@ -405,6 +406,8 @@ export default function Home() {
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [createItemOpen, setCreateItemOpen] = useState(false);
   const [createItemKind, setCreateItemKind] = useState<ItemKind>("task");
+  const [deletingOkrCycleIds, setDeletingOkrCycleIds] = useState<Set<string>>(new Set());
+  const [slowDeletingOkrCycleId, setSlowDeletingOkrCycleId] = useState<string | null>(null);
   const [okrListOpen, setOkrListOpen] = useState(false);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -752,22 +755,35 @@ export default function Home() {
   async function deleteOkrFile(id: string) {
     const cycle = okrCycles.find((entry) => entry.id === id);
     if (!cycle) return;
+    if (deletingOkrCycleIds.has(id)) return;
     if (okrCycles.length <= 1) {
       showNotice("OKR 파일은 최소 1개가 필요합니다.");
       return;
     }
     if (!window.confirm(`'${cycle.name}' OKR 파일을 삭제할까요?\n파일 연결만 해제하고 작업 항목 자체는 삭제하지 않습니다.`)) return;
+    setDeletingOkrCycleIds((current) => new Set(current).add(id));
+    const slowTimer = window.setTimeout(() => setSlowDeletingOkrCycleId(id), 800);
     try {
       const response = await fetch(`/api/okr-cycles?id=${encodeURIComponent(id)}`, { method: "DELETE" });
       if (!response.ok) throw new Error("cycle");
-      const data = await response.json() as { cycles: OkrCycle[] };
-      setOkrCycles(data.cycles);
-      if (selectedOkrCycle?.id === id) setSelectedOkrCycleId(data.cycles.find((entry) => entry.status === "active")?.id ?? data.cycles[0]?.id ?? null);
+      const data = await response.json() as { deletedId: string; nextActiveId: string | null };
+      const remaining = okrCycles.filter((entry) => entry.id !== data.deletedId);
+      const nextSelectedId = data.nextActiveId ?? remaining[0]?.id ?? null;
+      setOkrCycles(remaining.map((entry) => ({ ...entry, status: entry.id === data.nextActiveId ? "active" : entry.status === "active" && cycle.status === "active" ? "planned" : entry.status })));
+      if (selectedOkrCycle?.id === id) setSelectedOkrCycleId(nextSelectedId);
       setVisibleOkrCycleIds((current) => current.filter((entry) => entry !== id));
       setItems((current) => current.map((entry) => entry.cycleId === id ? { ...entry, cycleId: null } : entry));
       showNotice("OKR 파일을 삭제했습니다.");
     } catch {
       showNotice("OKR 파일을 삭제하지 못했습니다.");
+    } finally {
+      window.clearTimeout(slowTimer);
+      setSlowDeletingOkrCycleId((current) => current === id ? null : current);
+      setDeletingOkrCycleIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
     }
   }
 
@@ -1030,6 +1046,8 @@ export default function Home() {
             selectedCycle={selectedOkrCycle}
             visibleCycleIds={visibleOkrCycleIds}
             itemCounts={okrCycleItemCounts}
+            deletingIds={deletingOkrCycleIds}
+            slowDeletingId={slowDeletingOkrCycleId}
             onSelect={(id) => {
               setSelectedOkrCycleId(id);
               setVisibleOkrCycleIds((current) => current.includes(id) ? current : [id]);
@@ -1861,6 +1879,8 @@ function OkrFileManager({
   selectedCycle,
   visibleCycleIds,
   itemCounts,
+  deletingIds,
+  slowDeletingId,
   onSelect,
   onRename,
   onDepartmentChange,
@@ -1874,6 +1894,8 @@ function OkrFileManager({
   selectedCycle: OkrCycle | null;
   visibleCycleIds: string[];
   itemCounts: Record<string, number>;
+  deletingIds: Set<string>;
+  slowDeletingId: string | null;
   onSelect: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onDepartmentChange: (id: string, department: string) => void;
@@ -1902,6 +1924,8 @@ function OkrFileManager({
             latest={index === 0}
             itemCount={itemCounts[cycle.id] ?? 0}
             canDelete={cycles.length > 1}
+            deleting={deletingIds.has(cycle.id)}
+            slowDeleting={slowDeletingId === cycle.id}
             onSelect={onSelect}
             onRename={onRename}
             onDepartmentChange={onDepartmentChange}
@@ -1923,6 +1947,8 @@ function OkrFileRow({
   latest,
   itemCount,
   canDelete,
+  deleting,
+  slowDeleting,
   onSelect,
   onRename,
   onDepartmentChange,
@@ -1936,6 +1962,8 @@ function OkrFileRow({
   latest: boolean;
   itemCount: number;
   canDelete: boolean;
+  deleting: boolean;
+  slowDeleting: boolean;
   onSelect: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onDepartmentChange: (id: string, department: string) => void;
@@ -1980,7 +2008,7 @@ function OkrFileRow({
           }}
           aria-label="OKR 파일 이름"
         />
-        <small>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {itemCount}개 항목</small>
+        <small>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {itemCount}개 항목{slowDeleting ? " · 삭제 중" : ""}</small>
         <label className="okr-department-input">
           <span>부서</span>
           <input
@@ -2004,7 +2032,7 @@ function OkrFileRow({
         <button type="button" className={visible ? "is-on" : ""} onClick={() => onToggleVisible(cycle.id)}>{visible ? "보는 중" : "보기"}</button>
         {cycle.status === "active" ? <em>기본</em> : <button type="button" onClick={() => onSetDefault(cycle.id)}>기본</button>}
         {latest && <em>최신</em>}
-        <button type="button" onClick={() => onDelete(cycle.id)} disabled={!canDelete} aria-label={`${cycle.name} 삭제`} title={canDelete ? "삭제" : "마지막 파일은 삭제할 수 없습니다"}><Trash2 size={12} /></button>
+        <button type="button" className={deleting ? "is-loading" : ""} onClick={() => onDelete(cycle.id)} disabled={!canDelete || deleting} aria-label={`${cycle.name} 삭제`} title={deleting ? "삭제 중" : canDelete ? "삭제" : "마지막 파일은 삭제할 수 없습니다"}>{deleting ? <LoaderCircle size={12} /> : <Trash2 size={12} />}</button>
       </div>
     </article>
   );

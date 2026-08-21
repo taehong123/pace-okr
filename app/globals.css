@@ -265,7 +265,9 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .okr-file-row-actions button, .okr-file-row-actions em { height: 21px; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px; border: 1px solid var(--line); border-radius: 3px; background: white; color: var(--muted); font-size: 9px; font-style: normal; cursor: pointer; white-space: nowrap; }
 .okr-file-row-actions button:hover:not(:disabled) { color: var(--ink); background: #fbfbfa; }
 .okr-file-row-actions button.is-on { border-color: #b8d8e6; background: #f3fafc; color: #337ea9; }
+.okr-file-row-actions button.is-loading svg { animation: spin .8s linear infinite; }
 .okr-file-row-actions button:disabled { opacity: .45; cursor: not-allowed; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .okr-document-card + .okr-document-card { padding-top: 14px; border-top: 1px solid var(--line); }
 .objective-row { min-height: 92px; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
 .objective-row span { color: var(--muted); font-size: 10px; }

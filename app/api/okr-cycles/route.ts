@@ -68,8 +68,8 @@ export async function DELETE(request: Request) {
     await ensureWorkspace(authorization.ownerId);
     const id = new URL(request.url).searchParams.get("id")?.trim();
     if (!id) return Response.json({ error: "id is required" }, { status: 400 });
-    const cycles = await deleteOkrCycle(authorization.ownerId, id);
-    return Response.json({ cycles });
+    const result = await deleteOkrCycle(authorization.ownerId, id);
+    return Response.json(result);
   } catch (error) {
     return routeError(error);
   }
