@@ -205,6 +205,7 @@ async function ensureSchema() {
           owner_id TEXT NOT NULL,
           cycle_id TEXT REFERENCES okr_cycles(id) ON DELETE SET NULL,
           parent_id TEXT,
+          routine_id TEXT REFERENCES routines(id) ON DELETE SET NULL,
           kind TEXT NOT NULL,
           title TEXT NOT NULL,
           description TEXT NOT NULL DEFAULT '',
@@ -221,6 +222,7 @@ async function ensureSchema() {
         )`),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_status ON items(owner_id, status)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_parent ON items(owner_id, parent_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_routine ON items(owner_id, routine_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_cadence ON items(owner_id, cadence)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_cycle ON items(owner_id, cycle_id)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS activity_log (
@@ -399,6 +401,7 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN action_steps TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE okr_cycles ADD COLUMN department TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN cycle_id TEXT REFERENCES okr_cycles(id) ON DELETE SET NULL");
+      await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN routine_id TEXT REFERENCES routines(id) ON DELETE SET NULL");
     })()
       .catch((error: unknown) => {
         schemaReady = null;
@@ -1712,6 +1715,7 @@ export async function createItem(
     kind?: ItemKind;
     cycleId?: string | null;
     parentId?: string | null;
+    routineId?: string | null;
     description?: string;
     status?: ItemStatus;
     priority?: ItemPriority;
@@ -1723,8 +1727,9 @@ export async function createItem(
   },
 ) {
   const kind = input.kind ?? "task";
-  const status = input.status ?? (kind === "task" && !input.parentId ? "inbox" : "todo");
-  await validateParent(ownerId, kind, input.parentId ?? null, status);
+  const hasTaskContainer = Boolean(input.parentId || input.routineId);
+  const status = input.status ?? (kind === "task" && !hasTaskContainer ? "inbox" : "todo");
+  await validateParent(ownerId, kind, input.parentId ?? null, status, input.routineId ?? null);
   const rules = await getWorkspaceRules(ownerId);
   const cycleId = input.cycleId === undefined ? await defaultCycleIdForKind(ownerId, kind) : input.cycleId;
 
@@ -1736,6 +1741,7 @@ export async function createItem(
       ownerId,
       cycleId,
       parentId: input.parentId ?? null,
+      routineId: input.routineId ?? null,
       kind,
       title: input.title.trim(),
       description: input.description?.trim() ?? "",
@@ -1766,18 +1772,20 @@ export async function updateItem(
     progress: number;
     dueDate: string | null;
     parentId: string | null;
+    routineId: string | null;
     source: string;
   }>,
 ) {
   const current = await getItem(ownerId, id);
   if (!current) throw new Error("Item not found");
 
-  if (patch.parentId !== undefined || patch.status !== undefined) {
+  if (patch.parentId !== undefined || patch.status !== undefined || patch.routineId !== undefined) {
     await validateParent(
       ownerId,
       current.kind as ItemKind,
       patch.parentId === undefined ? current.parentId : patch.parentId,
       patch.status ?? (current.status as ItemStatus),
+      patch.routineId === undefined ? current.routineId : patch.routineId,
     );
   }
 
@@ -2457,9 +2465,21 @@ async function validateParent(
   kind: ItemKind,
   parentId: string | null,
   status: ItemStatus,
+  routineId: string | null = null,
 ) {
-  if (status === "inbox" && (kind !== "task" || parentId !== null)) {
+  if (status === "inbox" && (kind !== "task" || parentId !== null || routineId !== null)) {
     throw new Error("Only an unlinked Task can use inbox status");
+  }
+  if (routineId && kind !== "task") {
+    throw new Error("Only Task can be linked under Routine");
+  }
+  if (routineId && parentId) {
+    throw new Error("Task can be linked under either Project or Routine");
+  }
+  if (routineId) {
+    const routine = await getRoutine(ownerId, routineId);
+    if (!routine) throw new Error("Routine not found");
+    return;
   }
   const expected = parentKind[kind];
   if (!expected) {
@@ -2646,6 +2666,7 @@ export function serializeItem(item: PaceItem, properties: Record<string, Propert
     id: item.id,
     cycleId: item.cycleId,
     parentId: item.parentId,
+    routineId: item.routineId,
     kind: item.kind,
     title: item.title,
     description: item.description,

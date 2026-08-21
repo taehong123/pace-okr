@@ -286,9 +286,18 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .row-action { width: 23px; height: 23px; padding: 0; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--green); cursor: pointer; }
 .row-chevron { color: var(--faint); }
 .list-head { min-height: 34px; display: grid; grid-template-columns: minmax(0, 1fr) 100px 72px; align-items: center; gap: 12px; padding: 0 8px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.task-list-head { grid-template-columns: minmax(0, 1fr) minmax(160px, .8fr) 100px 76px; }
 .inbox-item { min-height: 52px; display: grid; grid-template-columns: minmax(0, 1fr) 100px 72px; align-items: center; gap: 12px; padding: 0 8px; border-bottom: 1px solid var(--line); }
+.task-list-item { grid-template-columns: minmax(0, 1fr) minmax(160px, .8fr) 100px 76px; }
 .inbox-item > div { min-width: 0; display: flex; align-items: center; gap: 9px; }
 .inbox-item h3 { overflow: hidden; margin: 0; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.task-list-title, .task-relation-button { min-width: 0; border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.task-list-title { display: flex; align-items: center; gap: 9px; padding: 0; }
+.task-list-title > span:last-child { min-width: 0; display: grid; gap: 2px; }
+.task-list-title b, .task-relation-button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; }
+.task-list-title small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.task-relation-button { height: 30px; padding: 0 6px; color: var(--muted); }
+.task-list-title:hover b, .task-relation-button:hover { color: var(--blue); }
 .page-icon { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 4px; background: #f1f1ef; color: var(--muted); }
 .source-badge { justify-self: start; padding: 3px 6px; border-radius: 3px; background: #f1f1ef; color: var(--muted); font-size: 9px; }
 .source-mcp { background: #e7f3f8; color: var(--blue); }
@@ -585,6 +594,16 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .task-meta { min-height: 47px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); }
 .task-meta > span:nth-child(2) { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
 .task-meta b { font-size: 11px; }
+.task-lineage { padding: 13px 18px; border-bottom: 1px solid var(--line); }
+.task-lineage > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.task-lineage > header b { font-size: 11px; }
+.task-lineage > header span { color: var(--muted); font-size: 10px; }
+.lineage-row { min-height: 30px; display: grid; grid-template-columns: 86px minmax(0, 1fr); align-items: center; gap: 10px; border-top: 1px solid #f1f1ef; }
+.lineage-row span { color: var(--muted); font-size: 10px; }
+.lineage-row b { overflow: hidden; font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.lineage-project-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding-top: 9px; }
+.lineage-project-meta span { min-width: 0; display: flex; justify-content: space-between; gap: 8px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 10px; }
+.lineage-project-meta b { overflow: hidden; color: var(--ink); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .task-calendar-action { min-height: 43px; display: flex; align-items: center; justify-content: flex-end; padding: 7px 18px; border-bottom: 1px solid var(--line); }
 .task-calendar-action button { height: 29px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--ink); font-size: 10px; cursor: pointer; }
 .task-calendar-action button:hover { background: var(--hover); }

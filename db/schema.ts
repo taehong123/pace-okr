@@ -128,6 +128,7 @@ export const items = sqliteTable(
     ownerId: text("owner_id").notNull(),
     cycleId: text("cycle_id").references(() => okrCycles.id, { onDelete: "set null" }),
     parentId: text("parent_id"),
+    routineId: text("routine_id").references(() => routines.id, { onDelete: "set null" }),
     kind: text("kind").notNull(),
     title: text("title").notNull(),
     description: text("description").notNull().default(""),
@@ -145,6 +146,7 @@ export const items = sqliteTable(
   (table) => [
     index("idx_items_owner_status").on(table.ownerId, table.status),
     index("idx_items_owner_parent").on(table.ownerId, table.parentId),
+    index("idx_items_owner_routine").on(table.ownerId, table.routineId),
     index("idx_items_owner_cadence").on(table.ownerId, table.cadence),
     index("idx_items_owner_cycle").on(table.ownerId, table.cycleId),
   ],

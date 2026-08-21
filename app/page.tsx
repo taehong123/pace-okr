@@ -62,6 +62,7 @@ type OkrptrItem = {
   id: string;
   cycleId: string | null;
   parentId: string | null;
+  routineId: string | null;
   kind: ItemKind;
   title: string;
   description: string;
@@ -381,6 +382,7 @@ export default function Home() {
   const [items, setItems] = useState<OkrptrItem[]>(fallbackItems);
   const [properties, setProperties] = useState<PropertyDefinition[]>(fallbackProperties);
   const [propertyValues, setPropertyValues] = useState<PropertyValueMap>(fallbackValues);
+  const [routines, setRoutines] = useState<Routine[]>([]);
   const [okrCycles, setOkrCycles] = useState<OkrCycle[]>([]);
   const [selectedOkrCycleId, setSelectedOkrCycleId] = useState<string | null>(null);
   const [visibleOkrCycleIds, setVisibleOkrCycleIds] = useState<string[]>([]);
@@ -423,18 +425,20 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([fetch("/api/items"), fetch("/api/properties"), fetch("/api/workspaces"), fetch("/api/workspace-rules"), fetch("/api/okr-cycles")])
-      .then(async ([itemsResponse, propertiesResponse, workspacesResponse, rulesResponse, cyclesResponse]) => {
-        if (!itemsResponse.ok || !propertiesResponse.ok || !workspacesResponse.ok || !rulesResponse.ok || !cyclesResponse.ok) throw new Error("offline");
+    Promise.all([fetch("/api/items"), fetch("/api/properties"), fetch("/api/workspaces"), fetch("/api/workspace-rules"), fetch("/api/okr-cycles"), fetch(`/api/routines?date=${localDate()}`)])
+      .then(async ([itemsResponse, propertiesResponse, workspacesResponse, rulesResponse, cyclesResponse, routinesResponse]) => {
+        if (!itemsResponse.ok || !propertiesResponse.ok || !workspacesResponse.ok || !rulesResponse.ok || !cyclesResponse.ok || !routinesResponse.ok) throw new Error("offline");
         const itemData = (await itemsResponse.json()) as { items: OkrptrItem[] };
         const propertyData = (await propertiesResponse.json()) as { properties: PropertyDefinition[]; values: PropertyValueMap };
         const workspaceData = (await workspacesResponse.json()) as { workspaces: WorkspaceSummary[] };
         const rulesData = (await rulesResponse.json()) as { rules: WorkspaceRules };
         const cyclesData = (await cyclesResponse.json()) as { cycles: OkrCycle[] };
+        const routineData = (await routinesResponse.json()) as { routines: Routine[] };
         if (!active) return;
         setItems(itemData.items);
         setProperties(propertyData.properties);
         setPropertyValues(propertyData.values);
+        setRoutines(routineData.routines);
         setWorkspaces(workspaceData.workspaces);
         setWorkspaceRules(rulesData.rules);
         setOkrCycles(cyclesData.cycles);
@@ -498,7 +502,8 @@ export default function Home() {
   }, [cleanupOpen, createItemOpen, integrationOpen, okrListOpen, onboardingOpen, propertyPanelOpen, selectedTaskId, teamPanelOpen, workspaceCreateOpen, workspaceMenuOpen]);
 
   const inboxItems = items.filter((entry) => entry.status === "inbox");
-  const executionItems = items.filter((entry) => entry.kind === "project" || entry.kind === "task");
+  const taskItems = items.filter((entry) => entry.kind === "task");
+  const executionItems = items.filter((entry) => entry.kind === "project");
   const structuredItems = items.filter((entry) => entry.status !== "inbox");
   const defaultOkrCycle = okrCycles.find((cycle) => cycle.status === "active") ?? okrCycles[0] ?? null;
   const selectedOkrCycle = okrCycles.find((cycle) => cycle.id === selectedOkrCycleId) ?? defaultOkrCycle;
@@ -972,7 +977,7 @@ export default function Home() {
           )}
 
           {activeView === "home" && <HomeView onCreatePlan={createOnboardingPlan} />}
-          {activeView === "inbox" && <InboxView items={inboxItems} onConnect={connectInbox} />}
+          {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={setSelectedTaskId} onConnect={connectInbox} />}
           {activeView === "work" && (
             <TaskDatabase
               items={executionItems}
@@ -987,7 +992,7 @@ export default function Home() {
               onOpenTask={setSelectedTaskId}
             />
           )}
-          {activeView === "routines" && <RoutineView onNotice={showNotice} />}
+          {activeView === "routines" && <RoutineView onNotice={showNotice} onRoutinesChange={setRoutines} />}
           {activeView === "okr" && (
             <section className="okr-workbench">
               <section className="okr-document">
@@ -1067,12 +1072,15 @@ export default function Home() {
         />
       )}
       {teamPanelOpen && <TeamPanel initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
-      {createItemOpen && <CreateItemPanel items={items} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
+      {createItemOpen && <CreateItemPanel items={items} routines={routines} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
       {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setPropertyValues({}); setOkrCycles([cycle]); setVisibleOkrCycleIds([cycle.id]); setSelectedTaskId(null); setActiveView("trash"); setCleanupOpen(false); showNotice("OKR 데이터를 휴지통에 보관하고 정리했습니다."); }} onNotice={showNotice} />}
       {selectedTask && (
         <TaskDetailPanel
           task={selectedTask}
-          project={items.find((entry) => entry.id === selectedTask.parentId)}
+          allItems={items}
+          routines={routines}
+          properties={properties}
+          propertyValues={propertyValues}
           onClose={() => setSelectedTaskId(null)}
           onProgress={(progress) => setItems((current) => current.map((entry) => entry.id === selectedTask.id ? { ...entry, progress } : entry))}
           onNotice={showNotice}
@@ -1246,10 +1254,28 @@ function PropertyCell({ itemId, property, value, onChange }: { itemId: string; p
   return <input className="property-input" type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => { const raw = event.target.value; void onChange(itemId, property.id, property.type === "number" ? (raw ? Number(raw) : null) : raw || null); }} />;
 }
 
-function TaskDetailPanel({ task, project, onClose, onProgress, onNotice }: { task: OkrptrItem; project?: OkrptrItem; onClose: () => void; onProgress: (progress: number) => void; onNotice: (message: string) => void }) {
+function TaskDetailPanel({ task, allItems, routines, properties, propertyValues, onClose, onProgress, onNotice }: {
+  task: OkrptrItem;
+  allItems: OkrptrItem[];
+  routines: Routine[];
+  properties: PropertyDefinition[];
+  propertyValues: PropertyValueMap;
+  onClose: () => void;
+  onProgress: (progress: number) => void;
+  onNotice: (message: string) => void;
+}) {
   const [rows, setRows] = useState<ChecklistItem[]>([]);
   const [title, setTitle] = useState("");
   const [syncingCalendar, setSyncingCalendar] = useState(false);
+  const byId = new Map(allItems.map((entry) => [entry.id, entry]));
+  const project = task.parentId ? byId.get(task.parentId) : undefined;
+  const initiative = project?.parentId ? byId.get(project.parentId) : undefined;
+  const keyResult = initiative?.parentId ? byId.get(initiative.parentId) : undefined;
+  const objective = keyResult?.parentId ? byId.get(keyResult.parentId) : undefined;
+  const routine = task.routineId ? routines.find((entry) => entry.id === task.routineId) : undefined;
+  const driProperty = properties.find((property) => /^(dri|담당|owner)$/i.test(property.name.trim()));
+  const projectDri = project && driProperty ? propertyValues[project.id]?.[driProperty.id] : null;
+  const lineageTitle = routine ? `Routine · ${routine.title}` : project ? `Project · ${project.title}` : "인박스";
   useEffect(() => {
     fetch(`/api/checklists?taskId=${encodeURIComponent(task.id)}`)
       .then(async (response) => response.ok ? response.json() as Promise<{ items: ChecklistItem[] }> : Promise.reject())
@@ -1310,13 +1336,45 @@ function TaskDetailPanel({ task, project, onClose, onProgress, onNotice }: { tas
     }
   }
 
-  return <div className="modal-backdrop align-right"><aside className="property-panel task-detail-panel"><header><div><p>{project?.title ?? "인박스"}</p><h2>{task.title}</h2></div><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header><div className="task-meta"><span className={`status-tag status-${task.status}`}>{statusLabel(task.status)}</span><span><CalendarDays size={13} />{dueLabel(task.dueDate)}</span><b>{task.progress}%</b></div><div className="task-calendar-action"><button onClick={() => void syncCalendar()} disabled={syncingCalendar || !task.dueDate}><CalendarDays size={13} />{syncingCalendar ? "동기화 중" : "Google Calendar에 보내기"}</button></div><section className="checklist-section"><header><b>체크리스트</b><span>{rows.filter((entry) => entry.completed).length}/{rows.length}</span></header><div>{rows.map((row) => <div className="checklist-row" key={row.id}><button className={`task-check ${row.completed ? "checked" : ""}`} onClick={() => void toggleRow(row)}><Check size={12} /></button><span className={row.completed ? "completed" : ""}>{row.title}</span><button className="icon-button" onClick={() => void deleteRow(row.id)} aria-label="삭제"><Trash2 size={13} /></button></div>)}</div><form className="checklist-form" onSubmit={addRow}><Plus size={14} /><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="항목 추가" /><button disabled={!title.trim()}>추가</button></form></section></aside></div>;
+  return (
+    <div className="modal-backdrop align-right">
+      <aside className="property-panel task-detail-panel">
+        <header><div><p>{lineageTitle}</p><h2>{task.title}</h2></div><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header>
+        <div className="task-meta"><span className={`status-tag status-${task.status}`}>{statusLabel(task.status)}</span><span><CalendarDays size={13} />{dueLabel(task.dueDate)}</span><b>{task.progress}%</b></div>
+        <section className="task-lineage">
+          <header><b>상위 맵핑</b><span>{routine ? "Routine 기반 Task" : project ? "OKR 실행 구조" : "아직 연결 전"}</span></header>
+          {routine ? (
+            <>
+              <LineageRow label="Routine" value={routine.title} />
+              <LineageRow label="트리거" value={routine.triggerPoint || "미지정"} />
+              <LineageRow label="어디서/어떻게" value={[routine.actionPlace, routine.actionSteps].filter(Boolean).join(" · ") || "미지정"} />
+            </>
+          ) : (
+            <>
+              <LineageRow label="Objective" value={objective?.title ?? "미연결"} />
+              <LineageRow label="Key Result" value={keyResult?.title ?? "미연결"} />
+              <LineageRow label="Initiative" value={initiative?.title ?? "미연결"} />
+              <LineageRow label="Project" value={project?.title ?? "미연결"} />
+              {project && <div className="lineage-project-meta"><span>우선순위 <b>{priorityLabels[project.priority]}</b></span><span>DRI <b>{projectDri === null || projectDri === undefined || projectDri === "" ? "미지정" : String(projectDri)}</b></span><span>상태 <b>{statusLabel(project.status)}</b></span><span>기한 <b>{dueLabel(project.dueDate)}</b></span></div>}
+            </>
+          )}
+        </section>
+        <div className="task-calendar-action"><button onClick={() => void syncCalendar()} disabled={syncingCalendar || !task.dueDate}><CalendarDays size={13} />{syncingCalendar ? "동기화 중" : "Google Calendar에 보내기"}</button></div>
+        <section className="checklist-section"><header><b>체크리스트</b><span>{rows.filter((entry) => entry.completed).length}/{rows.length}</span></header><div>{rows.map((row) => <div className="checklist-row" key={row.id}><button className={`task-check ${row.completed ? "checked" : ""}`} onClick={() => void toggleRow(row)}><Check size={12} /></button><span className={row.completed ? "completed" : ""}>{row.title}</span><button className="icon-button" onClick={() => void deleteRow(row.id)} aria-label="삭제"><Trash2 size={13} /></button></div>)}</div><form className="checklist-form" onSubmit={addRow}><Plus size={14} /><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="항목 추가" /><button disabled={!title.trim()}>추가</button></form></section>
+      </aside>
+    </div>
+  );
 }
 
-function CreateItemPanel({ items, onClose, onCreated }: { items: OkrptrItem[]; onClose: () => void; onCreated: (item: OkrptrItem) => void }) {
+function LineageRow({ label, value }: { label: string; value: string }) {
+  return <div className="lineage-row"><span>{label}</span><b>{value}</b></div>;
+}
+
+function CreateItemPanel({ items, routines, onClose, onCreated }: { items: OkrptrItem[]; routines: Routine[]; onClose: () => void; onCreated: (item: OkrptrItem) => void }) {
   const [kind, setKind] = useState<ItemKind>("task");
   const [title, setTitle] = useState("");
   const [parentId, setParentId] = useState("");
+  const [taskContainer, setTaskContainer] = useState("");
   const [saving, setSaving] = useState(false);
   const requiredParent: Record<ItemKind, ItemKind | null> = { objective: null, key_result: "objective", initiative: "key_result", project: "initiative", task: "project" };
   const parentKind = requiredParent[kind];
@@ -1325,16 +1383,19 @@ function CreateItemPanel({ items, onClose, onCreated }: { items: OkrptrItem[]; o
     event.preventDefault();
     if (!title.trim() || saving || (kind !== "objective" && kind !== "task" && !parentId)) return;
     setSaving(true);
-    const response = await fetch("/api/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, kind, parentId: parentId || null, status: kind === "task" && !parentId ? "inbox" : "todo" }) });
+    const routineId = kind === "task" && taskContainer.startsWith("routine:") ? taskContainer.slice(8) : null;
+    const taskParentId = kind === "task" && taskContainer.startsWith("project:") ? taskContainer.slice(8) : null;
+    const nextParentId = kind === "task" ? taskParentId : parentId || null;
+    const response = await fetch("/api/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, kind, parentId: nextParentId, routineId, status: kind === "task" && !nextParentId && !routineId ? "inbox" : "todo" }) });
     setSaving(false);
     if (!response.ok) return;
     const data = await response.json() as { item: OkrptrItem };
     onCreated(data.item);
   }
-  return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>새 항목</h2><p>OKR 실행 구조에 추가</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header><form className="property-form create-item-form" onSubmit={submit}><label><span>유형</span><select value={kind} onChange={(event) => { setKind(event.target.value as ItemKind); setParentId(""); }}>{(["objective", "key_result", "initiative", "project", "task"] as ItemKind[]).map((entry) => <option value={entry} key={entry}>{kindLabel(entry)}</option>)}</select></label><label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>{parentKind && <label><span>상위 {kindLabel(parentKind)}</span><select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">{kind === "task" ? "인박스에 저장" : "선택"}</option>{parentOptions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>}<button disabled={!title.trim() || saving}>{saving ? "저장 중" : "만들기"}</button></form></aside></div>;
+  return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>새 항목</h2><p>OKR 실행 구조에 추가</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header><form className="property-form create-item-form" onSubmit={submit}><label><span>유형</span><select value={kind} onChange={(event) => { setKind(event.target.value as ItemKind); setParentId(""); setTaskContainer(""); }}>{(["objective", "key_result", "initiative", "project", "task"] as ItemKind[]).map((entry) => <option value={entry} key={entry}>{kindLabel(entry)}</option>)}</select></label><label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>{kind === "task" ? <label><span>상위 연결</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">인박스에 저장</option><optgroup label="Project">{items.filter((entry) => entry.kind === "project").map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{routines.map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label> : parentKind && <label><span>상위 {kindLabel(parentKind)}</span><select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">선택</option>{parentOptions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>}<button disabled={!title.trim() || saving}>{saving ? "저장 중" : "만들기"}</button></form></aside></div>;
 }
 
-function RoutineView({ onNotice }: { onNotice: (message: string) => void }) {
+function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: string) => void; onRoutinesChange: (routines: Routine[]) => void }) {
   const [date, setDate] = useState(localDate());
   const [rows, setRows] = useState<Routine[] | null>(null);
   const [title, setTitle] = useState("");
@@ -1349,9 +1410,9 @@ function RoutineView({ onNotice }: { onNotice: (message: string) => void }) {
   useEffect(() => {
     fetch(`/api/routines?date=${date}`)
       .then(async (response) => response.ok ? response.json() as Promise<{ routines: Routine[] }> : Promise.reject())
-      .then((data) => setRows(data.routines))
+      .then((data) => { setRows(data.routines); onRoutinesChange(data.routines); })
       .catch(() => setRows([]));
-  }, [date]);
+  }, [date, onRoutinesChange]);
 
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -1365,7 +1426,11 @@ function RoutineView({ onNotice }: { onNotice: (message: string) => void }) {
     setSaving(false);
     if (!response.ok) return;
     const data = await response.json() as { routine: Routine };
-    setRows((current) => [...(current ?? []), data.routine]);
+    setRows((current) => {
+      const next = [...(current ?? []), data.routine];
+      onRoutinesChange(next);
+      return next;
+    });
     setTitle("");
     setDescription("");
     setTriggerPoint("");
@@ -1384,7 +1449,11 @@ function RoutineView({ onNotice }: { onNotice: (message: string) => void }) {
     });
     if (response.ok) {
       const data = await response.json() as { routine: Routine };
-      setRows((current) => current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? null);
+      setRows((current) => {
+        const next = current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? [];
+        onRoutinesChange(next);
+        return next;
+      });
     }
   }
 
@@ -1432,7 +1501,11 @@ function RoutineView({ onNotice }: { onNotice: (message: string) => void }) {
     setSaving(false);
     if (!response.ok) return;
     const data = await response.json() as { routine: Routine };
-    setRows((current) => current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? null);
+    setRows((current) => {
+      const next = current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? [];
+      onRoutinesChange(next);
+      return next;
+    });
     setDrafts((current) => {
       const next = { ...current };
       delete next[routine.id];
@@ -1444,7 +1517,11 @@ function RoutineView({ onNotice }: { onNotice: (message: string) => void }) {
   async function remove(id: string) {
     const response = await fetch(`/api/routines?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     if (response.ok) {
-      setRows((current) => current?.filter((entry) => entry.id !== id) ?? null);
+      setRows((current) => {
+        const next = current?.filter((entry) => entry.id !== id) ?? [];
+        onRoutinesChange(next);
+        return next;
+      });
       onNotice("루틴을 삭제했습니다.");
     }
   }
@@ -1922,9 +1999,31 @@ function BoardView({ items, onOpenTask }: { items: OkrptrItem[]; onOpenTask: (id
   return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <button className="board-item" key={entry.id} onClick={() => onOpenTask(entry.id)}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
 }
 
-function InboxView({ items, onConnect }: { items: OkrptrItem[]; onConnect: (item: OkrptrItem) => void }) {
-  if (!items.length) return <EmptyState icon={Inbox} title="인박스가 비어 있습니다" />;
-  return <section className="inbox-list"><div className="list-head"><span>이름</span><span>등록 경로</span><span /></div>{items.map((entry) => <article className="inbox-item" key={entry.id}><div><span className="page-icon"><ListChecks size={15} /></span><h3>{entry.title}</h3></div><span className={`source-badge source-${entry.source}`}>{sourceLabel(entry.source)}</span><button onClick={() => onConnect(entry)}><Link2 size={14} />연결</button></article>)}</section>;
+function TaskListView({ items, allItems, routines, onOpenTask, onConnect }: { items: OkrptrItem[]; allItems: OkrptrItem[]; routines: Routine[]; onOpenTask: (id: string) => void; onConnect: (item: OkrptrItem) => void }) {
+  const byId = new Map(allItems.map((entry) => [entry.id, entry]));
+  if (!items.length) return <EmptyState icon={Inbox} title="Task가 없습니다" />;
+  return (
+    <section className="inbox-list task-list">
+      <div className="list-head task-list-head"><span>이름</span><span>상위 연결</span><span>등록 경로</span><span /></div>
+      {items.map((entry) => {
+        const project = entry.parentId ? byId.get(entry.parentId) : undefined;
+        const routine = entry.routineId ? routines.find((row) => row.id === entry.routineId) : undefined;
+        const relation = routine ? `Routine · ${routine.title}` : project ? `Project · ${project.title}` : "인박스";
+        const disconnected = !entry.parentId && !entry.routineId;
+        return (
+          <article className="inbox-item task-list-item" key={entry.id}>
+            <button className="task-list-title" onClick={() => onOpenTask(entry.id)}>
+              <span className="page-icon"><ListChecks size={15} /></span>
+              <span><b>{entry.title}</b><small>{statusLabel(entry.status)} · {priorityLabels[entry.priority]}</small></span>
+            </button>
+            <button className="task-relation-button" onClick={() => onOpenTask(entry.id)}>{relation}</button>
+            <span className={`source-badge source-${entry.source}`}>{sourceLabel(entry.source)}</span>
+            {disconnected ? <button onClick={() => onConnect(entry)}><Link2 size={14} />연결</button> : <button onClick={() => onOpenTask(entry.id)}><MoreHorizontal size={14} />상세</button>}
+          </article>
+        );
+      })}
+    </section>
+  );
 }
 
 function TrashView({ onNotice }: { onNotice: (message: string) => void }) {
@@ -2258,7 +2357,7 @@ const statusLabels: Record<ItemStatus, string> = { inbox: "\uC778\uBC15\uC2A4", 
 const priorityLabels: Record<Priority, string> = { low: "낮음", medium: "보통", high: "높음", urgent: "긴급" };
 const groupColors: GroupColor[] = ["gray", "blue", "green", "yellow", "orange", "red", "purple"];
 
-function item(id: string, parentId: string | null, kind: ItemKind, title: string, status: ItemStatus, cadence: Cadence, progress: number, dueDate: string | null = null, source = "web", priority: Priority = "medium"): OkrptrItem { return { id, cycleId: null, parentId, kind, title, description: "", status, priority, cadence, progress, dueDate, source, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; }
+function item(id: string, parentId: string | null, kind: ItemKind, title: string, status: ItemStatus, cadence: Cadence, progress: number, dueDate: string | null = null, source = "web", priority: Priority = "medium"): OkrptrItem { return { id, cycleId: null, parentId, routineId: null, kind, title, description: "", status, priority, cadence, progress, dueDate, source, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; }
 function buildDepths(items: OkrptrItem[]) { const byId = new Map(items.map((entry) => [entry.id, entry])); const result: Record<string, number> = {}; for (const entry of items) { let depth = 0; let current = entry; while (current.parentId && depth < 5) { depth += 1; const parent = byId.get(current.parentId); if (!parent) break; current = parent; } result[entry.id] = depth; } return result; }
 function filterTreeItemsByCycle(items: OkrptrItem[], cycleId: string | null) { if (!cycleId) return items; const byParent = new Map<string | null, OkrptrItem[]>(); for (const entry of items) { const rows = byParent.get(entry.parentId) ?? []; rows.push(entry); byParent.set(entry.parentId, rows); } const roots = items.filter((entry) => ["objective", "key_result", "initiative"].includes(entry.kind) && entry.cycleId === cycleId); const included = new Set<string>(); const visit = (entry: OkrptrItem) => { if (included.has(entry.id)) return; included.add(entry.id); for (const child of byParent.get(entry.id) ?? []) visit(child); }; roots.forEach(visit); return items.filter((entry) => included.has(entry.id)); }
 function kindAbbr(kind: ItemKind) { return { objective: "O", key_result: "KR", initiative: "I", project: "P", task: "T" }[kind]; }
@@ -2287,6 +2386,6 @@ function preferredIntroLanguage(): IntroLanguage {
   if (language.startsWith("es")) return "es";
   return "en";
 }
-function pageSubtitle(view: View) { return { home: "지금 집중할 목표와 작업", inbox: "아직 Project에 연결하지 않은 Task", work: "Project와 연결된 실행 작업", routines: "반복되는 실행을 날짜별로 기록", okr: "Objective부터 Task까지의 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "클린업으로 보관한 OKR 실행 데이터" }[view]; }
+function pageSubtitle(view: View) { return { home: "지금 집중할 목표와 작업", inbox: "Project나 Routine에 연결된 Task까지 함께 확인", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "반복되는 실행을 날짜별로 기록", okr: "Objective부터 Task까지의 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "클린업으로 보관한 OKR 실행 데이터" }[view]; }
 function routineCadenceLabel(cadence: RoutineCadence) { return { daily: "매일", weekly: "매주", monthly: "매월" }[cadence]; }
 function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "unlinked") return "↗"; if (kind === "due_soon") return "3"; return "P"; }

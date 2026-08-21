@@ -58,6 +58,7 @@ export async function POST(request: Request) {
       kind: asValue(payload.kind, ITEM_KINDS) as ItemKind | undefined,
       cycleId: asNullableString(payload.cycleId),
       parentId: asNullableString(payload.parentId),
+      routineId: asNullableString(payload.routineId),
       status: asValue(payload.status, ITEM_STATUSES) as ItemStatus | undefined,
       priority: asValue(payload.priority, ITEM_PRIORITIES) as ItemPriority | undefined,
       cadence: asValue(payload.cadence, ITEM_CADENCES) as ItemCadence | undefined,
@@ -92,6 +93,7 @@ export async function PATCH(request: Request) {
       progress: typeof payload.progress === "number" ? payload.progress : undefined,
       dueDate: payload.dueDate === undefined ? undefined : asNullableString(payload.dueDate),
       parentId: payload.parentId === undefined ? undefined : asNullableString(payload.parentId),
+      routineId: payload.routineId === undefined ? undefined : asNullableString(payload.routineId),
       source: asOptionalString(payload.source) || "web",
     });
     return Response.json({ item: serializeItem(item) });
