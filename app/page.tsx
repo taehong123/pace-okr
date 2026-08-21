@@ -495,8 +495,8 @@ export default function Home() {
   const inboxItems = items.filter((entry) => entry.status === "inbox");
   const executionItems = items.filter((entry) => entry.kind === "project" || entry.kind === "task");
   const structuredItems = items.filter((entry) => entry.status !== "inbox");
-  const latestOkrCycle = okrCycles[0] ?? null;
-  const selectedOkrCycle = okrCycles.find((cycle) => cycle.id === selectedOkrCycleId) ?? latestOkrCycle;
+  const defaultOkrCycle = okrCycles.find((cycle) => cycle.status === "active") ?? okrCycles[0] ?? null;
+  const selectedOkrCycle = okrCycles.find((cycle) => cycle.id === selectedOkrCycleId) ?? defaultOkrCycle;
   const okrTreeItems = useMemo(() => filterTreeItemsByCycle(structuredItems, selectedOkrCycle?.id ?? null), [structuredItems, selectedOkrCycle?.id]);
   const okrCycleItemCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -678,6 +678,47 @@ export default function Home() {
     } catch {
       setOkrCycles(previous);
       showNotice("OKR 파일 이름을 저장하지 못했습니다.");
+    }
+  }
+
+  async function setDefaultOkrFile(id: string) {
+    const previous = okrCycles;
+    setOkrCycles((current) => current.map((cycle) => ({ ...cycle, status: cycle.id === id ? "active" : cycle.status === "active" ? "planned" : cycle.status })));
+    setSelectedOkrCycleId(id);
+    try {
+      const response = await fetch("/api/okr-cycles", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, status: "active" }),
+      });
+      if (!response.ok) throw new Error("cycle");
+      const data = await response.json() as { cycle: OkrCycle };
+      setOkrCycles((current) => current.map((cycle) => ({ ...cycle, status: cycle.id === data.cycle.id ? data.cycle.status : cycle.status === "active" ? "planned" : cycle.status })));
+      showNotice("기본으로 열 OKR 파일을 바꿨습니다.");
+    } catch {
+      setOkrCycles(previous);
+      showNotice("기본 OKR 파일을 바꾸지 못했습니다.");
+    }
+  }
+
+  async function deleteOkrFile(id: string) {
+    const cycle = okrCycles.find((entry) => entry.id === id);
+    if (!cycle) return;
+    if (okrCycles.length <= 1) {
+      showNotice("OKR 파일은 최소 1개가 필요합니다.");
+      return;
+    }
+    if (!window.confirm(`'${cycle.name}' OKR 파일을 삭제할까요?\n파일 연결만 해제하고 작업 항목 자체는 삭제하지 않습니다.`)) return;
+    try {
+      const response = await fetch(`/api/okr-cycles?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("cycle");
+      const data = await response.json() as { cycles: OkrCycle[] };
+      setOkrCycles(data.cycles);
+      if (selectedOkrCycle?.id === id) setSelectedOkrCycleId(data.cycles.find((entry) => entry.status === "active")?.id ?? data.cycles[0]?.id ?? null);
+      setItems((current) => current.map((entry) => entry.cycleId === id ? { ...entry, cycleId: null } : entry));
+      showNotice("OKR 파일을 삭제했습니다.");
+    } catch {
+      showNotice("OKR 파일을 삭제하지 못했습니다.");
     }
   }
 
@@ -876,9 +917,7 @@ export default function Home() {
         <div className="page-body">
           {activeView !== "home" && <header className="page-header">
             <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
-            {activeView === "okr" ? (
-              <button className="primary-action" onClick={() => void createOkrFile()}><Plus size={14} />새 OKR 파일</button>
-            ) : activeView === "reviews" ? (
+            {activeView === "reviews" ? (
               <CadenceSwitch value={cadence} onChange={setCadence} />
             ) : null}
           </header>}
@@ -909,18 +948,22 @@ export default function Home() {
           )}
           {activeView === "routines" && <RoutineView onNotice={showNotice} />}
           {activeView === "okr" && (
-            <>
+            <section className="okr-workbench">
               <OkrFileManager
                 cycles={okrCycles}
                 selectedCycle={selectedOkrCycle}
                 itemCounts={okrCycleItemCounts}
                 onSelect={setSelectedOkrCycleId}
                 onRename={(id, name) => void renameOkrFile(id, name)}
+                onSetDefault={(id) => void setDefaultOkrFile(id)}
+                onDelete={(id) => void deleteOkrFile(id)}
                 onCreate={() => void createOkrFile()}
-                onAddItem={() => setCreateItemOpen(true)}
               />
-              <TreeView objective={objective} items={okrTreeItems} depths={depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} />
-            </>
+              <section className="okr-document">
+                {selectedOkrCycle ? <OkrCurrentFile key={selectedOkrCycle.id} cycle={selectedOkrCycle} onRename={(id, name) => void renameOkrFile(id, name)} onAddItem={() => setCreateItemOpen(true)} /> : <EmptyState icon={Archive} title="OKR 파일이 없습니다" />}
+                <TreeView objective={objective} items={okrTreeItems} depths={depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} />
+              </section>
+            </section>
           )}
           {activeView === "scrum" && <DailyScrumView onOpenTask={setSelectedTaskId} onNotice={showNotice} />}
           {activeView === "recommendations" && <RecommendationsView onNavigate={setActiveView} />}
@@ -1592,50 +1635,67 @@ function OkrFileManager({
   itemCounts,
   onSelect,
   onRename,
+  onSetDefault,
+  onDelete,
   onCreate,
-  onAddItem,
 }: {
   cycles: OkrCycle[];
   selectedCycle: OkrCycle | null;
   itemCounts: Record<string, number>;
   onSelect: (id: string) => void;
   onRename: (id: string, name: string) => void;
+  onSetDefault: (id: string) => void;
+  onDelete: (id: string) => void;
   onCreate: () => void;
-  onAddItem: () => void;
 }) {
-  if (!selectedCycle) return <EmptyState icon={Archive} title="OKR 파일이 없습니다" />;
   return (
     <section className="okr-file-manager">
-      <div className="okr-current-file">
-        <span className="okr-file-icon"><Archive size={17} /></span>
-        <OkrCurrentFile key={selectedCycle.id} cycle={selectedCycle} onRename={onRename} />
-        <div className="okr-file-actions">
-          <button type="button" onClick={onAddItem}><Plus size={13} />항목 추가</button>
-          <button type="button" onClick={onCreate}><Plus size={13} />새 파일</button>
-        </div>
-      </div>
+      <header>
+        <div><b>OKR 파일</b><span>{cycles.length}개</span></div>
+        <button type="button" onClick={onCreate}><Plus size={13} />새로 만들기</button>
+      </header>
       <div className="okr-file-list" aria-label="OKR 파일 목록">
         {cycles.map((cycle, index) => (
-          <button
-            className={`okr-file-row ${cycle.id === selectedCycle.id ? "active" : ""}`}
+          <OkrFileRow
             key={cycle.id}
-            onClick={() => onSelect(cycle.id)}
-            type="button"
-          >
-            <Archive size={15} />
-            <span>
-              <b>{cycle.name}</b>
-              <small>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {itemCounts[cycle.id] ?? 0}개 항목</small>
-            </span>
-            <em>{index === 0 ? "최신" : cycleStatusLabel(cycle.status)}</em>
-          </button>
+            cycle={cycle}
+            selected={cycle.id === selectedCycle?.id}
+            latest={index === 0}
+            itemCount={itemCounts[cycle.id] ?? 0}
+            canDelete={cycles.length > 1}
+            onSelect={onSelect}
+            onRename={onRename}
+            onSetDefault={onSetDefault}
+            onDelete={onDelete}
+          />
         ))}
+        {!cycles.length && <EmptyState icon={Archive} title="OKR 파일이 없습니다" />}
       </div>
     </section>
   );
 }
 
-function OkrCurrentFile({ cycle, onRename }: { cycle: OkrCycle; onRename: (id: string, name: string) => void }) {
+function OkrFileRow({
+  cycle,
+  selected,
+  latest,
+  itemCount,
+  canDelete,
+  onSelect,
+  onRename,
+  onSetDefault,
+  onDelete,
+}: {
+  cycle: OkrCycle;
+  selected: boolean;
+  latest: boolean;
+  itemCount: number;
+  canDelete: boolean;
+  onSelect: (id: string) => void;
+  onRename: (id: string, name: string) => void;
+  onSetDefault: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
   const [nameDraft, setNameDraft] = useState(cycle.name);
 
   function commitName() {
@@ -1648,7 +1708,52 @@ function OkrCurrentFile({ cycle, onRename }: { cycle: OkrCycle; onRename: (id: s
   }
 
   return (
-    <div>
+    <article className={`okr-file-row ${selected ? "active" : ""}`}>
+      <button className="okr-file-open" type="button" onClick={() => onSelect(cycle.id)} aria-label={`${cycle.name} 열기`}>
+        <Archive size={15} />
+      </button>
+      <div className="okr-file-row-main">
+        <input
+          value={nameDraft}
+          onFocus={() => onSelect(cycle.id)}
+          onChange={(event) => setNameDraft(event.target.value)}
+          onBlur={commitName}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") {
+              setNameDraft(cycle.name);
+              event.currentTarget.blur();
+            }
+          }}
+          aria-label="OKR 파일 이름"
+        />
+        <small>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {itemCount}개 항목</small>
+      </div>
+      <div className="okr-file-row-actions">
+        {cycle.status === "active" ? <em>기본</em> : <button type="button" onClick={() => onSetDefault(cycle.id)}>기본</button>}
+        {latest && <em>최신</em>}
+        <button type="button" onClick={() => onDelete(cycle.id)} disabled={!canDelete} aria-label={`${cycle.name} 삭제`} title={canDelete ? "삭제" : "마지막 파일은 삭제할 수 없습니다"}><Trash2 size={12} /></button>
+      </div>
+    </article>
+  );
+}
+
+function OkrCurrentFile({ cycle, onRename, onAddItem }: { cycle: OkrCycle; onRename: (id: string, name: string) => void; onAddItem: () => void }) {
+  const [nameDraft, setNameDraft] = useState(cycle.name);
+
+  function commitName() {
+    const name = nameDraft.trim();
+    if (!name) {
+      setNameDraft(cycle.name);
+      return;
+    }
+    if (name !== cycle.name) onRename(cycle.id, name);
+  }
+
+  return (
+    <header className="okr-document-header">
+      <span className="okr-file-icon"><Archive size={17} /></span>
+      <div>
       <label className="okr-file-title">
         <span>열린 OKR 파일</span>
         <input
@@ -1666,7 +1771,9 @@ function OkrCurrentFile({ cycle, onRename }: { cycle: OkrCycle; onRename: (id: s
         />
       </label>
       <p>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {cycleStatusLabel(cycle.status)}</p>
-    </div>
+      </div>
+      <button type="button" onClick={onAddItem}><Plus size={13} />항목 추가</button>
+    </header>
   );
 }
 

@@ -2,6 +2,7 @@ import {
   OKR_CYCLE_STATUSES,
   authorizeRequest,
   createOkrCycle,
+  deleteOkrCycle,
   ensureWorkspace,
   listOkrCycles,
   updateOkrCycle,
@@ -57,6 +58,21 @@ export async function PATCH(request: Request) {
   }
 }
 
+export async function DELETE(request: Request) {
+  const authorization = await authorizeRequest(request, { allowViewerWrite: false });
+  if (authorization instanceof Response) return authorization;
+
+  try {
+    await ensureWorkspace(authorization.ownerId);
+    const id = new URL(request.url).searchParams.get("id")?.trim();
+    if (!id) return Response.json({ error: "id is required" }, { status: 400 });
+    const cycles = await deleteOkrCycle(authorization.ownerId, id);
+    return Response.json({ cycles });
+  } catch (error) {
+    return routeError(error);
+  }
+}
+
 function asOptionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -67,6 +83,6 @@ function asCycleStatus(value: unknown): OkrCycleStatus | undefined {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
-  const status = /required|unsupported|not found/i.test(message) ? 400 : 500;
+  const status = /required|unsupported|not found|at least/i.test(message) ? 400 : 500;
   return Response.json({ error: message }, { status });
 }

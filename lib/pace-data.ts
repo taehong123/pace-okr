@@ -463,6 +463,12 @@ export async function createOkrCycle(ownerId: string, input: { name?: string; st
 export async function updateOkrCycle(ownerId: string, id: string, patch: Partial<{ name: string; startDate: string; endDate: string; status: OkrCycleStatus }>) {
   await ensureSchema();
   if (patch.status !== undefined && !OKR_CYCLE_STATUSES.includes(patch.status)) throw new Error("Unsupported OKR cycle status");
+  if (patch.status === "active") {
+    await getDb()
+      .update(okrCycles)
+      .set({ status: "planned", updatedAt: new Date().toISOString() })
+      .where(and(eq(okrCycles.ownerId, ownerId), eq(okrCycles.status, "active")));
+  }
   const values = {
     name: patch.name?.trim(),
     startDate: patch.startDate,
@@ -477,6 +483,37 @@ export async function updateOkrCycle(ownerId: string, id: string, patch: Partial
     .returning();
   if (!updated) throw new Error("OKR cycle not found");
   return serializeOkrCycle(updated);
+}
+
+export async function deleteOkrCycle(ownerId: string, id: string) {
+  await ensureSchema();
+  const existing = await getDb().select().from(okrCycles).where(eq(okrCycles.ownerId, ownerId));
+  const target = existing.find((cycle) => cycle.id === id);
+  if (!target) throw new Error("OKR cycle not found");
+  if (existing.length <= 1) throw new Error("At least one OKR file is required");
+
+  await getDb()
+    .update(items)
+    .set({ cycleId: null, updatedAt: new Date().toISOString() })
+    .where(and(eq(items.ownerId, ownerId), eq(items.cycleId, id)));
+  await getDb().delete(okrCycles).where(and(eq(okrCycles.ownerId, ownerId), eq(okrCycles.id, id)));
+
+  if (target.status === "active") {
+    const [nextCycle] = await getDb()
+      .select()
+      .from(okrCycles)
+      .where(eq(okrCycles.ownerId, ownerId))
+      .orderBy(desc(okrCycles.version), desc(okrCycles.createdAt))
+      .limit(1);
+    if (nextCycle) {
+      await getDb()
+        .update(okrCycles)
+        .set({ status: "active", updatedAt: new Date().toISOString() })
+        .where(and(eq(okrCycles.ownerId, ownerId), eq(okrCycles.id, nextCycle.id)));
+    }
+  }
+
+  return listOkrCycles(ownerId);
 }
 
 export async function cleanupWorkspaceExecutionData(ownerId: string, createdByUserId: string | null = null) {
