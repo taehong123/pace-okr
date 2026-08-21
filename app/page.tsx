@@ -381,6 +381,7 @@ export default function Home() {
   const [properties, setProperties] = useState<PropertyDefinition[]>(fallbackProperties);
   const [propertyValues, setPropertyValues] = useState<PropertyValueMap>(fallbackValues);
   const [okrCycles, setOkrCycles] = useState<OkrCycle[]>([]);
+  const [selectedOkrCycleId, setSelectedOkrCycleId] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<View>("home");
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [taskDisplay, setTaskDisplay] = useState<"table" | "board">("table");
@@ -494,8 +495,14 @@ export default function Home() {
   const inboxItems = items.filter((entry) => entry.status === "inbox");
   const executionItems = items.filter((entry) => entry.kind === "project" || entry.kind === "task");
   const structuredItems = items.filter((entry) => entry.status !== "inbox");
-  const activeOkrCycle = okrCycles.find((cycle) => cycle.status === "active") ?? okrCycles[0] ?? null;
-  const okrTreeItems = useMemo(() => filterTreeItemsByCycle(structuredItems, activeOkrCycle?.id ?? null), [structuredItems, activeOkrCycle?.id]);
+  const latestOkrCycle = okrCycles[0] ?? null;
+  const selectedOkrCycle = okrCycles.find((cycle) => cycle.id === selectedOkrCycleId) ?? latestOkrCycle;
+  const okrTreeItems = useMemo(() => filterTreeItemsByCycle(structuredItems, selectedOkrCycle?.id ?? null), [structuredItems, selectedOkrCycle?.id]);
+  const okrCycleItemCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const cycle of okrCycles) counts[cycle.id] = filterTreeItemsByCycle(structuredItems, cycle.id).length;
+    return counts;
+  }, [okrCycles, structuredItems]);
   const periodItems = items.filter(
     (entry) => entry.status !== "inbox" && (cadence === "quarterly" || entry.cadence === cadence || entry.kind === "objective"),
   );
@@ -635,6 +642,43 @@ export default function Home() {
     setItems((current) => [...current, created]);
     setCreateItemOpen(false);
     showNotice(`${kindLabel(created.kind)}를 만들었습니다.`);
+  }
+
+  async function createOkrFile() {
+    try {
+      const response = await fetch("/api/okr-cycles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "새 OKR 파일", status: "planned" }),
+      });
+      if (!response.ok) throw new Error("cycle");
+      const data = await response.json() as { cycle: OkrCycle };
+      setOkrCycles((current) => [data.cycle, ...current]);
+      setSelectedOkrCycleId(data.cycle.id);
+      setActiveView("okr");
+      showNotice("새 OKR 파일을 만들었습니다.");
+    } catch {
+      showNotice("OKR 파일을 만들지 못했습니다.");
+    }
+  }
+
+  async function renameOkrFile(id: string, name: string) {
+    const previous = okrCycles;
+    setOkrCycles((current) => current.map((cycle) => cycle.id === id ? { ...cycle, name } : cycle));
+    try {
+      const response = await fetch("/api/okr-cycles", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, name }),
+      });
+      if (!response.ok) throw new Error("cycle");
+      const data = await response.json() as { cycle: OkrCycle };
+      setOkrCycles((current) => current.map((cycle) => cycle.id === id ? data.cycle : cycle));
+      showNotice("OKR 파일 이름을 저장했습니다.");
+    } catch {
+      setOkrCycles(previous);
+      showNotice("OKR 파일 이름을 저장하지 못했습니다.");
+    }
   }
 
   async function createOnboardingPlan(plan: OnboardingPlan) {
@@ -833,7 +877,7 @@ export default function Home() {
           {activeView !== "home" && <header className="page-header">
             <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
             {activeView === "okr" ? (
-              <button className="primary-action" onClick={() => setCreateItemOpen(true)}><Plus size={14} />새 항목</button>
+              <button className="primary-action" onClick={() => void createOkrFile()}><Plus size={14} />새 OKR 파일</button>
             ) : activeView === "reviews" ? (
               <CadenceSwitch value={cadence} onChange={setCadence} />
             ) : null}
@@ -864,7 +908,20 @@ export default function Home() {
             />
           )}
           {activeView === "routines" && <RoutineView onNotice={showNotice} />}
-          {activeView === "okr" && <><OkrCycleStrip cycle={activeOkrCycle} /><TreeView objective={objective} items={okrTreeItems} depths={depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} /></>}
+          {activeView === "okr" && (
+            <>
+              <OkrFileManager
+                cycles={okrCycles}
+                selectedCycle={selectedOkrCycle}
+                itemCounts={okrCycleItemCounts}
+                onSelect={setSelectedOkrCycleId}
+                onRename={(id, name) => void renameOkrFile(id, name)}
+                onCreate={() => void createOkrFile()}
+                onAddItem={() => setCreateItemOpen(true)}
+              />
+              <TreeView objective={objective} items={okrTreeItems} depths={depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} />
+            </>
+          )}
           {activeView === "scrum" && <DailyScrumView onOpenTask={setSelectedTaskId} onNotice={showNotice} />}
           {activeView === "recommendations" && <RecommendationsView onNavigate={setActiveView} />}
           {activeView === "reviews" && <ReviewView items={periodItems} cadence={cadence} completed={completed} blocked={blocked} averageProgress={averageProgress} />}
@@ -1529,9 +1586,88 @@ function aiLimitMessage(error: OrganizeError) {
   return `무료 AI 정리 예산을 다 썼습니다. 지금 화면에는 비용이 들지 않는 기본 정리만 반영했습니다. 현재 사용량은 ${spent} / ${budget} 기준입니다.`;
 }
 
-function OkrCycleStrip({ cycle }: { cycle: OkrCycle | null }) {
-  if (!cycle) return null;
-  return <section className="okr-cycle-strip"><div><span>OKR version</span><b>v{cycle.version}</b></div><div><span>기간</span><b>{cycle.startDate} - {cycle.endDate}</b></div><div><span>상태</span><b>{cycleStatusLabel(cycle.status)}</b></div></section>;
+function OkrFileManager({
+  cycles,
+  selectedCycle,
+  itemCounts,
+  onSelect,
+  onRename,
+  onCreate,
+  onAddItem,
+}: {
+  cycles: OkrCycle[];
+  selectedCycle: OkrCycle | null;
+  itemCounts: Record<string, number>;
+  onSelect: (id: string) => void;
+  onRename: (id: string, name: string) => void;
+  onCreate: () => void;
+  onAddItem: () => void;
+}) {
+  if (!selectedCycle) return <EmptyState icon={Archive} title="OKR 파일이 없습니다" />;
+  return (
+    <section className="okr-file-manager">
+      <div className="okr-current-file">
+        <span className="okr-file-icon"><Archive size={17} /></span>
+        <OkrCurrentFile key={selectedCycle.id} cycle={selectedCycle} onRename={onRename} />
+        <div className="okr-file-actions">
+          <button type="button" onClick={onAddItem}><Plus size={13} />항목 추가</button>
+          <button type="button" onClick={onCreate}><Plus size={13} />새 파일</button>
+        </div>
+      </div>
+      <div className="okr-file-list" aria-label="OKR 파일 목록">
+        {cycles.map((cycle, index) => (
+          <button
+            className={`okr-file-row ${cycle.id === selectedCycle.id ? "active" : ""}`}
+            key={cycle.id}
+            onClick={() => onSelect(cycle.id)}
+            type="button"
+          >
+            <Archive size={15} />
+            <span>
+              <b>{cycle.name}</b>
+              <small>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {itemCounts[cycle.id] ?? 0}개 항목</small>
+            </span>
+            <em>{index === 0 ? "최신" : cycleStatusLabel(cycle.status)}</em>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function OkrCurrentFile({ cycle, onRename }: { cycle: OkrCycle; onRename: (id: string, name: string) => void }) {
+  const [nameDraft, setNameDraft] = useState(cycle.name);
+
+  function commitName() {
+    const name = nameDraft.trim();
+    if (!name) {
+      setNameDraft(cycle.name);
+      return;
+    }
+    if (name !== cycle.name) onRename(cycle.id, name);
+  }
+
+  return (
+    <div>
+      <label className="okr-file-title">
+        <span>열린 OKR 파일</span>
+        <input
+          value={nameDraft}
+          onChange={(event) => setNameDraft(event.target.value)}
+          onBlur={commitName}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") {
+              setNameDraft(cycle.name);
+              event.currentTarget.blur();
+            }
+          }}
+          aria-label="OKR 파일 이름"
+        />
+      </label>
+      <p>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {cycleStatusLabel(cycle.status)}</p>
+    </div>
+  );
 }
 
 function TreeView({ objective, items, depths, onComplete }: { objective?: OkrptrItem; items: OkrptrItem[]; depths: Record<string, number>; onComplete: (id: string) => void }) {
