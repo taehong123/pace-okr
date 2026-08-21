@@ -404,6 +404,7 @@ export default function Home() {
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [createItemOpen, setCreateItemOpen] = useState(false);
+  const [createItemKind, setCreateItemKind] = useState<ItemKind>("task");
   const [okrListOpen, setOkrListOpen] = useState(false);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -647,6 +648,7 @@ export default function Home() {
   function connectInbox(entry: OkrptrItem) {
     const project = items.find((itemEntry) => itemEntry.kind === "project");
     if (!project) {
+      setCreateItemKind("project");
       setCreateItemOpen(true);
       showNotice("먼저 Project를 만들어 주세요.");
       return;
@@ -655,8 +657,11 @@ export default function Home() {
     showNotice(`‘${project.title}’에 연결했습니다.`);
   }
 
-  function addCreatedItem(created: OkrptrItem) {
+  function addCreatedItem(created: OkrptrItem, initialValues: Record<string, PropertyValue> = {}) {
     setItems((current) => [...current, created]);
+    if (Object.keys(initialValues).length) {
+      setPropertyValues((current) => ({ ...current, [created.id]: { ...current[created.id], ...initialValues } }));
+    }
     setCreateItemOpen(false);
     showNotice(`${kindLabel(created.kind)}를 만들었습니다.`);
   }
@@ -963,6 +968,8 @@ export default function Home() {
             <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setOkrListOpen(true)}><Archive size={14} />목록보기</button>
+            ) : activeView === "work" ? (
+              <button className="primary-action" onClick={() => { setCreateItemKind("project"); setCreateItemOpen(true); }}><Plus size={14} />Project 추가</button>
             ) : activeView === "reviews" ? (
               <CadenceSwitch value={cadence} onChange={setCadence} />
             ) : null}
@@ -1000,7 +1007,7 @@ export default function Home() {
                   const view = okrViews[cycle.id] ?? { items: [], depths: {} };
                   return (
                     <article className="okr-document-card" key={cycle.id}>
-                      <OkrCurrentFile key={`${cycle.id}-${cycle.name}-${cycle.department}`} cycle={cycle} onRename={(id, name) => void renameOkrFile(id, name)} onDepartmentChange={(id, department) => void setOkrFileDepartment(id, department)} onAddItem={() => setCreateItemOpen(true)} />
+                      <OkrCurrentFile key={`${cycle.id}-${cycle.name}-${cycle.department}`} cycle={cycle} onRename={(id, name) => void renameOkrFile(id, name)} onDepartmentChange={(id, department) => void setOkrFileDepartment(id, department)} onAddItem={() => { setCreateItemKind("task"); setCreateItemOpen(true); }} />
                       <TreeView objective={view.objective} items={view.items} depths={view.depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} />
                     </article>
                   );
@@ -1072,7 +1079,7 @@ export default function Home() {
         />
       )}
       {teamPanelOpen && <TeamPanel initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
-      {createItemOpen && <CreateItemPanel items={items} routines={routines} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
+      {createItemOpen && <CreateItemPanel initialKind={createItemKind} items={items} routines={routines} properties={properties} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
       {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setPropertyValues({}); setOkrCycles([cycle]); setVisibleOkrCycleIds([cycle.id]); setSelectedTaskId(null); setActiveView("trash"); setCleanupOpen(false); showNotice("OKR 데이터를 휴지통에 보관하고 정리했습니다."); }} onNotice={showNotice} />}
       {selectedTask && (
         <TaskDetailPanel
@@ -1370,15 +1377,37 @@ function LineageRow({ label, value }: { label: string; value: string }) {
   return <div className="lineage-row"><span>{label}</span><b>{value}</b></div>;
 }
 
-function CreateItemPanel({ items, routines, onClose, onCreated }: { items: OkrptrItem[]; routines: Routine[]; onClose: () => void; onCreated: (item: OkrptrItem) => void }) {
-  const [kind, setKind] = useState<ItemKind>("task");
+function CreateItemPanel({ initialKind, items, routines, properties, onClose, onCreated }: {
+  initialKind: ItemKind;
+  items: OkrptrItem[];
+  routines: Routine[];
+  properties: PropertyDefinition[];
+  onClose: () => void;
+  onCreated: (item: OkrptrItem, initialValues?: Record<string, PropertyValue>) => void;
+}) {
+  const [kind, setKind] = useState<ItemKind>(initialKind);
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [parentId, setParentId] = useState("");
   const [taskContainer, setTaskContainer] = useState("");
+  const [status, setStatus] = useState<ItemStatus>("todo");
+  const [priority, setPriority] = useState<Priority>("medium");
+  const [cadence, setCadence] = useState<Cadence>("weekly");
+  const [dueDate, setDueDate] = useState("");
+  const [customValues, setCustomValues] = useState<Record<string, PropertyValue>>({});
   const [saving, setSaving] = useState(false);
   const requiredParent: Record<ItemKind, ItemKind | null> = { objective: null, key_result: "objective", initiative: "key_result", project: "initiative", task: "project" };
   const parentKind = requiredParent[kind];
   const parentOptions = parentKind ? items.filter((entry) => entry.kind === parentKind) : [];
+  const projectProperties = kind === "project" ? properties : [];
+
+  function updateCustomValue(property: PropertyDefinition, value: string | boolean) {
+    setCustomValues((current) => ({
+      ...current,
+      [property.id]: property.type === "number" ? (value === "" ? null : Number(value)) : value === "" ? null : value,
+    }));
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!title.trim() || saving || (kind !== "objective" && kind !== "task" && !parentId)) return;
@@ -1386,13 +1415,75 @@ function CreateItemPanel({ items, routines, onClose, onCreated }: { items: Okrpt
     const routineId = kind === "task" && taskContainer.startsWith("routine:") ? taskContainer.slice(8) : null;
     const taskParentId = kind === "task" && taskContainer.startsWith("project:") ? taskContainer.slice(8) : null;
     const nextParentId = kind === "task" ? taskParentId : parentId || null;
-    const response = await fetch("/api/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, kind, parentId: nextParentId, routineId, status: kind === "task" && !nextParentId && !routineId ? "inbox" : "todo" }) });
-    setSaving(false);
-    if (!response.ok) return;
+    const response = await fetch("/api/items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title,
+        kind,
+        description: kind === "project" ? description : "",
+        parentId: nextParentId,
+        routineId,
+        status: kind === "task" && !nextParentId && !routineId ? "inbox" : status,
+        priority,
+        cadence,
+        dueDate: dueDate || null,
+      }),
+    });
+    if (!response.ok) { setSaving(false); return; }
     const data = await response.json() as { item: OkrptrItem };
-    onCreated(data.item);
+    const filledValues = Object.fromEntries(Object.entries(customValues).filter(([, value]) => value !== null && value !== ""));
+    for (const [propertyId, value] of Object.entries(filledValues)) {
+      const propertyResponse = await fetch("/api/property-values", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId: data.item.id, propertyId, value }),
+      });
+      if (!propertyResponse.ok) break;
+    }
+    setSaving(false);
+    onCreated(data.item, filledValues);
   }
-  return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>새 항목</h2><p>OKR 실행 구조에 추가</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header><form className="property-form create-item-form" onSubmit={submit}><label><span>유형</span><select value={kind} onChange={(event) => { setKind(event.target.value as ItemKind); setParentId(""); setTaskContainer(""); }}>{(["objective", "key_result", "initiative", "project", "task"] as ItemKind[]).map((entry) => <option value={entry} key={entry}>{kindLabel(entry)}</option>)}</select></label><label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>{kind === "task" ? <label><span>상위 연결</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">인박스에 저장</option><optgroup label="Project">{items.filter((entry) => entry.kind === "project").map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{routines.map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label> : parentKind && <label><span>상위 {kindLabel(parentKind)}</span><select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">선택</option>{parentOptions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>}<button disabled={!title.trim() || saving}>{saving ? "저장 중" : "만들기"}</button></form></aside></div>;
+  return (
+    <div className="modal-backdrop align-right">
+      <aside className="property-panel">
+        <header><div><h2>새 항목</h2><p>{kind === "project" ? "Project 속성을 지정해서 추가" : "OKR 실행 구조에 추가"}</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header>
+        <form className="property-form create-item-form" onSubmit={submit}>
+          <label><span>유형</span><select value={kind} onChange={(event) => { setKind(event.target.value as ItemKind); setParentId(""); setTaskContainer(""); }} disabled={initialKind === "project"}>{(["objective", "key_result", "initiative", "project", "task"] as ItemKind[]).map((entry) => <option value={entry} key={entry}>{kindLabel(entry)}</option>)}</select></label>
+          <label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+          {kind === "task" ? (
+            <label><span>상위 연결</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">인박스에 저장</option><optgroup label="Project">{items.filter((entry) => entry.kind === "project").map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{routines.map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
+          ) : parentKind && (
+            <label><span>상위 {kindLabel(parentKind)}</span><select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">선택</option>{parentOptions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>
+          )}
+          {kind === "project" && (
+            <section className="create-project-fields">
+              <header><b>Project 속성</b><span>생성할 때 바로 지정</span></header>
+              <label><span>설명</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} placeholder="범위, 배경, 성공 기준" /></label>
+              <div className="project-field-grid">
+                <label><span>우선순위</span><select className={`priority-${priority}`} value={priority} onChange={(event) => setPriority(event.target.value as Priority)}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+                <label><span>상태</span><select value={status} onChange={(event) => setStatus(event.target.value as ItemStatus)}>{Object.entries(statusLabels).filter(([value]) => value !== "inbox").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+                <label><span>주기</span><select value={cadence} onChange={(event) => setCadence(event.target.value as Cadence)}>{Object.entries(cadenceLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+                <label><span>기한</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
+              </div>
+              {projectProperties.length > 0 && <div className="project-field-grid custom-project-fields">{projectProperties.map((property) => <CreatePropertyField key={property.id} property={property} value={customValues[property.id] ?? null} onChange={updateCustomValue} />)}</div>}
+            </section>
+          )}
+          <button disabled={!title.trim() || saving}>{saving ? "저장 중" : "만들기"}</button>
+        </form>
+      </aside>
+    </div>
+  );
+}
+
+function CreatePropertyField({ property, value, onChange }: { property: PropertyDefinition; value: PropertyValue; onChange: (property: PropertyDefinition, value: string | boolean) => void }) {
+  if (property.type === "checkbox") {
+    return <label><span>{property.name}</span><input type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(property, event.target.checked)} /></label>;
+  }
+  if (property.type === "select") {
+    return <label><span>{property.name}</span><select value={typeof value === "string" ? value : ""} onChange={(event) => onChange(property, event.target.value)}><option value="">선택 안 함</option>{property.options.map((option) => <option key={option}>{option}</option>)}</select></label>;
+  }
+  return <label><span>{property.name}</span><input type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => onChange(property, event.target.value)} /></label>;
 }
 
 function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: string) => void; onRoutinesChange: (routines: Routine[]) => void }) {
