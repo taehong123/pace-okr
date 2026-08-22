@@ -599,6 +599,13 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .task-detail-panel > header > div { min-width: 0; padding: 12px 0; }
 .task-detail-panel h2 { overflow-wrap: anywhere; font-size: 15px; line-height: 1.4; }
 .project-detail-panel { width: min(720px, 100vw); }
+.page-body > .modal-backdrop.align-right { position: static; inset: auto; z-index: auto; display: block; padding: 0; background: transparent; }
+.page-body > .modal-backdrop.align-right .project-detail-panel { width: 100%; min-height: calc(100vh - 98px); border: 0; border-radius: 0; box-shadow: none; background: white; }
+.page-body > .modal-backdrop.align-right .project-detail-panel > header { padding-left: 0; padding-right: 0; border-bottom: 1px solid var(--line); }
+.page-body > .modal-backdrop.align-right .project-detail-form,
+.page-body > .modal-backdrop.align-right .project-page-body,
+.page-body > .modal-backdrop.align-right .task-lineage,
+.page-body > .modal-backdrop.align-right .project-custom-properties { padding-left: 0; padding-right: 0; }
 .project-detail-panel.archived { background: #fbfbfa; }
 .project-detail-panel > header { min-height: 78px; height: auto; }
 .project-detail-panel > header > div { min-width: 0; padding: 12px 0; }

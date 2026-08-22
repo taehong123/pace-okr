@@ -663,6 +663,12 @@ export default function Home() {
     showNotice(`‘${project.title}’에 연결했습니다.`);
   }
 
+  function openProjectPage(id: string) {
+    setSelectedTaskId(null);
+    setSelectedProjectId(id);
+    setActiveView("work");
+  }
+
   function addCreatedItem(created: OkrptrItem, initialValues: Record<string, PropertyValue> = {}) {
     setItems((current) => [...current, created]);
     if (Object.keys(initialValues).length) {
@@ -961,7 +967,7 @@ export default function Home() {
           {navItems.map((entry) => {
             const Icon = entry.icon;
             return (
-              <button className={`nav-item ${activeView === entry.id ? "active" : ""}`} key={entry.id} onClick={() => setActiveView(entry.id)}>
+              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); setActiveView(entry.id); }}>
                 <Icon size={16} /><span>{entry.label}</span>
                 {entry.id === "inbox" && inboxItems.length > 0 && <b>{inboxItems.length}</b>}
               </button>
@@ -979,11 +985,11 @@ export default function Home() {
 
       <section className="workspace">
         <header className="workspace-topbar">
-          <span>OKRPTR</span><ChevronRight size={13} /><b>{viewTitles[activeView]}</b>
+          <span>OKRPTR</span><ChevronRight size={13} /><b>{selectedProject ? "Project" : viewTitles[activeView]}</b>
           <div><button aria-label="팀 멤버" title="팀 멤버" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={15} /></button><button aria-label="알림" title="알림"><Bell size={15} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
         </header>
         <div className="page-body">
-          {activeView !== "home" && <header className="page-header">
+          {activeView !== "home" && !selectedProject && <header className="page-header">
             <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setOkrListOpen(true)}><Archive size={14} />목록보기</button>
@@ -994,7 +1000,7 @@ export default function Home() {
             ) : null}
           </header>}
 
-          {(activeView === "inbox" || activeView === "work") && (
+          {!selectedProject && (activeView === "inbox" || activeView === "work") && (
             <form className="quick-capture" onSubmit={submitCapture}>
               <Plus size={15} />
               <input value={capture} onChange={(event) => setCapture(event.target.value)} placeholder="할 일을 입력하면 인박스에 저장됩니다" aria-label="인박스에 할 일 추가" />
@@ -1002,6 +1008,18 @@ export default function Home() {
             </form>
           )}
 
+          {selectedProject ? (
+            <ProjectPageView
+              project={selectedProject}
+              allItems={items}
+              properties={properties}
+              propertyValues={propertyValues}
+              onClose={() => setSelectedProjectId(null)}
+              onPatch={patchItem}
+              onPropertyChange={setPropertyValue}
+            />
+          ) : (
+            <>
           {activeView === "home" && <HomeView onCreatePlan={createOnboardingPlan} />}
           {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={setSelectedTaskId} onConnect={connectInbox} />}
           {activeView === "work" && (
@@ -1016,7 +1034,7 @@ export default function Home() {
               onPropertyChange={setPropertyValue}
               onOpenProperties={() => setPropertyPanelOpen(true)}
               onOpenTask={setSelectedTaskId}
-              onOpenProject={setSelectedProjectId}
+              onOpenProject={openProjectPage}
             />
           )}
           {activeView === "routines" && <RoutineView onNotice={showNotice} onRoutinesChange={setRoutines} />}
@@ -1039,6 +1057,8 @@ export default function Home() {
           {activeView === "recommendations" && <RecommendationsView onNavigate={setActiveView} />}
           {activeView === "reviews" && <ReviewView items={periodItems} cadence={cadence} completed={completed} blocked={blocked} averageProgress={averageProgress} />}
           {activeView === "trash" && <TrashView onNotice={showNotice} />}
+            </>
+          )}
         </div>
       </section>
 
@@ -1103,17 +1123,6 @@ export default function Home() {
       {teamPanelOpen && <TeamPanel initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
       {createItemOpen && <CreateItemPanel initialKind={createItemKind} items={items} routines={routines} properties={properties} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
       {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setPropertyValues({}); setOkrCycles([cycle]); setVisibleOkrCycleIds([cycle.id]); setSelectedTaskId(null); setActiveView("trash"); setCleanupOpen(false); showNotice("OKR 데이터를 휴지통에 보관하고 정리했습니다."); }} onNotice={showNotice} />}
-      {selectedProject && (
-        <ProjectDetailPanel
-          project={selectedProject}
-          allItems={items}
-          properties={properties}
-          propertyValues={propertyValues}
-          onClose={() => setSelectedProjectId(null)}
-          onPatch={patchItem}
-          onPropertyChange={setPropertyValue}
-        />
-      )}
       {selectedTask && (
         <TaskDetailPanel
           task={selectedTask}
@@ -1296,7 +1305,7 @@ function PropertyCell({ itemId, property, value, onChange }: { itemId: string; p
   return <input className="property-input" type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => { const raw = event.target.value; void onChange(itemId, property.id, property.type === "number" ? (raw ? Number(raw) : null) : raw || null); }} />;
 }
 
-function ProjectDetailPanel({ project, allItems, properties, propertyValues, onClose, onPatch, onPropertyChange }: {
+function ProjectPageView({ project, allItems, properties, propertyValues, onClose, onPatch, onPropertyChange }: {
   project: OkrptrItem;
   allItems: OkrptrItem[];
   properties: PropertyDefinition[];
