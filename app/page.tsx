@@ -1000,7 +1000,7 @@ export default function Home() {
             ) : null}
           </header>}
 
-          {!selectedProject && (activeView === "inbox" || activeView === "work") && (
+          {activeView === "inbox" && (
             <form className="quick-capture" onSubmit={submitCapture}>
               <Plus size={15} />
               <input value={capture} onChange={(event) => setCapture(event.target.value)} placeholder="할 일을 입력하면 인박스에 저장됩니다" aria-label="인박스에 할 일 추가" />
