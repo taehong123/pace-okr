@@ -48,7 +48,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 
 type View = "home" | "inbox" | "work" | "routines" | "okr" | "scrum" | "recommendations" | "reviews" | "trash";
 type Cadence = "daily" | "weekly" | "monthly" | "quarterly";
-type ItemStatus = "inbox" | "backlog" | "todo" | "policy_discussion" | "in_progress" | "developing" | "development_done" | "done" | "blocked";
+type ItemStatus = "inbox" | "backlog" | "todo" | "policy_discussion" | "in_progress" | "developing" | "development_done" | "done" | "blocked" | "archived";
 type ItemKind = "objective" | "key_result" | "initiative" | "project" | "task";
 type Priority = "low" | "medium" | "high" | "urgent";
 type PropertyType = "text" | "number" | "select" | "date" | "checkbox";
@@ -1312,11 +1312,26 @@ function ProjectDetailPanel({ project, allItems, properties, propertyValues, onC
   const initiatives = allItems.filter((entry) => entry.kind === "initiative");
   return (
     <div className="modal-backdrop align-right">
-      <aside className="property-panel project-detail-panel">
-        <header><div><p>Project 속성</p><h2>{project.title}</h2></div><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header>
+      <aside className={`property-panel project-detail-panel ${project.status === "archived" ? "archived" : ""}`}>
+        <header className="project-page-head">
+          <div>
+            <p>Project page</p>
+            <input
+              className="project-title-input"
+              defaultValue={project.title}
+              onBlur={(event) => event.target.value.trim() !== project.title && void onPatch(project.id, { title: event.target.value })}
+              aria-label="Project 이름"
+            />
+          </div>
+          <div className="project-page-actions">
+            <button type="button" onClick={() => void onPatch(project.id, { status: project.status === "archived" ? "backlog" : "archived" })}>
+              {project.status === "archived" ? <RotateCcw size={13} /> : <Archive size={13} />}
+              {project.status === "archived" ? "복구" : "아카이브"}
+            </button>
+            <button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button>
+          </div>
+        </header>
         <form className="property-form project-detail-form">
-          <label><span>이름</span><input defaultValue={project.title} onBlur={(event) => event.target.value.trim() !== project.title && void onPatch(project.id, { title: event.target.value })} /></label>
-          <label><span>설명</span><textarea defaultValue={project.description} rows={4} placeholder="범위, 배경, 성공 기준" onBlur={(event) => event.target.value.trim() !== project.description && void onPatch(project.id, { description: event.target.value })} /></label>
           <label><span>상위 Initiative</span><select value={project.parentId ?? ""} onChange={(event) => void onPatch(project.id, { parentId: event.target.value || null })}><option value="">선택</option>{initiatives.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>
           <div className="project-field-grid">
             <label><span>우선순위</span><select className={`priority-${project.priority}`} value={project.priority} onChange={(event) => void onPatch(project.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
@@ -1325,6 +1340,17 @@ function ProjectDetailPanel({ project, allItems, properties, propertyValues, onC
             <label><span>기한</span><input type="date" value={project.dueDate ?? ""} onChange={(event) => void onPatch(project.id, { dueDate: event.target.value || null })} /></label>
           </div>
         </form>
+        <section className="project-page-body">
+          <label>
+            <span>본문</span>
+            <textarea
+              defaultValue={project.description}
+              rows={13}
+              placeholder={"# 배경\n\n## 범위\n\n## 결정사항\n\n## 다음 액션"}
+              onBlur={(event) => event.target.value !== project.description && void onPatch(project.id, { description: event.target.value })}
+            />
+          </label>
+        </section>
         <section className="task-lineage">
           <header><b>상위 OKR</b><span>Objective → KR → Initiative</span></header>
           <LineageRow label="Objective" value={objective?.title ?? "미연결"} />
@@ -1553,10 +1579,10 @@ function CreateItemPanel({ initialKind, items, routines, properties, onClose, on
           {kind === "project" && (
             <section className="create-project-fields">
               <header><b>Project 속성</b><span>생성할 때 바로 지정</span></header>
-              <label><span>설명</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} placeholder="범위, 배경, 성공 기준" /></label>
+              <label><span>본문</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={6} placeholder={"# 배경\n\n## 범위\n\n## 다음 액션"} /></label>
               <div className="project-field-grid">
                 <label><span>우선순위</span><select className={`priority-${priority}`} value={priority} onChange={(event) => setPriority(event.target.value as Priority)}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-                <label><span>상태</span><select value={status} onChange={(event) => setStatus(event.target.value as ItemStatus)}>{Object.entries(statusLabels).filter(([value]) => value !== "inbox").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+                <label><span>상태</span><select value={status} onChange={(event) => setStatus(event.target.value as ItemStatus)}>{Object.entries(statusLabels).filter(([value]) => value !== "inbox" && value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
                 <label><span>주기</span><select value={cadence} onChange={(event) => setCadence(event.target.value as Cadence)}>{Object.entries(cadenceLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
                 <label><span>기한</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
               </div>
@@ -2190,6 +2216,7 @@ function BoardView({ items, onOpenItem }: { items: OkrptrItem[]; onOpenItem: (it
     { status: "developing", label: "개발 중" },
     { status: "development_done", label: "개발 완료" },
     { status: "blocked", label: "막힘" },
+    { status: "archived", label: "아카이브" },
   ];
   return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <button className="board-item" key={entry.id} onClick={() => onOpenItem(entry)}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
 }
@@ -2548,7 +2575,7 @@ function IntegrationModal({ connected, google, slack, onGoogleChange, onSlackCha
 
 function EmptyState({ icon: Icon, title }: { icon: LucideIcon; title: string }) { return <div className="empty-state"><Icon size={22} /><span>{title}</span></div>; }
 
-const statusLabels: Record<ItemStatus, string> = { inbox: "\uC778\uBC15\uC2A4", backlog: "\uBC31\uB85C\uADF8", todo: "\uD560 \uC77C", policy_discussion: "\uC815\uCC45 \uB17C\uC758 \uC911", in_progress: "\uC9C4\uD589 \uC911", developing: "\uAC1C\uBC1C \uC911", development_done: "\uAC1C\uBC1C \uC644\uB8CC", done: "\uC644\uB8CC", blocked: "\uB9C9\uD798" };
+const statusLabels: Record<ItemStatus, string> = { inbox: "\uC778\uBC15\uC2A4", backlog: "\uBC31\uB85C\uADF8", todo: "\uD560 \uC77C", policy_discussion: "\uC815\uCC45 \uB17C\uC758 \uC911", in_progress: "\uC9C4\uD589 \uC911", developing: "\uAC1C\uBC1C \uC911", development_done: "\uAC1C\uBC1C \uC644\uB8CC", done: "\uC644\uB8CC", blocked: "\uB9C9\uD798", archived: "\uC544\uCE74\uC774\uBE0C" };
 const priorityLabels: Record<Priority, string> = { low: "낮음", medium: "보통", high: "높음", urgent: "긴급" };
 const groupColors: GroupColor[] = ["gray", "blue", "green", "yellow", "orange", "red", "purple"];
 

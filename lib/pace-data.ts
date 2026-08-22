@@ -37,7 +37,7 @@ import {
 } from "@/db/schema";
 
 export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "task"] as const;
-export const ITEM_STATUSES = ["inbox", "backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked"] as const;
+export const ITEM_STATUSES = ["inbox", "backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked", "archived"] as const;
 export const ITEM_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export const ITEM_CADENCES = ["daily", "weekly", "monthly", "quarterly"] as const;
 export const OKR_CYCLE_STATUSES = ["planned", "active", "closed"] as const;
