@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { and, asc, desc, eq, inArray, like, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   activityLog,
@@ -11,6 +11,7 @@ import {
   googleOAuthStates,
   itemPropertyValues,
   items,
+  integrationTokens,
   okrCycles,
   propertyDefinitions,
   routineCompletions,
@@ -30,6 +31,7 @@ import {
   type WorkspaceGroupMember,
   type WorkspaceMember,
   type WorkspaceRule,
+  type IntegrationToken,
   type OkrCycle,
   type GoogleConnection,
   type SlackConnection,
@@ -98,6 +100,8 @@ export type RequestAuthorization = {
   apiToken: boolean;
 };
 
+export type IntegrationTokenSummary = Pick<IntegrationToken, "id" | "name" | "tokenPrefix" | "createdAt" | "revokedAt">;
+
 type RuntimeEnv = typeof env & { OKRPTR_API_TOKEN?: string; OKITA_API_TOKEN?: string; PACE_API_TOKEN?: string };
 let schemaReady: Promise<void> | null = null;
 
@@ -160,6 +164,18 @@ async function ensureSchema() {
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS integration_tokens (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL,
+          name TEXT NOT NULL DEFAULT 'Codex',
+          token_hash TEXT NOT NULL,
+          token_prefix TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          revoked_at TEXT
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_integration_tokens_hash ON integration_tokens(token_hash)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_integration_tokens_workspace_user ON integration_tokens(workspace_id, user_id, revoked_at)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS okr_cycles (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -222,9 +238,7 @@ async function ensureSchema() {
         )`),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_status ON items(owner_id, status)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_parent ON items(owner_id, parent_id)"),
-        d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_routine ON items(owner_id, routine_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_cadence ON items(owner_id, cadence)"),
-        d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_cycle ON items(owner_id, cycle_id)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS activity_log (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL,
@@ -402,6 +416,10 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE okr_cycles ADD COLUMN department TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN cycle_id TEXT REFERENCES okr_cycles(id) ON DELETE SET NULL");
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN routine_id TEXT REFERENCES routines(id) ON DELETE SET NULL");
+      await d1.batch([
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_routine ON items(owner_id, routine_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_cycle ON items(owner_id, cycle_id)"),
+      ]);
     })()
       .catch((error: unknown) => {
         schemaReady = null;
@@ -1099,6 +1117,77 @@ export function serializeSlackConnection(connection: SlackConnection | null, con
   };
 }
 
+export async function createIntegrationToken(
+  authorization: RequestAuthorization,
+  name = "Codex",
+) {
+  await ensureSchema();
+  const token = `okrptr_${randomTokenPart(32)}`;
+  const now = new Date().toISOString();
+  const [record] = await getDb().insert(integrationTokens).values({
+    id: crypto.randomUUID(),
+    workspaceId: authorization.ownerId,
+    userId: authorization.userId,
+    name: name.trim().slice(0, 50) || "Codex",
+    tokenHash: await hashIntegrationToken(token),
+    tokenPrefix: `${token.slice(0, 14)}...`,
+    createdAt: now,
+  }).returning();
+  const activeTokens = await getDb().select({ id: integrationTokens.id }).from(integrationTokens).where(and(
+    eq(integrationTokens.workspaceId, authorization.ownerId),
+    eq(integrationTokens.userId, authorization.userId),
+    isNull(integrationTokens.revokedAt),
+  )).orderBy(desc(integrationTokens.createdAt));
+  const staleIds = activeTokens.slice(10).map((entry) => entry.id);
+  if (staleIds.length) {
+    await getDb().update(integrationTokens).set({ revokedAt: now }).where(inArray(integrationTokens.id, staleIds));
+  }
+  return { token, connection: serializeIntegrationToken(record) };
+}
+
+export async function listIntegrationTokens(authorization: RequestAuthorization) {
+  await ensureSchema();
+  const rows = await getDb().select().from(integrationTokens).where(and(
+    eq(integrationTokens.workspaceId, authorization.ownerId),
+    eq(integrationTokens.userId, authorization.userId),
+    isNull(integrationTokens.revokedAt),
+  )).orderBy(desc(integrationTokens.createdAt));
+  return rows.map(serializeIntegrationToken);
+}
+
+export async function revokeIntegrationTokens(authorization: RequestAuthorization, id?: string) {
+  await ensureSchema();
+  const now = new Date().toISOString();
+  const baseCondition = and(
+    eq(integrationTokens.workspaceId, authorization.ownerId),
+    eq(integrationTokens.userId, authorization.userId),
+    isNull(integrationTokens.revokedAt),
+  );
+  const condition = id ? and(baseCondition, eq(integrationTokens.id, id)) : baseCondition;
+  const revoked = await getDb().update(integrationTokens).set({ revokedAt: now }).where(condition).returning({ id: integrationTokens.id });
+  return { revoked: revoked.length, ids: revoked.map((entry) => entry.id) };
+}
+
+function serializeIntegrationToken(record: IntegrationToken): IntegrationTokenSummary {
+  return {
+    id: record.id,
+    name: record.name,
+    tokenPrefix: record.tokenPrefix,
+    createdAt: record.createdAt,
+    revokedAt: record.revokedAt,
+  };
+}
+
+function randomTokenPart(byteLength: number) {
+  const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function hashIntegrationToken(token: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export async function authorizeRequest(
   request: Request,
   options: { allowViewerWrite?: boolean } = {},
@@ -1106,6 +1195,35 @@ export async function authorizeRequest(
   const userId = request.headers.get("oai-authenticated-user-id");
   const configuredToken = (env as RuntimeEnv).OKRPTR_API_TOKEN ?? (env as RuntimeEnv).OKITA_API_TOKEN ?? (env as RuntimeEnv).PACE_API_TOKEN;
   const suppliedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  if (suppliedToken?.startsWith("okrptr_")) {
+    await ensureSchema();
+    const [token] = await getDb().select().from(integrationTokens).where(and(
+      eq(integrationTokens.tokenHash, await hashIntegrationToken(suppliedToken)),
+      isNull(integrationTokens.revokedAt),
+    )).limit(1);
+    if (token) {
+      const [membership] = await getDb().select().from(workspaceMembers).where(and(
+        eq(workspaceMembers.workspaceId, token.workspaceId),
+        eq(workspaceMembers.userId, token.userId),
+        eq(workspaceMembers.status, "active"),
+      )).limit(1);
+      if (!membership) {
+        return Response.json({ error: "This OKRPTR connection no longer has workspace access." }, { status: 403 });
+      }
+      const role = membership.role as TeamRole;
+      if (!options.allowViewerWrite && role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+        return Response.json({ error: "Viewer access is read-only." }, { status: 403 });
+      }
+      return {
+        ownerId: token.workspaceId,
+        userId: token.userId,
+        email: membership.email,
+        displayName: membership.displayName,
+        role,
+        apiToken: true,
+      };
+    }
+  }
   if (configuredToken && suppliedToken === configuredToken) {
     const ownerId = requestedWorkspaceId(request) || request.headers.get("x-okrptr-user-id") || request.headers.get("x-okita-user-id") || request.headers.get("x-pace-user-id") || "api-workspace";
     await ensureWorkspaceShell(ownerId, null, "API");

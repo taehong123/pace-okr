@@ -63,6 +63,24 @@ export const workspaceRules = sqliteTable(
   },
 );
 
+export const integrationTokens = sqliteTable(
+  "integration_tokens",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull().default("Codex"),
+    tokenHash: text("token_hash").notNull(),
+    tokenPrefix: text("token_prefix").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    revokedAt: text("revoked_at"),
+  },
+  (table) => [
+    uniqueIndex("idx_integration_tokens_hash").on(table.tokenHash),
+    index("idx_integration_tokens_workspace_user").on(table.workspaceId, table.userId, table.revokedAt),
+  ],
+);
+
 export const okrCycles = sqliteTable(
   "okr_cycles",
   {
@@ -417,6 +435,7 @@ export type Workspace = typeof workspaces.$inferSelect;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
 export type UserWorkspacePreference = typeof userWorkspacePreferences.$inferSelect;
 export type WorkspaceRule = typeof workspaceRules.$inferSelect;
+export type IntegrationToken = typeof integrationTokens.$inferSelect;
 export type OkrCycle = typeof okrCycles.$inferSelect;
 export type WorkspaceGroup = typeof workspaceGroups.$inferSelect;
 export type WorkspaceGroupMember = typeof workspaceGroupMembers.$inferSelect;

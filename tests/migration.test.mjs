@@ -281,6 +281,37 @@ test("creates Slack bot connection and OAuth state tables", async () => {
   db.close();
 });
 
+test("creates revocable workspace-scoped integration tokens", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON;");
+  const [workspaceMigration, tokenMigration] = await Promise.all([
+    readFile(new URL("../drizzle/0005_wet_roland_deschain.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0016_windy_flatman.sql", import.meta.url), "utf8"),
+  ]);
+  db.exec(workspaceMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(tokenMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
+    INSERT INTO integration_tokens (id, workspace_id, user_id, name, token_hash, token_prefix)
+      VALUES ('token', 'workspace', 'owner', 'Codex conversation', 'hash', 'okrptr_123...');
+  `);
+
+  assert.deepEqual({ ...db.prepare("SELECT workspace_id, user_id, revoked_at FROM integration_tokens WHERE id = 'token'").get() }, {
+    workspace_id: "workspace",
+    user_id: "owner",
+    revoked_at: null,
+  });
+  assert.throws(
+    () => db.exec("INSERT INTO integration_tokens (id, workspace_id, user_id, token_hash, token_prefix) VALUES ('duplicate', 'workspace', 'owner', 'hash', 'okrptr_456...')"),
+    /UNIQUE/i,
+  );
+  db.exec("UPDATE integration_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE id = 'token'");
+  assert.notEqual(db.prepare("SELECT revoked_at FROM integration_tokens WHERE id = 'token'").get().revoked_at, null);
+  db.exec("DELETE FROM workspaces WHERE id = 'workspace'");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM integration_tokens").get().count, 0);
+  db.close();
+});
+
 test("creates OKR cycles and links OKR items to a cycle", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON;");

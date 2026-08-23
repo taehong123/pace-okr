@@ -113,6 +113,13 @@
       "when": 1787308838969,
       "tag": "0015_slippery_night_thrasher",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1787476002618,
+      "tag": "0016_windy_flatman",
+      "breakpoints": true
     }
   ]
 }

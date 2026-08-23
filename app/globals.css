@@ -355,6 +355,30 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .integration-card p { margin: 2px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .integration-card > header span { width: 8px; height: 8px; border-radius: 50%; }
 .chatgpt-card { gap: 12px; }
+.codex-card { gap: 12px; }
+.codex-connect-flow { display: grid; grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr); align-items: center; gap: 8px; }
+.codex-connect-flow > div { min-width: 0; display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 7px; }
+.codex-connect-flow > div > span { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: var(--ink); color: white; font-size: 9px; font-weight: 700; }
+.codex-connect-flow > svg { color: var(--faint); }
+.codex-connect-flow p { min-width: 0; display: grid; gap: 2px; margin: 0; }
+.codex-connect-flow p b { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.codex-connect-flow p small { color: var(--muted); font-size: 9px; line-height: 1.4; }
+.connector-actions button:disabled { opacity: .55; cursor: default; }
+.spin { animation: spin .85s linear infinite; }
+.codex-connections { display: grid; gap: 5px; padding-top: 2px; }
+.codex-connections > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.codex-connections > div:first-child b { font-size: 10px; }
+.codex-connections > div:first-child span { color: var(--muted); font-size: 9px; }
+.codex-connection-row { min-height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 7px; border: 1px solid var(--line); border-radius: 4px; }
+.codex-connection-row code { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.codex-connection-row span { flex: 0 0 auto; color: var(--faint); font-size: 9px; }
+.codex-connections > button { justify-self: start; height: 27px; padding: 0 8px; border: 0; border-radius: 4px; background: transparent; color: var(--red); font-size: 9px; cursor: pointer; }
+.codex-connections > button:hover { background: #fff4f2; }
+.codex-connections > button:disabled { opacity: .5; cursor: default; }
+.mcp-advanced { border-top: 1px solid var(--line); padding-top: 9px; }
+.mcp-advanced summary { color: var(--muted); font-size: 10px; cursor: pointer; }
+.mcp-advanced .endpoint-row { margin-top: 8px; }
+.mcp-advanced > p { margin: 5px 0 0; }
 .connector-steps { display: grid; gap: 6px; }
 .connector-steps > div { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 8px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 5px; background: #fbfbfa; }
 .connector-steps span { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: var(--ink); color: white; font-size: 9px; font-weight: 700; }
