@@ -20,7 +20,6 @@ import {
   Filter,
   Hash,
   Inbox,
-  LayoutDashboard,
   Lightbulb,
   Link2,
   ListChecks,
@@ -358,7 +357,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "okr", label: "OKR", icon: Target },
   { id: "work", label: "Project", icon: Table2 },
   { id: "inbox", label: "Task", icon: Inbox },
-  { id: "home", label: "홈", icon: LayoutDashboard },
+  { id: "home", label: "대화", icon: Bot },
   { id: "routines", label: "루틴", icon: Repeat2 },
   { id: "scrum", label: "데일리", icon: CalendarCheck },
   { id: "recommendations", label: "추천", icon: Lightbulb },
@@ -368,7 +367,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
 
 const cadenceLabels: Record<Cadence, string> = { daily: "일간", weekly: "주간", monthly: "월간", quarterly: "분기" };
 const viewTitles: Record<View, string> = {
-  home: "홈",
+  home: "대화",
   inbox: "Task",
   work: "Project",
   routines: "루틴",
@@ -2617,6 +2616,6 @@ function preferredIntroLanguage(): IntroLanguage {
   if (language.startsWith("es")) return "es";
   return "en";
 }
-function pageSubtitle(view: View) { return { home: "지금 집중할 목표와 작업", inbox: "Project나 Routine에 연결된 Task까지 함께 확인", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "반복되는 실행을 날짜별로 기록", okr: "Objective부터 Task까지의 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "클린업으로 보관한 OKR 실행 데이터" }[view]; }
+function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", inbox: "Project나 Routine에 연결된 Task까지 함께 확인", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "반복되는 실행을 날짜별로 기록", okr: "Objective부터 Task까지의 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "클린업으로 보관한 OKR 실행 데이터" }[view]; }
 function routineCadenceLabel(cadence: RoutineCadence) { return { daily: "매일", weekly: "매주", monthly: "매월" }[cadence]; }
 function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "unlinked") return "↗"; if (kind === "due_soon") return "3"; return "P"; }
