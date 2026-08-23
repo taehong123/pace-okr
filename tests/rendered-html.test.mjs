@@ -58,7 +58,7 @@ test("ships product metadata and removes starter assets", async () => {
 
   assert.match(layout, /openGraph/);
   assert.doesNotMatch(layout, /\/og\.png/);
-  assert.match(page, /Codex 연결 문장 복사/);
+  assert.match(page, /연결 내용 복사/);
   assert.match(page, /\/api\/integration-tokens/);
   assert.match(page, /\/api\/okr-organize/);
   assert.match(page, /OKR 대화/);
@@ -67,10 +67,10 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /팀 OKR/);
   assert.match(page, /개인 OKR/);
   assert.match(page, /루틴부터/);
-  assert.match(page, /공식 MCP 연결 정보/);
+  assert.match(page, /전체 액세스로 연 대화창에 붙여넣으세요/);
   assert.match(page, /트리거 포인트/);
   assert.match(page, /무엇을 어떻게/);
-  assert.match(page, /모든 Codex 연결 해제/);
+  assert.match(page, /연결 해제/);
   assert.match(page, /Objective → Key Result → Initiative → Project → Task/);
   assert.match(page, /OKR이 오늘의 일로 이어지도록/);
   assert.match(page, /Connect your OKRs to today's work/);

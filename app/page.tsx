@@ -2536,11 +2536,9 @@ function GroupDetail({ detail, team, onBack, onChange, onGroupChange, onDeleted,
 }
 
 function IntegrationModal({ connected, google, slack, onGoogleChange, onSlackChange, onNotice, onClose }: { connected: boolean; google: GoogleConnectionStatus | null; slack: SlackConnectionStatus | null; onGoogleChange: (status: GoogleConnectionStatus | null) => void; onSlackChange: (status: SlackConnectionStatus | null) => void; onNotice: (message: string) => void; onClose: () => void }) {
-  const endpoint = typeof window === "undefined" ? "/api/mcp" : `${window.location.origin}/api/mcp`;
   const [disconnecting, setDisconnecting] = useState(false);
   const [disconnectingSlack, setDisconnectingSlack] = useState(false);
   const [connections, setConnections] = useState<IntegrationConnection[]>([]);
-  const [loadingConnections, setLoadingConnections] = useState(true);
   const [creatingConnection, setCreatingConnection] = useState(false);
   const [revokingConnections, setRevokingConnections] = useState(false);
 
@@ -2549,8 +2547,7 @@ function IntegrationModal({ connected, google, slack, onGoogleChange, onSlackCha
     void fetch("/api/integration-tokens")
       .then(async (response) => response.ok ? response.json() as Promise<{ connections: IntegrationConnection[] }> : Promise.reject())
       .then((data) => { if (active) setConnections(data.connections); })
-      .catch(() => undefined)
-      .finally(() => { if (active) setLoadingConnections(false); });
+      .catch(() => undefined);
     return () => { active = false; };
   }, []);
 
@@ -2560,7 +2557,7 @@ function IntegrationModal({ connected, google, slack, onGoogleChange, onSlackCha
       const response = await fetch("/api/integration-tokens", { method: "POST" });
       const data = await response.json() as { prompt?: string; connection?: IntegrationConnection; error?: string };
       if (!response.ok || !data.prompt || !data.connection) {
-        onNotice(data.error || "Codex 연결 문장을 만들지 못했습니다.");
+        onNotice(data.error || "연결 내용을 만들지 못했습니다.");
         return;
       }
       try {
@@ -2571,9 +2568,9 @@ function IntegrationModal({ connected, google, slack, onGoogleChange, onSlackCha
         return;
       }
       setConnections((current) => [data.connection!, ...current]);
-      onNotice("Codex 연결 문장을 복사했습니다. 이 대화창에 붙여넣으세요.");
+      onNotice("연결 내용을 복사했습니다. 전체 액세스로 연 대화창에 붙여넣으세요.");
     } catch {
-      onNotice("Codex 연결 문장을 만들지 못했습니다.");
+      onNotice("연결 내용을 만들지 못했습니다.");
     } finally {
       setCreatingConnection(false);
     }
@@ -2585,9 +2582,9 @@ function IntegrationModal({ connected, google, slack, onGoogleChange, onSlackCha
       const response = await fetch("/api/integration-tokens", { method: "DELETE" });
       if (!response.ok) throw new Error("revoke failed");
       setConnections([]);
-      onNotice("이 워크스페이스의 내 Codex 연결을 모두 해제했습니다.");
+      onNotice("이 워크스페이스의 대화 연결을 해제했습니다.");
     } catch {
-      onNotice("Codex 연결을 해제하지 못했습니다.");
+      onNotice("대화 연결을 해제하지 못했습니다.");
     } finally {
       setRevokingConnections(false);
     }
@@ -2618,19 +2615,10 @@ function IntegrationModal({ connected, google, slack, onGoogleChange, onSlackCha
     }
     window.location.href = `/api/slack/auth?returnTo=${encodeURIComponent("/")}`;
   }
-  function copyEndpoint() {
-    void navigator.clipboard.writeText(endpoint);
-    onNotice("공식 MCP 주소를 복사했습니다.");
-  }
-
-  return <div className="modal-backdrop"><section className="integration-modal"><header><h2>Codex / ChatGPT 연동</h2><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header><div className="integration-sections">
-    <section className="integration-card codex-card">
-      <header><Bot size={18} /><div><b>Codex 대화에 바로 연결</b><p>연결 문장을 복사해 이 대화창에 붙여넣으면 OKRPTR 데이터를 실제로 조회하고 수정합니다.</p></div><span className={connected ? "connection-live" : "connection-local"} /></header>
-      <div className="codex-connect-flow"><div><span>1</span><p><b>연결 문장 복사</b><small>현재 워크스페이스 전용 접근 키가 함께 만들어집니다.</small></p></div><ChevronRight size={15} /><div><span>2</span><p><b>Codex에 붙여넣기</b><small>별도 플러그인 메뉴 없이 바로 연결을 확인합니다.</small></p></div></div>
-      <div className="connector-actions"><button className="copy-primary" onClick={() => void copyCodexConnectionPrompt()} disabled={creatingConnection}>{creatingConnection ? <LoaderCircle className="spin" size={13} /> : <Copy size={13} />}{creatingConnection ? "문장 만드는 중" : "Codex 연결 문장 복사"}</button></div>
-      <p className="connector-note">복사되는 문장에는 이 워크스페이스만 접근하는 키가 포함됩니다. 다른 사람에게 공유하지 마세요. 연결은 아래에서 언제든 끊을 수 있습니다.</p>
-      <div className="codex-connections"><div><b>내 Codex 연결</b><span>{loadingConnections ? "확인 중" : `${connections.length}개`}</span></div>{connections.slice(0, 3).map((connection) => <div className="codex-connection-row" key={connection.id}><code>{connection.tokenPrefix}</code><span>{new Date(connection.createdAt).toLocaleDateString("ko-KR")}</span></div>)}{connections.length > 0 && <button onClick={() => void revokeCodexConnections()} disabled={revokingConnections}>{revokingConnections ? "해제 중" : "모든 Codex 연결 해제"}</button>}</div>
-      <details className="mcp-advanced"><summary>공식 MCP 연결 정보</summary><div className="endpoint-row"><div><b>Streamable HTTP</b><code>{endpoint}</code></div><button className="icon-button" onClick={copyEndpoint} title="주소 복사"><Copy size={14} /></button></div><p>사용자 지정 MCP를 추가할 수 있는 클라이언트에서는 이 주소를 사용합니다.</p></details>
+  return <div className="modal-backdrop"><section className="integration-modal"><header><h2>ChatGPT 연동</h2><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header><div className="integration-sections">
+    <section className="integration-card chatgpt-simple">
+      <header><Bot size={18} /><div><b>대화창에서 OKRPTR 사용하기</b><p>이 내용을 복사한 뒤, 전체 액세스로 연 대화창에 붙여넣으세요.</p></div><span className={connected ? "connection-live" : "connection-local"} /></header>
+      <div className="chatgpt-simple-actions"><button className="copy-primary" onClick={() => void copyCodexConnectionPrompt()} disabled={creatingConnection}>{creatingConnection ? <LoaderCircle className="spin" size={13} /> : <Copy size={13} />}{creatingConnection ? "복사 준비 중" : "연결 내용 복사"}</button>{connections.length > 0 && <button className="revoke-link" onClick={() => void revokeCodexConnections()} disabled={revokingConnections}>{revokingConnections ? "해제 중" : "연결 해제"}</button>}</div>
     </section>
     <section className="integration-card"><header><CalendarDays size={18} /><div><b>Google Calendar</b><p>{google?.connected ? `${google.email} 계정으로 연결됨` : google?.configured ? "Task 기한을 Google Calendar 이벤트로 보냅니다" : "Google OAuth 설정이 필요합니다"}</p></div><span className={google?.connected ? "connection-live" : "connection-local"} /></header><div className="integration-actions">{google?.connected ? <button onClick={() => void disconnectGoogle()} disabled={disconnecting}>{disconnecting ? "해제 중" : "연결 해제"}</button> : <button onClick={() => { if (!google?.configured) { onNotice("GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET 설정이 필요합니다."); return; } window.location.href = `/api/google/auth?returnTo=${encodeURIComponent("/")}`; }}>Google로 연결</button>}<small>권한: Google 계정 확인, Calendar 이벤트 생성/수정</small></div></section>
     <section className="integration-card"><header><Hash size={18} /><div><b>Slack bot</b><p>{slack?.connected ? `${slack.teamName} 워크스페이스에 설치됨` : slack?.configured ? "/okrptr 명령으로 인박스 Task를 만듭니다" : "Slack 앱 설정이 필요합니다"}</p></div><span className={slack?.connected ? "connection-live" : "connection-local"} /></header><div className="integration-actions">{slack?.connected ? <button onClick={() => void disconnectSlack()} disabled={disconnectingSlack}>{disconnectingSlack ? "해제 중" : "연결 해제"}</button> : <button onClick={connectSlack}>Slack에 설치</button>}<small>권한: slash command, bot 메시지 작성</small></div><div className="integration-url-grid"><div><b>OAuth Redirect URL</b><code>{slack?.redirectUrl ?? "/api/slack/callback"}</code></div><button className="icon-button" onClick={() => void navigator.clipboard.writeText(slack?.redirectUrl ?? `${window.location.origin}/api/slack/callback`)} title="주소 복사"><Copy size={14} /></button><div><b>Slash Command URL</b><code>{slack?.commandUrl ?? "/api/slack/commands"}</code></div><button className="icon-button" onClick={() => void navigator.clipboard.writeText(slack?.commandUrl ?? `${window.location.origin}/api/slack/commands`)} title="주소 복사"><Copy size={14} /></button></div></section>
