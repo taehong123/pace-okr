@@ -349,11 +349,15 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .integration-sections { display: grid; gap: 12px; padding: 14px 17px; }
 .integration-card { display: grid; gap: 10px; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
 .integration-card:last-child { padding-bottom: 0; border-bottom: 0; }
-.integration-card > header { min-height: 34px; display: grid; grid-template-columns: 22px minmax(0, 1fr) 8px; align-items: center; gap: 9px; }
+.integration-card > header { min-height: 34px; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 9px; }
 .integration-card > header svg { color: var(--muted); }
 .integration-card b { font-size: 12px; }
 .integration-card p { margin: 2px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
-.integration-card > header span { width: 8px; height: 8px; border-radius: 50%; }
+.integration-card > header > span { width: 8px; height: 8px; border-radius: 50%; }
+.connection-state { min-width: 58px; display: inline-flex; align-items: center; justify-content: flex-end; gap: 5px; color: var(--muted); font-size: 9px; white-space: nowrap; }
+.connection-state i { width: 7px; height: 7px; border-radius: 50%; background: #b1b0ad; }
+.connection-state.active { color: #35704b; }
+.connection-state.active i { background: #4f9769; }
 .chatgpt-simple { gap: 14px; }
 .chatgpt-simple-actions { display: flex; align-items: center; gap: 10px; }
 .chatgpt-simple-actions button { height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border-radius: 4px; font-size: 10px; cursor: pointer; }
