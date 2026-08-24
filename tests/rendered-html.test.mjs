@@ -50,16 +50,26 @@ test("server-renders the OKRPTR workspace", async () => {
 });
 
 test("ships product metadata and removes starter assets", async () => {
-  const [layout, page, integrationRoute, packageJson] = await Promise.all([
+  const [layout, page, integrationRoute, slackAuthRoute, slackDisconnectRoute, paceData, packageJson] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/integration-tokens/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/slack/auth/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/slack/disconnect/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
   assert.match(layout, /openGraph/);
   assert.doesNotMatch(layout, /\/og\.png/);
   assert.match(page, /MCP 연결 설정 복사/);
+  assert.match(page, /앱 연동/);
+  assert.match(page, /mobile-navigation/);
+  assert.match(page, /더보기/);
+  assert.match(page, /개인 연결/);
+  assert.match(page, /워크스페이스 연결/);
+  assert.match(page, /관리자만 설치/);
+  assert.doesNotMatch(page, /OAuth Redirect URL|Slash Command URL/);
   assert.match(page, /연결 관리/);
   assert.match(page, /연결됨/);
   assert.match(page, /연결 대기/);
@@ -81,6 +91,9 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(integrationRoute, /\[mcp_servers\.okrptr\]/);
   assert.match(integrationRoute, /http_headers/);
   assert.match(integrationRoute, /Codex를 재시작/);
+  assert.match(slackAuthRoute, /canManageTeam/);
+  assert.match(slackDisconnectRoute, /canManageTeam/);
+  assert.match(paceData, /getSlackConnection\(ownerId: string\)/);
   assert.match(page, /트리거 포인트/);
   assert.match(page, /무엇을 어떻게/);
   assert.match(page, /연결 해제/);

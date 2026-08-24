@@ -26,8 +26,10 @@ import {
   Languages,
   LockKeyhole,
   LoaderCircle,
+  Menu,
   MoreHorizontal,
   Plus,
+  Plug,
   Repeat2,
   RotateCcw,
   Search,
@@ -43,7 +45,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 type View = "home" | "inbox" | "work" | "routines" | "okr" | "scrum" | "recommendations" | "reviews" | "trash";
 type Cadence = "daily" | "weekly" | "monthly" | "quarterly";
@@ -401,6 +403,8 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [integrationOpen, setIntegrationOpen] = useState(false);
+  const [appIntegrationsOpen, setAppIntegrationsOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [propertyPanelOpen, setPropertyPanelOpen] = useState(false);
   const [teamPanelOpen, setTeamPanelOpen] = useState(false);
   const [teamPanelTab, setTeamPanelTab] = useState<"members" | "groups">("members");
@@ -503,14 +507,16 @@ export default function Home() {
       if (createItemOpen) { setCreateItemOpen(false); return; }
       if (teamPanelOpen) { setTeamPanelOpen(false); return; }
       if (propertyPanelOpen) { setPropertyPanelOpen(false); return; }
+      if (appIntegrationsOpen) { setAppIntegrationsOpen(false); return; }
       if (integrationOpen) { setIntegrationOpen(false); return; }
+      if (mobileMenuOpen) { setMobileMenuOpen(false); return; }
       if (onboardingOpen) { setOnboardingOpen(false); return; }
       if (workspaceCreateOpen) { setWorkspaceCreateOpen(false); setNewWorkspaceName(""); return; }
       if (workspaceMenuOpen) setWorkspaceMenuOpen(false);
     }
     window.addEventListener("keydown", closeTopmost);
     return () => window.removeEventListener("keydown", closeTopmost);
-  }, [cleanupOpen, createItemOpen, integrationOpen, okrListOpen, onboardingOpen, propertyPanelOpen, selectedProjectId, selectedTaskId, teamPanelOpen, workspaceCreateOpen, workspaceMenuOpen]);
+  }, [appIntegrationsOpen, cleanupOpen, createItemOpen, integrationOpen, mobileMenuOpen, okrListOpen, onboardingOpen, propertyPanelOpen, selectedProjectId, selectedTaskId, teamPanelOpen, workspaceCreateOpen, workspaceMenuOpen]);
 
   const inboxItems = items.filter((entry) => entry.status === "inbox");
   const taskItems = items.filter((entry) => entry.kind === "task");
@@ -967,7 +973,7 @@ export default function Home() {
             </div>
           )}
         </div>
-        <nav>
+        <nav className="desktop-navigation">
           {navItems.map((entry) => {
             const Icon = entry.icon;
             return (
@@ -978,14 +984,43 @@ export default function Home() {
             );
           })}
         </nav>
+        <nav className="mobile-navigation" aria-label="주요 메뉴">
+          {navItems.slice(0, 4).map((entry) => {
+            const Icon = entry.icon;
+            return (
+              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); setActiveView(entry.id); }}>
+                <Icon size={16} /><span>{entry.label}</span>
+                {entry.id === "inbox" && inboxItems.length > 0 && <b>{inboxItems.length}</b>}
+              </button>
+            );
+          })}
+          <button className={`nav-item ${mobileMenuOpen ? "active" : ""}`} onClick={() => setMobileMenuOpen(true)}><Menu size={16} /><span>더보기</span></button>
+        </nav>
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>ChatGPT 연동</span></button>
+          <button className="nav-item" onClick={() => setAppIntegrationsOpen(true)}><Plug size={16} /><span>앱 연동</span></button>
           <button className="nav-item" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={16} /><span>팀 멤버</span></button>
           <button className="nav-item" onClick={() => { setTeamPanelTab("groups"); setTeamPanelOpen(true); }}><AtSign size={16} /><span>그룹 관리</span></button>
           <button className="nav-item" onClick={() => setPropertyPanelOpen(true)}><Settings2 size={16} /><span>내 설정</span></button>
           <button className="profile-row" onClick={() => setPropertyPanelOpen(true)}><span className="avatar">T</span><span>태홍</span><MoreHorizontal size={15} /></button>
         </div>
       </aside>
+
+      {mobileMenuOpen && (
+        <div className="mobile-menu-backdrop" onClick={() => setMobileMenuOpen(false)}>
+          <aside className="mobile-menu-sheet" onClick={(event) => event.stopPropagation()}>
+            <header><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : "팀 워크스페이스"}</small></div><button className="icon-button" onClick={() => setMobileMenuOpen(false)} aria-label="닫기"><X size={17} /></button></header>
+            <div className="mobile-menu-list">
+              {navItems.slice(4).map((entry) => { const Icon = entry.icon; return <button key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); setActiveView(entry.id); setMobileMenuOpen(false); }}><Icon size={16} /><span>{entry.label}</span><ChevronRight size={14} /></button>; })}
+              <button onClick={() => { setMobileMenuOpen(false); setIntegrationOpen(true); }}><Link2 size={16} /><span>ChatGPT 연동</span><ChevronRight size={14} /></button>
+              <button onClick={() => { setMobileMenuOpen(false); setAppIntegrationsOpen(true); }}><Plug size={16} /><span>앱 연동</span><ChevronRight size={14} /></button>
+              <button onClick={() => { setMobileMenuOpen(false); setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={16} /><span>팀 멤버</span><ChevronRight size={14} /></button>
+              <button onClick={() => { setMobileMenuOpen(false); setTeamPanelTab("groups"); setTeamPanelOpen(true); }}><AtSign size={16} /><span>그룹 관리</span><ChevronRight size={14} /></button>
+              <button onClick={() => { setMobileMenuOpen(false); setPropertyPanelOpen(true); }}><Settings2 size={16} /><span>내 설정</span><ChevronRight size={14} /></button>
+            </div>
+          </aside>
+        </div>
+      )}
 
       <section className="workspace">
         <header className="workspace-topbar">
@@ -1108,7 +1143,8 @@ export default function Home() {
           }}
         />
       )}
-      {integrationOpen && <IntegrationModal google={googleStatus} slack={slackStatus} onGoogleChange={setGoogleStatus} onSlackChange={setSlackStatus} onNotice={showNotice} onClose={() => setIntegrationOpen(false)} />}
+      {integrationOpen && <IntegrationModal onNotice={showNotice} onClose={() => setIntegrationOpen(false)} />}
+      {appIntegrationsOpen && <AppIntegrationsModal google={googleStatus} slack={slackStatus} workspaceName={currentWorkspace?.name || "개인 워크스페이스"} canManageSlack={currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin"} onGoogleChange={setGoogleStatus} onSlackChange={setSlackStatus} onNotice={showNotice} onClose={() => setAppIntegrationsOpen(false)} />}
       {propertyPanelOpen && (
         <PropertyPanel
           properties={properties}
@@ -1510,6 +1546,123 @@ function LineageRow({ label, value }: { label: string; value: string }) {
   return <div className="lineage-row"><span>{label}</span><b>{value}</b></div>;
 }
 
+function memberInitial(member: Pick<TeamMember, "displayName" | "email">) {
+  return (member.displayName || member.email || "?").slice(0, 1).toLocaleUpperCase();
+}
+
+function memberMentionText(members: TeamMember[]) {
+  return members.map((member) => `@${member.displayName}`).join(", ");
+}
+
+function matchesMember(member: TeamMember, query: string) {
+  const normalized = query.replace(/^@/, "").trim().toLocaleLowerCase();
+  if (!normalized) return true;
+  return `${member.displayName} ${member.email}`.toLocaleLowerCase().includes(normalized);
+}
+
+function isDriProperty(property: PropertyDefinition) {
+  return /^(dri|owner|assignee|담당|담당자)$/i.test(property.name.trim());
+}
+
+function isWorkerProperty(property: PropertyDefinition) {
+  return /^(workers|assignees|업무자|하위 업무자|담당자)$/i.test(property.name.trim());
+}
+
+function pickMembers(members: TeamMember[], ids: string[]) {
+  const byId = new Map(members.map((member) => [member.id, member]));
+  return ids.map((id) => byId.get(id)).filter((member): member is TeamMember => Boolean(member));
+}
+
+function MemberMentionPicker({
+  label,
+  members,
+  selectedIds,
+  onChange,
+  placeholder,
+  maxSelected,
+  disabled = false,
+}: {
+  label: string;
+  members: TeamMember[];
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+  placeholder: string;
+  maxSelected?: number;
+  disabled?: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const selectedMembers = pickMembers(members, selectedIds);
+  const selectedSet = new Set(selectedIds);
+  const candidates = members
+    .filter((member) => !selectedSet.has(member.id) && matchesMember(member, query))
+    .slice(0, 7);
+  const atLimit = typeof maxSelected === "number" && selectedIds.length >= maxSelected;
+
+  function add(id: string) {
+    if (disabled || selectedSet.has(id)) return;
+    onChange(maxSelected === 1 ? [id] : [...selectedIds, id]);
+    setQuery("");
+    setOpen(false);
+  }
+
+  function remove(id: string) {
+    if (disabled) return;
+    onChange(selectedIds.filter((entry) => entry !== id));
+  }
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter" && candidates[0] && !atLimit) {
+      event.preventDefault();
+      add(candidates[0].id);
+      return;
+    }
+    if (event.key === "Backspace" && !query && selectedIds.length) {
+      onChange(selectedIds.slice(0, -1));
+    }
+  }
+
+  return (
+    <label className="member-mention-field">
+      <span>{label}</span>
+      <div className={`member-mention-box ${open ? "active" : ""} ${disabled ? "disabled" : ""}`}>
+        {selectedMembers.map((member) => (
+          <button type="button" className="member-chip" key={member.id} onClick={() => remove(member.id)} disabled={disabled} title={`${member.displayName} 제거`}>
+            <span className="team-avatar">{memberInitial(member)}</span>
+            <b>@{member.displayName}</b>
+            <X size={11} />
+          </button>
+        ))}
+        {!atLimit && (
+          <div className="member-mention-input">
+            <AtSign size={13} />
+            <input
+              value={query}
+              onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
+              onFocus={() => setOpen(true)}
+              onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+              onKeyDown={handleKeyDown}
+              placeholder={selectedMembers.length ? "" : placeholder}
+              disabled={disabled}
+            />
+          </div>
+        )}
+      </div>
+      {open && !disabled && !atLimit && (
+        <div className="member-mention-menu">
+          {candidates.length ? candidates.map((member) => (
+            <button type="button" key={member.id} onMouseDown={(event) => event.preventDefault()} onClick={() => add(member.id)}>
+              <span className="team-avatar">{memberInitial(member)}</span>
+              <b>{member.displayName}</b>
+              <small>{member.email || teamRoleLabel(member.role)}</small>
+            </button>
+          )) : <p>일치하는 멤버가 없습니다</p>}
+        </div>
+      )}
+    </label>
+  );
+}
+
 function CreateItemPanel({ initialKind, items, routines, properties, onClose, onCreated }: {
   initialKind: ItemKind;
   items: OkrptrItem[];
@@ -1528,11 +1681,26 @@ function CreateItemPanel({ initialKind, items, routines, properties, onClose, on
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [dueDate, setDueDate] = useState("");
   const [customValues, setCustomValues] = useState<Record<string, PropertyValue>>({});
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [projectDriIds, setProjectDriIds] = useState<string[]>([]);
+  const [projectWorkerIds, setProjectWorkerIds] = useState<string[]>([]);
+  const [taskAssigneeIds, setTaskAssigneeIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const requiredParent: Record<ItemKind, ItemKind | null> = { objective: null, key_result: "objective", initiative: "key_result", project: "initiative", task: "project" };
   const parentKind = requiredParent[kind];
   const parentOptions = parentKind ? items.filter((entry) => entry.kind === parentKind) : [];
   const projectProperties = kind === "project" ? properties : [];
+  const driProperty = properties.find(isDriProperty);
+  const workerProperty = properties.find(isWorkerProperty);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/team")
+      .then(async (response) => response.ok ? response.json() as Promise<TeamData> : Promise.reject())
+      .then((data) => { if (!cancelled) setTeamMembers(data.members); })
+      .catch(() => { if (!cancelled) setTeamMembers([]); });
+    return () => { cancelled = true; };
+  }, []);
 
   function updateCustomValue(property: PropertyDefinition, value: string | boolean) {
     setCustomValues((current) => ({
@@ -1548,13 +1716,16 @@ function CreateItemPanel({ initialKind, items, routines, properties, onClose, on
     const routineId = kind === "task" && taskContainer.startsWith("routine:") ? taskContainer.slice(8) : null;
     const taskParentId = kind === "task" && taskContainer.startsWith("project:") ? taskContainer.slice(8) : null;
     const nextParentId = kind === "task" ? taskParentId : parentId || null;
+    const projectWorkers = pickMembers(teamMembers, projectWorkerIds);
+    const workerDescription = kind === "project" && projectWorkers.length ? `## 하위 업무자\n${memberMentionText(projectWorkers)}` : "";
+    const nextDescription = kind === "project" ? [description.trim(), workerDescription].filter(Boolean).join("\n\n") : "";
     const response = await fetch("/api/items", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title,
         kind,
-        description: kind === "project" ? description : "",
+        description: nextDescription,
         parentId: nextParentId,
         routineId,
         status: kind === "task" && !nextParentId && !routineId ? "inbox" : status,
@@ -1566,6 +1737,11 @@ function CreateItemPanel({ initialKind, items, routines, properties, onClose, on
     if (!response.ok) { setSaving(false); return; }
     const data = await response.json() as { item: OkrptrItem };
     const filledValues = Object.fromEntries(Object.entries(customValues).filter(([, value]) => value !== null && value !== ""));
+    const projectDri = pickMembers(teamMembers, projectDriIds);
+    const taskAssignees = pickMembers(teamMembers, taskAssigneeIds);
+    if (kind === "project" && driProperty && projectDri.length) filledValues[driProperty.id] = memberMentionText(projectDri);
+    if (kind === "project" && workerProperty && projectWorkers.length) filledValues[workerProperty.id] = memberMentionText(projectWorkers);
+    if (kind === "task" && driProperty && taskAssignees.length) filledValues[driProperty.id] = memberMentionText(taskAssignees);
     for (const [propertyId, value] of Object.entries(filledValues)) {
       const propertyResponse = await fetch("/api/property-values", {
         method: "PATCH",
@@ -1599,8 +1775,17 @@ function CreateItemPanel({ initialKind, items, routines, properties, onClose, on
                 <label><span>주기</span><select value={cadence} onChange={(event) => setCadence(event.target.value as Cadence)}>{Object.entries(cadenceLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
                 <label><span>기한</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
               </div>
+              {teamMembers.length > 0 && driProperty && (
+                <MemberMentionPicker label="DRI" members={teamMembers} selectedIds={projectDriIds} onChange={setProjectDriIds} placeholder="@실명으로 찾기" maxSelected={1} />
+              )}
+              {teamMembers.length > 0 && (
+                <MemberMentionPicker label="하위 업무자" members={teamMembers} selectedIds={projectWorkerIds} onChange={setProjectWorkerIds} placeholder="@실명으로 여러 명 태그" />
+              )}
               {projectProperties.length > 0 && <div className="project-field-grid custom-project-fields">{projectProperties.map((property) => <CreatePropertyField key={property.id} property={property} value={customValues[property.id] ?? null} onChange={updateCustomValue} />)}</div>}
             </section>
+          )}
+          {kind === "task" && teamMembers.length > 0 && driProperty && (
+            <MemberMentionPicker label="담당자" members={teamMembers} selectedIds={taskAssigneeIds} onChange={setTaskAssigneeIds} placeholder="@실명으로 찾기" maxSelected={1} />
           )}
           <button disabled={!title.trim() || saving}>{saving ? "저장 중" : "만들기"}</button>
         </form>
@@ -2453,13 +2638,20 @@ function GroupDetail({ detail, team, onBack, onChange, onGroupChange, onDeleted,
   const [description, setDescription] = useState(detail.group.description);
   const [color, setColor] = useState<GroupColor>(detail.group.color);
   const [visibility, setVisibility] = useState<GroupVisibility>(detail.group.visibility);
-  const [memberId, setMemberId] = useState("");
+  const [memberIds, setMemberIds] = useState<string[]>([]);
   const [memberRole, setMemberRole] = useState<GroupRole>("member");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const availableMembers = team.members.filter((member) => !detail.members.some((entry) => entry.memberId === member.id));
-  const selectedWorkspaceMember = team.members.find((member) => member.id === memberId);
+  const selectedWorkspaceMembers = pickMembers(team.members, memberIds);
+  const selectedHasViewer = selectedWorkspaceMembers.some((member) => member.role === "viewer");
   const groupUrl = typeof window === "undefined" ? `/?group=${encodeURIComponent(detail.group.handle)}` : `${window.location.origin}${window.location.pathname}?group=${encodeURIComponent(detail.group.handle)}`;
+
+  useEffect(() => {
+    if (memberRole === "lead" && selectedHasViewer) {
+      setMemberRole("member");
+    }
+  }, [memberRole, selectedHasViewer]);
 
   function copyGroupUrl() {
     void navigator.clipboard.writeText(groupUrl);
@@ -2497,12 +2689,16 @@ function GroupDetail({ detail, team, onBack, onChange, onGroupChange, onDeleted,
 
   async function addMember(event: FormEvent) {
     event.preventDefault();
-    if (!memberId) return;
-    const response = await fetch("/api/group-members", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ groupId: detail.group.id, memberId, role: memberRole }) });
-    const data = await response.json() as { member?: GroupMember; error?: string };
-    if (!response.ok || !data.member) { setError(data.error ?? "그룹 멤버를 추가하지 못했습니다."); return; }
-    const next = { ...detail, group: { ...detail.group, memberCount: detail.group.memberCount + 1 }, members: [...detail.members, data.member] };
-    onChange(next); onGroupChange(next.group); setMemberId(""); onNotice("그룹에 멤버를 추가했습니다.");
+    if (!memberIds.length) return;
+    const added: GroupMember[] = [];
+    for (const memberId of memberIds) {
+      const response = await fetch("/api/group-members", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ groupId: detail.group.id, memberId, role: memberRole }) });
+      const data = await response.json() as { member?: GroupMember; error?: string };
+      if (!response.ok || !data.member) { setError(data.error ?? "그룹 멤버를 추가하지 못했습니다."); return; }
+      added.push(data.member);
+    }
+    const next = { ...detail, group: { ...detail.group, memberCount: detail.group.memberCount + added.length }, members: [...detail.members, ...added] };
+    onChange(next); onGroupChange(next.group); setMemberIds([]); onNotice(`${added.length}명을 그룹에 추가했습니다.`);
   }
 
   async function changeGroupRole(member: GroupMember, role: GroupRole) {
@@ -2530,12 +2726,80 @@ function GroupDetail({ detail, team, onBack, onChange, onGroupChange, onDeleted,
     onNotice(member.isCurrent ? "그룹에서 나갔습니다." : "그룹에서 멤버를 제거했습니다.");
   }
 
-  return <div className="group-detail"><header className="group-detail-head"><button className="icon-button" onClick={onBack} aria-label="그룹 목록" title="그룹 목록"><ArrowLeft size={16} /></button><i className={`group-swatch group-${detail.group.color}`} /><div><b>{detail.group.name}</b><small>@{detail.group.handle}</small></div><div className="group-head-actions">{detail.group.archived && <span className="group-archived">보관됨</span>}<button className="icon-button" onClick={copyGroupUrl} aria-label="그룹 주소 복사" title="그룹 주소 복사"><Copy size={13} /></button>{detail.group.canArchive && <button className="icon-button danger" onClick={() => void permanentlyDelete()} aria-label="그룹 삭제" title="그룹 삭제"><Trash2 size={13} /></button>}</div></header><div className="group-address-row"><div><b>그룹 주소</b><code>{groupUrl}</code></div><button className="icon-button" onClick={copyGroupUrl} aria-label="그룹 주소 복사" title="그룹 주소 복사"><Copy size={13} /></button></div>{detail.group.canEdit ? <form className="group-detail-form" onSubmit={save}><label><span>이름</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label><label><span>핸들</span><div className="handle-input"><AtSign size={13} /><input value={handle} onChange={(event) => setHandle(event.target.value)} maxLength={32} /></div></label><label><span>설명</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} rows={3} /></label><div className="group-setting-row"><span>색상</span><div className="color-swatches">{groupColors.map((entry) => <button type="button" className={color === entry ? "active" : ""} key={entry} onClick={() => setColor(entry)} title={groupColorLabel(entry)} aria-label={groupColorLabel(entry)}><i className={`group-swatch group-${entry}`} /></button>)}</div></div><div className="group-setting-row"><span>공개 범위</span><div className="visibility-control"><button type="button" className={visibility === "open" ? "active" : ""} onClick={() => setVisibility("open")}><Users size={12} />공개</button><button type="button" className={visibility === "private" ? "active" : ""} onClick={() => setVisibility("private")}><LockKeyhole size={12} />비공개</button></div></div>{error && <p className="form-error">{error}</p>}<div className="group-form-actions"><button className="save-group" disabled={!name.trim() || !handle.trim() || saving}><Check size={13} />저장</button>{detail.group.canArchive && (detail.group.archived ? <><button type="button" onClick={() => void setArchived(false)}><RotateCcw size={13} />복구</button><button type="button" className="danger" onClick={() => void permanentlyDelete()}><Trash2 size={13} />영구 삭제</button></> : <><button type="button" onClick={() => void setArchived(true)}><Archive size={13} />보관</button><button type="button" className="danger" onClick={() => void permanentlyDelete()}><Trash2 size={13} />삭제</button></>)}</div></form> : <div className="group-summary"><p>{detail.group.description || "설명 없음"}</p><span>{detail.group.visibility === "private" ? <LockKeyhole size={12} /> : <Users size={12} />}{detail.group.visibility === "private" ? "비공개" : "공개"}</span></div>}<section className="group-members"><header><b>멤버</b><span>{detail.members.length}</span></header>{detail.canManageMembers && <form className="group-member-add" onSubmit={addMember}><select value={memberId} onChange={(event) => { const nextMember = team.members.find((member) => member.id === event.target.value); setMemberId(event.target.value); if (nextMember?.role === "viewer") setMemberRole("member"); }} aria-label="추가할 멤버"><option value="">멤버 선택</option>{availableMembers.map((member) => <option value={member.id} key={member.id}>{member.displayName}{member.status === "invited" ? " (초대 대기)" : ""}</option>)}</select><select value={memberRole} onChange={(event) => setMemberRole(event.target.value as GroupRole)} aria-label="그룹 역할"><option value="member">Member</option><option value="lead" disabled={selectedWorkspaceMember?.role === "viewer"}>Lead</option></select><button disabled={!memberId} aria-label="그룹에 추가" title="그룹에 추가"><UserPlus size={13} /></button></form>}<div className="group-member-list">{detail.members.map((member) => <div className="group-member-row" key={member.memberId}><span className="team-avatar">{member.displayName.slice(0, 1).toLocaleUpperCase()}</span><div><b>{member.displayName}{member.isCurrent && <em>나</em>}</b><small>{member.status === "invited" ? `${member.email} · 초대 대기` : member.email || teamRoleLabel(member.workspaceRole)}</small></div>{detail.canManageMembers ? <select value={member.groupRole} onChange={(event) => void changeGroupRole(member, event.target.value as GroupRole)} aria-label={`${member.displayName} 그룹 역할`}><option value="lead" disabled={member.workspaceRole === "viewer"}>Lead</option><option value="member">Member</option></select> : <span className="member-role">{member.groupRole === "lead" ? "Lead" : "Member"}</span>}{detail.canManageMembers && <button className="icon-button danger" onClick={() => void removeMember(member)} aria-label="그룹에서 제거" title="그룹에서 제거"><X size={13} /></button>}</div>)}{!detail.members.length && <EmptyState icon={Users} title="그룹 멤버가 없습니다" />}</div></section></div>;
+  return (
+    <div className="group-detail">
+      <header className="group-detail-head">
+        <button className="icon-button" onClick={onBack} aria-label="그룹 목록" title="그룹 목록"><ArrowLeft size={16} /></button>
+        <i className={`group-swatch group-${detail.group.color}`} />
+        <div><b>{detail.group.name}</b><small>@{detail.group.handle}</small></div>
+        <div className="group-head-actions">
+          {detail.group.archived && <span className="group-archived">보관됨</span>}
+          <button className="icon-button" onClick={copyGroupUrl} aria-label="그룹 주소 복사" title="그룹 주소 복사"><Copy size={13} /></button>
+          {detail.group.canArchive && <button className="icon-button danger" onClick={() => void permanentlyDelete()} aria-label="그룹 삭제" title="그룹 삭제"><Trash2 size={13} /></button>}
+        </div>
+      </header>
+      <div className="group-address-row">
+        <div><b>그룹 주소</b><code>{groupUrl}</code></div>
+        <button className="icon-button" onClick={copyGroupUrl} aria-label="그룹 주소 복사" title="그룹 주소 복사"><Copy size={13} /></button>
+      </div>
+      {detail.group.canEdit ? (
+        <form className="group-detail-form" onSubmit={save}>
+          <label><span>이름</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label>
+          <label><span>핸들</span><div className="handle-input"><AtSign size={13} /><input value={handle} onChange={(event) => setHandle(event.target.value)} maxLength={32} /></div></label>
+          <label><span>설명</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} rows={3} /></label>
+          <div className="group-setting-row"><span>색상</span><div className="color-swatches">{groupColors.map((entry) => <button type="button" className={color === entry ? "active" : ""} key={entry} onClick={() => setColor(entry)} title={groupColorLabel(entry)} aria-label={groupColorLabel(entry)}><i className={`group-swatch group-${entry}`} /></button>)}</div></div>
+          <div className="group-setting-row"><span>공개 범위</span><div className="visibility-control"><button type="button" className={visibility === "open" ? "active" : ""} onClick={() => setVisibility("open")}><Users size={12} />공개</button><button type="button" className={visibility === "private" ? "active" : ""} onClick={() => setVisibility("private")}><LockKeyhole size={12} />비공개</button></div></div>
+          {error && <p className="form-error">{error}</p>}
+          <div className="group-form-actions">
+            <button className="save-group" disabled={!name.trim() || !handle.trim() || saving}><Check size={13} />저장</button>
+            {detail.group.canArchive && (detail.group.archived ? (
+              <>
+                <button type="button" onClick={() => void setArchived(false)}><RotateCcw size={13} />복구</button>
+                <button type="button" className="danger" onClick={() => void permanentlyDelete()}><Trash2 size={13} />영구 삭제</button>
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={() => void setArchived(true)}><Archive size={13} />보관</button>
+                <button type="button" className="danger" onClick={() => void permanentlyDelete()}><Trash2 size={13} />삭제</button>
+              </>
+            ))}
+          </div>
+        </form>
+      ) : (
+        <div className="group-summary">
+          <p>{detail.group.description || "설명 없음"}</p>
+          <span>{detail.group.visibility === "private" ? <LockKeyhole size={12} /> : <Users size={12} />}{detail.group.visibility === "private" ? "비공개" : "공개"}</span>
+        </div>
+      )}
+      <section className="group-members">
+        <header><b>멤버</b><span>{detail.members.length}</span></header>
+        {detail.canManageMembers && (
+          <form className="group-member-add" onSubmit={addMember}>
+            <MemberMentionPicker label="실명 태그" members={availableMembers} selectedIds={memberIds} onChange={setMemberIds} placeholder="@실명 또는 이메일" />
+            <select value={memberRole} onChange={(event) => setMemberRole(event.target.value as GroupRole)} aria-label="그룹 역할">
+              <option value="member">Member</option>
+              <option value="lead" disabled={selectedHasViewer}>Lead</option>
+            </select>
+            <button disabled={!memberIds.length} aria-label="그룹에 추가" title="그룹에 추가"><UserPlus size={13} /></button>
+          </form>
+        )}
+        <div className="group-member-list">
+          {detail.members.map((member) => (
+            <div className="group-member-row" key={member.memberId}>
+              <span className="team-avatar">{memberInitial(member)}</span>
+              <div><b>{member.displayName}{member.isCurrent && <em>나</em>}</b><small>{member.status === "invited" ? `${member.email} · 초대 대기` : member.email || teamRoleLabel(member.workspaceRole)}</small></div>
+              {detail.canManageMembers ? <select value={member.groupRole} onChange={(event) => void changeGroupRole(member, event.target.value as GroupRole)} aria-label={`${member.displayName} 그룹 역할`}><option value="lead" disabled={member.workspaceRole === "viewer"}>Lead</option><option value="member">Member</option></select> : <span className="member-role">{member.groupRole === "lead" ? "Lead" : "Member"}</span>}
+              {detail.canManageMembers && <button className="icon-button danger" onClick={() => void removeMember(member)} aria-label="그룹에서 제거" title="그룹에서 제거"><X size={13} /></button>}
+            </div>
+          ))}
+          {!detail.members.length && <EmptyState icon={Users} title="그룹 멤버가 없습니다" />}
+        </div>
+      </section>
+    </div>
+  );
 }
 
-function IntegrationModal({ google, slack, onGoogleChange, onSlackChange, onNotice, onClose }: { google: GoogleConnectionStatus | null; slack: SlackConnectionStatus | null; onGoogleChange: (status: GoogleConnectionStatus | null) => void; onSlackChange: (status: SlackConnectionStatus | null) => void; onNotice: (message: string) => void; onClose: () => void }) {
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [disconnectingSlack, setDisconnectingSlack] = useState(false);
+function IntegrationModal({ onNotice, onClose }: { onNotice: (message: string) => void; onClose: () => void }) {
   const [connections, setConnections] = useState<IntegrationConnection[]>([]);
   const [loadingConnections, setLoadingConnections] = useState(true);
   const [creatingConnection, setCreatingConnection] = useState(false);
@@ -2594,31 +2858,6 @@ function IntegrationModal({ google, slack, onGoogleChange, onSlackChange, onNoti
     }
   }
 
-  async function disconnectGoogle() {
-    setDisconnecting(true);
-    const response = await fetch("/api/google/disconnect", { method: "POST" });
-    setDisconnecting(false);
-    if (!response.ok) { onNotice("Google 연결을 해제하지 못했습니다."); return; }
-    const next = google ? { ...google, connected: false, email: null, displayName: null, connectedAt: null, updatedAt: null } : null;
-    onGoogleChange(next);
-    onNotice("Google Calendar 연결을 해제했습니다.");
-  }
-  async function disconnectSlack() {
-    setDisconnectingSlack(true);
-    const response = await fetch("/api/slack/disconnect", { method: "POST" });
-    setDisconnectingSlack(false);
-    if (!response.ok) { onNotice("Slack 연결을 해제하지 못했습니다."); return; }
-    const next = slack ? { ...slack, connected: false, teamName: null, teamId: null, botUserId: null, connectedAt: null, updatedAt: null } : null;
-    onSlackChange(next);
-    onNotice("Slack bot 연결을 해제했습니다.");
-  }
-  function connectSlack() {
-    if (!slack?.configured) {
-      onNotice("SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET 설정이 필요합니다.");
-      return;
-    }
-    window.location.href = `/api/slack/auth?returnTo=${encodeURIComponent("/")}`;
-  }
   const hasConnectedConversation = connections.some((connection) => connection.lastUsedAt);
   const connectionStatus = loadingConnections ? "확인 중" : hasConnectedConversation ? "연결됨" : connections.length > 0 ? "연결 대기" : "연결 없음";
   return <div className="modal-backdrop"><section className="integration-modal"><header><h2>ChatGPT 연동</h2><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header><div className="integration-sections">
@@ -2627,9 +2866,45 @@ function IntegrationModal({ google, slack, onGoogleChange, onSlackChange, onNoti
       <div className="chatgpt-simple-actions"><button className="copy-primary" onClick={() => void copyCodexConnectionPrompt()} disabled={creatingConnection}>{creatingConnection ? <LoaderCircle className="spin" size={13} /> : <Copy size={13} />}{creatingConnection ? "복사 준비 중" : "MCP 연결 설정 복사"}</button></div>
       <details className="connection-management"><summary><span>연결 관리</span><ChevronDown size={13} /></summary><div><span>발급된 연결 키 {connections.length}개</span>{connections.length > 0 && <button onClick={() => void revokeCodexConnections()} disabled={revokingConnections}>{revokingConnections ? "해제 중" : "연결 해제"}</button>}</div></details>
     </section>
-    <section className="integration-card"><header><CalendarDays size={18} /><div><b>Google Calendar</b><p>{google?.connected ? `${google.email} 계정으로 연결됨` : google?.configured ? "Task 기한을 Google Calendar 이벤트로 보냅니다" : "Google OAuth 설정이 필요합니다"}</p></div><span className={google?.connected ? "connection-live" : "connection-local"} /></header><div className="integration-actions">{google?.connected ? <button onClick={() => void disconnectGoogle()} disabled={disconnecting}>{disconnecting ? "해제 중" : "연결 해제"}</button> : <button onClick={() => { if (!google?.configured) { onNotice("GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET 설정이 필요합니다."); return; } window.location.href = `/api/google/auth?returnTo=${encodeURIComponent("/")}`; }}>Google로 연결</button>}<small>권한: Google 계정 확인, Calendar 이벤트 생성/수정</small></div></section>
-    <section className="integration-card"><header><Hash size={18} /><div><b>Slack bot</b><p>{slack?.connected ? `${slack.teamName} 워크스페이스에 설치됨` : slack?.configured ? "/okrptr 명령으로 인박스 Task를 만듭니다" : "Slack 앱 설정이 필요합니다"}</p></div><span className={slack?.connected ? "connection-live" : "connection-local"} /></header><div className="integration-actions">{slack?.connected ? <button onClick={() => void disconnectSlack()} disabled={disconnectingSlack}>{disconnectingSlack ? "해제 중" : "연결 해제"}</button> : <button onClick={connectSlack}>Slack에 설치</button>}<small>권한: slash command, bot 메시지 작성</small></div><div className="integration-url-grid"><div><b>OAuth Redirect URL</b><code>{slack?.redirectUrl ?? "/api/slack/callback"}</code></div><button className="icon-button" onClick={() => void navigator.clipboard.writeText(slack?.redirectUrl ?? `${window.location.origin}/api/slack/callback`)} title="주소 복사"><Copy size={14} /></button><div><b>Slash Command URL</b><code>{slack?.commandUrl ?? "/api/slack/commands"}</code></div><button className="icon-button" onClick={() => void navigator.clipboard.writeText(slack?.commandUrl ?? `${window.location.origin}/api/slack/commands`)} title="주소 복사"><Copy size={14} /></button></div></section>
   </div><footer><span><CheckCircle2 size={15} />Objective → Key Result → Initiative → Project → Task</span><button onClick={onClose}>닫기</button></footer></section></div>;
+}
+
+function AppIntegrationsModal({ google, slack, workspaceName, canManageSlack, onGoogleChange, onSlackChange, onNotice, onClose }: { google: GoogleConnectionStatus | null; slack: SlackConnectionStatus | null; workspaceName: string; canManageSlack: boolean; onGoogleChange: (status: GoogleConnectionStatus | null) => void; onSlackChange: (status: SlackConnectionStatus | null) => void; onNotice: (message: string) => void; onClose: () => void }) {
+  const [disconnectingGoogle, setDisconnectingGoogle] = useState(false);
+  const [disconnectingSlack, setDisconnectingSlack] = useState(false);
+
+  async function disconnectGoogle() {
+    setDisconnectingGoogle(true);
+    const response = await fetch("/api/google/disconnect", { method: "POST" });
+    setDisconnectingGoogle(false);
+    if (!response.ok) { onNotice("Google 연결을 해제하지 못했습니다."); return; }
+    onGoogleChange(google ? { ...google, connected: false, email: null, displayName: null, connectedAt: null, updatedAt: null } : null);
+    onNotice("Google Calendar 연결을 해제했습니다.");
+  }
+
+  async function disconnectSlack() {
+    setDisconnectingSlack(true);
+    const response = await fetch("/api/slack/disconnect", { method: "POST" });
+    setDisconnectingSlack(false);
+    if (!response.ok) { onNotice("Slack 연결을 해제하지 못했습니다."); return; }
+    onSlackChange(slack ? { ...slack, connected: false, teamName: null, teamId: null, botUserId: null, connectedAt: null, updatedAt: null } : null);
+    onNotice("Slack bot 연결을 해제했습니다.");
+  }
+
+  function connectGoogle() {
+    if (!google?.configured) return;
+    window.location.href = `/api/google/auth?returnTo=${encodeURIComponent("/")}`;
+  }
+
+  function connectSlack() {
+    if (!slack?.configured || !canManageSlack) return;
+    window.location.href = `/api/slack/auth?returnTo=${encodeURIComponent("/")}`;
+  }
+
+  return <div className="modal-backdrop"><section className="integration-modal app-integrations-modal"><header><div><h2>앱 연동</h2><p>개인 계정과 워크스페이스 앱을 구분해 관리합니다.</p></div><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header><div className="integration-sections">
+    <section className="integration-card"><header><CalendarDays size={18} /><div><b>Google Calendar</b><p>{google?.connected ? `${google.email} 계정으로 연결됨` : "내 Task 일정을 개인 캘린더와 연결"}</p></div><span className={google?.connected ? "connection-live" : "connection-local"} /></header><div className="integration-scope"><b>개인 연결</b><span>현재 사용자에게만 적용</span></div><div className="integration-actions">{google?.connected ? <button className="secondary-danger" onClick={() => void disconnectGoogle()} disabled={disconnectingGoogle}>{disconnectingGoogle ? "해제 중" : "연결 해제"}</button> : <button onClick={connectGoogle} disabled={!google?.configured}>{google?.configured ? "Google로 연결" : "준비 중"}</button>}<small>{google?.configured ? "Google 계정 확인 · Calendar 이벤트 생성 및 수정" : "서비스 연결 설정을 준비 중입니다."}</small></div></section>
+    <section className="integration-card"><header><Hash size={18} /><div><b>Slack bot</b><p>{slack?.connected ? `${slack.teamName}에 설치됨` : "/okrptr 명령으로 Task를 워크스페이스에 저장"}</p></div><span className={slack?.connected ? "connection-live" : "connection-local"} /></header><div className="integration-scope"><b>워크스페이스 연결</b><span>{workspaceName} 전체에 적용</span></div><div className="integration-actions">{slack?.connected ? <button className="secondary-danger" onClick={() => void disconnectSlack()} disabled={disconnectingSlack || !canManageSlack}>{disconnectingSlack ? "해제 중" : canManageSlack ? "연결 해제" : "관리자만 변경"}</button> : <button onClick={connectSlack} disabled={!slack?.configured || !canManageSlack}>{!canManageSlack ? "관리자만 설치" : slack?.configured ? "Slack에 설치" : "준비 중"}</button>}<small>{slack?.configured ? "Slash command · bot 메시지 작성" : "서비스 연결 설정을 준비 중입니다."}</small></div></section>
+  </div><footer><span><Plug size={15} />연동별 적용 범위와 권한을 확인하세요.</span><button onClick={onClose}>닫기</button></footer></section></div>;
 }
 
 function EmptyState({ icon: Icon, title }: { icon: LucideIcon; title: string }) { return <div className="empty-state"><Icon size={22} /><span>{title}</span></div>; }

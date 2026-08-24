@@ -7,7 +7,7 @@ export async function GET(request: Request) {
   if (authorization instanceof Response) return authorization;
   await ensureWorkspace(authorization.ownerId);
   const runtime = env as SlackRuntimeEnv;
-  const connection = await getSlackConnection(authorization.ownerId, authorization.userId);
+  const connection = await getSlackConnection(authorization.ownerId);
   return Response.json({
     slack: serializeSlackConnection(connection, slackConfigured(runtime), {
       redirectUrl: slackRedirectUri(runtime, request),

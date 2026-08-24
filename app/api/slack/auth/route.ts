@@ -1,10 +1,11 @@
 import { env } from "cloudflare:workers";
-import { authorizeRequest, createSlackOAuthState, ensureWorkspace } from "@/lib/pace-data";
+import { authorizeRequest, canManageTeam, createSlackOAuthState, ensureWorkspace } from "@/lib/pace-data";
 import { slackAuthorizationUrl, slackConfigured, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 
 export async function GET(request: Request) {
   const authorization = await authorizeRequest(request, { allowViewerWrite: true });
   if (authorization instanceof Response) return authorization;
+  if (!canManageTeam(authorization)) return Response.json({ error: "Workspace admin access is required" }, { status: 403 });
   await ensureWorkspace(authorization.ownerId);
 
   const runtime = env as SlackRuntimeEnv;

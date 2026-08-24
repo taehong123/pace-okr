@@ -1038,12 +1038,13 @@ export async function consumeSlackOAuthState(state: string) {
   return saved;
 }
 
-export async function getSlackConnection(ownerId: string, userId: string) {
+export async function getSlackConnection(ownerId: string) {
   await ensureSchema();
   const [connection] = await getDb()
     .select()
     .from(slackConnections)
-    .where(and(eq(slackConnections.ownerId, ownerId), eq(slackConnections.userId, userId)))
+    .where(eq(slackConnections.ownerId, ownerId))
+    .orderBy(desc(slackConnections.updatedAt))
     .limit(1);
   return connection ?? null;
 }
@@ -1080,7 +1081,7 @@ export async function saveSlackConnection(input: {
     scope: input.scope,
     updatedAt: now,
   };
-  await getDb().delete(slackConnections).where(and(eq(slackConnections.ownerId, input.ownerId), eq(slackConnections.userId, input.userId)));
+  await getDb().delete(slackConnections).where(eq(slackConnections.ownerId, input.ownerId));
   const [connection] = await getDb()
     .insert(slackConnections)
     .values({
@@ -1097,10 +1098,10 @@ export async function saveSlackConnection(input: {
   return connection;
 }
 
-export async function deleteSlackConnection(ownerId: string, userId: string) {
+export async function deleteSlackConnection(ownerId: string) {
   await ensureSchema();
-  const current = await getSlackConnection(ownerId, userId);
-  await getDb().delete(slackConnections).where(and(eq(slackConnections.ownerId, ownerId), eq(slackConnections.userId, userId)));
+  const current = await getSlackConnection(ownerId);
+  await getDb().delete(slackConnections).where(eq(slackConnections.ownerId, ownerId));
   return current;
 }
 
@@ -1438,19 +1439,20 @@ export async function getTeam(ownerId: string, currentUserId: string) {
   };
 }
 
-export async function inviteTeamMember(ownerId: string, actorUserId: string, emailInput: string, role: Exclude<TeamRole, "owner">) {
+export async function inviteTeamMember(ownerId: string, actorUserId: string, emailInput: string, role: Exclude<TeamRole, "owner">, displayNameInput = "") {
   const email = normalizeEmail(emailInput);
   if (!email || !/^\S+@\S+\.\S+$/.test(email)) throw new Error("A valid email is required");
   if (!(["admin", "member", "viewer"] as TeamRole[]).includes(role)) throw new Error("Unsupported team role");
   const [existing] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, ownerId), eq(workspaceMembers.email, email))).limit(1);
   if (existing) throw new Error("This email is already a workspace member or invitation");
   const now = new Date().toISOString();
+  const displayName = displayNameInput.trim() || email.split("@")[0];
   const member: WorkspaceMember = {
     id: crypto.randomUUID(),
     workspaceId: ownerId,
     userId: null,
     email,
-    displayName: email.split("@")[0],
+    displayName,
     role,
     status: "invited",
     invitedByUserId: actorUserId,

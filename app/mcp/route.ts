@@ -867,13 +867,13 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     {
       title: "Invite a workspace team member",
       description: "Create an email invitation with an Admin, Member, or Viewer role.",
-      inputSchema: { email: z.string().email(), role: z.enum(["admin", "member", "viewer"]).default("member") },
+      inputSchema: { email: z.string().email(), role: z.enum(["admin", "member", "viewer"]).default("member"), displayName: z.string().optional() },
       outputSchema: { member: teamMemberOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ email, role }) => {
+    async ({ email, role, displayName }) => {
       if (!canManageTeam(authorization)) throw new Error("Owner or Admin access is required.");
-      const member = await inviteTeamMember(ownerId, authorization.userId, email, role as Exclude<TeamRole, "owner">);
+      const member = await inviteTeamMember(ownerId, authorization.userId, email, role as Exclude<TeamRole, "owner">, displayName ?? "");
       return { structuredContent: { member }, content: [{ type: "text", text: `Invited ${email} as ${role}.` }] };
     },
   );
