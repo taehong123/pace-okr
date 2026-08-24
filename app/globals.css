@@ -358,9 +358,14 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .chatgpt-simple-actions { display: flex; align-items: center; gap: 10px; }
 .chatgpt-simple-actions button { height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border-radius: 4px; font-size: 10px; cursor: pointer; }
 .chatgpt-simple-actions .copy-primary { border: 0; background: var(--ink); color: white; }
-.chatgpt-simple-actions .revoke-link { border: 0; background: transparent; color: var(--red); }
-.chatgpt-simple-actions .revoke-link:hover { background: #fff4f2; }
 .chatgpt-simple-actions button:disabled { opacity: .55; cursor: default; }
+.connection-management { border-top: 1px solid var(--line); padding-top: 8px; }
+.connection-management summary { color: var(--muted); font-size: 10px; cursor: pointer; }
+.connection-management > div { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 7px; }
+.connection-management > div span { color: var(--muted); font-size: 9px; }
+.connection-management button { height: 27px; padding: 0 8px; border: 0; border-radius: 4px; background: transparent; color: var(--red); font-size: 9px; cursor: pointer; }
+.connection-management button:hover { background: #fff4f2; }
+.connection-management button:disabled { opacity: .5; cursor: default; }
 .spin { animation: spin .85s linear infinite; }
 .connector-steps { display: grid; gap: 6px; }
 .connector-steps > div { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 8px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 5px; background: #fbfbfa; }

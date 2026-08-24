@@ -59,6 +59,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(layout, /openGraph/);
   assert.doesNotMatch(layout, /\/og\.png/);
   assert.match(page, /연결 내용 복사/);
+  assert.match(page, /연결 관리/);
+  assert.doesNotMatch(page, /revoke-link/);
   assert.match(page, /\/api\/integration-tokens/);
   assert.match(page, /\/api\/okr-organize/);
   assert.match(page, /OKR 대화/);
