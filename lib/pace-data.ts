@@ -100,7 +100,7 @@ export type RequestAuthorization = {
   apiToken: boolean;
 };
 
-export type IntegrationTokenSummary = Pick<IntegrationToken, "id" | "name" | "tokenPrefix" | "createdAt" | "revokedAt">;
+export type IntegrationTokenSummary = Pick<IntegrationToken, "id" | "name" | "tokenPrefix" | "createdAt" | "lastUsedAt" | "revokedAt">;
 
 type RuntimeEnv = typeof env & { OKRPTR_API_TOKEN?: string; OKITA_API_TOKEN?: string; PACE_API_TOKEN?: string };
 let schemaReady: Promise<void> | null = null;
@@ -172,6 +172,7 @@ async function ensureSchema() {
           token_hash TEXT NOT NULL,
           token_prefix TEXT NOT NULL,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          last_used_at TEXT,
           revoked_at TEXT
         )`),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_integration_tokens_hash ON integration_tokens(token_hash)"),
@@ -416,6 +417,7 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE okr_cycles ADD COLUMN department TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN cycle_id TEXT REFERENCES okr_cycles(id) ON DELETE SET NULL");
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN routine_id TEXT REFERENCES routines(id) ON DELETE SET NULL");
+      await addColumnIfMissing(d1, "ALTER TABLE integration_tokens ADD COLUMN last_used_at TEXT");
       await d1.batch([
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_routine ON items(owner_id, routine_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_cycle ON items(owner_id, cycle_id)"),
@@ -1174,6 +1176,7 @@ function serializeIntegrationToken(record: IntegrationToken): IntegrationTokenSu
     name: record.name,
     tokenPrefix: record.tokenPrefix,
     createdAt: record.createdAt,
+    lastUsedAt: record.lastUsedAt,
     revokedAt: record.revokedAt,
   };
 }
@@ -1202,6 +1205,7 @@ export async function authorizeRequest(
       isNull(integrationTokens.revokedAt),
     )).limit(1);
     if (token) {
+      await getDb().update(integrationTokens).set({ lastUsedAt: new Date().toISOString() }).where(eq(integrationTokens.id, token.id));
       const [membership] = await getDb().select().from(workspaceMembers).where(and(
         eq(workspaceMembers.workspaceId, token.workspaceId),
         eq(workspaceMembers.userId, token.userId),

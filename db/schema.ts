@@ -73,6 +73,7 @@ export const integrationTokens = sqliteTable(
     tokenHash: text("token_hash").notNull(),
     tokenPrefix: text("token_prefix").notNull(),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    lastUsedAt: text("last_used_at"),
     revokedAt: text("revoked_at"),
   },
   (table) => [

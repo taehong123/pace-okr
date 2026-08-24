@@ -61,8 +61,10 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /연결 내용 복사/);
   assert.match(page, /연결 관리/);
   assert.match(page, /연결됨/);
+  assert.match(page, /연결 대기/);
   assert.match(page, /연결 없음/);
   assert.match(page, /발급된 연결 키/);
+  assert.match(page, /lastUsedAt/);
   assert.doesNotMatch(page, /<span>ChatGPT 연동<\/span><i/);
   assert.doesNotMatch(page, /revoke-link/);
   assert.match(page, /\/api\/integration-tokens/);

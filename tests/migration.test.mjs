@@ -284,21 +284,24 @@ test("creates Slack bot connection and OAuth state tables", async () => {
 test("creates revocable workspace-scoped integration tokens", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON;");
-  const [workspaceMigration, tokenMigration] = await Promise.all([
+  const [workspaceMigration, tokenMigration, tokenUsageMigration] = await Promise.all([
     readFile(new URL("../drizzle/0005_wet_roland_deschain.sql", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0016_windy_flatman.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0017_equal_doctor_octopus.sql", import.meta.url), "utf8"),
   ]);
   db.exec(workspaceMigration.replaceAll("--> statement-breakpoint", ""));
   db.exec(tokenMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(tokenUsageMigration.replaceAll("--> statement-breakpoint", ""));
   db.exec(`
     INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
     INSERT INTO integration_tokens (id, workspace_id, user_id, name, token_hash, token_prefix)
       VALUES ('token', 'workspace', 'owner', 'Codex conversation', 'hash', 'okrptr_123...');
   `);
 
-  assert.deepEqual({ ...db.prepare("SELECT workspace_id, user_id, revoked_at FROM integration_tokens WHERE id = 'token'").get() }, {
+  assert.deepEqual({ ...db.prepare("SELECT workspace_id, user_id, last_used_at, revoked_at FROM integration_tokens WHERE id = 'token'").get() }, {
     workspace_id: "workspace",
     user_id: "owner",
+    last_used_at: null,
     revoked_at: null,
   });
   assert.throws(
