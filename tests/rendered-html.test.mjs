@@ -50,15 +50,16 @@ test("server-renders the OKRPTR workspace", async () => {
 });
 
 test("ships product metadata and removes starter assets", async () => {
-  const [layout, page, packageJson] = await Promise.all([
+  const [layout, page, integrationRoute, packageJson] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/integration-tokens/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
   assert.match(layout, /openGraph/);
   assert.doesNotMatch(layout, /\/og\.png/);
-  assert.match(page, /연결 내용 복사/);
+  assert.match(page, /MCP 연결 설정 복사/);
   assert.match(page, /연결 관리/);
   assert.match(page, /연결됨/);
   assert.match(page, /연결 대기/);
@@ -75,7 +76,11 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /팀 OKR/);
   assert.match(page, /개인 OKR/);
   assert.match(page, /루틴부터/);
-  assert.match(page, /전체 액세스로 연 대화창에 붙여넣으세요/);
+  assert.match(page, /이 기기의 새 대화에서도 계속 사용할 수 있습니다/);
+  assert.match(integrationRoute, /공식 플러그인은 현재 지원하지 않으므로/);
+  assert.match(integrationRoute, /\[mcp_servers\.okrptr\]/);
+  assert.match(integrationRoute, /http_headers/);
+  assert.match(integrationRoute, /Codex를 재시작/);
   assert.match(page, /트리거 포인트/);
   assert.match(page, /무엇을 어떻게/);
   assert.match(page, /연결 해제/);
