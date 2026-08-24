@@ -17,6 +17,7 @@ export type GoogleProfile = {
   sub: string;
   email: string;
   name: string;
+  emailVerified: boolean;
 };
 
 export type GoogleCalendarEventPayload = {
@@ -55,6 +56,18 @@ export function googleAuthorizationUrl(runtime: GoogleRuntimeEnv, request: Reque
   return url.toString();
 }
 
+export function googleSignInAuthorizationUrl(runtime: GoogleRuntimeEnv, request: Request, state: string) {
+  const clientId = requireGoogleValue(runtime.GOOGLE_CLIENT_ID, "GOOGLE_CLIENT_ID");
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("redirect_uri", googleRedirectUri(runtime, request));
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", "openid email profile");
+  url.searchParams.set("prompt", "select_account");
+  url.searchParams.set("state", state);
+  return url.toString();
+}
+
 export async function exchangeGoogleCode(runtime: GoogleRuntimeEnv, request: Request, code: string) {
   return googleTokenRequest(runtime, {
     code,
@@ -80,6 +93,7 @@ export async function fetchGoogleProfile(accessToken: string): Promise<GooglePro
     sub: stringValue(data.sub),
     email: stringValue(data.email),
     name: stringValue(data.name),
+    emailVerified: data.email_verified === true,
   };
 }
 

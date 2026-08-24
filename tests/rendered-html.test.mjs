@@ -25,7 +25,7 @@ async function render(path = "/") {
   );
 }
 
-test("server-renders the OKRPTR workspace", async () => {
+test("server-renders the OKRPTR authentication shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
@@ -33,30 +33,23 @@ test("server-renders the OKRPTR workspace", async () => {
   const html = await response.text();
   assert.match(html, /<title>OKRPTR - 목표를 오늘의 실행으로<\/title>/);
   assert.match(html, /OKRPTR/);
-  assert.match(html, /개인 워크스페이스/);
-  assert.match(html, /그룹 관리/);
-  assert.match(html, /OKR 대화/);
-  assert.match(html, /팀 OKR/);
-  assert.match(html, /개인 OKR/);
-  assert.match(html, /루틴부터/);
-  assert.match(html, /처음이면 아래 버튼으로 시작해도 됩니다/);
-  assert.match(html, /목표, 고민, 지표, 해야 할 일을 편하게 적어 주세요/);
-  assert.doesNotMatch(html, /할 일을 입력하면 인박스에 저장됩니다/);
-  assert.match(html, /데일리/);
-  assert.match(html, /추천/);
-  assert.match(html, /루틴/);
+  assert.match(html, /워크스페이스 로그인/);
+  assert.match(html, /세션 확인 중/);
   assert.doesNotMatch(html, /셀프 서브 도입|신규 사용자의 첫 주 활성화율|온보딩 체크리스트/);
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview|react-loading-skeleton/i);
 });
 
 test("ships product metadata and removes starter assets", async () => {
-  const [layout, page, integrationRoute, slackAuthRoute, slackDisconnectRoute, paceData, packageJson] = await Promise.all([
+  const [layout, page, integrationRoute, slackAuthRoute, slackDisconnectRoute, paceData, googleSession, googleSignInRoute, googleCallbackRoute, packageJson] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/integration-tokens/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/auth/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/disconnect/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/google-session.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/auth/google/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/google/callback/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
@@ -103,6 +96,14 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /目標を実行に変えるワークスペース/);
   assert.match(page, /把目标变成行动的工作空间/);
   assert.match(page, /convertir objetivos en acción/);
+  assert.match(page, /Google 계정으로 계속/);
+  assert.match(page, /\/api\/auth\/session/);
+  assert.match(page, /Google 계정 로그아웃/);
+  assert.match(googleSession, /HttpOnly; Secure; SameSite=Lax/);
+  assert.match(googleSession, /crypto\.subtle\.verify\("HMAC"/);
+  assert.match(googleSignInRoute, /googleSignInAuthorizationUrl/);
+  assert.match(googleCallbackRoute, /createGoogleSessionCookie/);
+  assert.match(paceData, /canonicalUserIdForGoogle/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("app/_sites-preview/SkeletonPreview.tsx", projectRoot)));
 });

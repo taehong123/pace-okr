@@ -28,6 +28,8 @@ import {
   Languages,
   LockKeyhole,
   LoaderCircle,
+  LogIn,
+  LogOut,
   Menu,
   MoreHorizontal,
   Plus,
@@ -63,6 +65,8 @@ type GroupVisibility = "open" | "private";
 type GroupRole = "lead" | "member";
 type ProjectTab = "list" | "properties" | "archive";
 type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
+type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "openai" | "local" };
+type AuthState = { status: "loading" | "authenticated" | "unauthenticated"; user: AuthUser | null; reason: string | null };
 
 type ItemAssignment = {
   id: string;
@@ -450,6 +454,7 @@ export default function Home() {
   const [slackStatus, setSlackStatus] = useState<SlackConnectionStatus | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [introLanguage, setIntroLanguage] = useState<IntroLanguage>("ko");
+  const [authState, setAuthState] = useState<AuthState>({ status: "loading", user: null, reason: null });
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -462,6 +467,23 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    void fetch("/api/auth/session", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("unauthenticated");
+        return response.json() as Promise<{ user: AuthUser }>;
+      })
+      .then((data) => { if (active) setAuthState({ status: "authenticated", user: data.user, reason: null }); })
+      .catch(() => {
+        if (!active) return;
+        const reason = new URLSearchParams(window.location.search).get("auth");
+        setAuthState({ status: "unauthenticated", user: null, reason });
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (authState.status !== "authenticated") return;
     let active = true;
     Promise.all([fetch("/api/items"), fetch("/api/properties"), fetch("/api/workspaces"), fetch("/api/workspace-rules"), fetch("/api/okr-cycles"), fetch(`/api/routines?date=${localDate()}`), fetch("/api/project-archives")])
       .then(async ([itemsResponse, propertiesResponse, workspacesResponse, rulesResponse, cyclesResponse, routinesResponse, archivesResponse]) => {
@@ -487,7 +509,7 @@ export default function Home() {
       })
       .catch(() => undefined);
     return () => { active = false; };
-  }, []);
+  }, [authState.status]);
 
   useEffect(() => {
     const group = new URLSearchParams(window.location.search).get("group")?.replace(/^@/, "").trim();
@@ -501,6 +523,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (authState.status !== "authenticated") return;
     let active = true;
     void fetch("/api/google/status")
       .then(async (response) => {
@@ -517,9 +540,10 @@ export default function Home() {
       .then((data) => { if (active) setSlackStatus(data.slack); })
       .catch(() => { if (active) setSlackStatus(null); });
     return () => { active = false; };
-  }, []);
+  }, [authState.status]);
 
   useEffect(() => {
+    if (authState.status !== "authenticated") return;
     let active = true;
     void fetch("/api/team")
       .then(async (response) => {
@@ -536,7 +560,7 @@ export default function Home() {
       })
       .catch(() => undefined);
     return () => { active = false; };
-  }, []);
+  }, [authState.status]);
 
   useEffect(() => {
     if (workspaceMenuOpen && workspaceCreateOpen) workspaceNameInputRef.current?.focus();
@@ -597,6 +621,9 @@ export default function Home() {
   const selectedTask = activeItems.find((entry) => entry.id === selectedTaskId && entry.kind === "task");
   const selectedProject = activeItems.find((entry) => entry.id === selectedProjectId && entry.kind === "project");
   const currentWorkspace = workspaces.find((entry) => entry.current) ?? workspaces[0];
+  const currentTeamMember = teamMembers.find((member) => member.isCurrent && member.status === "active");
+  const accountDisplayName = currentTeamMember?.displayName || authState.user?.displayName || "내 계정";
+  const accountInitial = accountDisplayName.slice(0, 1).toLocaleUpperCase() || "O";
 
   async function switchWorkspace(workspaceId: string) {
     if (workspaceSaving || workspaceId === currentWorkspace?.id) {
@@ -1020,6 +1047,10 @@ export default function Home() {
     }
   }
 
+  if (authState.status !== "authenticated") {
+    return <AuthScreen loading={authState.status === "loading"} reason={authState.reason} />;
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -1124,7 +1155,7 @@ export default function Home() {
           <button className="nav-item" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={16} /><span>팀 멤버</span></button>
           <button className="nav-item" onClick={() => { setTeamPanelTab("groups"); setTeamPanelOpen(true); }}><AtSign size={16} /><span>그룹 관리</span></button>
           <button className="nav-item" onClick={() => setPropertyPanelOpen(true)}><Settings2 size={16} /><span>내 설정</span></button>
-          <button className="profile-row" onClick={() => setPropertyPanelOpen(true)}><span className="avatar">T</span><span>태홍</span><MoreHorizontal size={15} /></button>
+          <button className="profile-row" onClick={() => setPropertyPanelOpen(true)}><span className="avatar">{accountInitial}</span><span>{accountDisplayName}</span><MoreHorizontal size={15} /></button>
         </div>
       </aside>
 
@@ -1314,6 +1345,7 @@ export default function Home() {
           onOpenWorkspaceMenu={() => { setPropertyPanelOpen(false); setWorkspaceMenuOpen(true); }}
           onOpenTeamMembers={() => { setPropertyPanelOpen(false); setTeamPanelTab("members"); setTeamPanelOpen(true); }}
           onOpenGroups={() => { setPropertyPanelOpen(false); setTeamPanelTab("groups"); setTeamPanelOpen(true); }}
+          onSignOut={() => { window.location.href = "/api/auth/logout"; }}
         />
       )}
       {teamPanelOpen && <TeamPanel initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
@@ -1331,6 +1363,28 @@ export default function Home() {
           onNotice={showNotice}
         />
       )}
+    </main>
+  );
+}
+
+function AuthScreen({ loading, reason }: { loading: boolean; reason: string | null }) {
+  const unavailable = reason === "missing_config";
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel">
+        <header><span className="brand-mark">O</span><div><b>OKRPTR</b><span>목표를 오늘의 실행으로</span></div></header>
+        <div className="auth-content">
+          <h1>워크스페이스 로그인</h1>
+          <p>초대에 사용된 Google 계정으로 안전하게 접속하세요.</p>
+          {reason === "failed" && <p className="auth-error">Google 로그인을 완료하지 못했습니다. 다시 시도해 주세요.</p>}
+          {unavailable && <p className="auth-error">Google 로그인 설정을 완료하는 중입니다.</p>}
+          <button disabled={loading || unavailable} onClick={() => { window.location.href = "/api/auth/google?returnTo=%2F"; }}>
+            {loading ? <LoaderCircle className="spin" size={17} /> : <LogIn size={17} />}
+            {loading ? "세션 확인 중" : "Google 계정으로 계속"}
+          </button>
+        </div>
+        <footer>개인 워크스페이스와 초대받은 팀 워크스페이스가 계정별로 분리됩니다.</footer>
+      </section>
     </main>
   );
 }
@@ -2782,8 +2836,8 @@ function ProjectArchiveView({ projects, onRestore, onDelete }: { projects: Archi
   return <section className="project-archive-list">{projects.map((project) => <article className="project-archive-row" key={project.id}><span className="archive-project-icon"><Archive size={15} /></span><div className="project-archive-copy"><b>{project.title}</b><small>하위 Task {project.archivedTaskCount}개 · {project.archivedAt ? formatDateTime(project.archivedAt) : "보관됨"}</small></div><span className={`status-tag status-${project.archivedFromStatus ?? "backlog"}`}>{statusLabel(project.archivedFromStatus ?? "backlog")}</span><div className="project-archive-actions"><button onClick={() => onRestore(project.id)}><RotateCcw size={14} />함께 복구</button><button className="danger" onClick={() => onDelete(project)} aria-label={`${project.title} 영구 삭제`} title="영구 삭제"><Trash2 size={14} /></button></div></article>)}</section>;
 }
 
-function PropertyPanel({ currentWorkspace, workspaceCount, onClose, onCleanup, onOpenWorkspaceMenu, onOpenTeamMembers, onOpenGroups }: { currentWorkspace?: WorkspaceSummary; workspaceCount: number; onClose: () => void; onCleanup: () => void; onOpenWorkspaceMenu: () => void; onOpenTeamMembers: () => void; onOpenGroups: () => void }) {
-  return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>내 설정</h2><p>워크스페이스와 팀 설정</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header><section className="settings-section"><h3>워크스페이스</h3><div className="settings-workspace-card"><span className="workspace-avatar">{currentWorkspace?.name.slice(0, 1).toLocaleUpperCase() || "O"}</span><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : `${teamRoleLabel(currentWorkspace?.role ?? "member")} · 전체 ${workspaceCount}개`}</small></div></div><div className="settings-action-grid"><button onClick={onOpenWorkspaceMenu}><Columns3 size={13} />워크스페이스 관리</button><button onClick={onOpenTeamMembers}><Users size={13} />멤버 관리</button><button onClick={onOpenGroups}><AtSign size={13} />그룹 관리</button></div></section><section className="settings-hint"><Settings2 size={15} /><div><b>Project 속성</b><p>Project 화면의 속성 관리 탭에서 추가하거나 삭제할 수 있습니다.</p></div></section><section className="settings-danger-zone"><div><b>OKR 데이터 정리</b><p>워크스페이스와 그룹은 남기고 OKR 실행 데이터를 휴지통으로 보냅니다.</p></div><button onClick={onCleanup}><Trash2 size={13} />클린업 열기</button></section></aside></div>;
+function PropertyPanel({ currentWorkspace, workspaceCount, onClose, onCleanup, onOpenWorkspaceMenu, onOpenTeamMembers, onOpenGroups, onSignOut }: { currentWorkspace?: WorkspaceSummary; workspaceCount: number; onClose: () => void; onCleanup: () => void; onOpenWorkspaceMenu: () => void; onOpenTeamMembers: () => void; onOpenGroups: () => void; onSignOut: () => void }) {
+  return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>내 설정</h2><p>워크스페이스와 팀 설정</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header><section className="settings-section"><h3>워크스페이스</h3><div className="settings-workspace-card"><span className="workspace-avatar">{currentWorkspace?.name.slice(0, 1).toLocaleUpperCase() || "O"}</span><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : `${teamRoleLabel(currentWorkspace?.role ?? "member")} · 전체 ${workspaceCount}개`}</small></div></div><div className="settings-action-grid"><button onClick={onOpenWorkspaceMenu}><Columns3 size={13} />워크스페이스 관리</button><button onClick={onOpenTeamMembers}><Users size={13} />멤버 관리</button><button onClick={onOpenGroups}><AtSign size={13} />그룹 관리</button></div></section><section className="settings-hint"><Settings2 size={15} /><div><b>Project 속성</b><p>Project 화면의 속성 관리 탭에서 추가하거나 삭제할 수 있습니다.</p></div></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section><section className="settings-danger-zone"><div><b>OKR 데이터 정리</b><p>워크스페이스와 그룹은 남기고 OKR 실행 데이터를 휴지통으로 보냅니다.</p></div><button onClick={onCleanup}><Trash2 size={13} />클린업 열기</button></section></aside></div>;
 }
 
 function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { initialTab: "members" | "groups"; initialGroupHandle: string | null; onClose: () => void; onNotice: (message: string) => void }) {

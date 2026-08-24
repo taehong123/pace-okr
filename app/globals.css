@@ -21,6 +21,20 @@ body, button, input, select, textarea { font-family: -apple-system, BlinkMacSyst
 button, input, select, textarea { font-size: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid rgba(51, 126, 169, .45); outline-offset: 1px; }
 
+.auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 20px; background: var(--paper); }
+.auth-panel { width: min(390px, 100%); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--raised); box-shadow: 0 18px 55px rgba(38, 50, 58, .14); }
+.auth-panel > header { min-height: 64px; display: flex; align-items: center; gap: 10px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.auth-panel > header div { display: grid; gap: 2px; }
+.auth-panel > header b { font-size: 13px; }
+.auth-panel > header span:not(.brand-mark) { color: var(--muted); font-size: 10px; }
+.auth-content { display: grid; gap: 10px; padding: 28px 24px 25px; }
+.auth-content h1 { margin: 0; font-size: 20px; line-height: 1.35; }
+.auth-content > p { margin: 0 0 8px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.auth-content .auth-error { margin: 0; padding: 9px 10px; border: 1px solid #e2baba; border-radius: 4px; background: #fbefee; color: var(--red); }
+.auth-content > button { height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--ink); border-radius: 4px; background: var(--ink); color: white; font-size: 11px; font-weight: 600; cursor: pointer; }
+.auth-content > button:disabled { opacity: .5; cursor: default; }
+.auth-panel > footer { padding: 12px 18px; border-top: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 9px; line-height: 1.5; text-align: center; }
+
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 238px minmax(0, 1fr); background: var(--paper); }
 .sidebar { height: 100vh; position: sticky; top: 0; display: flex; flex-direction: column; padding: 9px 8px 10px; background: var(--sidebar); border-right: 1px solid var(--line); }
 .workspace-control { position: relative; }
@@ -550,6 +564,9 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .settings-hint svg { color: var(--blue); }
 .settings-hint b { font-size: 10px; }
 .settings-hint p { margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.settings-account-actions { padding: 0 18px 12px; }
+.settings-account-actions button { height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--raised); color: var(--ink); font-size: 10px; cursor: pointer; }
+.settings-account-actions button:hover { background: var(--hover); }
 .settings-section { border-bottom: 1px solid var(--line); }
 .settings-section h3 { margin: 0; padding: 14px 18px 4px; color: var(--muted); font-size: 10px; }
 .settings-workspace-card { min-height: 52px; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 9px; margin: 6px 18px 10px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; background: #fbfbfa; }

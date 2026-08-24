@@ -78,10 +78,11 @@ The previous `OKITA_API_TOKEN`, `X-Okita-User-Id`, `PACE_API_TOKEN`, and
 `X-Pace-User-Id` names remain supported for
 existing integrations.
 
-## Google Calendar
+## Google sign-in and Calendar
 
-Google Calendar integration uses Google's OAuth 2.0 web server flow. Configure
-these hosted runtime values before enabling it in production:
+Google authentication and Calendar integration use Google's OAuth 2.0 web
+server flow. Configure these hosted runtime values before enabling them in
+production:
 
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
@@ -89,9 +90,10 @@ these hosted runtime values before enabling it in production:
 - `GOOGLE_OAUTH_REDIRECT_URI`, usually `https://okrptr.com/api/google/callback`
 
 The OAuth client must allow that redirect URI and the Calendar API must be
-enabled in the Google Cloud project. OKRPTR requests Google profile identity
-and `https://www.googleapis.com/auth/calendar.events`, then stores the refresh
-token encrypted with `GOOGLE_TOKEN_ENCRYPTION_KEY`.
+enabled in the Google Cloud project. Sign-in requests only OpenID profile and
+email scopes. The optional Calendar connection separately requests
+`https://www.googleapis.com/auth/calendar.events` and stores its refresh token
+encrypted with `GOOGLE_TOKEN_ENCRYPTION_KEY`.
 
 ## Slack bot
 

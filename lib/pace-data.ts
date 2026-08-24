@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { and, asc, desc, eq, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { readGoogleSession } from "@/lib/google-session";
 import {
   activityLog,
   aiUsageEvents,
@@ -106,7 +107,12 @@ export type RequestAuthorization = {
 
 export type IntegrationTokenSummary = Pick<IntegrationToken, "id" | "name" | "tokenPrefix" | "createdAt" | "lastUsedAt" | "revokedAt">;
 
-type RuntimeEnv = typeof env & { OKRPTR_API_TOKEN?: string; OKITA_API_TOKEN?: string; PACE_API_TOKEN?: string };
+type RuntimeEnv = typeof env & {
+  OKRPTR_API_TOKEN?: string;
+  OKITA_API_TOKEN?: string;
+  PACE_API_TOKEN?: string;
+  GOOGLE_TOKEN_ENCRYPTION_KEY?: string;
+};
 let schemaReady: Promise<void> | null = null;
 
 const parentKind: Record<ItemKind, ItemKind | null> = {
@@ -1306,10 +1312,38 @@ export async function authorizeRequest(
     }
   }
 
+  const googleSession = await readGoogleSession(request, (env as RuntimeEnv).GOOGLE_TOKEN_ENCRYPTION_KEY);
+  if (googleSession) {
+    try {
+      await ensureSchema();
+      const canonicalUserId = await canonicalUserIdForGoogle(googleSession.sub, googleSession.email);
+      const membership = await resolveWorkspaceMembership(canonicalUserId, googleSession.email, googleSession.name, requestedWorkspaceId(request));
+      if (!membership || membership.status !== "active") {
+        return Response.json({ error: "This Google account is not an active workspace member." }, { status: 403 });
+      }
+      const role = membership.role as TeamRole;
+      if (!options.allowViewerWrite && role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+        return Response.json({ error: "Viewer access is read-only." }, { status: 403 });
+      }
+      return { ownerId: membership.workspaceId, userId: canonicalUserId, email: googleSession.email, displayName: membership.displayName, role, apiToken: false };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to resolve Google workspace access.";
+      return Response.json({ error: message }, { status: 500 });
+    }
+  }
+
   return Response.json(
     { error: "Authentication required. Sign in or provide an OKRPTR API token." },
     { status: 401, headers: { "WWW-Authenticate": "Bearer" } },
   );
+}
+
+async function canonicalUserIdForGoogle(subject: string, email: string) {
+  const matches = await getDb().select().from(workspaceMembers).where(and(
+    sql`lower(${workspaceMembers.email}) = ${email.toLocaleLowerCase()}`,
+    eq(workspaceMembers.status, "active"),
+  )).orderBy(asc(workspaceMembers.createdAt));
+  return matches.find((entry) => entry.userId)?.userId ?? `google:${subject}`;
 }
 
 async function ensureWorkspaceShell(ownerId: string, email: string | null = null, displayName = "Workspace Owner") {
