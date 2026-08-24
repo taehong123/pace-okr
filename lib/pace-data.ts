@@ -114,6 +114,7 @@ type RuntimeEnv = typeof env & {
   GOOGLE_TOKEN_ENCRYPTION_KEY?: string;
 };
 let schemaReady: Promise<void> | null = null;
+const workspaceReady = new Map<string, Promise<void>>();
 
 const parentKind: Record<ItemKind, ItemKind | null> = {
   objective: null,
@@ -489,12 +490,20 @@ async function addColumnIfMissing(d1: RuntimeEnv["DB"], statement: string) {
 }
 
 export async function ensureWorkspace(ownerId: string) {
-  await ensureSchema();
-  await migrateLegacyHierarchy(ownerId);
-  await removeLegacySeedWorkspaceData(ownerId);
-  await seedProjectExecutionProperties(ownerId);
-  await migrateLegacyItemAssignments(ownerId);
-  await ensureActiveOkrCycle(ownerId);
+  let ready = workspaceReady.get(ownerId);
+  if (!ready) {
+    ready = (async () => {
+      await ensureSchema();
+      await migrateLegacyHierarchy(ownerId);
+      await removeLegacySeedWorkspaceData(ownerId);
+      await seedProjectExecutionProperties(ownerId);
+      await migrateLegacyItemAssignments(ownerId);
+      await ensureActiveOkrCycle(ownerId);
+    })();
+    workspaceReady.set(ownerId, ready);
+    void ready.catch(() => workspaceReady.delete(ownerId));
+  }
+  await ready;
 }
 
 export async function listOkrCycles(ownerId: string) {
@@ -1368,7 +1377,13 @@ async function ensureWorkspaceShell(ownerId: string, email: string | null = null
 }
 
 async function resolveWorkspaceMembership(userId: string, email: string | null, displayName: string, requestedId: string | null) {
-  await ensureWorkspaceShell(userId, email, displayName);
+  let memberships = await activeWorkspaceMemberships(userId);
+  if (!memberships.length) {
+    await ensureWorkspaceShell(userId, email, displayName);
+    memberships = await activeWorkspaceMemberships(userId);
+  }
+
+  let invitationActivated = false;
   if (email) {
     const invitations = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.email, email), eq(workspaceMembers.status, "invited"))).orderBy(asc(workspaceMembers.createdAt));
     for (const invitation of invitations) {
@@ -1380,18 +1395,21 @@ async function resolveWorkspaceMembership(userId: string, email: string | null, 
         status: "active",
         updatedAt: new Date().toISOString(),
       }).where(eq(workspaceMembers.id, invitation.id));
+      invitationActivated = true;
     }
   }
 
-  const memberships = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, "active"))).orderBy(asc(workspaceMembers.createdAt));
+  if (invitationActivated) memberships = await activeWorkspaceMemberships(userId);
   const now = new Date().toISOString();
   const normalizedMemberships = memberships.map((membership) => ({
     ...membership,
+    email,
     displayName: displayNameForExistingMember(membership.displayName, displayName, email),
   }));
   for (const membership of normalizedMemberships) {
-    const nextDisplayName = displayNameForExistingMember(membership.displayName, displayName, email);
-    await getDb().update(workspaceMembers).set({ email, displayName: nextDisplayName, updatedAt: now }).where(eq(workspaceMembers.id, membership.id));
+    const previous = memberships.find((entry) => entry.id === membership.id);
+    if (previous?.email === membership.email && previous.displayName === membership.displayName) continue;
+    await getDb().update(workspaceMembers).set({ email: membership.email, displayName: membership.displayName, updatedAt: now }).where(eq(workspaceMembers.id, membership.id));
   }
   const [preference] = await getDb().select().from(userWorkspacePreferences).where(eq(userWorkspacePreferences.userId, userId)).limit(1);
   return normalizedMemberships.find((entry) => entry.workspaceId === requestedId)
@@ -1399,6 +1417,13 @@ async function resolveWorkspaceMembership(userId: string, email: string | null, 
     ?? normalizedMemberships.find((entry) => entry.workspaceId === userId)
     ?? normalizedMemberships[0]
     ?? null;
+}
+
+async function activeWorkspaceMemberships(userId: string) {
+  return getDb().select().from(workspaceMembers).where(and(
+    eq(workspaceMembers.userId, userId),
+    eq(workspaceMembers.status, "active"),
+  )).orderBy(asc(workspaceMembers.createdAt));
 }
 
 function requestedWorkspaceId(request: Request) {

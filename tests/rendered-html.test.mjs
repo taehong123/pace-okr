@@ -40,9 +40,10 @@ test("server-renders the OKRPTR authentication shell", async () => {
 });
 
 test("ships product metadata and removes starter assets", async () => {
-  const [layout, page, integrationRoute, slackAuthRoute, slackDisconnectRoute, paceData, googleSession, googleSignInRoute, googleCallbackRoute, packageJson] = await Promise.all([
+  const [layout, page, bootstrapRoute, integrationRoute, slackAuthRoute, slackDisconnectRoute, paceData, googleSession, googleSignInRoute, googleCallbackRoute, packageJson] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/bootstrap/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/integration-tokens/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/auth/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/disconnect/route.ts", import.meta.url), "utf8"),
@@ -97,7 +98,12 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /把目标变成行动的工作空间/);
   assert.match(page, /convertir objetivos en acción/);
   assert.match(page, /Google 계정으로 계속/);
-  assert.match(page, /\/api\/auth\/session/);
+  assert.match(page, /\/api\/bootstrap/);
+  assert.doesNotMatch(page, /\/api\/auth\/session/);
+  assert.match(bootstrapRoute, /Promise\.all/);
+  assert.match(bootstrapRoute, /getTeam/);
+  assert.match(bootstrapRoute, /listItems/);
+  assert.match(paceData, /workspaceReady/);
   assert.match(page, /Google 계정 로그아웃/);
   assert.match(googleSession, /HttpOnly; Secure; SameSite=Lax/);
   assert.match(googleSession, /crypto\.subtle\.verify\("HMAC"/);

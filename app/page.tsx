@@ -235,6 +235,19 @@ type GroupMember = {
 };
 
 type TeamData = { workspace: { id: string; name: string }; members: TeamMember[]; currentRole: TeamRole; canManage: boolean };
+type BootstrapData = {
+  user: AuthUser;
+  items: OkrptrItem[];
+  properties: PropertyDefinition[];
+  propertyValues: PropertyValueMap;
+  hiddenByProject: ProjectHiddenPropertyMap;
+  archivedProjects: ArchivedProject[];
+  routines: Routine[];
+  workspaces: WorkspaceSummary[];
+  rules: WorkspaceRules;
+  cycles: OkrCycle[];
+  team: TeamData;
+};
 type GroupDetailData = { group: WorkspaceGroup; members: GroupMember[]; canManageMembers: boolean };
 type WorkspaceSummary = { id: string; name: string; personal: boolean; role: TeamRole; current: boolean };
 type GoogleConnectionStatus = {
@@ -418,7 +431,7 @@ export default function Home() {
   const [hiddenProperties, setHiddenProperties] = useState<ProjectHiddenPropertyMap>({});
   const [archivedProjects, setArchivedProjects] = useState<ArchivedProject[]>([]);
   const [projectTab, setProjectTab] = useState<ProjectTab>("list");
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamData, setTeamData] = useState<TeamData | null>(null);
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [okrCycles, setOkrCycles] = useState<OkrCycle[]>([]);
   const [selectedOkrCycleId, setSelectedOkrCycleId] = useState<string | null>(null);
@@ -453,6 +466,7 @@ export default function Home() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null);
   const [slackStatus, setSlackStatus] = useState<SlackConnectionStatus | null>(null);
+  const [integrationStatusesLoaded, setIntegrationStatusesLoaded] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [introLanguage, setIntroLanguage] = useState<IntroLanguage>("ko");
   const [authState, setAuthState] = useState<AuthState>({ status: "loading", user: null, reason: null });
@@ -469,12 +483,31 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
-    void fetch("/api/auth/session", { cache: "no-store" })
+    void fetch(`/api/bootstrap?date=${encodeURIComponent(localDate())}`, { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("unauthenticated");
-        return response.json() as Promise<{ user: AuthUser }>;
+        return response.json() as Promise<BootstrapData>;
       })
-      .then((data) => { if (active) setAuthState({ status: "authenticated", user: data.user, reason: null }); })
+      .then((data) => {
+        if (!active) return;
+        setItems(data.items);
+        setProperties(data.properties);
+        setPropertyValues(data.propertyValues);
+        setHiddenProperties(data.hiddenByProject ?? {});
+        setArchivedProjects(data.archivedProjects);
+        setRoutines(data.routines);
+        setWorkspaces(data.workspaces);
+        setWorkspaceRules(data.rules);
+        setOkrCycles(data.cycles);
+        setTeamData(data.team);
+        const activeCycle = data.cycles.find((cycle) => cycle.status === "active") ?? data.cycles[0];
+        setVisibleOkrCycleIds(activeCycle ? [activeCycle.id] : []);
+        const currentMember = data.team.members.find((member) => member.isCurrent && member.status === "active");
+        if (currentMember && memberNameNeedsConfirmation(currentMember) && window.localStorage.getItem(profileNameConfirmationKey(currentMember)) !== currentMember.displayName) {
+          setProfilePromptMember(currentMember);
+        }
+        setAuthState({ status: "authenticated", user: data.user, reason: null });
+      })
       .catch(() => {
         if (!active) return;
         const reason = new URLSearchParams(window.location.search).get("auth");
@@ -482,35 +515,6 @@ export default function Home() {
       });
     return () => { active = false; };
   }, []);
-
-  useEffect(() => {
-    if (authState.status !== "authenticated") return;
-    let active = true;
-    Promise.all([fetch("/api/items"), fetch("/api/properties"), fetch("/api/workspaces"), fetch("/api/workspace-rules"), fetch("/api/okr-cycles"), fetch(`/api/routines?date=${localDate()}`), fetch("/api/project-archives")])
-      .then(async ([itemsResponse, propertiesResponse, workspacesResponse, rulesResponse, cyclesResponse, routinesResponse, archivesResponse]) => {
-        if (!itemsResponse.ok || !propertiesResponse.ok || !workspacesResponse.ok || !rulesResponse.ok || !cyclesResponse.ok || !routinesResponse.ok || !archivesResponse.ok) throw new Error("offline");
-        const itemData = (await itemsResponse.json()) as { items: OkrptrItem[] };
-        const propertyData = (await propertiesResponse.json()) as { properties: PropertyDefinition[]; values: PropertyValueMap; hiddenByProject: ProjectHiddenPropertyMap };
-        const workspaceData = (await workspacesResponse.json()) as { workspaces: WorkspaceSummary[] };
-        const rulesData = (await rulesResponse.json()) as { rules: WorkspaceRules };
-        const cyclesData = (await cyclesResponse.json()) as { cycles: OkrCycle[] };
-        const routineData = (await routinesResponse.json()) as { routines: Routine[] };
-        const archiveData = (await archivesResponse.json()) as { projects: ArchivedProject[] };
-        if (!active) return;
-        setItems(itemData.items);
-        setProperties(propertyData.properties);
-        setPropertyValues(propertyData.values);
-        setHiddenProperties(propertyData.hiddenByProject ?? {});
-        setArchivedProjects(archiveData.projects);
-        setRoutines(routineData.routines);
-        setWorkspaces(workspaceData.workspaces);
-        setWorkspaceRules(rulesData.rules);
-        setOkrCycles(cyclesData.cycles);
-        setVisibleOkrCycleIds(cyclesData.cycles.find((cycle) => cycle.status === "active") ? [cyclesData.cycles.find((cycle) => cycle.status === "active")!.id] : cyclesData.cycles[0] ? [cyclesData.cycles[0].id] : []);
-      })
-      .catch(() => undefined);
-    return () => { active = false; };
-  }, [authState.status]);
 
   useEffect(() => {
     const group = new URLSearchParams(window.location.search).get("group")?.replace(/^@/, "").trim();
@@ -524,44 +528,21 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (authState.status !== "authenticated") return;
+    if (authState.status !== "authenticated" || !appIntegrationsOpen || integrationStatusesLoaded) return;
     let active = true;
-    void fetch("/api/google/status")
-      .then(async (response) => {
-        if (!response.ok) throw new Error("google unavailable");
-        return response.json() as Promise<{ google: GoogleConnectionStatus }>;
-      })
-      .then((data) => { if (active) setGoogleStatus(data.google); })
-      .catch(() => { if (active) setGoogleStatus(null); });
-    void fetch("/api/slack/status")
-      .then(async (response) => {
-        if (!response.ok) throw new Error("slack unavailable");
-        return response.json() as Promise<{ slack: SlackConnectionStatus }>;
-      })
-      .then((data) => { if (active) setSlackStatus(data.slack); })
-      .catch(() => { if (active) setSlackStatus(null); });
-    return () => { active = false; };
-  }, [authState.status]);
-
-  useEffect(() => {
-    if (authState.status !== "authenticated") return;
-    let active = true;
-    void fetch("/api/team")
-      .then(async (response) => {
-        if (!response.ok) throw new Error("team unavailable");
-        return response.json() as Promise<TeamData>;
-      })
-      .then((data) => {
+    void Promise.all([
+      fetch("/api/google/status").then(async (response) => response.ok ? response.json() as Promise<{ google: GoogleConnectionStatus }> : Promise.reject()),
+      fetch("/api/slack/status").then(async (response) => response.ok ? response.json() as Promise<{ slack: SlackConnectionStatus }> : Promise.reject()),
+    ])
+      .then(([googleData, slackData]) => {
         if (!active) return;
-        setTeamMembers(data.members);
-        const currentMember = data.members.find((member) => member.isCurrent && member.status === "active");
-        if (!currentMember || !memberNameNeedsConfirmation(currentMember)) return;
-        if (window.localStorage.getItem(profileNameConfirmationKey(currentMember)) === currentMember.displayName) return;
-        setProfilePromptMember(currentMember);
+        setGoogleStatus(googleData.google);
+        setSlackStatus(slackData.slack);
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => { if (active) setIntegrationStatusesLoaded(true); });
     return () => { active = false; };
-  }, [authState.status]);
+  }, [appIntegrationsOpen, authState.status, integrationStatusesLoaded]);
 
   useEffect(() => {
     if (workspaceMenuOpen && workspaceCreateOpen) workspaceNameInputRef.current?.focus();
@@ -589,6 +570,7 @@ export default function Home() {
     return () => window.removeEventListener("keydown", closeTopmost);
   }, [appIntegrationsOpen, cleanupOpen, createItemOpen, integrationOpen, mobileMenuOpen, okrListOpen, onboardingOpen, profilePromptMember, propertyPanelOpen, selectedProjectId, selectedTaskId, teamPanelOpen, workspaceCreateOpen, workspaceMenuOpen]);
 
+  const teamMembers = teamData?.members ?? [];
   const activeItems = items.filter((entry) => !entry.archivedAt && entry.status !== "archived");
   const inboxItems = activeItems.filter((entry) => entry.status === "inbox");
   const taskItems = activeItems.filter((entry) => entry.kind === "task");
@@ -1329,7 +1311,7 @@ export default function Home() {
           onClose={() => setProfilePromptMember(null)}
           onSaved={(member) => {
             window.localStorage.setItem(profileNameConfirmationKey(member), member.displayName);
-            setTeamMembers((current) => current.map((entry) => entry.id === member.id ? member : entry));
+            setTeamData((current) => current ? { ...current, members: current.members.map((entry) => entry.id === member.id ? member : entry) } : current);
             setProfilePromptMember(null);
             showNotice("실명을 저장했습니다.");
           }}
@@ -1349,8 +1331,8 @@ export default function Home() {
           onSignOut={() => { window.location.href = "/api/auth/logout"; }}
         />
       )}
-      {teamPanelOpen && <TeamPanel initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
-      {createItemOpen && <CreateItemPanel initialKind={createItemKind} items={items} routines={routines} properties={properties} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
+      {teamPanelOpen && <TeamPanel initialTeam={teamData} initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onMembersChange={(members) => setTeamData((current) => current ? { ...current, members } : current)} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
+      {createItemOpen && <CreateItemPanel initialKind={createItemKind} items={items} routines={routines} properties={properties} teamMembers={teamMembers} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
       {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setArchivedProjects([]); setPropertyValues({}); setOkrCycles([cycle]); setVisibleOkrCycleIds([cycle.id]); setSelectedTaskId(null); setActiveView("trash"); setCleanupOpen(false); showNotice("OKR 데이터를 휴지통에 보관하고 정리했습니다."); }} onNotice={showNotice} />}
       {selectedTask && (
         <TaskDetailPanel
@@ -1972,11 +1954,12 @@ function MemberMentionPicker({
   );
 }
 
-function CreateItemPanel({ initialKind, items, routines, properties, onClose, onCreated }: {
+function CreateItemPanel({ initialKind, items, routines, properties, teamMembers, onClose, onCreated }: {
   initialKind: ItemKind;
   items: OkrptrItem[];
   routines: Routine[];
   properties: PropertyDefinition[];
+  teamMembers: TeamMember[];
   onClose: () => void;
   onCreated: (item: OkrptrItem, initialValues?: Record<string, PropertyValue>) => void;
 }) {
@@ -1990,7 +1973,6 @@ function CreateItemPanel({ initialKind, items, routines, properties, onClose, on
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [dueDate, setDueDate] = useState("");
   const [customValues, setCustomValues] = useState<Record<string, PropertyValue>>({});
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [projectDriIds, setProjectDriIds] = useState<string[]>([]);
   const [projectWorkerIds, setProjectWorkerIds] = useState<string[]>([]);
   const [taskAssigneeIds, setTaskAssigneeIds] = useState<string[]>([]);
@@ -1999,15 +1981,6 @@ function CreateItemPanel({ initialKind, items, routines, properties, onClose, on
   const parentKind = requiredParent[kind];
   const parentOptions = parentKind ? items.filter((entry) => entry.kind === parentKind) : [];
   const projectProperties = kind === "project" ? properties : [];
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/team")
-      .then(async (response) => response.ok ? response.json() as Promise<TeamData> : Promise.reject())
-      .then((data) => { if (!cancelled) setTeamMembers(data.members); })
-      .catch(() => { if (!cancelled) setTeamMembers([]); });
-    return () => { cancelled = true; };
-  }, []);
 
   function updateCustomValue(property: PropertyDefinition, value: string | boolean) {
     setCustomValues((current) => ({
@@ -2841,8 +2814,9 @@ function PropertyPanel({ currentWorkspace, workspaceCount, onClose, onCleanup, o
   return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>내 설정</h2><p>워크스페이스와 팀 설정</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header><section className="settings-section"><h3>워크스페이스</h3><div className="settings-workspace-card"><span className="workspace-avatar">{currentWorkspace?.name.slice(0, 1).toLocaleUpperCase() || "O"}</span><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : `${teamRoleLabel(currentWorkspace?.role ?? "member")} · 전체 ${workspaceCount}개`}</small></div></div><div className="settings-action-grid"><button onClick={onOpenWorkspaceMenu}><Columns3 size={13} />워크스페이스 관리</button><button onClick={onOpenTeamMembers}><Users size={13} />멤버 관리</button><button onClick={onOpenGroups}><AtSign size={13} />그룹 관리</button></div></section><section className="settings-hint"><Settings2 size={15} /><div><b>Project 속성</b><p>Project 화면의 속성 관리 탭에서 추가하거나 삭제할 수 있습니다.</p></div></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section><section className="settings-danger-zone"><div><b>OKR 데이터 정리</b><p>워크스페이스와 그룹은 남기고 OKR 실행 데이터를 휴지통으로 보냅니다.</p></div><button onClick={onCleanup}><Trash2 size={13} />클린업 열기</button></section></aside></div>;
 }
 
-function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { initialTab: "members" | "groups"; initialGroupHandle: string | null; onClose: () => void; onNotice: (message: string) => void }) {
-  const [team, setTeam] = useState<TeamData | null>(null);
+function TeamPanel({ initialTeam, initialTab, initialGroupHandle, onMembersChange, onClose, onNotice }: { initialTeam: TeamData | null; initialTab: "members" | "groups"; initialGroupHandle: string | null; onMembersChange: (members: TeamMember[]) => void; onClose: () => void; onNotice: (message: string) => void }) {
+  const [team, setTeam] = useState<TeamData | null>(initialTeam);
+  const initialTeamRef = useRef(initialTeam);
   const [groups, setGroups] = useState<WorkspaceGroup[] | null>(null);
   const [tab, setTab] = useState<"members" | "groups">(initialTab);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
@@ -2862,10 +2836,10 @@ function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { init
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/team").then(async (response) => response.ok ? response.json() as Promise<TeamData> : Promise.reject()),
+      initialTeamRef.current ? Promise.resolve(initialTeamRef.current) : fetch("/api/team").then(async (response) => response.ok ? response.json() as Promise<TeamData> : Promise.reject()),
       fetch("/api/groups?includeArchived=true").then(async (response) => response.ok ? response.json() as Promise<{ groups: WorkspaceGroup[] }> : Promise.reject()),
     ])
-      .then(([teamData, groupData]) => { setTeam(teamData); setGroups(groupData.groups); })
+      .then(([loadedTeam, groupData]) => { setTeam(loadedTeam); setGroups(groupData.groups); })
       .catch(() => setError("팀 정보를 불러오지 못했습니다."));
   }, []);
 
@@ -2909,6 +2883,11 @@ function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { init
     window.history.replaceState(null, "", url);
   }
 
+  function applyMembers(members: TeamMember[]) {
+    setTeam((current) => current ? { ...current, members } : current);
+    onMembersChange(members);
+  }
+
   function openGroup(id: string) {
     setGroupDetail(null);
     setSelectedGroupId(id);
@@ -2932,7 +2911,7 @@ function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { init
       setError(data.error ?? "초대를 등록하지 못했습니다.");
       return;
     }
-    setTeam((current) => current ? { ...current, members: [...current.members, data.member!] } : current);
+    applyMembers([...(team?.members ?? []), data.member]);
     setEmail("");
     setInviteDisplayName("");
     setError("");
@@ -2943,7 +2922,7 @@ function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { init
     const response = await fetch("/api/team", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: member.id, role: nextRole }) });
     if (!response.ok) return;
     const data = await response.json() as { member: TeamMember };
-    setTeam((current) => current ? { ...current, members: current.members.map((entry) => entry.id === member.id ? data.member : entry) } : current);
+    applyMembers((team?.members ?? []).map((entry) => entry.id === member.id ? data.member : entry));
     onNotice("멤버 역할을 변경했습니다.");
   }
 
@@ -2976,7 +2955,7 @@ function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { init
       return;
     }
     if (data.member.isCurrent) window.localStorage.setItem(profileNameConfirmationKey(data.member), data.member.displayName);
-    setTeam((current) => current ? { ...current, members: current.members.map((entry) => entry.id === data.member!.id ? data.member! : entry) } : current);
+    applyMembers((team?.members ?? []).map((entry) => entry.id === data.member!.id ? data.member! : entry));
     cancelMemberNameEdit();
     setError("");
     onNotice(data.member.isCurrent ? "내 실명을 저장했습니다." : "멤버 실명을 저장했습니다.");
@@ -2985,7 +2964,7 @@ function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { init
   async function remove(member: TeamMember) {
     const response = await fetch(`/api/team?id=${encodeURIComponent(member.id)}`, { method: "DELETE" });
     if (!response.ok) return;
-    setTeam((current) => current ? { ...current, members: current.members.filter((entry) => entry.id !== member.id) } : current);
+    applyMembers((team?.members ?? []).filter((entry) => entry.id !== member.id));
     onNotice(member.status === "invited" ? "초대를 취소했습니다." : "팀에서 제거했습니다.");
   }
 
