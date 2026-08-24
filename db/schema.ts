@@ -159,6 +159,9 @@ export const items = sqliteTable(
     source: text("source").notNull().default("web"),
     sourceRef: text("source_ref"),
     sortOrder: integer("sort_order").notNull().default(0),
+    archivedAt: text("archived_at"),
+    archivedFromStatus: text("archived_from_status"),
+    archiveRootId: text("archive_root_id"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
@@ -168,6 +171,29 @@ export const items = sqliteTable(
     index("idx_items_owner_routine").on(table.ownerId, table.routineId),
     index("idx_items_owner_cadence").on(table.ownerId, table.cadence),
     index("idx_items_owner_cycle").on(table.ownerId, table.cycleId),
+    index("idx_items_owner_archived").on(table.ownerId, table.archivedAt),
+    index("idx_items_owner_archive_root").on(table.ownerId, table.archiveRootId),
+  ],
+);
+
+export const itemAssignments = sqliteTable(
+  "item_assignments",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    itemId: text("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    memberId: text("member_id").notNull().references(() => workspaceMembers.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_item_assignments_unique").on(table.ownerId, table.itemId, table.memberId, table.role),
+    uniqueIndex("idx_item_assignments_single_role")
+      .on(table.ownerId, table.itemId, table.role)
+      .where(sql`${table.role} IN ('project_dri', 'task_assignee')`),
+    index("idx_item_assignments_owner_item").on(table.ownerId, table.itemId),
+    index("idx_item_assignments_member").on(table.memberId),
   ],
 );
 
@@ -220,6 +246,22 @@ export const itemPropertyValues = sqliteTable(
     uniqueIndex("idx_item_property_values_unique").on(table.ownerId, table.itemId, table.propertyId),
     index("idx_item_property_values_owner_item").on(table.ownerId, table.itemId),
     index("idx_item_property_values_owner_property").on(table.ownerId, table.propertyId),
+  ],
+);
+
+export const projectHiddenProperties = sqliteTable(
+  "project_hidden_properties",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    projectId: text("project_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    propertyId: text("property_id").notNull().references(() => propertyDefinitions.id, { onDelete: "cascade" }),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_project_hidden_properties_unique").on(table.ownerId, table.projectId, table.propertyId),
+    index("idx_project_hidden_properties_project").on(table.ownerId, table.projectId),
+    index("idx_project_hidden_properties_property").on(table.ownerId, table.propertyId),
   ],
 );
 
@@ -426,8 +468,10 @@ export const trashRecords = sqliteTable(
 
 export type PaceItem = typeof items.$inferSelect;
 export type NewPaceItem = typeof items.$inferInsert;
+export type ItemAssignment = typeof itemAssignments.$inferSelect;
 export type PropertyDefinition = typeof propertyDefinitions.$inferSelect;
 export type ItemPropertyValue = typeof itemPropertyValues.$inferSelect;
+export type ProjectHiddenProperty = typeof projectHiddenProperties.$inferSelect;
 export type ChecklistItem = typeof checklistItems.$inferSelect;
 export type DailyScrum = typeof dailyScrums.$inferSelect;
 export type Routine = typeof routines.$inferSelect;

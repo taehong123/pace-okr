@@ -44,16 +44,18 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const authorization = await authorizeRequest(request);
+  const authorization = await authorizeRequest(request, { allowViewerWrite: true });
   if (authorization instanceof Response) return authorization;
-  if (!canManageTeam(authorization)) return forbidden();
   try {
     await ensureWorkspace(authorization.ownerId);
     const payload = (await request.json()) as Record<string, unknown>;
     const id = typeof payload.id === "string" ? payload.id.trim() : "";
-    const role = asAssignableRole(payload.role);
-    if (!id || !role) return Response.json({ error: "id and supported role are required" }, { status: 400 });
-    const member = await updateTeamMember(authorization.ownerId, id, role, authorization.userId);
+    const role = payload.role === undefined ? undefined : asAssignableRole(payload.role);
+    const displayName = typeof payload.displayName === "string" ? payload.displayName : undefined;
+    if (!id || (payload.role !== undefined && !role) || (role === undefined && displayName === undefined)) {
+      return Response.json({ error: "id and supported changes are required" }, { status: 400 });
+    }
+    const member = await updateTeamMember(authorization.ownerId, id, { role, displayName }, authorization.userId, canManageTeam(authorization));
     return Response.json({ member });
   } catch (error) {
     return routeError(error);
@@ -86,6 +88,12 @@ function forbidden() {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
-  const status = /already/i.test(message) ? 409 : /required|unsupported|not found|cannot/i.test(message) ? 400 : 500;
+  const status = /already/i.test(message)
+    ? 409
+    : /owner or admin|access|only update your own/i.test(message)
+      ? 403
+      : /required|unsupported|not found|cannot/i.test(message)
+        ? 400
+        : 500;
   return Response.json({ error: message }, { status });
 }

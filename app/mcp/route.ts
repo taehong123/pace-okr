@@ -11,6 +11,7 @@ import {
   PROPERTY_TYPES,
   ROUTINE_CADENCES,
   addGroupMember,
+  archiveProject,
   authorizeRequest,
   canManageTeam,
   createChecklistItem,
@@ -25,6 +26,7 @@ import {
   getTeam,
   getDailyScrum,
   getItemPropertiesByName,
+  getItemAssignmentMap,
   getPeriodReview,
   getRecommendations,
   getWorkspaceRules,
@@ -32,11 +34,13 @@ import {
   listGroupMembers,
   listGroups,
   listItems,
-  listPropertyDefinitions,
+  listProjectPropertyDefinitions,
   listRoutines,
   inviteTeamMember,
   removeTeamMember,
   removeGroupMember,
+  replaceItemAssignmentRole,
+  restoreProject,
   saveDailyScrum,
   saveWorkspaceRules,
   serializeChecklistItem,
@@ -74,6 +78,15 @@ const propertyDefinitionOutput = z.object({
   type: z.string(),
   options: z.array(z.string()),
   sortOrder: z.number(),
+  valueCount: z.number(),
+});
+
+const itemAssignmentOutput = z.object({
+  id: z.string(),
+  memberId: z.string(),
+  displayName: z.string(),
+  email: z.string(),
+  role: z.enum(["project_dri", "project_worker", "task_assignee"]),
 });
 
 const itemOutput = z.object({
@@ -88,9 +101,13 @@ const itemOutput = z.object({
   progress: z.number(),
   dueDate: z.string().nullable(),
   source: z.string(),
+  archivedAt: z.string().nullable(),
+  archivedFromStatus: z.string().nullable(),
+  archiveRootId: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
   properties: z.record(z.string(), propertyValueSchema),
+  assignments: z.array(itemAssignmentOutput),
 });
 
 const checklistOutput = z.object({
@@ -190,7 +207,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     {
       instructions:
         [
-          "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Routines are separate recurring work with trigger points, places/tools, concrete action steps, and dated completion records. Tasks are database rows with custom properties and internal checklists. Team access uses Owner, Admin, Member, and read-only Viewer roles. Workspace groups have @handles, open or private visibility, and Lead or Member roles. Use list_properties before setting unfamiliar property names.",
+          "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Routines are separate recurring work with trigger points, places/tools, concrete action steps, and dated completion records. Tasks have one assignee and belong to either a Project or Routine; custom properties belong to Projects. Team access uses Owner, Admin, Member, and read-only Viewer roles. Workspace groups have @handles, open or private visibility, and Lead or Member roles. Use list_properties before setting unfamiliar Project property names.",
           `Workspace capture rule: ${rules.captureInstruction}`,
           `Workspace structure rule: ${rules.structureInstruction}`,
           `Workspace routine rule: ${rules.routineInstruction}`,
@@ -258,12 +275,12 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
         due_date: z.string().optional().describe("Due date in YYYY-MM-DD format when stated"),
         priority: z.enum(ITEM_PRIORITIES).optional(),
         source_ref: z.string().optional().describe("Message or conversation identifier for traceability"),
-        properties: z.record(z.string(), propertyValueSchema).optional().describe("Custom values keyed by property name"),
+        assignee_member_id: z.string().optional().describe("Active workspace member ID for the single Task assignee"),
       },
       outputSchema: { item: itemOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ title, description, due_date, priority, source_ref, properties }) => {
+    async ({ title, description, due_date, priority, source_ref, assignee_member_id }) => {
       const item = await createItem(ownerId, {
         title,
         description,
@@ -274,7 +291,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
         source: "mcp",
         sourceRef: source_ref,
       });
-      if (properties) await setItemPropertiesByName(ownerId, item.id, properties as Record<string, PropertyValue>);
+      if (assignee_member_id) await replaceItemAssignmentRole(ownerId, item.id, "task_assignee", [assignee_member_id]);
       const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
       return {
         structuredContent: { item: serialized },
@@ -298,7 +315,10 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
         cadence: z.enum(ITEM_CADENCES).optional(),
         progress: z.number().min(0).max(100).optional(),
         due_date: z.string().optional(),
-        properties: z.record(z.string(), propertyValueSchema).optional().describe("Custom values keyed by property name"),
+        properties: z.record(z.string(), propertyValueSchema).optional().describe("Project-only custom values keyed by property name"),
+        dri_member_id: z.string().optional().describe("Active workspace member ID for a Project DRI"),
+        worker_member_ids: z.array(z.string()).optional().describe("Active workspace member IDs for Project workers"),
+        assignee_member_id: z.string().optional().describe("Active workspace member ID for a Task assignee"),
       },
       outputSchema: { item: itemOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -316,9 +336,12 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
         dueDate: input.due_date,
         source: "mcp",
       });
-      if (input.properties) {
+      if (input.properties && item.kind === "project") {
         await setItemPropertiesByName(ownerId, item.id, input.properties as Record<string, PropertyValue>);
       }
+      if (item.kind === "project" && input.dri_member_id) await replaceItemAssignmentRole(ownerId, item.id, "project_dri", [input.dri_member_id]);
+      if (item.kind === "project" && input.worker_member_ids) await replaceItemAssignmentRole(ownerId, item.id, "project_worker", input.worker_member_ids);
+      if (item.kind === "task" && input.assignee_member_id) await replaceItemAssignmentRole(ownerId, item.id, "task_assignee", [input.assignee_member_id]);
       const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
       return {
         structuredContent: { item: serialized },
@@ -339,6 +362,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
         parent_id: z.string().optional(),
         query: z.string().optional(),
         limit: z.number().int().min(1).max(100).optional(),
+        include_archived: z.boolean().default(false),
       },
       outputSchema: { items: z.array(itemOutput), count: z.number() },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -351,6 +375,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
         parentId: input.parent_id,
         query: input.query,
         limit: input.limit,
+        includeArchived: input.include_archived,
       });
       const serialized = await serializeItemsForMcp(ownerId, rows);
       return {
@@ -374,7 +399,10 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
         cadence: z.enum(ITEM_CADENCES).optional(),
         progress: z.number().min(0).max(100).optional(),
         due_date: z.string().nullable().optional(),
-        properties: z.record(z.string(), propertyValueSchema).optional().describe("Custom values keyed by property name"),
+        properties: z.record(z.string(), propertyValueSchema).optional().describe("Project-only custom values keyed by property name"),
+        dri_member_id: z.string().nullable().optional(),
+        worker_member_ids: z.array(z.string()).optional(),
+        assignee_member_id: z.string().nullable().optional(),
       },
       outputSchema: { item: itemOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -390,9 +418,12 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
         dueDate: input.due_date,
         source: "mcp",
       });
-      if (input.properties) {
+      if (input.properties && item.kind === "project") {
         await setItemPropertiesByName(ownerId, item.id, input.properties as Record<string, PropertyValue>);
       }
+      if (item.kind === "project" && input.dri_member_id !== undefined) await replaceItemAssignmentRole(ownerId, item.id, "project_dri", input.dri_member_id ? [input.dri_member_id] : []);
+      if (item.kind === "project" && input.worker_member_ids !== undefined) await replaceItemAssignmentRole(ownerId, item.id, "project_worker", input.worker_member_ids);
+      if (item.kind === "task" && input.assignee_member_id !== undefined) await replaceItemAssignmentRole(ownerId, item.id, "task_assignee", input.assignee_member_id ? [input.assignee_member_id] : []);
       const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
       return {
         structuredContent: { item: serialized },
@@ -425,20 +456,59 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   );
 
   server.registerTool(
+    "archive_project",
+    {
+      title: "Archive a Project with its Tasks",
+      description: "Remove a Project and its direct Tasks from active views while preserving them for restoration.",
+      inputSchema: { id: z.string() },
+      outputSchema: { project: itemOutput, archivedTaskCount: z.number() },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    async ({ id }) => {
+      const result = await archiveProject(ownerId, id);
+      const project = (await serializeItemsForMcp(ownerId, [result.project]))[0];
+      const archivedTaskCount = Math.max(0, result.affectedCount - 1);
+      return {
+        structuredContent: { project, archivedTaskCount },
+        content: [{ type: "text", text: `Archived "${result.project.title}" with ${archivedTaskCount} Tasks.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "restore_project",
+    {
+      title: "Restore an archived Project",
+      description: "Restore an archived Project and its direct Tasks to their previous statuses.",
+      inputSchema: { id: z.string() },
+      outputSchema: { project: itemOutput, restoredCount: z.number() },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ id }) => {
+      const result = await restoreProject(ownerId, id);
+      const project = (await serializeItemsForMcp(ownerId, [result.project]))[0];
+      return {
+        structuredContent: { project, restoredCount: result.affectedCount },
+        content: [{ type: "text", text: `Restored "${result.project.title}" and its archived Tasks.` }],
+      };
+    },
+  );
+
+  server.registerTool(
     "list_properties",
     {
-      title: "List Task database properties",
-      description: "List the custom columns available on Task rows, including IDs, types, and select options.",
+      title: "List Project properties",
+      description: "List the custom fields available on Projects, including IDs, types, usage counts, and select options.",
       inputSchema: {},
       outputSchema: { properties: z.array(propertyDefinitionOutput), count: z.number() },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async () => {
-      const definitions = await listPropertyDefinitions(ownerId);
-      const properties = definitions.map(serializePropertyDefinition);
+      const definitions = await listProjectPropertyDefinitions(ownerId);
+      const properties = definitions.map((definition) => serializePropertyDefinition(definition));
       return {
         structuredContent: { properties, count: properties.length },
-        content: [{ type: "text", text: `Found ${properties.length} Task database properties.` }],
+        content: [{ type: "text", text: `Found ${properties.length} Project properties.` }],
       };
     },
   );
@@ -446,8 +516,8 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   server.registerTool(
     "create_property",
     {
-      title: "Create a Task database property",
-      description: "Add a custom column to every Task row. Select properties should include their allowed options.",
+      title: "Create a Project property",
+      description: "Add a custom field to every Project. Select properties should include their allowed options.",
       inputSchema: {
         name: z.string().min(1),
         type: z.enum(PROPERTY_TYPES),
@@ -465,7 +535,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       const serialized = serializePropertyDefinition(property);
       return {
         structuredContent: { property: serialized },
-        content: [{ type: "text", text: `Created Task property "${property.name}".` }],
+        content: [{ type: "text", text: `Created Project property "${property.name}".` }],
       };
     },
   );
@@ -473,8 +543,8 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   server.registerTool(
     "set_property_value",
     {
-      title: "Set a Task property value",
-      description: "Set or clear a custom property on an item. The property can be provided by ID or exact name.",
+      title: "Set a Project property value",
+      description: "Set or clear a custom property on a Project. The property can be provided by ID or exact name.",
       inputSchema: {
         item_id: z.string(),
         property: z.string().min(1).describe("Property ID or exact name"),
@@ -507,8 +577,8 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   server.registerTool(
     "delete_property",
     {
-      title: "Delete a Task database property",
-      description: "Delete a custom Task column and all values stored under it. The property can be provided by ID or exact name.",
+      title: "Delete a Project property",
+      description: "Delete a custom Project field and all Project values stored under it. The property can be provided by ID or exact name.",
       inputSchema: { property: z.string().min(1).describe("Property ID or exact name") },
       outputSchema: { deleted: z.boolean(), propertyId: z.string(), propertyName: z.string() },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
@@ -523,7 +593,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       };
       return {
         structuredContent,
-        content: [{ type: "text", text: `Deleted Task property "${definition.name}".` }],
+        content: [{ type: "text", text: `Deleted Project property "${definition.name}".` }],
       };
     },
   );
@@ -881,16 +951,16 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   server.registerTool(
     "update_team_member",
     {
-      title: "Update a team member role",
-      description: "Change a non-owner team member or invitation to Admin, Member, or Viewer.",
-      inputSchema: { id: z.string(), role: z.enum(["admin", "member", "viewer"]) },
+      title: "Update a team member",
+      description: "Change a non-owner team member or invitation role, or update a display name.",
+      inputSchema: { id: z.string(), role: z.enum(["admin", "member", "viewer"]).optional(), displayName: z.string().optional() },
       outputSchema: { member: teamMemberOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ id, role }) => {
+    async ({ id, role, displayName }) => {
       if (!canManageTeam(authorization)) throw new Error("Owner or Admin access is required.");
-      const member = await updateTeamMember(ownerId, id, role as Exclude<TeamRole, "owner">, authorization.userId);
-      return { structuredContent: { member }, content: [{ type: "text", text: `Updated ${member.email || member.displayName} to ${role}.` }] };
+      const member = await updateTeamMember(ownerId, id, { role: role as Exclude<TeamRole, "owner"> | undefined, displayName }, authorization.userId, true);
+      return { structuredContent: { member }, content: [{ type: "text", text: `Updated ${member.email || member.displayName}.` }] };
     },
   );
 
@@ -1080,12 +1150,15 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
 }
 
 async function serializeItemsForMcp(ownerId: string, rows: Parameters<typeof serializeItem>[0][]) {
-  const properties = await getItemPropertiesByName(ownerId);
-  return rows.map((item) => serializeItem(item, properties[item.id] ?? {}));
+  const [properties, assignments] = await Promise.all([
+    getItemPropertiesByName(ownerId),
+    getItemAssignmentMap(ownerId, rows.map((item) => item.id)),
+  ]);
+  return rows.map((item) => serializeItem(item, item.kind === "project" ? properties[item.id] ?? {} : {}, assignments[item.id] ?? []));
 }
 
 async function resolveProperty(ownerId: string, value: string) {
-  const definitions = await listPropertyDefinitions(ownerId);
+  const definitions = await listProjectPropertyDefinitions(ownerId);
   const normalized = value.trim().toLocaleLowerCase();
   const property = definitions.find(
     (definition) => definition.id === value || definition.name.toLocaleLowerCase() === normalized,

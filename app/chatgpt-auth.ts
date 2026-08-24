@@ -33,7 +33,7 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
 
   return {
     userId,
-    displayName: fullName ?? email,
+    displayName: fullName ?? email.split("@")[0],
     email,
     fullName,
   };

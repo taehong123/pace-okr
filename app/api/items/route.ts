@@ -6,8 +6,10 @@ import {
   authorizeRequest,
   createItem,
   ensureWorkspace,
+  getItemAssignmentMap,
   getPeriodReview,
   listItems,
+  replaceItemAssignmentRole,
   serializeItem,
   updateItem,
   type ItemCadence,
@@ -26,7 +28,8 @@ export async function GET(request: Request) {
     const cadence = asValue(url.searchParams.get("cadence"), ITEM_CADENCES);
     if (url.searchParams.get("review") === "true" && cadence) {
       const review = await getPeriodReview(authorization.ownerId, cadence);
-      return Response.json({ review: { ...review, items: review.items.map((item) => serializeItem(item)) } });
+      const assignments = await getItemAssignmentMap(authorization.ownerId, review.items.map((item) => item.id));
+      return Response.json({ review: { ...review, items: review.items.map((item) => serializeItem(item, {}, assignments[item.id] ?? [])) } });
     }
 
     const rows = await listItems(authorization.ownerId, {
@@ -35,8 +38,10 @@ export async function GET(request: Request) {
       cadence,
       parentId: url.searchParams.get("parentId") ?? undefined,
       query: url.searchParams.get("q") ?? undefined,
+      includeArchived: url.searchParams.get("includeArchived") === "true",
     });
-    return Response.json({ items: rows.map((item) => serializeItem(item)) });
+    const assignments = await getItemAssignmentMap(authorization.ownerId, rows.map((item) => item.id));
+    return Response.json({ items: rows.map((item) => serializeItem(item, {}, assignments[item.id] ?? [])) });
   } catch (error) {
     return routeError(error);
   }
@@ -67,7 +72,9 @@ export async function POST(request: Request) {
       source: asString(payload.source) || "web",
       sourceRef: asNullableString(payload.sourceRef),
     });
-    return Response.json({ item: serializeItem(item) }, { status: 201 });
+    await saveAssignments(authorization.ownerId, item.id, item.kind as ItemKind, payload);
+    const assignments = await getItemAssignmentMap(authorization.ownerId, [item.id]);
+    return Response.json({ item: serializeItem(item, {}, assignments[item.id] ?? []) }, { status: 201 });
   } catch (error) {
     return routeError(error);
   }
@@ -96,10 +103,33 @@ export async function PATCH(request: Request) {
       routineId: payload.routineId === undefined ? undefined : asNullableString(payload.routineId),
       source: asOptionalString(payload.source) || "web",
     });
-    return Response.json({ item: serializeItem(item) });
+    await saveAssignments(authorization.ownerId, item.id, item.kind as ItemKind, payload);
+    const assignments = await getItemAssignmentMap(authorization.ownerId, [item.id]);
+    return Response.json({ item: serializeItem(item, {}, assignments[item.id] ?? []) });
   } catch (error) {
     return routeError(error);
   }
+}
+
+async function saveAssignments(ownerId: string, itemId: string, kind: ItemKind, payload: Record<string, unknown>) {
+  if (kind === "project") {
+    if (payload.driMemberId !== undefined) {
+      await replaceItemAssignmentRole(ownerId, itemId, "project_dri", asMemberIds(payload.driMemberId, 1));
+    }
+    if (payload.workerMemberIds !== undefined) {
+      await replaceItemAssignmentRole(ownerId, itemId, "project_worker", asMemberIds(payload.workerMemberIds));
+    }
+  }
+  if (kind === "task" && payload.assigneeMemberId !== undefined) {
+    await replaceItemAssignmentRole(ownerId, itemId, "task_assignee", asMemberIds(payload.assigneeMemberId, 1));
+  }
+}
+
+function asMemberIds(value: unknown, max?: number) {
+  const values = Array.isArray(value) ? value : typeof value === "string" && value.trim() ? [value] : [];
+  const ids = values.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim())).map((entry) => entry.trim());
+  if (max !== undefined && ids.length > max) throw new Error("Only one accountable member is allowed");
+  return ids;
 }
 
 function asValue<T extends readonly string[]>(value: unknown, values: T): T[number] | undefined {
@@ -120,6 +150,10 @@ function asNullableString(value: unknown) {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
-  const status = /required|requires|must be|cannot have|not found|only an/i.test(message) ? 400 : 500;
+  const status = /required|requires|must be|cannot have|not found|only an|archive|restore|active workspace|assignment/i.test(
+    message,
+  )
+    ? 400
+    : 500;
   return Response.json({ error: message }, { status });
 }

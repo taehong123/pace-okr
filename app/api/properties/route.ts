@@ -4,8 +4,10 @@ import {
   createPropertyDefinition,
   deletePropertyDefinition,
   ensureWorkspace,
-  getPropertyValueMap,
-  listPropertyDefinitions,
+  getProjectHiddenPropertyMap,
+  getProjectPropertyUsageCounts,
+  getProjectPropertyValueMap,
+  listProjectPropertyDefinitions,
   serializePropertyDefinition,
   type PropertyType,
 } from "@/lib/pace-data";
@@ -16,13 +18,16 @@ export async function GET(request: Request) {
 
   try {
     await ensureWorkspace(authorization.ownerId);
-    const [properties, values] = await Promise.all([
-      listPropertyDefinitions(authorization.ownerId),
-      getPropertyValueMap(authorization.ownerId),
+    const [properties, values, usageCounts, hiddenByProject] = await Promise.all([
+      listProjectPropertyDefinitions(authorization.ownerId),
+      getProjectPropertyValueMap(authorization.ownerId),
+      getProjectPropertyUsageCounts(authorization.ownerId),
+      getProjectHiddenPropertyMap(authorization.ownerId),
     ]);
     return Response.json({
-      properties: properties.map(serializePropertyDefinition),
+      properties: properties.map((property) => serializePropertyDefinition(property, usageCounts[property.id] ?? 0)),
       values,
+      hiddenByProject,
     });
   } catch (error) {
     return routeError(error);
@@ -73,6 +78,6 @@ export async function DELETE(request: Request) {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
-  const status = /required|unsupported|already exists|not found/i.test(message) ? 400 : 500;
+  const status = /required|unsupported|already exists|not found|assignment fields/i.test(message) ? 400 : 500;
   return Response.json({ error: message }, { status });
 }

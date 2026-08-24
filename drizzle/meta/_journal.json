@@ -127,6 +127,13 @@
       "when": 1787542607217,
       "tag": "0017_equal_doctor_octopus",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1787555145990,
+      "tag": "0019_magenta_shooting_star",
+      "breakpoints": true
     }
   ]
 }

@@ -25,7 +25,7 @@ export async function PATCH(request: Request) {
     return Response.json({ itemId, propertyId, value: payload.value });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
-    const status = /required|must be|not found|configured options/i.test(message) ? 400 : 500;
+    const status = /required|must be|not found|configured options|only|archived/i.test(message) ? 400 : 500;
     return Response.json({ error: message }, { status });
   }
 }

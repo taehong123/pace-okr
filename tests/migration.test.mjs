@@ -74,6 +74,91 @@ test("creates relational workspaces and team memberships", async () => {
   db.close();
 });
 
+test("archives Projects with Tasks and preserves structured assignments and hidden properties", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE workspace_members (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active'
+    );
+    CREATE TABLE property_definitions (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL,
+      options TEXT NOT NULL DEFAULT '[]', sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE items (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, parent_id TEXT, kind TEXT NOT NULL,
+      title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'todo',
+      priority TEXT NOT NULL DEFAULT 'medium', cadence TEXT NOT NULL DEFAULT 'weekly',
+      progress INTEGER NOT NULL DEFAULT 0, due_date TEXT, source TEXT NOT NULL DEFAULT 'web',
+      source_ref TEXT, sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE item_property_values (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL,
+      item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+      property_id TEXT NOT NULL REFERENCES property_definitions(id) ON DELETE CASCADE,
+      value TEXT NOT NULL DEFAULT 'null', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO workspace_members (id, workspace_id, display_name) VALUES
+      ('lead', 'workspace', '김태홍'), ('worker', 'workspace', '이실무'), ('second', 'workspace', '박지원');
+    INSERT INTO property_definitions (id, owner_id, name, type) VALUES
+      ('risk', 'workspace', '리스크', 'text');
+    INSERT INTO items (id, owner_id, kind, title, status) VALUES
+      ('project', 'workspace', 'project', '출시 프로젝트', 'in_progress'),
+      ('other-project', 'workspace', 'project', '다른 프로젝트', 'backlog');
+    INSERT INTO items (id, owner_id, parent_id, kind, title, status) VALUES
+      ('task-a', 'workspace', 'project', 'task', '설계', 'blocked'),
+      ('task-b', 'workspace', 'project', 'task', '개발', 'done');
+    INSERT INTO item_property_values (id, owner_id, item_id, property_id, value) VALUES
+      ('risk-value', 'workspace', 'project', 'risk', '"높음"');
+  `);
+
+  const migration = await readFile(new URL("../drizzle/0019_magenta_shooting_star.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO item_assignments (id, owner_id, item_id, member_id, role) VALUES
+      ('dri', 'workspace', 'project', 'lead', 'project_dri'),
+      ('worker-a', 'workspace', 'project', 'worker', 'project_worker'),
+      ('worker-b', 'workspace', 'project', 'second', 'project_worker'),
+      ('assignee', 'workspace', 'task-a', 'worker', 'task_assignee');
+    INSERT INTO project_hidden_properties (id, owner_id, project_id, property_id)
+      VALUES ('hidden', 'workspace', 'project', 'risk');
+  `);
+
+  assert.throws(() => db.exec(`INSERT INTO item_assignments (id, owner_id, item_id, member_id, role)
+    VALUES ('second-dri', 'workspace', 'project', 'second', 'project_dri')`));
+  assert.throws(() => db.exec(`INSERT INTO item_assignments (id, owner_id, item_id, member_id, role)
+    VALUES ('second-assignee', 'workspace', 'task-a', 'second', 'task_assignee')`));
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM item_assignments WHERE item_id = 'project' AND role = 'project_worker'").get().count, 2);
+  assert.equal(db.prepare("SELECT value FROM item_property_values WHERE id = 'risk-value'").get().value, '"높음"');
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM project_hidden_properties WHERE project_id = 'other-project'").get().count, 0);
+
+  db.prepare(`UPDATE items
+    SET archived_from_status = status, status = 'archived', archived_at = ?, archive_root_id = ?, updated_at = ?
+    WHERE owner_id = ? AND archived_at IS NULL AND (id = ? OR (parent_id = ? AND kind = 'task'))`)
+    .run("2026-08-24T00:00:00.000Z", "project", "2026-08-24T00:00:00.000Z", "workspace", "project", "project");
+  assert.deepEqual(db.prepare("SELECT id, status FROM items WHERE archived_at IS NULL ORDER BY id").all().map((row) => ({ ...row })), [
+    { id: "other-project", status: "backlog" },
+  ]);
+
+  db.prepare(`UPDATE items
+    SET status = CASE WHEN archived_from_status IS NULL OR archived_from_status = 'archived'
+      THEN CASE kind WHEN 'project' THEN 'backlog' ELSE 'todo' END ELSE archived_from_status END,
+      archived_at = NULL, archived_from_status = NULL, archive_root_id = NULL, updated_at = ?
+    WHERE owner_id = ? AND (id = ? OR archive_root_id = ?)`)
+    .run("2026-08-24T01:00:00.000Z", "workspace", "project", "project");
+  assert.deepEqual(db.prepare("SELECT id, status FROM items WHERE id IN ('project', 'task-a', 'task-b') ORDER BY id").all().map((row) => ({ ...row })), [
+    { id: "project", status: "in_progress" },
+    { id: "task-a", status: "blocked" },
+    { id: "task-b", status: "done" },
+  ]);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM item_assignments").get().count, 4);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM project_hidden_properties").get().count, 1);
+  db.close();
+});
+
 test("creates groups with unique handles and cascading memberships", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON;");
