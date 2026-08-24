@@ -31,6 +31,7 @@ const guide = {
     { purpose: "Archive a Project and its direct Tasks", method: "POST", path: "/api/project-archives", body: "projectId required" },
     { purpose: "List archived Projects", method: "GET", path: "/api/project-archives" },
     { purpose: "Restore a Project and its direct Tasks", method: "DELETE", path: "/api/project-archives?projectId=<project-id>" },
+    { purpose: "Permanently delete an archived Project and all of its archived Tasks after explicit confirmation", method: "DELETE", path: "/api/project-archives/permanent", body: "projectId and exact confirmationTitle required", requiresConfirmation: true },
     { purpose: "Read Project custom properties, values, and per-Project visibility", method: "GET", path: "/api/properties" },
     { purpose: "Set one Project property value", method: "PATCH", path: "/api/property-values", body: "itemId, propertyId, value" },
     { purpose: "Set Project or Task member assignments", method: "PATCH", path: "/api/item-assignments", body: "itemId, role, memberIds; role is project_dri, project_worker, or task_assignee" },

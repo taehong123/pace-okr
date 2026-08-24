@@ -156,6 +156,17 @@ test("archives Projects with Tasks and preserves structured assignments and hidd
   ]);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM item_assignments").get().count, 4);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM project_hidden_properties").get().count, 1);
+
+  db.prepare(`UPDATE items
+    SET archived_from_status = status, status = 'archived', archived_at = ?, archive_root_id = ?, updated_at = ?
+    WHERE owner_id = ? AND archived_at IS NULL AND (id = ? OR (parent_id = ? AND kind = 'task'))`)
+    .run("2026-08-24T02:00:00.000Z", "project", "2026-08-24T02:00:00.000Z", "workspace", "project", "project");
+  db.exec("DELETE FROM items WHERE owner_id = 'workspace' AND (id = 'project' OR archive_root_id = 'project')");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM items WHERE id IN ('project', 'task-a', 'task-b')").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM item_assignments").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM item_property_values").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM project_hidden_properties").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM items WHERE id = 'other-project'").get().count, 1);
   db.close();
 });
 

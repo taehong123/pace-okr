@@ -760,6 +760,23 @@ export default function Home() {
     showNotice("프로젝트와 하위 Task를 원래 상태로 복구했습니다.");
   }
 
+  async function permanentlyDeleteProjectItem(project: ArchivedProject) {
+    if (!window.confirm(`'${project.title}'을 영구 삭제할까요?\n프로젝트와 하위 Task ${project.archivedTaskCount}개, 체크리스트, 속성값, 담당자 연결이 모두 삭제되며 복구할 수 없습니다.`)) return;
+    const response = await fetch("/api/project-archives/permanent", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: project.id, confirmationTitle: project.title }),
+    });
+    if (!response.ok) {
+      showNotice("프로젝트를 영구 삭제하지 못했습니다.");
+      return;
+    }
+    setArchivedProjects((current) => current.filter((entry) => entry.id !== project.id));
+    setPropertyValues((current) => Object.fromEntries(Object.entries(current).filter(([itemId]) => itemId !== project.id)));
+    setHiddenProperties((current) => Object.fromEntries(Object.entries(current).filter(([projectId]) => projectId !== project.id)));
+    showNotice(`'${project.title}'과 하위 Task를 영구 삭제했습니다.`);
+  }
+
   function showNotice(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 2200);
@@ -1203,7 +1220,7 @@ export default function Home() {
                 }}
                 onNotice={showNotice}
               />}
-              {projectTab === "archive" && <ProjectArchiveView projects={archivedProjects} onRestore={(id) => void restoreProjectItem(id)} />}
+              {projectTab === "archive" && <ProjectArchiveView projects={archivedProjects} onRestore={(id) => void restoreProjectItem(id)} onDelete={(project) => void permanentlyDeleteProjectItem(project)} />}
             </section>
           )}
           {activeView === "routines" && <RoutineView onNotice={showNotice} onRoutinesChange={setRoutines} />}
@@ -2760,9 +2777,9 @@ function ProjectPropertyManager({ properties, onCreated, onDeleted, onNotice }: 
   return <section className="project-property-manager"><header><div><h2>Project 속성</h2><p>모든 Project에 적용되는 필드를 관리합니다.</p></div><span>{properties.length}개</span></header><div className="project-property-layout"><div className="project-property-catalog">{properties.length ? properties.map((property) => <article className="project-property-item" key={property.id}><span className="property-type-icon">{property.type === "number" ? <Hash size={14} /> : <TextCursorInput size={14} />}</span><div><b>{property.name}</b><small>{propertyTypeLabel(property.type)} · 값이 있는 Project {property.valueCount}개</small></div><button className="icon-button" onClick={() => void remove(property)} aria-label={`${property.name} 삭제`} title="속성 삭제"><Trash2 size={14} /></button></article>) : <EmptyState icon={Settings2} title="아직 Project 속성이 없습니다" />}</div><form className="project-property-create" onSubmit={create}><h3>새 속성</h3><label><span>이름</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="예: 리스크, 예산, 출시일" /></label><label><span>유형</span><select value={type} onChange={(event) => setType(event.target.value as PropertyType)}>{(["text", "number", "select", "date", "checkbox"] as PropertyType[]).map((entry) => <option value={entry} key={entry}>{propertyTypeLabel(entry)}</option>)}</select></label>{type === "select" && <label><span>선택 옵션</span><input value={options} onChange={(event) => setOptions(event.target.value)} placeholder="쉼표로 구분" /></label>}<button className="primary-action" disabled={!name.trim() || saving}><Plus size={14} />{saving ? "추가 중" : "속성 추가"}</button></form></div></section>;
 }
 
-function ProjectArchiveView({ projects, onRestore }: { projects: ArchivedProject[]; onRestore: (id: string) => void }) {
+function ProjectArchiveView({ projects, onRestore, onDelete }: { projects: ArchivedProject[]; onRestore: (id: string) => void; onDelete: (project: ArchivedProject) => void }) {
   if (!projects.length) return <div className="project-archive-empty"><EmptyState icon={Archive} title="보관된 Project가 없습니다" /></div>;
-  return <section className="project-archive-list">{projects.map((project) => <article className="project-archive-row" key={project.id}><span className="archive-project-icon"><Archive size={15} /></span><div><b>{project.title}</b><small>하위 Task {project.archivedTaskCount}개 · {project.archivedAt ? formatDateTime(project.archivedAt) : "보관됨"}</small></div><span className={`status-tag status-${project.archivedFromStatus ?? "backlog"}`}>{statusLabel(project.archivedFromStatus ?? "backlog")}</span><button onClick={() => onRestore(project.id)}><RotateCcw size={14} />함께 복구</button></article>)}</section>;
+  return <section className="project-archive-list">{projects.map((project) => <article className="project-archive-row" key={project.id}><span className="archive-project-icon"><Archive size={15} /></span><div className="project-archive-copy"><b>{project.title}</b><small>하위 Task {project.archivedTaskCount}개 · {project.archivedAt ? formatDateTime(project.archivedAt) : "보관됨"}</small></div><span className={`status-tag status-${project.archivedFromStatus ?? "backlog"}`}>{statusLabel(project.archivedFromStatus ?? "backlog")}</span><div className="project-archive-actions"><button onClick={() => onRestore(project.id)}><RotateCcw size={14} />함께 복구</button><button className="danger" onClick={() => onDelete(project)} aria-label={`${project.title} 영구 삭제`} title="영구 삭제"><Trash2 size={14} /></button></div></article>)}</section>;
 }
 
 function PropertyPanel({ currentWorkspace, workspaceCount, onClose, onCleanup, onOpenWorkspaceMenu, onOpenTeamMembers, onOpenGroups }: { currentWorkspace?: WorkspaceSummary; workspaceCount: number; onClose: () => void; onCleanup: () => void; onOpenWorkspaceMenu: () => void; onOpenTeamMembers: () => void; onOpenGroups: () => void }) {

@@ -40,6 +40,7 @@ import {
   removeTeamMember,
   removeGroupMember,
   replaceItemAssignmentRole,
+  permanentlyDeleteArchivedProject,
   restoreProject,
   saveDailyScrum,
   saveWorkspaceRules,
@@ -490,6 +491,24 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       return {
         structuredContent: { project, restoredCount: result.affectedCount },
         content: [{ type: "text", text: `Restored "${result.project.title}" and its archived Tasks.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "delete_archived_project",
+    {
+      title: "Permanently delete an archived Project",
+      description: "Permanently delete an archived Project, its archived Tasks, checklists, property values, and assignments. Ask for explicit confirmation immediately before calling, then pass the exact Project title as confirmation_title.",
+      inputSchema: { id: z.string(), confirmation_title: z.string() },
+      outputSchema: { deleted: z.boolean(), projectId: z.string(), title: z.string(), deletedTaskCount: z.number(), deletedItemCount: z.number() },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    async ({ id, confirmation_title }) => {
+      const result = await permanentlyDeleteArchivedProject(ownerId, id, confirmation_title);
+      return {
+        structuredContent: result,
+        content: [{ type: "text", text: `Permanently deleted "${result.title}" and ${result.deletedTaskCount} Tasks.` }],
       };
     },
   );

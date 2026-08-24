@@ -2172,6 +2172,40 @@ export async function restoreProject(ownerId: string, projectId: string) {
   return { project: (await getItem(ownerId, projectId))!, affectedCount: Number(result[0].meta.changes ?? 0) };
 }
 
+export async function permanentlyDeleteArchivedProject(ownerId: string, projectId: string, confirmationTitle: string) {
+  const project = await getItem(ownerId, projectId);
+  if (!project || project.kind !== "project") throw new Error("Project not found");
+  if (!project.archivedAt) throw new Error("Archive the Project before deleting it permanently");
+  if (confirmationTitle.trim() !== project.title) throw new Error("Project title confirmation does not match");
+
+  const linkedItems = await getDb()
+    .select({ id: items.id, kind: items.kind })
+    .from(items)
+    .where(and(eq(items.ownerId, ownerId), or(eq(items.id, projectId), eq(items.archiveRootId, projectId))));
+  const deletedTaskCount = linkedItems.filter((entry) => entry.kind === "task").length;
+  const d1 = (env as RuntimeEnv).DB;
+  const itemScope = `SELECT id FROM items WHERE owner_id = ? AND (id = ? OR archive_root_id = ?)`;
+
+  await d1.batch([
+    d1.prepare(`DELETE FROM activity_log WHERE owner_id = ? AND item_id IN (${itemScope})`)
+      .bind(ownerId, ownerId, projectId, projectId),
+    d1.prepare(`DELETE FROM google_calendar_events WHERE owner_id = ? AND item_id IN (${itemScope})`)
+      .bind(ownerId, ownerId, projectId, projectId),
+    d1.prepare(`DELETE FROM checklist_items WHERE owner_id = ? AND task_id IN (${itemScope})`)
+      .bind(ownerId, ownerId, projectId, projectId),
+    d1.prepare(`DELETE FROM item_property_values WHERE owner_id = ? AND item_id IN (${itemScope})`)
+      .bind(ownerId, ownerId, projectId, projectId),
+    d1.prepare(`DELETE FROM item_assignments WHERE owner_id = ? AND item_id IN (${itemScope})`)
+      .bind(ownerId, ownerId, projectId, projectId),
+    d1.prepare(`DELETE FROM project_hidden_properties WHERE owner_id = ? AND project_id = ?`)
+      .bind(ownerId, projectId),
+    d1.prepare("DELETE FROM items WHERE owner_id = ? AND (id = ? OR archive_root_id = ?)")
+      .bind(ownerId, projectId, projectId),
+  ]);
+
+  return { deleted: true, projectId, title: project.title, deletedTaskCount, deletedItemCount: linkedItems.length };
+}
+
 export async function listPropertyDefinitions(ownerId: string) {
   return getDb()
     .select()
