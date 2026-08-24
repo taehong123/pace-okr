@@ -601,13 +601,6 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .team-tabs button::after { content: ""; position: absolute; right: 10px; bottom: -1px; left: 10px; height: 2px; background: transparent; }
 .team-tabs button.active { color: var(--ink); font-weight: 600; }
 .team-tabs button.active::after { background: var(--ink); }
-.team-profile { display: grid; gap: 8px; padding: 14px 18px; border-bottom: 1px solid var(--line); background: #fbfbfa; }
-.team-profile label { display: grid; gap: 7px; }
-.team-profile label > span { color: var(--muted); font-size: 10px; font-weight: 600; }
-.team-profile label > div { display: grid; grid-template-columns: minmax(0, 1fr) 72px; }
-.team-profile input { min-width: 0; height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 4px 0 0 4px; outline: 0; background: white; color: var(--ink); font-size: 11px; }
-.team-profile button { height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 0; border-radius: 0 4px 4px 0; background: var(--ink); color: white; font-size: 10px; cursor: pointer; }
-.team-profile button:disabled { opacity: .45; cursor: default; }
 .team-invite { display: grid; gap: 8px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
 .team-invite label { display: grid; gap: 7px; }
 .team-invite label > span { color: var(--muted); font-size: 10px; font-weight: 600; }
@@ -625,6 +618,17 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .team-member b { overflow: hidden; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .team-member b em { margin-left: 5px; padding: 2px 4px; border-radius: 3px; background: #f1f1ef; color: var(--muted); font-size: 8px; font-style: normal; font-weight: 500; }
 .team-member small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.member-name-button { min-width: 0; height: 21px; display: flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.member-name-button > span { min-width: 0; overflow: hidden; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.member-name-button em { margin-left: 5px; padding: 2px 4px; border-radius: 3px; background: #f1f1ef; color: var(--muted); font-size: 8px; font-style: normal; font-weight: 500; }
+.member-name-button svg { flex: 0 0 auto; color: var(--faint); opacity: 0; }
+.member-name-button:hover svg, .member-name-button:focus-visible svg { opacity: 1; }
+.member-name-editor { min-width: 0; height: 28px; display: grid; grid-template-columns: minmax(0, 1fr) 27px 27px; }
+.member-name-editor input { min-width: 0; height: 28px; padding: 0 7px; border: 1px solid var(--line-strong); border-radius: 4px 0 0 4px; outline: 0; background: white; color: var(--ink); font-size: 10px; }
+.member-name-editor button { width: 27px; height: 28px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line-strong); border-left: 0; border-radius: 0; background: var(--surface); color: var(--ink); cursor: pointer; }
+.member-name-editor button:last-child { border-radius: 0 4px 4px 0; color: var(--muted); }
+.member-name-editor button:hover { background: var(--hover); }
+.member-name-editor button:disabled { opacity: .45; cursor: default; }
 .member-status { justify-self: start; padding: 3px 5px; border-radius: 3px; font-size: 8px; white-space: nowrap; }
 .member-active { background: #edf3ec; color: var(--green); }
 .member-invited { background: #faebdd; color: #a34f00; }

@@ -32,6 +32,7 @@ import {
   LogOut,
   Menu,
   MoreHorizontal,
+  Pencil,
   Plus,
   Plug,
   Repeat2,
@@ -2849,7 +2850,9 @@ function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { init
   const [showArchived, setShowArchived] = useState(false);
   const [email, setEmail] = useState("");
   const [inviteDisplayName, setInviteDisplayName] = useState("");
-  const [profileName, setProfileName] = useState<string | null>(null);
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [memberNameDraft, setMemberNameDraft] = useState("");
+  const memberNameInputRef = useRef<HTMLInputElement>(null);
   const [role, setRole] = useState<Exclude<TeamRole, "owner">>("member");
   const [groupName, setGroupName] = useState("");
   const [groupColor, setGroupColor] = useState<GroupColor>("blue");
@@ -2893,6 +2896,12 @@ function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { init
     }, 0);
     return () => window.clearTimeout(timeout);
   }, [groups, initialGroupHandle, selectedGroupId]);
+
+  useEffect(() => {
+    if (!editingMemberId) return;
+    memberNameInputRef.current?.focus();
+    memberNameInputRef.current?.select();
+  }, [editingMemberId]);
 
   function clearGroupUrl() {
     const url = new URL(window.location.href);
@@ -2938,23 +2947,39 @@ function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { init
     onNotice("멤버 역할을 변경했습니다.");
   }
 
-  async function saveProfileName(event: FormEvent) {
+  function editMemberName(member: TeamMember) {
+    setEditingMemberId(member.id);
+    setMemberNameDraft(member.displayName);
+    setError("");
+  }
+
+  function cancelMemberNameEdit() {
+    setEditingMemberId(null);
+    setMemberNameDraft("");
+  }
+
+  async function saveMemberName(event: FormEvent, member: TeamMember) {
     event.preventDefault();
-    if (!currentMember || !effectiveProfileName.trim() || saving) return;
+    const displayName = memberNameDraft.trim();
+    if (!displayName || saving) return;
+    if (displayName === member.displayName) {
+      cancelMemberNameEdit();
+      return;
+    }
     setSaving(true);
     setError("");
-    const response = await fetch("/api/team", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: currentMember.id, displayName: effectiveProfileName }) });
+    const response = await fetch("/api/team", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: member.id, displayName }) });
     const data = await response.json() as { member?: TeamMember; error?: string };
     setSaving(false);
     if (!response.ok || !data.member) {
-      setError(data.error ?? "실명을 저장하지 못했습니다.");
+      setError(data.error ?? "멤버 실명을 저장하지 못했습니다.");
       return;
     }
-    window.localStorage.setItem(profileNameConfirmationKey(data.member), data.member.displayName);
+    if (data.member.isCurrent) window.localStorage.setItem(profileNameConfirmationKey(data.member), data.member.displayName);
     setTeam((current) => current ? { ...current, members: current.members.map((entry) => entry.id === data.member!.id ? data.member! : entry) } : current);
-    setProfileName(null);
+    cancelMemberNameEdit();
     setError("");
-    onNotice("내 실명을 저장했습니다.");
+    onNotice(data.member.isCurrent ? "내 실명을 저장했습니다." : "멤버 실명을 저장했습니다.");
   }
 
   async function remove(member: TeamMember) {
@@ -2992,9 +3017,6 @@ function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { init
 
   const visibleGroups = (groups ?? []).filter((group) => showArchived || !group.archived);
   const activeGroupCount = (groups ?? []).filter((group) => !group.archived).length;
-  const currentMember = team?.members.find((member) => member.isCurrent);
-  const currentMemberDisplayName = currentMember?.displayName;
-  const effectiveProfileName = profileName ?? currentMemberDisplayName ?? "";
 
   return (
     <div className="modal-backdrop align-right">
@@ -3009,11 +3031,6 @@ function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { init
         </nav>
         {tab === "members" ? (
           <>
-            {currentMember && (
-              <form className="team-profile" onSubmit={saveProfileName}>
-                <label><span>내 실명</span><div><input value={effectiveProfileName} onChange={(event) => setProfileName(event.target.value)} maxLength={80} aria-label="내 실명" /><button disabled={!effectiveProfileName.trim() || effectiveProfileName.trim() === currentMember.displayName || saving}><Check size={13} />저장</button></div></label>
-              </form>
-            )}
             {team?.canManage && (
               <form className="team-invite" onSubmit={invite}>
                 <label><span>실명과 이메일로 초대</span><div><input value={inviteDisplayName} onChange={(event) => setInviteDisplayName(event.target.value)} maxLength={80} placeholder="홍길동" aria-label="초대 실명" /><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.com" aria-label="초대 이메일" /><select value={role} onChange={(event) => setRole(event.target.value as Exclude<TeamRole, "owner">)} aria-label="초대 역할"><option value="admin">Admin</option><option value="member">Member</option><option value="viewer">Viewer</option></select><button disabled={!email.trim() || saving} aria-label="멤버 초대" title="멤버 초대"><UserPlus size={14} /></button></div></label>
@@ -3021,7 +3038,35 @@ function TeamPanel({ initialTab, initialGroupHandle, onClose, onNotice }: { init
             )}
             {error && <p className="team-panel-error">{error}</p>}
             <div className="team-list">
-              {team ? team.members.map((member) => <div className="team-member" key={member.id}><span className="team-avatar">{memberInitial(member)}</span><div><b>{member.displayName}{member.isCurrent && <em>나</em>}</b><small>{member.email || (member.role === "owner" ? "Workspace owner" : "이메일 없음")}</small></div><span className={`member-status member-${member.status}`}>{member.status === "active" ? "활성" : "초대 대기"}</span>{team.canManage && member.role !== "owner" ? <select value={member.role} onChange={(event) => void changeRole(member, event.target.value as Exclude<TeamRole, "owner">)} aria-label={`${member.displayName} 역할`}><option value="admin">Admin</option><option value="member">Member</option><option value="viewer">Viewer</option></select> : <span className="member-role">{teamRoleLabel(member.role)}</span>}<div className="team-member-actions">{member.status === "invited" && <button className="icon-button" onClick={() => { void navigator.clipboard.writeText(window.location.origin); onNotice("워크스페이스 주소를 복사했습니다."); }} aria-label="초대 주소 복사" title="초대 주소 복사"><Copy size={13} /></button>}{team.canManage && member.role !== "owner" && !member.isCurrent && <button className="icon-button danger" onClick={() => void remove(member)} aria-label={member.status === "invited" ? "초대 취소" : "팀에서 제거"} title={member.status === "invited" ? "초대 취소" : "팀에서 제거"}><Trash2 size={13} /></button>}</div></div>) : !error ? <EmptyState icon={Users} title="팀 정보를 불러오는 중입니다" /> : <EmptyState icon={Users} title={error} />}
+              {team ? team.members.map((member) => {
+                const canEditName = team.canManage || member.isCurrent;
+                const editingName = editingMemberId === member.id;
+                return (
+                  <div className="team-member" key={member.id}>
+                    <span className="team-avatar">{memberInitial(member)}</span>
+                    <div className="team-member-identity">
+                      {editingName ? (
+                        <form className="member-name-editor" onSubmit={(event) => void saveMemberName(event, member)}>
+                          <input ref={memberNameInputRef} value={memberNameDraft} onChange={(event) => setMemberNameDraft(event.target.value)} maxLength={80} aria-label={`${member.displayName} 실명 편집`} />
+                          <button disabled={!memberNameDraft.trim() || saving} aria-label="실명 저장" title="실명 저장"><Check size={12} /></button>
+                          <button type="button" onClick={cancelMemberNameEdit} aria-label="수정 취소" title="수정 취소"><X size={12} /></button>
+                        </form>
+                      ) : canEditName ? (
+                        <button className="member-name-button" onClick={() => editMemberName(member)} aria-label={`${member.displayName} 실명 수정`} title="실명 수정">
+                          <span>{member.displayName}{member.isCurrent && <em>나</em>}</span><Pencil size={11} />
+                        </button>
+                      ) : <b>{member.displayName}{member.isCurrent && <em>나</em>}</b>}
+                      <small>{member.email || (member.role === "owner" ? "Workspace owner" : "이메일 없음")}</small>
+                    </div>
+                    <span className={`member-status member-${member.status}`}>{member.status === "active" ? "활성" : "초대 대기"}</span>
+                    {team.canManage && member.role !== "owner" ? <select value={member.role} onChange={(event) => void changeRole(member, event.target.value as Exclude<TeamRole, "owner">)} aria-label={`${member.displayName} 역할`}><option value="admin">Admin</option><option value="member">Member</option><option value="viewer">Viewer</option></select> : <span className="member-role">{teamRoleLabel(member.role)}</span>}
+                    <div className="team-member-actions">
+                      {member.status === "invited" && <button className="icon-button" onClick={() => { void navigator.clipboard.writeText(window.location.origin); onNotice("워크스페이스 주소를 복사했습니다."); }} aria-label="초대 주소 복사" title="초대 주소 복사"><Copy size={13} /></button>}
+                      {team.canManage && member.role !== "owner" && !member.isCurrent && <button className="icon-button danger" onClick={() => void remove(member)} aria-label={member.status === "invited" ? "초대 취소" : "팀에서 제거"} title={member.status === "invited" ? "초대 취소" : "팀에서 제거"}><Trash2 size={13} /></button>}
+                    </div>
+                  </div>
+                );
+              }) : !error ? <EmptyState icon={Users} title="팀 정보를 불러오는 중입니다" /> : <EmptyState icon={Users} title={error} />}
             </div>
           </>
         ) : selectedGroupId ? (
