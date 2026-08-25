@@ -329,6 +329,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .setup-chat-body { min-height: 0; display: grid; grid-template-columns: minmax(280px, .85fr) minmax(0, 1.15fr); gap: 14px; padding: 14px; overflow: auto; }
 .chat-thread { display: grid; align-content: start; gap: 10px; }
 .assistant-message { margin: 0; padding: 10px; border-radius: 6px; background: #f7f7f5; color: var(--ink); font-size: 12px; line-height: 1.55; }
+.user-message { max-width: 82%; margin: 0 0 0 auto; padding: 10px 12px; border-radius: 7px 7px 2px 7px; background: var(--ink); color: white; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
 .chat-presets { display: flex; flex-wrap: wrap; gap: 5px; }
 .chat-presets button, .chat-apply { height: 29px; padding: 0 9px; border: 0; border-radius: 4px; background: var(--hover); color: var(--ink); font-size: 11px; cursor: pointer; }
 .chat-input { display: grid; gap: 4px; }

@@ -42,13 +42,14 @@ test("server-renders the OKRPTR application loading shell", async () => {
 });
 
 test("ships product metadata and removes starter assets", async () => {
-  const [layout, page, bootstrapRoute, itemRoute, workspaceRoute, integrationRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson] = await Promise.all([
+  const [layout, page, bootstrapRoute, itemRoute, workspaceRoute, integrationRoute, okrOrganizeRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/bootstrap/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/items/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/workspaces/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/integration-tokens/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/okr-organize/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/auth/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/disconnect/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/automations/route.ts", import.meta.url), "utf8"),
@@ -92,9 +93,14 @@ test("ships product metadata and removes starter assets", async () => {
   assert.doesNotMatch(page, /revoke-link/);
   assert.match(page, /\/api\/integration-tokens/);
   assert.match(page, /\/api\/okr-organize/);
-  assert.match(page, /OKR 대화/);
-  assert.match(page, /정리하기/);
+  assert.match(page, /OKRPTR 대화/);
+  assert.match(page, /가벼운 질문/);
+  assert.match(page, /답변 중/);
+  assert.match(page, /보내기/);
   assert.match(page, /OKR 만들기/);
+  assert.match(page, /setDraftOpen\(hasPlanContent\(data\.organized\.plan\)\)/);
+  assert.match(okrOrganizeRoute, /Always respond to the user's actual message first/);
+  assert.match(okrOrganizeRoute, /leave every plan field empty/);
   assert.match(page, /팀 OKR/);
   assert.match(page, /개인 OKR/);
   assert.match(page, /루틴부터/);
