@@ -139,6 +139,17 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /워크스페이스 데이터를 불러오지 못했습니다/);
   assert.match(page, /visibleCount.*20/);
   assert.match(page, /더 보기/);
+  assert.match(page, /aria-label="Project 필터" title="Project 필터"/);
+  assert.match(page, /aria-label="Project 정렬" title="Project 정렬"/);
+  assert.match(page, /aria-label="Project 속성 관리" title="Project 속성 관리"/);
+  assert.match(page, /aria-label="내 설정 닫기" title="내 설정 닫기"/);
+  assert.match(page, /workspaceNameCounts/);
+  assert.match(page, /생성 \$\{formatDateTime\(workspace\.createdAt\)\}/);
+  assert.match(page, /루틴을 불러오지 못했습니다/);
+  assert.match(page, /데일리 스크럼을 불러오지 못했습니다/);
+  assert.match(page, /추천을 계산하지 못했습니다/);
+  assert.match(page, /휴지통을 불러오지 못했습니다/);
+  assert.match(page, /다시 시도/);
   assert.doesNotMatch(page, /\/api\/auth\/session/);
   assert.match(bootstrapRoute, /Promise\.all/);
   assert.match(bootstrapRoute, /scope === "shell"/);
@@ -147,6 +158,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(bootstrapRoute, /getTeam/);
   assert.match(bootstrapRoute, /listItems/);
   assert.match(paceData, /createdAt: workspace\.createdAt/);
+  assert.match(bootstrapRoute, /scope !== "shell"/);
   assert.match(paceData, /workspaceReady/);
   assert.match(paceData, /schemaIsCurrent/);
   assert.match(paceData, /workspaceInitializationIsCurrent/);

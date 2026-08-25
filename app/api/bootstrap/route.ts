@@ -23,10 +23,10 @@ export async function GET(request: Request) {
   if (authorization instanceof Response) return authorization;
 
   try {
-    await ensureWorkspace(authorization.ownerId);
     const url = new URL(request.url);
     const date = url.searchParams.get("date") ?? new Date().toISOString().slice(0, 10);
     const scope = url.searchParams.get("scope");
+    if (scope !== "shell") await ensureWorkspace(authorization.ownerId);
     const hostname = url.hostname;
     const provider = hostname === "localhost" || hostname === "127.0.0.1"
       ? "local"

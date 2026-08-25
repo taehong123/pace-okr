@@ -650,6 +650,11 @@ export default function Home() {
   const selectedProject = activeItems.find((entry) => entry.id === selectedProjectId && entry.kind === "project");
   const activeWorkspaces = workspaces.filter((entry) => !entry.scheduledDeletionAt);
   const scheduledWorkspaces = workspaces.filter((entry) => Boolean(entry.scheduledDeletionAt));
+  const workspaceNameCounts = workspaces.reduce((counts, workspace) => {
+    const key = workspace.name.trim().toLocaleLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    return counts;
+  }, new Map<string, number>());
   const currentWorkspace = activeWorkspaces.find((entry) => entry.current) ?? activeWorkspaces[0];
   const currentTeamMember = teamMembers.find((member) => member.isCurrent && member.status === "active");
   const accountDisplayName = currentTeamMember?.displayName || authState.user?.displayName || "내 계정";
@@ -1127,7 +1132,7 @@ export default function Home() {
                   <div className="workspace-row" key={workspace.id}>
                     <button onClick={() => void switchWorkspace(workspace.id)} disabled={workspaceSaving}>
                       <span className="workspace-avatar">{workspace.name.slice(0, 1).toLocaleUpperCase()}</span>
-                      <span><b>{workspace.name}</b><small>{workspace.personal ? "개인" : teamRoleLabel(workspace.role)}</small></span>
+                      <span><b>{workspace.name}</b><small>{workspace.personal ? "개인" : `${teamRoleLabel(workspace.role)}${(workspaceNameCounts.get(workspace.name.trim().toLocaleLowerCase()) ?? 0) > 1 ? ` · 생성 ${formatDateTime(workspace.createdAt)}` : ""}`}</small></span>
                       {workspace.current && <Check size={14} />}
                     </button>
                     {!workspace.personal && workspace.role === "owner" && (
@@ -1144,7 +1149,7 @@ export default function Home() {
                       <div className="workspace-row workspace-row-scheduled" key={workspace.id}>
                         <div className="workspace-scheduled-main">
                           <span className="workspace-avatar">{workspace.name.slice(0, 1).toLocaleUpperCase()}</span>
-                          <span><b>{workspace.name}</b><small>{workspaceDeletionLabel(workspace.scheduledDeletionAt)}</small></span>
+                          <span><b>{workspace.name}</b><small>{workspaceDeletionLabel(workspace.scheduledDeletionAt)}{(workspaceNameCounts.get(workspace.name.trim().toLocaleLowerCase()) ?? 0) > 1 ? ` · 생성 ${formatDateTime(workspace.createdAt)}` : ""}</small></span>
                         </div>
                         <button className="workspace-restore" onClick={() => void restoreWorkspace(workspace)} disabled={workspaceSaving} aria-label={`${workspace.name} 워크스페이스 복구`} title="워크스페이스 복구">
                           <RotateCcw size={13} />
@@ -1693,9 +1698,9 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
         </div>
         <div className="database-actions">
           <label className="table-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="검색" /></label>
-          <button><Filter size={13} /><span>필터</span></button>
-          <button><ArrowDownUp size={13} /><span>정렬</span></button>
-          <button onClick={onOpenProperties}><Plus size={13} /><span>속성</span></button>
+          <button aria-label="Project 필터" title="Project 필터"><Filter size={13} /><span>필터</span></button>
+          <button aria-label="Project 정렬" title="Project 정렬"><ArrowDownUp size={13} /><span>정렬</span></button>
+          <button onClick={onOpenProperties} aria-label="Project 속성 관리" title="Project 속성 관리"><Plus size={13} /><span>속성</span></button>
         </div>
       </div>
       {display === "board" ? <BoardView items={visible} onOpenItem={(entry) => entry.kind === "project" ? onOpenProject(entry.id) : onOpenTask(entry.id)} /> : (
@@ -2172,7 +2177,7 @@ function CreateItemPanel({ initialKind, items, routines, properties, teamMembers
   return (
     <div className="modal-backdrop align-right">
       <aside className="property-panel">
-        <header><div><h2>새 항목</h2><p>{kind === "project" ? "Project 속성을 지정해서 추가" : "OKR 실행 구조에 추가"}</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header>
+        <header><div><h2>새 항목</h2><p>{kind === "project" ? "Project 속성을 지정해서 추가" : "OKR 실행 구조에 추가"}</p></div><button className="icon-button" onClick={onClose} aria-label="새 항목 닫기" title="새 항목 닫기"><X size={17} /></button></header>
         <form className="property-form create-item-form" onSubmit={submit}>
           <label><span>유형</span><select value={kind} onChange={(event) => { setKind(event.target.value as ItemKind); setParentId(""); setTaskContainer(""); }} disabled={initialKind === "project"}>{(["objective", "key_result", "initiative", "project", "task"] as ItemKind[]).map((entry) => <option value={entry} key={entry}>{kindLabel(entry)}</option>)}</select></label>
           <label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
@@ -2231,13 +2236,17 @@ function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: strin
   const [cadence, setCadence] = useState<RoutineCadence>("daily");
   const [drafts, setDrafts] = useState<Record<string, Pick<Routine, "description" | "triggerPoint" | "actionPlace" | "actionSteps">>>({});
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
+    let active = true;
     fetch(`/api/routines?date=${date}`)
       .then(async (response) => response.ok ? response.json() as Promise<{ routines: Routine[] }> : Promise.reject())
-      .then((data) => { setRows(data.routines); onRoutinesChange(data.routines); })
-      .catch(() => setRows([]));
-  }, [date, onRoutinesChange]);
+      .then((data) => { if (active) { setRows(data.routines); onRoutinesChange(data.routines); } })
+      .catch(() => { if (active) setLoadError(true); });
+    return () => { active = false; };
+  }, [date, loadAttempt, onRoutinesChange]);
 
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -2354,7 +2363,7 @@ function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: strin
   return (
     <section className="routine-section">
       <div className="routine-toolbar">
-        <label><CalendarDays size={14} /><input type="date" value={date} onChange={(event) => { setRows(null); setDate(event.target.value); }} /></label>
+        <label><CalendarDays size={14} /><input type="date" value={date} onChange={(event) => { setRows(null); setLoadError(false); setDate(event.target.value); }} /></label>
         <form className="routine-create" onSubmit={create}>
           <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="루틴 이름" aria-label="루틴 이름" />
           <select value={cadence} onChange={(event) => setCadence(event.target.value as RoutineCadence)} aria-label="반복 주기"><option value="daily">매일</option><option value="weekly">매주</option><option value="monthly">매월</option></select>
@@ -2366,7 +2375,7 @@ function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: strin
         </form>
       </div>
       <div className="routine-cards">
-        {rows === null ? <EmptyState icon={Repeat2} title="루틴을 불러오는 중입니다" /> : rows.length ? rows.map((routine) => {
+        {loadError ? <AsyncState icon={AlertTriangle} title="루틴을 불러오지 못했습니다" detail="잠시 후 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => { setRows(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} /> : rows === null ? <AsyncState icon={LoaderCircle} title="루틴을 불러오는 중입니다" loading /> : rows.length ? rows.map((routine) => {
           const draft = routineDraft(routine);
           return (
             <article className={`routine-card ${routine.active ? "" : "inactive"}`} key={routine.id}>
@@ -2397,10 +2406,18 @@ function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => 
   const [date, setDate] = useState(localDate());
   const [scrum, setScrum] = useState<Scrum | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   useEffect(() => {
-    fetch(`/api/daily-scrum?date=${date}`).then(async (response) => response.json() as Promise<{ scrum: Scrum }>).then((data) => setScrum(data.scrum));
-  }, [date]);
-  if (!scrum) return <EmptyState icon={CalendarCheck} title="데일리 스크럼을 불러오는 중입니다" />;
+    let active = true;
+    fetch(`/api/daily-scrum?date=${date}`)
+      .then(async (response) => response.ok ? response.json() as Promise<{ scrum: Scrum }> : Promise.reject())
+      .then((data) => { if (active) setScrum(data.scrum); })
+      .catch(() => { if (active) setLoadError(true); });
+    return () => { active = false; };
+  }, [date, loadAttempt]);
+  if (loadError) return <AsyncState icon={AlertTriangle} title="데일리 스크럼을 불러오지 못했습니다" detail="날짜를 유지한 채 다시 불러옵니다." actionLabel="다시 시도" onAction={() => { setScrum(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} />;
+  if (!scrum) return <AsyncState icon={LoaderCircle} title="데일리 스크럼을 불러오는 중입니다" loading />;
   async function save() {
     setSaving(true);
     const response = await fetch("/api/daily-scrum", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(scrum) });
@@ -2412,15 +2429,25 @@ function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => 
     { key: "todayNote", title: "오늘 집중", tasks: scrum.todayTasks, icon: Target },
     { key: "blockersNote", title: "막힘", tasks: scrum.blockers, icon: CircleHelp },
   ];
-  return <section className="scrum-section"><div className="scrum-toolbar"><label><CalendarDays size={14} /><input type="date" value={date} onChange={(event) => { setScrum(null); setDate(event.target.value); }} /></label><button className="primary-action" onClick={() => void save()} disabled={saving}><Check size={14} />{saving ? "저장 중" : "저장"}</button></div><div className="scrum-grid">{sections.map((section) => { const Icon = section.icon; return <section className="scrum-column" key={section.key}><header><Icon size={15} /><b>{section.title}</b><span>{section.tasks.length}</span></header><div className="scrum-task-list">{section.tasks.map((task) => <button key={task.id} onClick={() => onOpenTask(task.id)}><span className={`status-dot status-${task.status}`} /><b>{task.title}</b><small>{dueLabel(task.dueDate)}</small></button>)}{!section.tasks.length && <span className="empty-column">자동으로 모인 Task가 없습니다</span>}</div><textarea value={scrum[section.key]} onChange={(event) => setScrum({ ...scrum, [section.key]: event.target.value })} placeholder="메모" /></section>; })}</div></section>;
+  return <section className="scrum-section"><div className="scrum-toolbar"><label><CalendarDays size={14} /><input type="date" value={date} onChange={(event) => { setScrum(null); setLoadError(false); setDate(event.target.value); }} /></label><button className="primary-action" onClick={() => void save()} disabled={saving}><Check size={14} />{saving ? "저장 중" : "저장"}</button></div><div className="scrum-grid">{sections.map((section) => { const Icon = section.icon; return <section className="scrum-column" key={section.key}><header><Icon size={15} /><b>{section.title}</b><span>{section.tasks.length}</span></header><div className="scrum-task-list">{section.tasks.map((task) => <button key={task.id} onClick={() => onOpenTask(task.id)}><span className={`status-dot status-${task.status}`} /><b>{task.title}</b><small>{dueLabel(task.dueDate)}</small></button>)}{!section.tasks.length && <span className="empty-column">자동으로 모인 Task가 없습니다</span>}</div><textarea value={scrum[section.key]} onChange={(event) => setScrum({ ...scrum, [section.key]: event.target.value })} placeholder="메모" /></section>; })}</div></section>;
 }
 
 function RecommendationsView({ onNavigate }: { onNavigate: (view: View) => void }) {
   const [rows, setRows] = useState<Recommendation[] | null>(null);
-  useEffect(() => { fetch(`/api/recommendations?date=${localDate()}`).then(async (response) => response.json() as Promise<{ recommendations: Recommendation[] }>).then((data) => setRows(data.recommendations)).catch(() => setRows([])); }, []);
-  if (!rows) return <EmptyState icon={Lightbulb} title="추천을 계산하는 중입니다" />;
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/recommendations?date=${localDate()}`)
+      .then(async (response) => response.ok ? response.json() as Promise<{ recommendations: Recommendation[] }> : Promise.reject())
+      .then((data) => { if (active) setRows(data.recommendations); })
+      .catch(() => { if (active) setLoadError(true); });
+    return () => { active = false; };
+  }, [loadAttempt]);
+  if (loadError) return <AsyncState icon={AlertTriangle} title="추천을 계산하지 못했습니다" detail="워크스페이스 데이터를 다시 확인해 주세요." actionLabel="다시 시도" onAction={() => { setRows(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} />;
+  if (!rows) return <AsyncState icon={LoaderCircle} title="추천을 계산하는 중입니다" loading />;
   if (!rows.length) return <EmptyState icon={CheckCircle2} title="지금 바로 정리할 항목이 없습니다" />;
-  return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{row.itemIds.length}개 항목 · 우선순위 {row.score}</small></div><button onClick={() => onNavigate(row.kind === "unlinked" ? "inbox" : row.kind === "empty_project" ? "okr" : "work")}><ChevronRight size={15} /></button></article>)}</section>;
+  return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{row.itemIds.length}개 항목 · 우선순위 {row.score}</small></div><button aria-label={`${row.title} 확인`} title="관련 항목 확인" onClick={() => onNavigate(row.kind === "unlinked" ? "inbox" : row.kind === "empty_project" ? "okr" : "work")}><ChevronRight size={15} /></button></article>)}</section>;
 }
 
 function HomeView({ onCreatePlan }: {
@@ -2880,14 +2907,16 @@ function AsyncState({ icon: Icon, title, detail, actionLabel, onAction, loading 
 
 function TrashView({ onNotice }: { onNotice: (message: string) => void }) {
   const [rows, setRows] = useState<TrashRecord[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   useEffect(() => {
     let active = true;
     fetch("/api/trash")
       .then(async (response) => response.ok ? response.json() as Promise<{ trash: TrashRecord[] }> : Promise.reject())
       .then((data) => { if (active) setRows(data.trash); })
-      .catch(() => { if (active) setRows([]); });
+      .catch(() => { if (active) setLoadError(true); });
     return () => { active = false; };
-  }, []);
+  }, [loadAttempt]);
 
   async function permanentlyDelete(record: TrashRecord) {
     if (!window.confirm(`'${record.title}' 휴지통 기록을 영구 삭제할까요?`)) return;
@@ -2900,7 +2929,8 @@ function TrashView({ onNotice }: { onNotice: (message: string) => void }) {
     onNotice("휴지통 기록을 영구 삭제했습니다.");
   }
 
-  if (rows === null) return <EmptyState icon={Trash2} title="휴지통을 불러오는 중입니다" />;
+  if (loadError) return <AsyncState icon={AlertTriangle} title="휴지통을 불러오지 못했습니다" detail="삭제 기록은 그대로 보존되어 있습니다." actionLabel="다시 시도" onAction={() => { setRows(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} />;
+  if (rows === null) return <AsyncState icon={LoaderCircle} title="휴지통을 불러오는 중입니다" loading />;
   if (!rows.length) return <EmptyState icon={Trash2} title="휴지통이 비어 있습니다" />;
 
   return (
@@ -2966,7 +2996,7 @@ function ProjectArchiveView({ projects, onRestore, onDelete }: { projects: Archi
 }
 
 function PropertyPanel({ currentWorkspace, workspaceCount, onClose, onCleanup, onOpenWorkspaceMenu, onOpenTeamMembers, onOpenGroups, onSignOut }: { currentWorkspace?: WorkspaceSummary; workspaceCount: number; onClose: () => void; onCleanup: () => void; onOpenWorkspaceMenu: () => void; onOpenTeamMembers: () => void; onOpenGroups: () => void; onSignOut: () => void }) {
-  return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>내 설정</h2><p>워크스페이스와 팀 설정</p></div><button className="icon-button" onClick={onClose}><X size={17} /></button></header><section className="settings-section"><h3>워크스페이스</h3><div className="settings-workspace-card"><span className="workspace-avatar">{currentWorkspace?.name.slice(0, 1).toLocaleUpperCase() || "O"}</span><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : `${teamRoleLabel(currentWorkspace?.role ?? "member")} · 전체 ${workspaceCount}개`}</small></div></div><div className="settings-action-grid"><button onClick={onOpenWorkspaceMenu}><Columns3 size={13} />워크스페이스 관리</button><button onClick={onOpenTeamMembers}><Users size={13} />멤버 관리</button><button onClick={onOpenGroups}><AtSign size={13} />그룹 관리</button></div></section><section className="settings-hint"><Settings2 size={15} /><div><b>Project 속성</b><p>Project 화면의 속성 관리 탭에서 추가하거나 삭제할 수 있습니다.</p></div></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section><section className="settings-danger-zone"><div><b>OKR 데이터 정리</b><p>워크스페이스와 그룹은 남기고 OKR 실행 데이터를 휴지통으로 보냅니다.</p></div><button onClick={onCleanup}><Trash2 size={13} />클린업 열기</button></section></aside></div>;
+  return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>내 설정</h2><p>워크스페이스와 팀 설정</p></div><button className="icon-button" onClick={onClose} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section"><h3>워크스페이스</h3><div className="settings-workspace-card"><span className="workspace-avatar">{currentWorkspace?.name.slice(0, 1).toLocaleUpperCase() || "O"}</span><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : `${teamRoleLabel(currentWorkspace?.role ?? "member")} · 전체 ${workspaceCount}개`}</small></div></div><div className="settings-action-grid"><button onClick={onOpenWorkspaceMenu}><Columns3 size={13} />워크스페이스 관리</button><button onClick={onOpenTeamMembers}><Users size={13} />멤버 관리</button><button onClick={onOpenGroups}><AtSign size={13} />그룹 관리</button></div></section><section className="settings-hint"><Settings2 size={15} /><div><b>Project 속성</b><p>Project 화면의 속성 관리 탭에서 추가하거나 삭제할 수 있습니다.</p></div></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section><section className="settings-danger-zone"><div><b>OKR 데이터 정리</b><p>워크스페이스와 그룹은 남기고 OKR 실행 데이터를 휴지통으로 보냅니다.</p></div><button onClick={onCleanup}><Trash2 size={13} />클린업 열기</button></section></aside></div>;
 }
 
 function TeamPanel({ initialTeam, initialTab, initialGroupHandle, onMembersChange, onClose, onNotice }: { initialTeam: TeamData | null; initialTab: "members" | "groups"; initialGroupHandle: string | null; onMembersChange: (members: TeamMember[]) => void; onClose: () => void; onNotice: (message: string) => void }) {
