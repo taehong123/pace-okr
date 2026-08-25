@@ -25,7 +25,7 @@ async function render(path = "/") {
   );
 }
 
-test("server-renders the OKRPTR authentication shell", async () => {
+test("server-renders the OKRPTR application loading shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
@@ -33,8 +33,10 @@ test("server-renders the OKRPTR authentication shell", async () => {
   const html = await response.text();
   assert.match(html, /<title>OKRPTR - 목표를 오늘의 실행으로<\/title>/);
   assert.match(html, /OKRPTR/);
-  assert.match(html, /워크스페이스 로그인/);
-  assert.match(html, /세션 확인 중/);
+  assert.match(html, /app-loading-shell/);
+  assert.match(html, /목표와 실행을 준비하고 있습니다/);
+  assert.match(html, /워크스페이스와 오늘의 할 일을 불러오는 중입니다/);
+  assert.doesNotMatch(html, /워크스페이스 로그인|세션 확인 중/);
   assert.doesNotMatch(html, /셀프 서브 도입|신규 사용자의 첫 주 활성화율|온보딩 체크리스트/);
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview|react-loading-skeleton/i);
 });
@@ -100,6 +102,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /convertir objetivos en acción/);
   assert.match(page, /Google 계정으로 계속/);
   assert.match(page, /Google로 이동 중/);
+  assert.match(page, /AppLoadingScreen/);
   assert.match(page, /GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX/);
   assert.match(page, /accounts\.google\.com\/o\/oauth2\/v2\/auth/);
   assert.match(page, /window\.location\.assign\(url\.toString\(\)\)/);

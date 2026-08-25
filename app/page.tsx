@@ -1034,9 +1034,8 @@ export default function Home() {
     }
   }
 
-  if (authState.status !== "authenticated") {
-    return <AuthScreen loading={authState.status === "loading"} reason={authState.reason} />;
-  }
+  if (authState.status === "loading") return <AppLoadingScreen />;
+  if (authState.status === "unauthenticated") return <AuthScreen reason={authState.reason} />;
 
   return (
     <main className="app-shell">
@@ -1354,10 +1353,41 @@ export default function Home() {
   );
 }
 
-function AuthScreen({ loading, reason }: { loading: boolean; reason: string | null }) {
+function AppLoadingScreen() {
+  return (
+    <main className="app-loading-shell" aria-busy="true" aria-label="OKRPTR 불러오는 중">
+      <aside className="app-loading-sidebar" aria-hidden="true">
+        <div className="app-loading-brand"><span className="brand-mark">O</span><span><b>OKRPTR</b><small>Workspace</small></span></div>
+        <div className="app-loading-nav">
+          <i /><i /><i /><i /><i />
+        </div>
+        <div className="app-loading-profile"><i /><span /></div>
+      </aside>
+      <section className="app-loading-workspace">
+        <header className="app-loading-topbar"><span /><div><i /><i /></div></header>
+        <div className="app-loading-body">
+          <div className="app-loading-copy">
+            <h1>목표와 실행을 준비하고 있습니다</h1>
+            <p>워크스페이스와 오늘의 할 일을 불러오는 중입니다.</p>
+          </div>
+          <div className="app-loading-command" aria-hidden="true"><i /><span /><b /></div>
+          <div className="app-loading-surface" aria-hidden="true">
+            <header><span /><div><i /><i /><i /></div></header>
+            <div className="app-loading-table-head"><span /><span /><span /><span /></div>
+            <div className="app-loading-table-row"><b /><span /><span /><span /></div>
+            <div className="app-loading-table-row"><b /><span /><span /><span /></div>
+            <div className="app-loading-table-row"><b /><span /><span /><span /></div>
+          </div>
+        </div>
+      </section>
+      <span className="sr-only" aria-live="polite">OKRPTR 워크스페이스를 불러오고 있습니다.</span>
+    </main>
+  );
+}
+
+function AuthScreen({ reason }: { reason: string | null }) {
   const [signingIn, setSigningIn] = useState(false);
   const unavailable = reason === "missing_config";
-  const busy = loading || signingIn;
   return (
     <main className="auth-shell">
       <section className="auth-panel">
@@ -1367,9 +1397,9 @@ function AuthScreen({ loading, reason }: { loading: boolean; reason: string | nu
           <p>초대에 사용된 Google 계정으로 안전하게 접속하세요.</p>
           {reason === "failed" && <p className="auth-error">Google 로그인을 완료하지 못했습니다. 다시 시도해 주세요.</p>}
           {unavailable && <p className="auth-error">Google 로그인 설정을 완료하는 중입니다.</p>}
-          <button disabled={busy || unavailable} aria-busy={busy} onClick={() => { setSigningIn(true); startGoogleSignIn(); }}>
-            {busy ? <LoaderCircle className="spin" size={17} /> : <LogIn size={17} />}
-            {loading ? "세션 확인 중" : signingIn ? "Google로 이동 중" : "Google 계정으로 계속"}
+          <button disabled={signingIn || unavailable} aria-busy={signingIn} onClick={() => { setSigningIn(true); startGoogleSignIn(); }}>
+            {signingIn ? <LoaderCircle className="spin" size={17} /> : <LogIn size={17} />}
+            {signingIn ? "Google로 이동 중" : "Google 계정으로 계속"}
           </button>
         </div>
       </section>
