@@ -42,13 +42,16 @@ test("server-renders the OKRPTR application loading shell", async () => {
 });
 
 test("ships product metadata and removes starter assets", async () => {
-  const [layout, page, bootstrapRoute, integrationRoute, slackAuthRoute, slackDisconnectRoute, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson] = await Promise.all([
+  const [layout, page, bootstrapRoute, integrationRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/bootstrap/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/integration-tokens/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/auth/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/disconnect/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/slack/automations/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/slack/automations/test/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/slack-automation.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/google-session.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/auth/google/route.ts", import.meta.url), "utf8"),
@@ -65,7 +68,12 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /더보기/);
   assert.match(page, /개인 연결/);
   assert.match(page, /워크스페이스 연결/);
-  assert.match(page, /관리자만 설치/);
+  assert.match(page, /관리자만 연결/);
+  assert.match(page, /자동화 봇/);
+  assert.match(page, /업무가 생성될 때/);
+  assert.match(page, /업무 상태가 바뀔 때/);
+  assert.match(page, /테스트 전송/);
+  assert.match(page, /최근 전송 기록/);
   assert.doesNotMatch(page, /OAuth Redirect URL|Slash Command URL/);
   assert.match(page, /연결 관리/);
   assert.match(page, /연결됨/);
@@ -90,7 +98,15 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(integrationRoute, /사용자가 직접 해야 하는 마지막 한 단계만/);
   assert.match(slackAuthRoute, /canManageTeam/);
   assert.match(slackDisconnectRoute, /canManageTeam/);
+  assert.match(slackAutomationRoute, /canManageTeam/);
+  assert.match(slackAutomationRoute, /listSlackAutomationDeliveries/);
+  assert.match(slackAutomationTestRoute, /testSlackAutomation/);
+  assert.match(slackAutomation, /chat\.postMessage/);
+  assert.match(slackAutomation, /title\|status\|from_status\|priority\|kind\|workspace/);
+  assert.match(slackAutomation, /replace\(\/&\/g, "&amp;"\)/);
   assert.match(paceData, /getSlackConnection\(ownerId: string\)/);
+  assert.match(paceData, /dispatchSlackAutomationEvent/);
+  assert.match(paceData, /onConflictDoNothing/);
   assert.match(page, /트리거 포인트/);
   assert.match(page, /무엇을 어떻게/);
   assert.match(page, /연결 해제/);

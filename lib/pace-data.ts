@@ -19,6 +19,8 @@ import {
   projectHiddenProperties,
   routineCompletions,
   routines,
+  slackAutomationDeliveries,
+  slackAutomations,
   slackConnections,
   slackOAuthStates,
   trashRecords,
@@ -38,8 +40,21 @@ import {
   type OkrCycle,
   type GoogleConnection,
   type SlackConnection,
+  type SlackAutomation,
+  type SlackAutomationDelivery,
   type TrashRecord,
 } from "@/db/schema";
+import { decryptSlackSecret } from "@/lib/slack-oauth";
+import {
+  defaultSlackAutomationTemplate,
+  isSlackAutomationTrigger,
+  normalizeSlackChannelId,
+  postSlackMessage,
+  renderSlackAutomationMessage,
+  slackAutomationMatches,
+  type SlackAutomationContext,
+  type SlackAutomationTrigger,
+} from "@/lib/slack-automation";
 
 export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "task"] as const;
 export const ITEM_STATUSES = ["inbox", "backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked", "archived"] as const;
@@ -118,6 +133,7 @@ type RuntimeEnv = typeof env & {
   OKITA_API_TOKEN?: string;
   PACE_API_TOKEN?: string;
   GOOGLE_TOKEN_ENCRYPTION_KEY?: string;
+  SLACK_TOKEN_ENCRYPTION_KEY?: string;
 };
 let schemaReady: Promise<void> | null = null;
 const workspaceReady = new Map<string, Promise<void>>();
@@ -432,6 +448,41 @@ async function ensureSchema() {
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_connections_owner_user ON slack_connections(owner_id, user_id)"),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_connections_team ON slack_connections(team_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_connections_owner ON slack_connections(owner_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_automations (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          created_by_user_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          trigger_type TEXT NOT NULL,
+          trigger_status TEXT NOT NULL DEFAULT '',
+          channel_id TEXT NOT NULL,
+          message_template TEXT NOT NULL,
+          active INTEGER NOT NULL DEFAULT 1,
+          last_triggered_at TEXT,
+          last_delivery_status TEXT NOT NULL DEFAULT 'never',
+          last_error TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_automations_owner ON slack_automations(owner_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_automations_owner_active_trigger ON slack_automations(owner_id, active, trigger_type)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_automation_deliveries (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          automation_id TEXT NOT NULL REFERENCES slack_automations(id) ON DELETE CASCADE,
+          item_id TEXT REFERENCES items(id) ON DELETE SET NULL,
+          event_key TEXT NOT NULL,
+          trigger_type TEXT NOT NULL,
+          channel_id TEXT NOT NULL,
+          message TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          error TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          sent_at TEXT
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_automation_deliveries_event ON slack_automation_deliveries(event_key)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_automation_deliveries_owner_created ON slack_automation_deliveries(owner_id, created_at)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_automation_deliveries_automation_created ON slack_automation_deliveries(automation_id, created_at)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS slack_oauth_states (
           state TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL,
@@ -519,6 +570,8 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       google_state.expires_at,
       calendar_event.calendar_id,
       slack_connection.team_id,
+      slack_automation.trigger_type,
+      slack_delivery.event_key,
       slack_state.expires_at,
       trash.created_by_user_id
     FROM workspaces AS workspace
@@ -544,6 +597,8 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
     LEFT JOIN google_oauth_states AS google_state ON 1 = 0
     LEFT JOIN google_calendar_events AS calendar_event ON 1 = 0
     LEFT JOIN slack_connections AS slack_connection ON 1 = 0
+    LEFT JOIN slack_automations AS slack_automation ON 1 = 0
+    LEFT JOIN slack_automation_deliveries AS slack_delivery ON 1 = 0
     LEFT JOIN slack_oauth_states AS slack_state ON 1 = 0
     LEFT JOIN trash_records AS trash ON 1 = 0
     LIMIT 0`).first();
@@ -700,6 +755,7 @@ export async function cleanupWorkspaceExecutionData(ownerId: string, createdByUs
   const protectedBefore = await protectedWorkspaceCounts(ownerId);
   const archivedRecord = await archiveWorkspaceExecutionData(ownerId, createdByUserId);
 
+  await getDb().delete(slackAutomationDeliveries).where(eq(slackAutomationDeliveries.ownerId, ownerId));
   await getDb().delete(checklistItems).where(eq(checklistItems.ownerId, ownerId));
   await getDb().delete(itemAssignments).where(eq(itemAssignments.ownerId, ownerId));
   await getDb().delete(projectHiddenProperties).where(eq(projectHiddenProperties.ownerId, ownerId));
@@ -791,6 +847,7 @@ async function protectedWorkspaceCounts(ownerId: string) {
     propertyCount,
     googleConnectionCount,
     slackConnectionCount,
+    slackAutomationCount,
     trashRecordCount,
   ] = await Promise.all([
     getDb().select({ count: sql<number>`count(*)` }).from(workspaces).where(eq(workspaces.id, ownerId)),
@@ -804,6 +861,7 @@ async function protectedWorkspaceCounts(ownerId: string) {
     getDb().select({ count: sql<number>`count(*)` }).from(propertyDefinitions).where(eq(propertyDefinitions.ownerId, ownerId)),
     getDb().select({ count: sql<number>`count(*)` }).from(googleConnections).where(eq(googleConnections.ownerId, ownerId)),
     getDb().select({ count: sql<number>`count(*)` }).from(slackConnections).where(eq(slackConnections.ownerId, ownerId)),
+    getDb().select({ count: sql<number>`count(*)` }).from(slackAutomations).where(eq(slackAutomations.ownerId, ownerId)),
     getDb().select({ count: sql<number>`count(*)` }).from(trashRecords).where(eq(trashRecords.ownerId, ownerId)),
   ]);
 
@@ -815,6 +873,7 @@ async function protectedWorkspaceCounts(ownerId: string) {
     properties: propertyCount[0]?.count ?? 0,
     googleConnections: googleConnectionCount[0]?.count ?? 0,
     slackConnections: slackConnectionCount[0]?.count ?? 0,
+    slackAutomations: slackAutomationCount[0]?.count ?? 0,
     trashRecords: trashRecordCount[0]?.count ?? 0,
   };
 }
@@ -1263,6 +1322,252 @@ export function serializeSlackConnection(connection: SlackConnection | null, con
   };
 }
 
+export type SlackAutomationInput = {
+  name?: string;
+  triggerType?: string;
+  triggerStatus?: string;
+  channelId?: string;
+  messageTemplate?: string;
+  active?: boolean;
+};
+
+export async function listSlackAutomations(ownerId: string) {
+  await ensureSchema();
+  const rows = await getDb()
+    .select()
+    .from(slackAutomations)
+    .where(eq(slackAutomations.ownerId, ownerId))
+    .orderBy(desc(slackAutomations.createdAt));
+  return rows.map(serializeSlackAutomation);
+}
+
+export async function listSlackAutomationDeliveries(ownerId: string, limit = 20) {
+  await ensureSchema();
+  const rows = await getDb()
+    .select()
+    .from(slackAutomationDeliveries)
+    .where(eq(slackAutomationDeliveries.ownerId, ownerId))
+    .orderBy(desc(slackAutomationDeliveries.createdAt))
+    .limit(Math.min(Math.max(limit, 1), 50));
+  return rows.map(serializeSlackAutomationDelivery);
+}
+
+export async function createSlackAutomation(ownerId: string, userId: string, input: SlackAutomationInput) {
+  await ensureSchema();
+  if (!await getSlackConnection(ownerId)) throw new Error("Slack을 먼저 연결해 주세요");
+  const requestedTrigger = input.triggerType?.trim();
+  const values = validateSlackAutomationInput({
+    ...input,
+    messageTemplate: input.messageTemplate?.trim() || (requestedTrigger && isSlackAutomationTrigger(requestedTrigger) ? defaultSlackAutomationTemplate(requestedTrigger) : undefined),
+  }, false);
+  const now = new Date().toISOString();
+  const [created] = await getDb().insert(slackAutomations).values({
+    id: crypto.randomUUID(),
+    ownerId,
+    createdByUserId: userId,
+    name: values.name!,
+    triggerType: values.triggerType!,
+    triggerStatus: values.triggerStatus!,
+    channelId: values.channelId!,
+    messageTemplate: values.messageTemplate!,
+    active: values.active ?? true,
+    createdAt: now,
+    updatedAt: now,
+  }).returning();
+  return serializeSlackAutomation(created);
+}
+
+export async function updateSlackAutomation(ownerId: string, id: string, input: SlackAutomationInput) {
+  await ensureSchema();
+  const current = await getSlackAutomation(ownerId, id);
+  if (!current) throw new Error("Slack 자동화를 찾을 수 없습니다");
+  const next = validateSlackAutomationInput({
+    name: input.name ?? current.name,
+    triggerType: input.triggerType ?? current.triggerType,
+    triggerStatus: input.triggerStatus ?? current.triggerStatus,
+    channelId: input.channelId ?? current.channelId,
+    messageTemplate: input.messageTemplate ?? current.messageTemplate,
+    active: input.active ?? current.active,
+  }, false);
+  const [updated] = await getDb().update(slackAutomations).set({
+    name: next.name,
+    triggerType: next.triggerType,
+    triggerStatus: next.triggerStatus,
+    channelId: next.channelId,
+    messageTemplate: next.messageTemplate,
+    active: next.active,
+    updatedAt: new Date().toISOString(),
+  }).where(and(eq(slackAutomations.ownerId, ownerId), eq(slackAutomations.id, id))).returning();
+  return serializeSlackAutomation(updated);
+}
+
+export async function deleteSlackAutomation(ownerId: string, id: string) {
+  await ensureSchema();
+  const [deleted] = await getDb().delete(slackAutomations)
+    .where(and(eq(slackAutomations.ownerId, ownerId), eq(slackAutomations.id, id)))
+    .returning();
+  if (!deleted) throw new Error("Slack 자동화를 찾을 수 없습니다");
+  return { deleted: true, id };
+}
+
+export async function testSlackAutomation(ownerId: string, id: string) {
+  await ensureSchema();
+  const automation = await getSlackAutomation(ownerId, id);
+  if (!automation) throw new Error("Slack 자동화를 찾을 수 없습니다");
+  const workspace = await getWorkspaceName(ownerId);
+  const context: SlackAutomationContext = {
+    title: "Slack 자동화 테스트 업무",
+    status: automation.triggerStatus || "in_progress",
+    fromStatus: "todo",
+    priority: "high",
+    kind: "task",
+    workspace,
+  };
+  const delivery = await deliverSlackAutomation(automation, context, null, `test:${ownerId}:${automation.id}:${crypto.randomUUID()}`, "test");
+  if (!delivery) throw new Error("테스트 전송을 시작하지 못했습니다");
+  if (delivery.status === "failed") throw new Error(delivery.error);
+  return serializeSlackAutomationDelivery(delivery);
+}
+
+export async function dispatchSlackAutomationEvent(ownerId: string, event: {
+  triggerType: SlackAutomationTrigger;
+  item: PaceItem;
+  fromStatus?: string | null;
+}) {
+  if (event.item.kind !== "task") return;
+  try {
+    await ensureSchema();
+    const automations = await getDb().select().from(slackAutomations).where(and(
+      eq(slackAutomations.ownerId, ownerId),
+      eq(slackAutomations.active, true),
+      eq(slackAutomations.triggerType, event.triggerType),
+    ));
+    if (!automations.length) return;
+    const workspace = await getWorkspaceName(ownerId);
+    const context: SlackAutomationContext = {
+      title: event.item.title,
+      status: event.item.status,
+      fromStatus: event.fromStatus,
+      priority: event.item.priority,
+      kind: event.item.kind,
+      workspace,
+    };
+    for (const automation of automations) {
+      if (!slackAutomationMatches(automation, { triggerType: event.triggerType, status: event.item.status })) continue;
+      const eventKey = `${ownerId}:${event.triggerType}:${automation.id}:${event.item.id}:${event.fromStatus ?? ""}:${event.item.status}:${event.item.updatedAt}`;
+      await deliverSlackAutomation(automation, context, event.item.id, eventKey, event.triggerType);
+    }
+  } catch (error) {
+    console.error("Slack automation dispatch failed", error);
+  }
+}
+
+function validateSlackAutomationInput(input: SlackAutomationInput, partial: boolean) {
+  const name = input.name?.trim();
+  if (!partial && !name) throw new Error("자동화 이름을 입력해 주세요");
+  if (name && name.length > 80) throw new Error("자동화 이름은 80자 이하여야 합니다");
+  const triggerType = input.triggerType?.trim();
+  if (!partial && (!triggerType || !isSlackAutomationTrigger(triggerType))) throw new Error("지원하지 않는 트리거입니다");
+  if (triggerType && !isSlackAutomationTrigger(triggerType)) throw new Error("지원하지 않는 트리거입니다");
+  const triggerStatus = triggerType === "task_status_changed" ? input.triggerStatus?.trim() ?? "" : "";
+  if (triggerStatus && !ITEM_STATUSES.includes(triggerStatus as ItemStatus)) throw new Error("지원하지 않는 업무 상태입니다");
+  const channelId = input.channelId === undefined && partial ? undefined : normalizeSlackChannelId(input.channelId ?? "");
+  const messageTemplate = input.messageTemplate?.trim();
+  if (!partial && !messageTemplate) throw new Error("Slack 메시지를 입력해 주세요");
+  if (messageTemplate && messageTemplate.length > 3000) throw new Error("Slack 메시지는 3,000자 이하여야 합니다");
+  return { name, triggerType, triggerStatus, channelId, messageTemplate, active: input.active };
+}
+
+async function getSlackAutomation(ownerId: string, id: string) {
+  const [automation] = await getDb().select().from(slackAutomations)
+    .where(and(eq(slackAutomations.ownerId, ownerId), eq(slackAutomations.id, id))).limit(1);
+  return automation ?? null;
+}
+
+async function getWorkspaceName(ownerId: string) {
+  const [workspace] = await getDb().select({ name: workspaces.name }).from(workspaces).where(eq(workspaces.id, ownerId)).limit(1);
+  return workspace?.name ?? "OKRPTR";
+}
+
+async function deliverSlackAutomation(
+  automation: SlackAutomation,
+  context: SlackAutomationContext,
+  itemId: string | null,
+  eventKey: string,
+  triggerType: string,
+) {
+  const now = new Date().toISOString();
+  const message = renderSlackAutomationMessage(automation.messageTemplate, context);
+  const [delivery] = await getDb().insert(slackAutomationDeliveries).values({
+    id: crypto.randomUUID(),
+    ownerId: automation.ownerId,
+    automationId: automation.id,
+    itemId,
+    eventKey,
+    triggerType,
+    channelId: automation.channelId,
+    message,
+    status: "pending",
+    createdAt: now,
+  }).onConflictDoNothing({ target: slackAutomationDeliveries.eventKey }).returning();
+  if (!delivery) return null;
+
+  try {
+    const runtime = env as RuntimeEnv;
+    const connection = await getSlackConnection(automation.ownerId);
+    if (!connection) throw new Error("Slack 연결이 끊어졌습니다. 다시 연결해 주세요.");
+    if (!runtime.SLACK_TOKEN_ENCRYPTION_KEY) throw new Error("Slack 암호화 설정이 없습니다");
+    const token = await decryptSlackSecret(connection.encryptedBotToken, runtime.SLACK_TOKEN_ENCRYPTION_KEY);
+    await postSlackMessage(token, automation.channelId, message);
+    const sentAt = new Date().toISOString();
+    const [sent] = await getDb().update(slackAutomationDeliveries).set({ status: "sent", sentAt, error: "" })
+      .where(eq(slackAutomationDeliveries.id, delivery.id)).returning();
+    await getDb().update(slackAutomations).set({ lastTriggeredAt: sentAt, lastDeliveryStatus: "sent", lastError: "", updatedAt: sentAt })
+      .where(eq(slackAutomations.id, automation.id));
+    return sent;
+  } catch (error) {
+    const message = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+    const failedAt = new Date().toISOString();
+    const [failed] = await getDb().update(slackAutomationDeliveries).set({ status: "failed", error: message })
+      .where(eq(slackAutomationDeliveries.id, delivery.id)).returning();
+    await getDb().update(slackAutomations).set({ lastTriggeredAt: failedAt, lastDeliveryStatus: "failed", lastError: message, updatedAt: failedAt })
+      .where(eq(slackAutomations.id, automation.id));
+    return failed;
+  }
+}
+
+function serializeSlackAutomation(automation: SlackAutomation) {
+  return {
+    id: automation.id,
+    name: automation.name,
+    triggerType: automation.triggerType,
+    triggerStatus: automation.triggerStatus,
+    channelId: automation.channelId,
+    messageTemplate: automation.messageTemplate,
+    active: automation.active,
+    lastTriggeredAt: automation.lastTriggeredAt,
+    lastDeliveryStatus: automation.lastDeliveryStatus,
+    lastError: automation.lastError,
+    createdAt: automation.createdAt,
+    updatedAt: automation.updatedAt,
+  };
+}
+
+function serializeSlackAutomationDelivery(delivery: SlackAutomationDelivery) {
+  return {
+    id: delivery.id,
+    automationId: delivery.automationId,
+    itemId: delivery.itemId,
+    triggerType: delivery.triggerType,
+    channelId: delivery.channelId,
+    message: delivery.message,
+    status: delivery.status,
+    error: delivery.error,
+    createdAt: delivery.createdAt,
+    sentAt: delivery.sentAt,
+  };
+}
+
 export async function createIntegrationToken(
   authorization: RequestAuthorization,
   name = "Codex",
@@ -1576,6 +1881,8 @@ export async function deleteWorkspaceForUser(userId: string, workspaceId: string
   await getDb().delete(googleCalendarEvents).where(eq(googleCalendarEvents.ownerId, id));
   await getDb().delete(googleConnections).where(eq(googleConnections.ownerId, id));
   await getDb().delete(googleOAuthStates).where(eq(googleOAuthStates.ownerId, id));
+  await getDb().delete(slackAutomationDeliveries).where(eq(slackAutomationDeliveries.ownerId, id));
+  await getDb().delete(slackAutomations).where(eq(slackAutomations.ownerId, id));
   await getDb().delete(slackConnections).where(eq(slackConnections.ownerId, id));
   await getDb().delete(slackOAuthStates).where(eq(slackOAuthStates.ownerId, id));
   await getDb().delete(aiUsageEvents).where(eq(aiUsageEvents.ownerId, id));
@@ -2114,6 +2421,7 @@ export async function createItem(
     .returning();
 
   await logActivity(ownerId, created.id, "created", created.source, { kind, status });
+  await dispatchSlackAutomationEvent(ownerId, { triggerType: "task_created", item: created });
   return created;
 }
 
@@ -2166,6 +2474,13 @@ export async function updateItem(
     .returning();
 
   await logActivity(ownerId, id, "updated", patch.source ?? "web", patch);
+  if (current.status !== updated.status) {
+    await dispatchSlackAutomationEvent(ownerId, {
+      triggerType: "task_status_changed",
+      item: updated,
+      fromStatus: current.status,
+    });
+  }
   return updated;
 }
 

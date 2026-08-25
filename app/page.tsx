@@ -38,6 +38,7 @@ import {
   Repeat2,
   RotateCcw,
   Search,
+  Send,
   Settings2,
   Table2,
   Target,
@@ -274,6 +275,33 @@ type SlackConnectionStatus = {
   updatedAt: string | null;
   redirectUrl: string;
   commandUrl: string;
+};
+type SlackAutomationTrigger = "task_created" | "task_status_changed";
+type SlackAutomation = {
+  id: string;
+  name: string;
+  triggerType: SlackAutomationTrigger;
+  triggerStatus: string;
+  channelId: string;
+  messageTemplate: string;
+  active: boolean;
+  lastTriggeredAt: string | null;
+  lastDeliveryStatus: "never" | "sent" | "failed";
+  lastError: string;
+  createdAt: string;
+  updatedAt: string;
+};
+type SlackAutomationDelivery = {
+  id: string;
+  automationId: string;
+  itemId: string | null;
+  triggerType: string;
+  channelId: string;
+  message: string;
+  status: "pending" | "sent" | "failed";
+  error: string;
+  createdAt: string;
+  sentAt: string | null;
 };
 type IntegrationConnection = {
   id: string;
@@ -3367,7 +3395,7 @@ function AppIntegrationsModal({ google, slack, workspaceName, canManageSlack, on
     setDisconnectingSlack(false);
     if (!response.ok) { onNotice("Slack 연결을 해제하지 못했습니다."); return; }
     onSlackChange(slack ? { ...slack, connected: false, teamName: null, teamId: null, botUserId: null, connectedAt: null, updatedAt: null } : null);
-    onNotice("Slack bot 연결을 해제했습니다.");
+    onNotice("Slack 연결을 해제했습니다. 자동화 규칙은 보관됩니다.");
   }
 
   function connectGoogle() {
@@ -3380,10 +3408,205 @@ function AppIntegrationsModal({ google, slack, workspaceName, canManageSlack, on
     window.location.href = `/api/slack/auth?returnTo=${encodeURIComponent("/")}`;
   }
 
-  return <div className="modal-backdrop"><section className="integration-modal app-integrations-modal"><header><div><h2>앱 연동</h2><p>개인 계정과 워크스페이스 앱을 구분해 관리합니다.</p></div><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header><div className="integration-sections">
-    <section className="integration-card"><header><CalendarDays size={18} /><div><b>Google Calendar</b><p>{google?.connected ? `${google.email} 계정으로 연결됨` : "내 Task 일정을 개인 캘린더와 연결"}</p></div><span className={google?.connected ? "connection-live" : "connection-local"} /></header><div className="integration-scope"><b>개인 연결</b><span>현재 사용자에게만 적용</span></div><div className="integration-actions">{google?.connected ? <button className="secondary-danger" onClick={() => void disconnectGoogle()} disabled={disconnectingGoogle}>{disconnectingGoogle ? "해제 중" : "연결 해제"}</button> : <button onClick={connectGoogle} disabled={!google?.configured}>{google?.configured ? "Google로 연결" : "준비 중"}</button>}<small>{google?.configured ? "Google 계정 확인 · Calendar 이벤트 생성 및 수정" : "서비스 연결 설정을 준비 중입니다."}</small></div></section>
-    <section className="integration-card"><header><Hash size={18} /><div><b>Slack bot</b><p>{slack?.connected ? `${slack.teamName}에 설치됨` : "/okrptr 명령으로 Task를 워크스페이스에 저장"}</p></div><span className={slack?.connected ? "connection-live" : "connection-local"} /></header><div className="integration-scope"><b>워크스페이스 연결</b><span>{workspaceName} 전체에 적용</span></div><div className="integration-actions">{slack?.connected ? <button className="secondary-danger" onClick={() => void disconnectSlack()} disabled={disconnectingSlack || !canManageSlack}>{disconnectingSlack ? "해제 중" : canManageSlack ? "연결 해제" : "관리자만 변경"}</button> : <button onClick={connectSlack} disabled={!slack?.configured || !canManageSlack}>{!canManageSlack ? "관리자만 설치" : slack?.configured ? "Slack에 설치" : "준비 중"}</button>}<small>{slack?.configured ? "Slash command · bot 메시지 작성" : "서비스 연결 설정을 준비 중입니다."}</small></div></section>
-  </div><footer><span><Plug size={15} />연동별 적용 범위와 권한을 확인하세요.</span><button onClick={onClose}>닫기</button></footer></section></div>;
+  return <div className="modal-backdrop"><section className="integration-modal app-integrations-modal">
+    <header><div><h2>앱 연동</h2><p>업무가 움직일 때 팀이 있는 곳으로 바로 전달합니다.</p></div><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header>
+    <div className="integration-sections">
+      <section className="integration-card compact-integration-card">
+        <header><CalendarDays size={18} /><div><b>Google Calendar</b><p>{google?.connected ? `${google.email} 계정으로 연결됨` : "내 Task 일정을 개인 캘린더와 연결"}</p></div><span className={google?.connected ? "connection-live" : "connection-local"} /></header>
+        <div className="integration-scope"><b>개인 연결</b><span>현재 사용자에게만 적용</span></div>
+        <div className="integration-actions">{google?.connected ? <button className="secondary-danger" onClick={() => void disconnectGoogle()} disabled={disconnectingGoogle}>{disconnectingGoogle ? "해제 중" : "연결 해제"}</button> : <button onClick={connectGoogle} disabled={!google?.configured}>{google?.configured ? "Google로 연결" : "준비 중"}</button>}<small>{google?.configured ? "일정 생성 및 수정" : "서버 연결 설정이 필요합니다."}</small></div>
+      </section>
+      <section className="integration-card slack-integration-card">
+        <header><Hash size={18} /><div><b>Slack</b><p>{slack?.connected ? `${slack.teamName}에 OKRPTR 봇 연결됨` : "업무 이벤트를 원하는 채널로 자동 전송"}</p></div><span className={slack?.connected ? "connection-live" : "connection-local"} /></header>
+        <div className="integration-scope"><b>워크스페이스 연결</b><span>{workspaceName} 전체에 적용</span></div>
+        <div className="integration-actions">{slack?.connected ? <button className="secondary-danger" onClick={() => void disconnectSlack()} disabled={disconnectingSlack || !canManageSlack}>{disconnectingSlack ? "해제 중" : canManageSlack ? "연결 해제" : "관리자만 변경"}</button> : <button onClick={connectSlack} disabled={!slack?.configured || !canManageSlack}>{!canManageSlack ? "관리자만 연결" : slack?.configured ? "Slack에 연결" : "준비 중"}</button>}<small>{slack?.connected ? "/okrptr 수집 · 자동 알림" : "연결 후 자동화 봇을 만들 수 있습니다."}</small></div>
+        <SlackAutomationManager connected={Boolean(slack?.connected)} canManage={canManageSlack} workspaceName={workspaceName} onNotice={onNotice} />
+      </section>
+    </div>
+    <footer><span><Plug size={15} />자동화는 연결된 OKRPTR Slack 봇으로 전송됩니다.</span><button onClick={onClose}>닫기</button></footer>
+  </section></div>;
+}
+
+type SlackAutomationDraft = {
+  name: string;
+  triggerType: SlackAutomationTrigger;
+  triggerStatus: string;
+  channelId: string;
+  messageTemplate: string;
+  active: boolean;
+};
+
+const slackAutomationDefaults: Record<SlackAutomationTrigger, string> = {
+  task_created: "새 업무가 등록되었습니다.\n*{{title}}*\n상태: {{status}} · 우선순위: {{priority}} · {{workspace}}",
+  task_status_changed: "*{{title}}* 상태가 `{{from_status}}` → `{{status}}`로 바뀌었습니다.\n우선순위: {{priority}} · {{workspace}}",
+};
+
+function emptySlackAutomationDraft(triggerType: SlackAutomationTrigger = "task_created"): SlackAutomationDraft {
+  return { name: "", triggerType, triggerStatus: "", channelId: "", messageTemplate: slackAutomationDefaults[triggerType], active: true };
+}
+
+async function fetchSlackAutomationData() {
+  const response = await fetch("/api/slack/automations");
+  const data = await response.json() as { automations?: SlackAutomation[]; deliveries?: SlackAutomationDelivery[]; error?: string };
+  if (!response.ok) throw new Error(data.error || "자동화를 불러오지 못했습니다.");
+  return { automations: data.automations ?? [], deliveries: data.deliveries ?? [] };
+}
+
+function SlackAutomationManager({ connected, canManage, workspaceName, onNotice }: { connected: boolean; canManage: boolean; workspaceName: string; onNotice: (message: string) => void }) {
+  const [automations, setAutomations] = useState<SlackAutomation[]>([]);
+  const [deliveries, setDeliveries] = useState<SlackAutomationDelivery[]>([]);
+  const [loading, setLoading] = useState(connected);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<SlackAutomationDraft>(emptySlackAutomationDraft());
+  const [formOpen, setFormOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!connected) return;
+    let active = true;
+    void fetchSlackAutomationData()
+      .then((data) => {
+        if (!active) return;
+        setAutomations(data.automations);
+        setDeliveries(data.deliveries);
+      })
+      .catch((error: unknown) => { if (active) onNotice(error instanceof Error ? error.message : "자동화를 불러오지 못했습니다."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [connected, onNotice]);
+
+  async function loadAutomations(showLoading = true) {
+    if (showLoading) setLoading(true);
+    try {
+      const data = await fetchSlackAutomationData();
+      setAutomations(data.automations);
+      setDeliveries(data.deliveries);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "자동화를 불러오지 못했습니다.");
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  }
+
+  function startCreate() {
+    setEditingId(null);
+    setDraft(emptySlackAutomationDraft());
+    setFormOpen(true);
+  }
+
+  function startEdit(automation: SlackAutomation) {
+    setEditingId(automation.id);
+    setDraft({ name: automation.name, triggerType: automation.triggerType, triggerStatus: automation.triggerStatus, channelId: automation.channelId, messageTemplate: automation.messageTemplate, active: automation.active });
+    setFormOpen(true);
+  }
+
+  async function saveAutomation(event: FormEvent) {
+    event.preventDefault();
+    if (!draft.name.trim() || !draft.channelId.trim() || !draft.messageTemplate.trim()) { onNotice("이름, 채널 ID, 메시지를 모두 입력해 주세요."); return; }
+    setSaving(true);
+    try {
+      const response = await fetch("/api/slack/automations", {
+        method: editingId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...(editingId ? { id: editingId } : {}), ...draft }),
+      });
+      const data = await response.json() as { automation?: SlackAutomation; error?: string };
+      if (!response.ok || !data.automation) throw new Error(data.error || "자동화를 저장하지 못했습니다.");
+      setAutomations((current) => editingId ? current.map((entry) => entry.id === editingId ? data.automation! : entry) : [data.automation!, ...current]);
+      setFormOpen(false);
+      setEditingId(null);
+      onNotice(editingId ? "Slack 자동화를 수정했습니다." : "Slack 자동화를 만들었습니다. 테스트 전송으로 확인해 보세요.");
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "자동화를 저장하지 못했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleAutomation(automation: SlackAutomation) {
+    setBusyId(automation.id);
+    try {
+      const response = await fetch("/api/slack/automations", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: automation.id, active: !automation.active }) });
+      const data = await response.json() as { automation?: SlackAutomation; error?: string };
+      if (!response.ok || !data.automation) throw new Error(data.error || "상태를 바꾸지 못했습니다.");
+      setAutomations((current) => current.map((entry) => entry.id === automation.id ? data.automation! : entry));
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "상태를 바꾸지 못했습니다.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function testSend(automation: SlackAutomation) {
+    setBusyId(automation.id);
+    try {
+      const response = await fetch("/api/slack/automations/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: automation.id }) });
+      const data = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(data.error || "테스트 전송에 실패했습니다.");
+      onNotice(`#${automation.channelId} 채널로 테스트 메시지를 보냈습니다.`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "테스트 전송에 실패했습니다.");
+    } finally {
+      await loadAutomations(false);
+      setBusyId(null);
+    }
+  }
+
+  async function removeAutomation(automation: SlackAutomation) {
+    if (!window.confirm(`'${automation.name}' 자동화를 삭제할까요?`)) return;
+    setBusyId(automation.id);
+    try {
+      const response = await fetch(`/api/slack/automations?id=${encodeURIComponent(automation.id)}`, { method: "DELETE" });
+      const data = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(data.error || "자동화를 삭제하지 못했습니다.");
+      setAutomations((current) => current.filter((entry) => entry.id !== automation.id));
+      setDeliveries((current) => current.filter((entry) => entry.automationId !== automation.id));
+      onNotice("Slack 자동화를 삭제했습니다.");
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "자동화를 삭제하지 못했습니다.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (!connected) return <div className="slack-automation-locked"><Zap size={16} /><div><b>Slack 자동화</b><p>Slack을 연결하면 업무 생성과 상태 변경을 채널로 자동 전송할 수 있습니다.</p></div></div>;
+
+  return <div className="slack-automation-manager">
+    <div className="slack-automation-heading"><div><span>SLACK AUTOMATION</span><h3>자동화 봇</h3><p>{workspaceName}의 업무 트리거마다 채널과 메시지를 정합니다.</p></div>{canManage && <button type="button" onClick={startCreate}><Plus size={14} />새 자동화</button>}</div>
+    <div className="slack-bot-note"><Bot size={15} /><p>각 자동화는 독립된 규칙으로 작동하며, 메시지는 연결된 <b>OKRPTR 봇</b> 이름으로 전송됩니다.</p></div>
+    {formOpen && <form className="slack-automation-form" onSubmit={(event) => void saveAutomation(event)}>
+      <div className="slack-form-title"><b>{editingId ? "자동화 수정" : "새 자동화"}</b><button type="button" className="icon-button" onClick={() => setFormOpen(false)} aria-label="작성 취소"><X size={14} /></button></div>
+      <div className="slack-form-grid">
+        <label><span>자동화 이름</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="예: 새 업무 알림" maxLength={80} /></label>
+        <label><span>Slack 채널 ID</span><input value={draft.channelId} onChange={(event) => setDraft({ ...draft, channelId: event.target.value.toUpperCase() })} placeholder="C0123456789" maxLength={32} /></label>
+        <label><span>트리거</span><select value={draft.triggerType} onChange={(event) => { const triggerType = event.target.value as SlackAutomationTrigger; setDraft({ ...draft, triggerType, triggerStatus: "", messageTemplate: slackAutomationDefaults[triggerType] }); }}><option value="task_created">업무가 생성될 때</option><option value="task_status_changed">업무 상태가 바뀔 때</option></select></label>
+        {draft.triggerType === "task_status_changed" && <label><span>바뀐 상태</span><select value={draft.triggerStatus} onChange={(event) => setDraft({ ...draft, triggerStatus: event.target.value })}><option value="">모든 상태</option>{(["inbox", "backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked"] as ItemStatus[]).map((status) => <option value={status} key={status}>{statusLabel(status)}</option>)}</select></label>}
+      </div>
+      <label className="slack-message-field"><span>보낼 메시지</span><textarea value={draft.messageTemplate} onChange={(event) => setDraft({ ...draft, messageTemplate: event.target.value })} maxLength={3000} rows={4} /></label>
+      <div className="slack-variable-row"><span>변수</span>{["{{title}}", "{{status}}", "{{from_status}}", "{{priority}}", "{{workspace}}"].map((variable) => <button type="button" key={variable} onClick={() => setDraft({ ...draft, messageTemplate: `${draft.messageTemplate}${draft.messageTemplate.endsWith(" ") || draft.messageTemplate.endsWith("\n") ? "" : " "}${variable}` })}>{variable}</button>)}</div>
+      <p className="slack-channel-help">채널 상세정보에서 채널 ID를 복사하세요. 비공개 채널은 OKRPTR 봇을 먼저 초대해야 합니다.</p>
+      <div className="slack-form-actions"><label><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /><span>저장 즉시 활성화</span></label><div><button type="button" onClick={() => setFormOpen(false)}>취소</button><button type="submit" disabled={saving}>{saving ? <LoaderCircle className="spin" size={13} /> : <Check size={13} />}{saving ? "저장 중" : "저장"}</button></div></div>
+    </form>}
+    {loading ? <div className="slack-automation-loading"><LoaderCircle className="spin" size={16} />자동화를 불러오는 중</div> : automations.length === 0 ? <div className="slack-automation-empty"><Zap size={18} /><b>아직 자동화가 없습니다.</b><p>{canManage ? "새 자동화를 만들어 첫 Slack 알림을 보내보세요." : "워크스페이스 관리자가 자동화를 만들 수 있습니다."}</p></div> : <div className="slack-automation-list">{automations.map((automation) => <article key={automation.id} className={automation.active ? "" : "inactive"}>
+      <div className="slack-automation-main"><span className={`slack-delivery-dot ${automation.lastDeliveryStatus}`} /><div><b>{automation.name}</b><p>{slackTriggerLabel(automation)} · #{automation.channelId}</p></div><span className={`slack-automation-state ${automation.active ? "active" : ""}`}>{automation.active ? "활성" : "중지"}</span></div>
+      <div className="slack-automation-meta">{automation.lastDeliveryStatus === "never" ? "아직 전송 이력 없음" : automation.lastDeliveryStatus === "sent" ? `${formatSlackAutomationTime(automation.lastTriggeredAt)} 전송 성공` : automation.lastError || "최근 전송 실패"}</div>
+      {canManage && <div className="slack-automation-actions"><button type="button" onClick={() => void testSend(automation)} disabled={busyId === automation.id}>{busyId === automation.id ? <LoaderCircle className="spin" size={12} /> : <Send size={12} />}테스트</button><button type="button" onClick={() => void toggleAutomation(automation)} disabled={busyId === automation.id}>{automation.active ? "중지" : "활성화"}</button><button type="button" onClick={() => startEdit(automation)}><Pencil size={12} />수정</button><button type="button" className="danger" onClick={() => void removeAutomation(automation)} disabled={busyId === automation.id} aria-label={`${automation.name} 삭제`}><Trash2 size={12} /></button></div>}
+    </article>)}</div>}
+    {deliveries.length > 0 && <details className="slack-delivery-history"><summary>최근 전송 기록 <span>{deliveries.length}</span><ChevronDown size={13} /></summary><div>{deliveries.slice(0, 8).map((delivery) => <div key={delivery.id}><span className={`slack-delivery-dot ${delivery.status}`} /><p><b>{delivery.status === "sent" ? "전송 성공" : delivery.status === "failed" ? "전송 실패" : "전송 중"}</b><small>#{delivery.channelId} · {formatSlackAutomationTime(delivery.sentAt || delivery.createdAt)}</small>{delivery.error && <em>{delivery.error}</em>}</p></div>)}</div></details>}
+  </div>;
+}
+
+function slackTriggerLabel(automation: SlackAutomation) {
+  if (automation.triggerType === "task_created") return "업무 생성";
+  return automation.triggerStatus ? `상태 변경 → ${statusLabel(automation.triggerStatus as ItemStatus)}` : "모든 상태 변경";
+}
+
+function formatSlackAutomationTime(value: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function EmptyState({ icon: Icon, title }: { icon: LucideIcon; title: string }) { return <div className="empty-state"><Icon size={22} /><span>{title}</span></div>; }

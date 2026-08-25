@@ -74,6 +74,51 @@ test("creates relational workspaces and team memberships", async () => {
   db.close();
 });
 
+test("creates workspace-scoped Slack automations with deduplicated delivery history", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE workspaces (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_user_id TEXT NOT NULL
+    );
+    CREATE TABLE items (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL
+    );
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
+    INSERT INTO items (id, owner_id, kind, title) VALUES ('task', 'workspace', 'task', 'Ship Slack automation');
+  `);
+
+  const migration = await readFile(new URL("../drizzle/0020_slack_automations.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO slack_automations (
+      id, owner_id, created_by_user_id, name, trigger_type, channel_id, message_template
+    ) VALUES (
+      'automation', 'workspace', 'owner', 'New task alert', 'task_created', 'C0123456789', '*{{title}}*'
+    );
+    INSERT INTO slack_automation_deliveries (
+      id, owner_id, automation_id, item_id, event_key, trigger_type, channel_id, message, status
+    ) VALUES (
+      'delivery', 'workspace', 'automation', 'task', 'event-1', 'task_created', 'C0123456789', '*Ship Slack automation*', 'sent'
+    );
+  `);
+
+  assert.deepEqual({ ...db.prepare("SELECT trigger_type, active, last_delivery_status FROM slack_automations WHERE id = 'automation'").get() }, {
+    trigger_type: "task_created",
+    active: 1,
+    last_delivery_status: "never",
+  });
+  assert.throws(() => db.exec(`
+    INSERT INTO slack_automation_deliveries (
+      id, owner_id, automation_id, event_key, trigger_type, channel_id, message
+    ) VALUES ('duplicate', 'workspace', 'automation', 'event-1', 'task_created', 'C0123456789', 'duplicate');
+  `), /UNIQUE constraint failed/);
+  db.exec("DELETE FROM workspaces WHERE id = 'workspace'");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM slack_automations").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM slack_automation_deliveries").get().count, 0);
+  db.close();
+});
+
 test("archives Projects with Tasks and preserves structured assignments and hidden properties", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`

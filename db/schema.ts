@@ -432,6 +432,53 @@ export const slackConnections = sqliteTable(
   ],
 );
 
+export const slackAutomations = sqliteTable(
+  "slack_automations",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").notNull(),
+    name: text("name").notNull(),
+    triggerType: text("trigger_type").notNull(),
+    triggerStatus: text("trigger_status").notNull().default(""),
+    channelId: text("channel_id").notNull(),
+    messageTemplate: text("message_template").notNull(),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    lastTriggeredAt: text("last_triggered_at"),
+    lastDeliveryStatus: text("last_delivery_status").notNull().default("never"),
+    lastError: text("last_error").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_slack_automations_owner").on(table.ownerId),
+    index("idx_slack_automations_owner_active_trigger").on(table.ownerId, table.active, table.triggerType),
+  ],
+);
+
+export const slackAutomationDeliveries = sqliteTable(
+  "slack_automation_deliveries",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    automationId: text("automation_id").notNull().references(() => slackAutomations.id, { onDelete: "cascade" }),
+    itemId: text("item_id").references(() => items.id, { onDelete: "set null" }),
+    eventKey: text("event_key").notNull(),
+    triggerType: text("trigger_type").notNull(),
+    channelId: text("channel_id").notNull(),
+    message: text("message").notNull(),
+    status: text("status").notNull().default("pending"),
+    error: text("error").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    sentAt: text("sent_at"),
+  },
+  (table) => [
+    uniqueIndex("idx_slack_automation_deliveries_event").on(table.eventKey),
+    index("idx_slack_automation_deliveries_owner_created").on(table.ownerId, table.createdAt),
+    index("idx_slack_automation_deliveries_automation_created").on(table.automationId, table.createdAt),
+  ],
+);
+
 export const slackOAuthStates = sqliteTable(
   "slack_oauth_states",
   {
@@ -489,5 +536,7 @@ export type GoogleConnection = typeof googleConnections.$inferSelect;
 export type GoogleOAuthState = typeof googleOAuthStates.$inferSelect;
 export type GoogleCalendarEvent = typeof googleCalendarEvents.$inferSelect;
 export type SlackConnection = typeof slackConnections.$inferSelect;
+export type SlackAutomation = typeof slackAutomations.$inferSelect;
+export type SlackAutomationDelivery = typeof slackAutomationDeliveries.$inferSelect;
 export type SlackOAuthState = typeof slackOAuthStates.$inferSelect;
 export type TrashRecord = typeof trashRecords.$inferSelect;
