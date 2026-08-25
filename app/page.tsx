@@ -1351,7 +1351,9 @@ export default function Home() {
 }
 
 function AuthScreen({ loading, reason }: { loading: boolean; reason: string | null }) {
+  const [signingIn, setSigningIn] = useState(false);
   const unavailable = reason === "missing_config";
+  const busy = loading || signingIn;
   return (
     <main className="auth-shell">
       <section className="auth-panel">
@@ -1361,12 +1363,11 @@ function AuthScreen({ loading, reason }: { loading: boolean; reason: string | nu
           <p>초대에 사용된 Google 계정으로 안전하게 접속하세요.</p>
           {reason === "failed" && <p className="auth-error">Google 로그인을 완료하지 못했습니다. 다시 시도해 주세요.</p>}
           {unavailable && <p className="auth-error">Google 로그인 설정을 완료하는 중입니다.</p>}
-          <button disabled={loading || unavailable} onClick={() => { window.location.href = "/api/auth/google?returnTo=%2F"; }}>
-            {loading ? <LoaderCircle className="spin" size={17} /> : <LogIn size={17} />}
-            {loading ? "세션 확인 중" : "Google 계정으로 계속"}
+          <button disabled={busy || unavailable} aria-busy={busy} onClick={() => { setSigningIn(true); window.location.assign("/api/auth/google?returnTo=%2F"); }}>
+            {busy ? <LoaderCircle className="spin" size={17} /> : <LogIn size={17} />}
+            {loading ? "세션 확인 중" : signingIn ? "Google로 이동 중" : "Google 계정으로 계속"}
           </button>
         </div>
-        <footer>개인 워크스페이스와 초대받은 팀 워크스페이스가 계정별로 분리됩니다.</footer>
       </section>
     </main>
   );

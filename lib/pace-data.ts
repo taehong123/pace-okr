@@ -107,6 +107,12 @@ export type RequestAuthorization = {
 
 export type IntegrationTokenSummary = Pick<IntegrationToken, "id" | "name" | "tokenPrefix" | "createdAt" | "lastUsedAt" | "revokedAt">;
 
+const DEFAULT_PROJECT_EXECUTION_PROPERTIES: { name: string; type: PropertyType; options?: string[] }[] = [
+  { name: "시기", type: "select", options: ["이번 주", "이번 달", "이번 분기", "다음 분기", "미정"] },
+  { name: "KR 기여 예상치", type: "number" },
+  { name: "예상 기간", type: "number" },
+];
+
 type RuntimeEnv = typeof env & {
   OKRPTR_API_TOKEN?: string;
   OKITA_API_TOKEN?: string;
@@ -131,6 +137,7 @@ async function ensureSchema() {
   if (!schemaReady) {
     const d1 = (env as RuntimeEnv).DB;
     schemaReady = (async () => {
+      if (await schemaIsCurrent(d1)) return;
       await d1.batch([
         d1.prepare(`CREATE TABLE IF NOT EXISTS workspaces (
           id TEXT PRIMARY KEY,
@@ -480,6 +487,72 @@ async function ensureSchema() {
   await schemaReady;
 }
 
+async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
+  try {
+    await d1.prepare(`SELECT
+      workspace.owner_user_id,
+      member.invited_by_user_id,
+      preference.active_workspace_id,
+      rules.configured,
+      token.last_used_at,
+      cycle.department,
+      workspace_group.archived,
+      group_member.role,
+      item.cycle_id,
+      item.routine_id,
+      item.archived_at,
+      item.archived_from_status,
+      item.archive_root_id,
+      assignment.role,
+      activity.action,
+      property.options,
+      property_value.value,
+      hidden_property.project_id,
+      checklist.completed,
+      scrum.scrum_date,
+      routine.trigger_point,
+      routine.action_place,
+      routine.action_steps,
+      completion.completion_date,
+      usage.estimated_cost_won_micros,
+      google_connection.google_account_id,
+      google_state.expires_at,
+      calendar_event.calendar_id,
+      slack_connection.team_id,
+      slack_state.expires_at,
+      trash.created_by_user_id
+    FROM workspaces AS workspace
+    LEFT JOIN workspace_members AS member ON 1 = 0
+    LEFT JOIN user_workspace_preferences AS preference ON 1 = 0
+    LEFT JOIN workspace_rules AS rules ON 1 = 0
+    LEFT JOIN integration_tokens AS token ON 1 = 0
+    LEFT JOIN okr_cycles AS cycle ON 1 = 0
+    LEFT JOIN workspace_groups AS workspace_group ON 1 = 0
+    LEFT JOIN workspace_group_members AS group_member ON 1 = 0
+    LEFT JOIN items AS item ON 1 = 0
+    LEFT JOIN item_assignments AS assignment ON 1 = 0
+    LEFT JOIN activity_log AS activity ON 1 = 0
+    LEFT JOIN property_definitions AS property ON 1 = 0
+    LEFT JOIN item_property_values AS property_value ON 1 = 0
+    LEFT JOIN project_hidden_properties AS hidden_property ON 1 = 0
+    LEFT JOIN checklist_items AS checklist ON 1 = 0
+    LEFT JOIN daily_scrums AS scrum ON 1 = 0
+    LEFT JOIN routines AS routine ON 1 = 0
+    LEFT JOIN routine_completions AS completion ON 1 = 0
+    LEFT JOIN ai_usage_events AS usage ON 1 = 0
+    LEFT JOIN google_connections AS google_connection ON 1 = 0
+    LEFT JOIN google_oauth_states AS google_state ON 1 = 0
+    LEFT JOIN google_calendar_events AS calendar_event ON 1 = 0
+    LEFT JOIN slack_connections AS slack_connection ON 1 = 0
+    LEFT JOIN slack_oauth_states AS slack_state ON 1 = 0
+    LEFT JOIN trash_records AS trash ON 1 = 0
+    LIMIT 0`).first();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function addColumnIfMissing(d1: RuntimeEnv["DB"], statement: string) {
   try {
     await d1.prepare(statement).run();
@@ -494,6 +567,7 @@ export async function ensureWorkspace(ownerId: string) {
   if (!ready) {
     ready = (async () => {
       await ensureSchema();
+      if (await workspaceInitializationIsCurrent(ownerId)) return;
       await migrateLegacyHierarchy(ownerId);
       await removeLegacySeedWorkspaceData(ownerId);
       await seedProjectExecutionProperties(ownerId);
@@ -504,6 +578,18 @@ export async function ensureWorkspace(ownerId: string) {
     void ready.catch(() => workspaceReady.delete(ownerId));
   }
   await ready;
+}
+
+async function workspaceInitializationIsCurrent(ownerId: string) {
+  const rows = await getDb()
+    .select({ name: propertyDefinitions.name })
+    .from(propertyDefinitions)
+    .where(and(
+      eq(propertyDefinitions.ownerId, ownerId),
+      inArray(propertyDefinitions.name, DEFAULT_PROJECT_EXECUTION_PROPERTIES.map((property) => property.name)),
+    ));
+  const names = new Set(rows.map((row) => row.name));
+  return DEFAULT_PROJECT_EXECUTION_PROPERTIES.every((property) => names.has(property.name));
 }
 
 export async function listOkrCycles(ownerId: string) {
@@ -944,23 +1030,21 @@ export async function recordAiUsageEvent(input: {
 export async function createGoogleOAuthState(ownerId: string, userId: string, returnTo = "/") {
   await ensureSchema();
   const state = crypto.randomUUID();
+  const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  await getDb().delete(googleOAuthStates).where(lte(googleOAuthStates.expiresAt, new Date().toISOString()));
-  await getDb().insert(googleOAuthStates).values({
-    state,
-    ownerId,
-    userId,
-    returnTo: normalizeReturnTo(returnTo),
-    expiresAt,
-  });
+  const d1 = (env as RuntimeEnv).DB;
+  await d1.batch([
+    d1.prepare("DELETE FROM google_oauth_states WHERE expires_at <= ?").bind(now),
+    d1.prepare(`INSERT INTO google_oauth_states (state, owner_id, user_id, return_to, expires_at)
+      VALUES (?, ?, ?, ?, ?)`).bind(state, ownerId, userId, normalizeReturnTo(returnTo), expiresAt),
+  ]);
   return state;
 }
 
 export async function consumeGoogleOAuthState(state: string) {
   await ensureSchema();
-  const [saved] = await getDb().select().from(googleOAuthStates).where(eq(googleOAuthStates.state, state)).limit(1);
+  const [saved] = await getDb().delete(googleOAuthStates).where(eq(googleOAuthStates.state, state)).returning();
   if (!saved) return null;
-  await getDb().delete(googleOAuthStates).where(eq(googleOAuthStates.state, state));
   if (saved.expiresAt <= new Date().toISOString()) return null;
   return saved;
 }
@@ -3115,12 +3199,7 @@ async function removeLegacySeedWorkspaceData(ownerId: string) {
 async function seedProjectExecutionProperties(ownerId: string) {
   const existing = await listPropertyDefinitions(ownerId);
   const existingNames = new Set(existing.map((property) => property.name.toLocaleLowerCase()));
-  const defaults: { name: string; type: PropertyType; options?: string[] }[] = [
-    { name: "시기", type: "select", options: ["이번 주", "이번 달", "이번 분기", "다음 분기", "미정"] },
-    { name: "KR 기여 예상치", type: "number" },
-    { name: "예상 기간", type: "number" },
-  ];
-  const missing = defaults.filter((property) => !existingNames.has(property.name.toLocaleLowerCase()));
+  const missing = DEFAULT_PROJECT_EXECUTION_PROPERTIES.filter((property) => !existingNames.has(property.name.toLocaleLowerCase()));
   if (!missing.length) return;
 
   const baseSortOrder = existing.at(-1)?.sortOrder ?? 0;

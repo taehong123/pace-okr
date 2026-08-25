@@ -99,12 +99,17 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /把目标变成行动的工作空间/);
   assert.match(page, /convertir objetivos en acción/);
   assert.match(page, /Google 계정으로 계속/);
+  assert.match(page, /Google로 이동 중/);
   assert.match(page, /\/api\/bootstrap/);
   assert.doesNotMatch(page, /\/api\/auth\/session/);
   assert.match(bootstrapRoute, /Promise\.all/);
   assert.match(bootstrapRoute, /getTeam/);
   assert.match(bootstrapRoute, /listItems/);
   assert.match(paceData, /workspaceReady/);
+  assert.match(paceData, /schemaIsCurrent/);
+  assert.match(paceData, /workspaceInitializationIsCurrent/);
+  assert.match(paceData, /DELETE FROM google_oauth_states WHERE expires_at <=/);
+  assert.match(paceData, /delete\(googleOAuthStates\).*returning/);
   assert.match(page, /Google 계정 로그아웃/);
   assert.match(googleSession, /HttpOnly; Secure; SameSite=Lax/);
   assert.match(googleSession, /crypto\.subtle\.verify\("HMAC"/);
