@@ -69,6 +69,10 @@ type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
 type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "openai" | "local" };
 type AuthState = { status: "loading" | "authenticated" | "unauthenticated"; user: AuthUser | null; reason: string | null };
 
+const GOOGLE_SIGN_IN_CLIENT_ID = "497784342268-ik1c65ff3co1s6qt0gga34gt1togmart.apps.googleusercontent.com";
+const GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX = "browser_signin_";
+const GOOGLE_BROWSER_SIGN_IN_STATE_COOKIE_NAME = "__Host-okrptr_google_signin_browser";
+
 type ItemAssignment = {
   id: string;
   memberId: string;
@@ -1363,7 +1367,7 @@ function AuthScreen({ loading, reason }: { loading: boolean; reason: string | nu
           <p>초대에 사용된 Google 계정으로 안전하게 접속하세요.</p>
           {reason === "failed" && <p className="auth-error">Google 로그인을 완료하지 못했습니다. 다시 시도해 주세요.</p>}
           {unavailable && <p className="auth-error">Google 로그인 설정을 완료하는 중입니다.</p>}
-          <button disabled={busy || unavailable} aria-busy={busy} onClick={() => { setSigningIn(true); window.location.assign("/api/auth/google?returnTo=%2F"); }}>
+          <button disabled={busy || unavailable} aria-busy={busy} onClick={() => { setSigningIn(true); startGoogleSignIn(); }}>
             {busy ? <LoaderCircle className="spin" size={17} /> : <LogIn size={17} />}
             {loading ? "세션 확인 중" : signingIn ? "Google로 이동 중" : "Google 계정으로 계속"}
           </button>
@@ -1371,6 +1375,23 @@ function AuthScreen({ loading, reason }: { loading: boolean; reason: string | nu
       </section>
     </main>
   );
+}
+
+function startGoogleSignIn() {
+  if (window.location.hostname !== "okrptr.com") {
+    window.location.assign("/api/auth/google?returnTo=%2F");
+    return;
+  }
+  const state = `${GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX}${window.crypto.randomUUID()}`;
+  document.cookie = `${GOOGLE_BROWSER_SIGN_IN_STATE_COOKIE_NAME}=${state}; Path=/; Secure; SameSite=Lax; Max-Age=600`;
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id", GOOGLE_SIGN_IN_CLIENT_ID);
+  url.searchParams.set("redirect_uri", `${window.location.origin}/api/google/callback`);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", "openid email profile");
+  url.searchParams.set("prompt", "select_account");
+  url.searchParams.set("state", state);
+  window.location.assign(url.toString());
 }
 
 function WelcomeModal({ language, onLanguageChange, onClose, onOpenMcp }: {

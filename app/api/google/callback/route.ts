@@ -1,10 +1,5 @@
 import { env } from "cloudflare:workers";
 import {
-  consumeGoogleOAuthState,
-  getGoogleConnection,
-  saveGoogleConnection,
-} from "@/lib/pace-data";
-import {
   decryptSecret,
   encryptSecret,
   exchangeGoogleCode,
@@ -13,11 +8,13 @@ import {
   type GoogleRuntimeEnv,
 } from "@/lib/google-oauth";
 import {
-  clearGoogleSignInStateCookie,
+  clearGoogleSignInStateCookies,
   createGoogleSessionCookie,
+  GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX,
   GOOGLE_SIGN_IN_STATE_OWNER,
   GOOGLE_SIGN_IN_STATE_PREFIX,
   GOOGLE_SIGN_IN_STATE_USER,
+  readGoogleBrowserSignInState,
   readGoogleSignInState,
 } from "@/lib/google-session";
 
@@ -25,11 +22,15 @@ export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const stateValue = requestUrl.searchParams.get("state") ?? "";
   const runtime = env as GoogleRuntimeEnv;
-  const signingIn = stateValue.startsWith(GOOGLE_SIGN_IN_STATE_PREFIX);
-  const signInState = signingIn
+  const serverStateSignIn = stateValue.startsWith(GOOGLE_SIGN_IN_STATE_PREFIX);
+  const browserStateSignIn = stateValue.startsWith(GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX);
+  const signingIn = serverStateSignIn || browserStateSignIn;
+  const signInState = serverStateSignIn
     ? await readGoogleSignInState(request, stateValue, runtime.GOOGLE_TOKEN_ENCRYPTION_KEY)
-    : null;
-  const savedState = signingIn ? null : await consumeGoogleOAuthState(stateValue);
+    : browserStateSignIn
+      ? readGoogleBrowserSignInState(request, stateValue)
+      : null;
+  const savedState = signingIn ? null : await consumeStoredGoogleOAuthState(stateValue);
   const state = signInState
     ? { ownerId: GOOGLE_SIGN_IN_STATE_OWNER, userId: GOOGLE_SIGN_IN_STATE_USER, returnTo: signInState.returnTo }
     : savedState;
@@ -54,12 +55,13 @@ export async function GET(request: Request) {
         Location: new URL(returnTo, request.url).toString(),
         "Set-Cookie": await createGoogleSessionCookie(profile, runtime.GOOGLE_TOKEN_ENCRYPTION_KEY!),
       });
-      headers.append("Set-Cookie", clearGoogleSignInStateCookie());
+      appendGoogleSignInStateClearCookies(headers);
       return new Response(null, {
         status: 303,
         headers,
       });
     }
+    const { getGoogleConnection, saveGoogleConnection } = await import("@/lib/pace-data");
     const existing = await getGoogleConnection(state.ownerId, state.userId);
     const refreshToken = tokens.refresh_token
       ?? (existing ? await decryptSecret(existing.encryptedRefreshToken, runtime.GOOGLE_TOKEN_ENCRYPTION_KEY!) : "");
@@ -84,8 +86,17 @@ function redirectWithAuthStatus(request: Request, returnTo: string, status: stri
   const url = new URL(returnTo, request.url);
   url.searchParams.set("auth", status);
   const headers = new Headers({ Location: url.toString() });
-  if (clearState) headers.append("Set-Cookie", clearGoogleSignInStateCookie());
+  if (clearState) appendGoogleSignInStateClearCookies(headers);
   return new Response(null, { status: 303, headers });
+}
+
+async function consumeStoredGoogleOAuthState(state: string) {
+  const { consumeGoogleOAuthState } = await import("@/lib/pace-data");
+  return consumeGoogleOAuthState(state);
+}
+
+function appendGoogleSignInStateClearCookies(headers: Headers) {
+  clearGoogleSignInStateCookies().forEach((cookie) => headers.append("Set-Cookie", cookie));
 }
 
 function redirectWithGoogleStatus(request: Request, returnTo: string, status: string) {

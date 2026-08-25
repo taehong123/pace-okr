@@ -100,6 +100,9 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /convertir objetivos en acción/);
   assert.match(page, /Google 계정으로 계속/);
   assert.match(page, /Google로 이동 중/);
+  assert.match(page, /GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX/);
+  assert.match(page, /accounts\.google\.com\/o\/oauth2\/v2\/auth/);
+  assert.match(page, /window\.location\.assign\(url\.toString\(\)\)/);
   assert.match(page, /\/api\/bootstrap/);
   assert.doesNotMatch(page, /\/api\/auth\/session/);
   assert.match(bootstrapRoute, /Promise\.all/);
@@ -115,12 +118,15 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(googleSession, /crypto\.subtle\.verify\("HMAC"/);
   assert.match(googleSession, /createGoogleSignInState/);
   assert.match(googleSession, /readGoogleSignInState/);
+  assert.match(googleSession, /readGoogleBrowserSignInState/);
   assert.match(googleSignInRoute, /googleSignInAuthorizationUrl/);
   assert.match(googleSignInRoute, /createGoogleSignInState/);
   assert.doesNotMatch(googleSignInRoute, /createGoogleOAuthState/);
   assert.match(googleSignInRoute, /"Set-Cookie": signIn\.cookie/);
   assert.match(googleCallbackRoute, /createGoogleSessionCookie/);
   assert.match(googleCallbackRoute, /readGoogleSignInState/);
+  assert.match(googleCallbackRoute, /readGoogleBrowserSignInState/);
+  assert.match(googleCallbackRoute, /await import\("@\/lib\/pace-data"\)/);
   assert.match(googleCallbackRoute, /"Set-Cookie": await createGoogleSessionCookie/);
   assert.match(googleCallbackRoute, /const headers = new Headers/);
   assert.match(googleCallbackRoute, /return new Response\(null, \{ status: 303, headers \}\)/);
