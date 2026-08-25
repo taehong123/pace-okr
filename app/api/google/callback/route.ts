@@ -12,37 +12,52 @@ import {
   googleConfigured,
   type GoogleRuntimeEnv,
 } from "@/lib/google-oauth";
-import { createGoogleSessionCookie, GOOGLE_SIGN_IN_STATE_OWNER } from "@/lib/google-session";
+import {
+  clearGoogleSignInStateCookie,
+  createGoogleSessionCookie,
+  GOOGLE_SIGN_IN_STATE_OWNER,
+  GOOGLE_SIGN_IN_STATE_PREFIX,
+  GOOGLE_SIGN_IN_STATE_USER,
+  readGoogleSignInState,
+} from "@/lib/google-session";
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const stateValue = requestUrl.searchParams.get("state") ?? "";
-  const state = await consumeGoogleOAuthState(stateValue);
+  const runtime = env as GoogleRuntimeEnv;
+  const signingIn = stateValue.startsWith(GOOGLE_SIGN_IN_STATE_PREFIX);
+  const signInState = signingIn
+    ? await readGoogleSignInState(request, stateValue, runtime.GOOGLE_TOKEN_ENCRYPTION_KEY)
+    : null;
+  const savedState = signingIn ? null : await consumeGoogleOAuthState(stateValue);
+  const state = signInState
+    ? { ownerId: GOOGLE_SIGN_IN_STATE_OWNER, userId: GOOGLE_SIGN_IN_STATE_USER, returnTo: signInState.returnTo }
+    : savedState;
   const returnTo = state?.returnTo ?? "/";
-  const signingIn = state?.ownerId === GOOGLE_SIGN_IN_STATE_OWNER;
 
   if (!state || requestUrl.searchParams.get("error")) {
-    return signingIn ? redirectWithAuthStatus(request, returnTo, "failed") : redirectWithGoogleStatus(request, returnTo, "failed");
+    return signingIn ? redirectWithAuthStatus(request, returnTo, "failed", true) : redirectWithGoogleStatus(request, returnTo, "failed");
   }
 
-  const runtime = env as GoogleRuntimeEnv;
   if (!googleConfigured(runtime)) {
-    return signingIn ? redirectWithAuthStatus(request, returnTo, "missing_config") : redirectWithGoogleStatus(request, returnTo, "missing_config");
+    return signingIn ? redirectWithAuthStatus(request, returnTo, "missing_config", true) : redirectWithGoogleStatus(request, returnTo, "missing_config");
   }
 
   const code = requestUrl.searchParams.get("code");
-  if (!code) return signingIn ? redirectWithAuthStatus(request, returnTo, "failed") : redirectWithGoogleStatus(request, returnTo, "failed");
+  if (!code) return signingIn ? redirectWithAuthStatus(request, returnTo, "failed", true) : redirectWithGoogleStatus(request, returnTo, "failed");
 
   try {
     const tokens = await exchangeGoogleCode(runtime, request, code);
     const profile = await fetchGoogleProfile(tokens.access_token);
     if (state.ownerId === GOOGLE_SIGN_IN_STATE_OWNER) {
+      const headers = new Headers({
+        Location: new URL(returnTo, request.url).toString(),
+        "Set-Cookie": await createGoogleSessionCookie(profile, runtime.GOOGLE_TOKEN_ENCRYPTION_KEY!),
+      });
+      headers.append("Set-Cookie", clearGoogleSignInStateCookie());
       return new Response(null, {
         status: 303,
-        headers: {
-          Location: new URL(returnTo, request.url).toString(),
-          "Set-Cookie": await createGoogleSessionCookie(profile, runtime.GOOGLE_TOKEN_ENCRYPTION_KEY!),
-        },
+        headers,
       });
     }
     const existing = await getGoogleConnection(state.ownerId, state.userId);
@@ -61,14 +76,16 @@ export async function GET(request: Request) {
     });
     return redirectWithGoogleStatus(request, returnTo, "connected");
   } catch {
-    return signingIn ? redirectWithAuthStatus(request, returnTo, "failed") : redirectWithGoogleStatus(request, returnTo, "failed");
+    return signingIn ? redirectWithAuthStatus(request, returnTo, "failed", true) : redirectWithGoogleStatus(request, returnTo, "failed");
   }
 }
 
-function redirectWithAuthStatus(request: Request, returnTo: string, status: string) {
+function redirectWithAuthStatus(request: Request, returnTo: string, status: string, clearState = false) {
   const url = new URL(returnTo, request.url);
   url.searchParams.set("auth", status);
-  return Response.redirect(url.toString(), 303);
+  const headers = new Headers({ Location: url.toString() });
+  if (clearState) headers.append("Set-Cookie", clearGoogleSignInStateCookie());
+  return new Response(null, { status: 303, headers });
 }
 
 function redirectWithGoogleStatus(request: Request, returnTo: string, status: string) {

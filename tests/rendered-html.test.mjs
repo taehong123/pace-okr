@@ -113,10 +113,17 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /Google 계정 로그아웃/);
   assert.match(googleSession, /HttpOnly; Secure; SameSite=Lax/);
   assert.match(googleSession, /crypto\.subtle\.verify\("HMAC"/);
+  assert.match(googleSession, /createGoogleSignInState/);
+  assert.match(googleSession, /readGoogleSignInState/);
   assert.match(googleSignInRoute, /googleSignInAuthorizationUrl/);
+  assert.match(googleSignInRoute, /createGoogleSignInState/);
+  assert.doesNotMatch(googleSignInRoute, /createGoogleOAuthState/);
+  assert.match(googleSignInRoute, /"Set-Cookie": signIn\.cookie/);
   assert.match(googleCallbackRoute, /createGoogleSessionCookie/);
+  assert.match(googleCallbackRoute, /readGoogleSignInState/);
   assert.match(googleCallbackRoute, /"Set-Cookie": await createGoogleSessionCookie/);
-  assert.doesNotMatch(googleCallbackRoute, /headers\.append\("Set-Cookie"/);
+  assert.match(googleCallbackRoute, /const headers = new Headers/);
+  assert.match(googleCallbackRoute, /return new Response\(null, \{ status: 303, headers \}\)/);
   assert.match(logoutRoute, /"Set-Cookie": clearGoogleSessionCookie/);
   assert.match(paceData, /canonicalUserIdForGoogle/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);

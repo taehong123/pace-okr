@@ -3,7 +3,10 @@ import type { GoogleProfile } from "@/lib/google-oauth";
 export const GOOGLE_SIGN_IN_STATE_OWNER = "__google_signin__";
 export const GOOGLE_SIGN_IN_STATE_USER = "__google_signin__";
 const SESSION_COOKIE_NAME = "__Host-okrptr_session";
+const GOOGLE_SIGN_IN_STATE_COOKIE_NAME = "__Host-okrptr_google_signin";
 const SESSION_DURATION_SECONDS = 7 * 24 * 60 * 60;
+const GOOGLE_SIGN_IN_STATE_DURATION_SECONDS = 10 * 60;
+export const GOOGLE_SIGN_IN_STATE_PREFIX = "signin_";
 
 export type GoogleSession = {
   provider: "google";
@@ -12,6 +15,47 @@ export type GoogleSession = {
   name: string;
   expiresAt: number;
 };
+
+type GoogleSignInState = {
+  state: string;
+  returnTo: string;
+  expiresAt: number;
+};
+
+export async function createGoogleSignInState(returnTo: string, secret: string) {
+  const state = `${GOOGLE_SIGN_IN_STATE_PREFIX}${crypto.randomUUID()}`;
+  const value: GoogleSignInState = {
+    state,
+    returnTo: normalizeReturnTo(returnTo),
+    expiresAt: Math.floor(Date.now() / 1000) + GOOGLE_SIGN_IN_STATE_DURATION_SECONDS,
+  };
+  const payload = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(value)));
+  const signature = await sign(payload, secret);
+  return {
+    state,
+    cookie: `${GOOGLE_SIGN_IN_STATE_COOKIE_NAME}=${payload}.${signature}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${GOOGLE_SIGN_IN_STATE_DURATION_SECONDS}`,
+  };
+}
+
+export async function readGoogleSignInState(request: Request, expectedState: string, secret: string | undefined) {
+  if (!secret || !expectedState.startsWith(GOOGLE_SIGN_IN_STATE_PREFIX)) return null;
+  const cookie = readCookie(request, GOOGLE_SIGN_IN_STATE_COOKIE_NAME);
+  if (!cookie) return null;
+  const [payload, signature] = cookie.split(".");
+  if (!payload || !signature || !(await verify(payload, signature, secret))) return null;
+  try {
+    const state = JSON.parse(new TextDecoder().decode(base64UrlToBytes(payload))) as Partial<GoogleSignInState>;
+    if (state.state !== expectedState || !state.returnTo || !state.expiresAt) return null;
+    if (state.expiresAt <= Math.floor(Date.now() / 1000)) return null;
+    return state as GoogleSignInState;
+  } catch {
+    return null;
+  }
+}
+
+export function clearGoogleSignInStateCookie() {
+  return `${GOOGLE_SIGN_IN_STATE_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+}
 
 export async function createGoogleSessionCookie(profile: GoogleProfile, secret: string) {
   if (!profile.sub || !profile.email || !profile.emailVerified) throw new Error("A verified Google email is required");
@@ -33,11 +77,7 @@ export function clearGoogleSessionCookie() {
 
 export async function readGoogleSession(request: Request, secret: string | undefined): Promise<GoogleSession | null> {
   if (!secret) return null;
-  const cookie = request.headers.get("cookie")
-    ?.split(";")
-    .map((entry) => entry.trim())
-    .find((entry) => entry.startsWith(`${SESSION_COOKIE_NAME}=`))
-    ?.slice(SESSION_COOKIE_NAME.length + 1);
+  const cookie = readCookie(request, SESSION_COOKIE_NAME);
   if (!cookie) return null;
   const [payload, signature] = cookie.split(".");
   if (!payload || !signature || !(await verify(payload, signature, secret))) return null;
@@ -67,6 +107,19 @@ async function verify(payload: string, signature: string, secret: string) {
 
 async function signingKey(secret: string) {
   return crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+}
+
+function readCookie(request: Request, name: string) {
+  return request.headers.get("cookie")
+    ?.split(";")
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(`${name}=`))
+    ?.slice(name.length + 1);
+}
+
+function normalizeReturnTo(value: string) {
+  if (!value.startsWith("/") || value.startsWith("//")) return "/";
+  return value.slice(0, 200);
 }
 
 function bytesToBase64Url(bytes: Uint8Array) {
