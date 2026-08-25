@@ -1877,6 +1877,7 @@ export async function listUserWorkspaces(userId: string, currentWorkspaceId: str
   return rows.map(({ workspace, membership }) => ({
     id: workspace.id,
     name: workspace.name,
+    createdAt: workspace.createdAt,
     personal: workspace.id === workspace.ownerUserId,
     role: membership.role as TeamRole,
     current: workspace.id === currentWorkspaceId && !workspace.scheduledDeletionAt,
@@ -1897,6 +1898,7 @@ export async function createWorkspaceForUser(userId: string, email: string | nul
   return {
     id,
     name,
+    createdAt: now,
     personal: false,
     role: "owner" as TeamRole,
     current: true,

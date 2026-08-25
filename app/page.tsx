@@ -240,23 +240,26 @@ type GroupMember = {
 };
 
 type TeamData = { workspace: { id: string; name: string }; members: TeamMember[]; currentRole: TeamRole; canManage: boolean };
-type BootstrapData = {
+type BootstrapShellData = {
   user: AuthUser;
+  workspaces: WorkspaceSummary[];
+  rules: WorkspaceRules;
+  cycles: OkrCycle[];
+  team: TeamData;
+};
+type BootstrapWorkspaceData = {
   items: OkrptrItem[];
   properties: PropertyDefinition[];
   propertyValues: PropertyValueMap;
   hiddenByProject: ProjectHiddenPropertyMap;
   archivedProjects: ArchivedProject[];
   routines: Routine[];
-  workspaces: WorkspaceSummary[];
-  rules: WorkspaceRules;
-  cycles: OkrCycle[];
-  team: TeamData;
 };
 type GroupDetailData = { group: WorkspaceGroup; members: GroupMember[]; canManageMembers: boolean };
 type WorkspaceSummary = {
   id: string;
   name: string;
+  createdAt: string;
   personal: boolean;
   role: TeamRole;
   current: boolean;
@@ -430,15 +433,6 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
   },
 };
 
-const fallbackItems: OkrptrItem[] = [];
-
-const fallbackProperties: PropertyDefinition[] = [
-  { id: "sprint", name: "스프린트", type: "select", options: ["Sprint 18", "Sprint 19", "Backlog"], sortOrder: 20, valueCount: 0 },
-  { id: "estimate", name: "예상 시간", type: "number", options: [], sortOrder: 30, valueCount: 0 },
-];
-
-const fallbackValues: PropertyValueMap = {};
-
 const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "okr", label: "OKR", icon: Target },
   { id: "work", label: "Project", icon: Table2 },
@@ -465,9 +459,9 @@ const viewTitles: Record<View, string> = {
 };
 
 export default function Home() {
-  const [items, setItems] = useState<OkrptrItem[]>(fallbackItems);
-  const [properties, setProperties] = useState<PropertyDefinition[]>(fallbackProperties);
-  const [propertyValues, setPropertyValues] = useState<PropertyValueMap>(fallbackValues);
+  const [items, setItems] = useState<OkrptrItem[]>([]);
+  const [properties, setProperties] = useState<PropertyDefinition[]>([]);
+  const [propertyValues, setPropertyValues] = useState<PropertyValueMap>({});
   const [hiddenProperties, setHiddenProperties] = useState<ProjectHiddenPropertyMap>({});
   const [archivedProjects, setArchivedProjects] = useState<ArchivedProject[]>([]);
   const [projectTab, setProjectTab] = useState<ProjectTab>("list");
@@ -510,6 +504,8 @@ export default function Home() {
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [introLanguage, setIntroLanguage] = useState<IntroLanguage>("ko");
   const [authState, setAuthState] = useState<AuthState>({ status: "loading", user: null, reason: null });
+  const [workspaceDataState, setWorkspaceDataState] = useState<"loading" | "ready" | "error">("loading");
+  const [workspaceDataAttempt, setWorkspaceDataAttempt] = useState(0);
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -523,19 +519,14 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
-    void fetch(`/api/bootstrap?date=${encodeURIComponent(localDate())}`, { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("unauthenticated");
-        return response.json() as Promise<BootstrapData>;
-      })
+    const date = encodeURIComponent(localDate());
+    const shellRequest = fetch(`/api/bootstrap?scope=shell&date=${date}`, { cache: "no-store" });
+    const dataRequest = fetch(`/api/bootstrap?scope=data&date=${date}`, { cache: "no-store" });
+
+    void shellRequest
+      .then(async (response) => response.ok ? response.json() as Promise<BootstrapShellData> : Promise.reject(new Error("unauthenticated")))
       .then((data) => {
         if (!active) return;
-        setItems(data.items);
-        setProperties(data.properties);
-        setPropertyValues(data.propertyValues);
-        setHiddenProperties(data.hiddenByProject ?? {});
-        setArchivedProjects(data.archivedProjects);
-        setRoutines(data.routines);
         setWorkspaces(data.workspaces);
         setWorkspaceRules(data.rules);
         setOkrCycles(data.cycles);
@@ -553,8 +544,22 @@ export default function Home() {
         const reason = new URLSearchParams(window.location.search).get("auth");
         setAuthState({ status: "unauthenticated", user: null, reason });
       });
+
+    void dataRequest
+      .then(async (response) => response.ok ? response.json() as Promise<BootstrapWorkspaceData> : Promise.reject(new Error("workspace data unavailable")))
+      .then((data) => {
+        if (!active) return;
+        setItems(data.items);
+        setProperties(data.properties);
+        setPropertyValues(data.propertyValues);
+        setHiddenProperties(data.hiddenByProject ?? {});
+        setArchivedProjects(data.archivedProjects);
+        setRoutines(data.routines);
+        setWorkspaceDataState("ready");
+      })
+      .catch(() => { if (active) setWorkspaceDataState("error"); });
     return () => { active = false; };
-  }, []);
+  }, [workspaceDataAttempt]);
 
   useEffect(() => {
     const group = new URLSearchParams(window.location.search).get("group")?.replace(/^@/, "").trim();
@@ -1250,6 +1255,17 @@ export default function Home() {
             ) : null}
           </header>}
 
+          {workspaceDataState === "error" ? (
+            <AsyncState
+              icon={AlertTriangle}
+              title="워크스페이스 데이터를 불러오지 못했습니다"
+              detail="연결을 확인한 뒤 다시 시도해 주세요. 입력한 내용은 변경되지 않았습니다."
+              actionLabel="다시 시도"
+              onAction={() => { setWorkspaceDataState("loading"); setWorkspaceDataAttempt((attempt) => attempt + 1); }}
+            />
+          ) : workspaceDataState === "loading" ? (
+            <AsyncState icon={LoaderCircle} title={`${viewTitles[activeView]} 데이터를 불러오는 중입니다`} loading />
+          ) : <>
           {activeView === "inbox" && (
             <form className="quick-capture" onSubmit={submitCapture}>
               <Plus size={15} />
@@ -1276,7 +1292,7 @@ export default function Home() {
           ) : (
             <>
           {activeView === "home" && <HomeView onCreatePlan={createOnboardingPlan} />}
-          {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={setSelectedTaskId} onConnect={connectInbox} />}
+          {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={setSelectedTaskId} onConnect={connectInbox} onPatch={patchItem} />}
           {activeView === "work" && (
             <section className="project-workspace">
               <div className="project-tabs" role="tablist" aria-label="Project 보기">
@@ -1333,6 +1349,7 @@ export default function Home() {
           {activeView === "trash" && <TrashView onNotice={showNotice} />}
             </>
           )}
+          </>}
         </div>
       </section>
 
@@ -2818,13 +2835,14 @@ function BoardView({ items, onOpenItem }: { items: OkrptrItem[]; onOpenItem: (it
   return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <button className="board-item" key={entry.id} onClick={() => onOpenItem(entry)}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
 }
 
-function TaskListView({ items, allItems, routines, onOpenTask, onConnect }: { items: OkrptrItem[]; allItems: OkrptrItem[]; routines: Routine[]; onOpenTask: (id: string) => void; onConnect: (item: OkrptrItem) => void }) {
+function TaskListView({ items, allItems, routines, onOpenTask, onConnect, onPatch }: { items: OkrptrItem[]; allItems: OkrptrItem[]; routines: Routine[]; onOpenTask: (id: string) => void; onConnect: (item: OkrptrItem) => void; onPatch: (id: string, patch: Partial<OkrptrItem>) => Promise<void> }) {
+  const [visibleCount, setVisibleCount] = useState(20);
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
   if (!items.length) return <EmptyState icon={Inbox} title="Task가 없습니다" />;
   return (
     <section className="inbox-list task-list">
       <div className="list-head task-list-head"><span>이름</span><span>담당자</span><span>상위 연결</span><span>등록 경로</span><span /></div>
-      {items.map((entry) => {
+      {items.slice(0, visibleCount).map((entry) => {
         const project = entry.parentId ? byId.get(entry.parentId) : undefined;
         const routine = entry.routineId ? routines.find((row) => row.id === entry.routineId) : undefined;
         const relation = routine ? `Routine · ${routine.title}` : project ? `Project · ${project.title}` : "인박스";
@@ -2835,13 +2853,27 @@ function TaskListView({ items, allItems, routines, onOpenTask, onConnect }: { it
               <span className="page-icon"><ListChecks size={15} /></span>
               <span><b>{entry.title}</b><small>{statusLabel(entry.status)} · {priorityLabels[entry.priority]}</small></span>
             </button>
-            <span className="task-assignee-cell">{assignmentLabel(entry, "task_assignee")}</span>
-            <button className="task-relation-button" onClick={() => onOpenTask(entry.id)}>{relation}</button>
-            <span className={`source-badge source-${entry.source}`}>{sourceLabel(entry.source)}</span>
+            <select className={`task-list-status status-${entry.status}`} value={entry.status} onChange={(event) => void onPatch(entry.id, { status: event.target.value as ItemStatus })} aria-label={`${entry.title} 상태 변경`}>
+              {Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+            </select>
+            <span className="task-assignee-cell"><i>담당자</i>{assignmentLabel(entry, "task_assignee")}</span>
+            <button className="task-relation-button" onClick={() => onOpenTask(entry.id)}><i>상위 연결</i>{relation}</button>
+            <span className={`source-badge source-${entry.source}`}><i>출처</i>{sourceLabel(entry.source)}</span>
             {disconnected ? <button onClick={() => onConnect(entry)}><Link2 size={14} />연결</button> : <button onClick={() => onOpenTask(entry.id)}><MoreHorizontal size={14} />상세</button>}
           </article>
         );
       })}
+      {items.length > visibleCount && <button className="task-list-more" onClick={() => setVisibleCount((count) => count + 20)}>더 보기 <span>{Math.min(visibleCount, items.length)} / {items.length}</span></button>}
+    </section>
+  );
+}
+
+function AsyncState({ icon: Icon, title, detail, actionLabel, onAction, loading = false }: { icon: LucideIcon; title: string; detail?: string; actionLabel?: string; onAction?: () => void; loading?: boolean }) {
+  return (
+    <section className="async-state" role={loading ? "status" : "alert"} aria-live="polite">
+      <span className={loading ? "spinning" : ""}><Icon size={18} /></span>
+      <div><b>{title}</b>{detail && <p>{detail}</p>}</div>
+      {actionLabel && onAction && <button type="button" onClick={onAction}><RotateCcw size={14} />{actionLabel}</button>}
     </section>
   );
 }
