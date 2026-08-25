@@ -37,9 +37,13 @@ export async function GET(request: Request) {
     const tokens = await exchangeGoogleCode(runtime, request, code);
     const profile = await fetchGoogleProfile(tokens.access_token);
     if (state.ownerId === GOOGLE_SIGN_IN_STATE_OWNER) {
-      const response = Response.redirect(new URL(returnTo, request.url).toString(), 303);
-      response.headers.append("Set-Cookie", await createGoogleSessionCookie(profile, runtime.GOOGLE_TOKEN_ENCRYPTION_KEY!));
-      return response;
+      return new Response(null, {
+        status: 303,
+        headers: {
+          Location: new URL(returnTo, request.url).toString(),
+          "Set-Cookie": await createGoogleSessionCookie(profile, runtime.GOOGLE_TOKEN_ENCRYPTION_KEY!),
+        },
+      });
     }
     const existing = await getGoogleConnection(state.ownerId, state.userId);
     const refreshToken = tokens.refresh_token

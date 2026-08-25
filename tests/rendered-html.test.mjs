@@ -40,7 +40,7 @@ test("server-renders the OKRPTR authentication shell", async () => {
 });
 
 test("ships product metadata and removes starter assets", async () => {
-  const [layout, page, bootstrapRoute, integrationRoute, slackAuthRoute, slackDisconnectRoute, paceData, googleSession, googleSignInRoute, googleCallbackRoute, packageJson] = await Promise.all([
+  const [layout, page, bootstrapRoute, integrationRoute, slackAuthRoute, slackDisconnectRoute, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/bootstrap/route.ts", import.meta.url), "utf8"),
@@ -51,6 +51,7 @@ test("ships product metadata and removes starter assets", async () => {
     readFile(new URL("../lib/google-session.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/auth/google/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/google/callback/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/auth/logout/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
@@ -109,6 +110,9 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(googleSession, /crypto\.subtle\.verify\("HMAC"/);
   assert.match(googleSignInRoute, /googleSignInAuthorizationUrl/);
   assert.match(googleCallbackRoute, /createGoogleSessionCookie/);
+  assert.match(googleCallbackRoute, /"Set-Cookie": await createGoogleSessionCookie/);
+  assert.doesNotMatch(googleCallbackRoute, /headers\.append\("Set-Cookie"/);
+  assert.match(logoutRoute, /"Set-Cookie": clearGoogleSessionCookie/);
   assert.match(paceData, /canonicalUserIdForGoogle/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("app/_sites-preview/SkeletonPreview.tsx", projectRoot)));
