@@ -57,7 +57,7 @@ test("ships product metadata and removes starter assets", async () => {
 
   assert.match(layout, /openGraph/);
   assert.doesNotMatch(layout, /\/og\.png/);
-  assert.match(page, /MCP 연결 설정 복사/);
+  assert.match(page, /ChatGPT 연결 문구 복사/);
   assert.match(page, /앱 연동/);
   assert.match(page, /mobile-navigation/);
   assert.match(page, /더보기/);
@@ -81,11 +81,11 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /팀 OKR/);
   assert.match(page, /개인 OKR/);
   assert.match(page, /루틴부터/);
-  assert.match(page, /이 기기의 새 대화에서도 계속 사용할 수 있습니다/);
-  assert.match(integrationRoute, /공식 플러그인은 현재 지원하지 않으므로/);
-  assert.match(integrationRoute, /\[mcp_servers\.okrptr\]/);
-  assert.match(integrationRoute, /http_headers/);
-  assert.match(integrationRoute, /Codex를 재시작/);
+  assert.match(page, /브라우저 제어가 가능한 ChatGPT 대화/);
+  assert.match(integrationRoute, /브라우저 컨트롤을 사용해 ChatGPT 설정 화면을 직접 열고/);
+  assert.match(integrationRoute, /Authorization: Bearer <OKRPTR_ACCESS_TOKEN>/);
+  assert.match(integrationRoute, /중간마다 승인 여부를 반복해서 묻지 말고/);
+  assert.match(integrationRoute, /사용자가 직접 해야 하는 마지막 한 단계만/);
   assert.match(slackAuthRoute, /canManageTeam/);
   assert.match(slackDisconnectRoute, /canManageTeam/);
   assert.match(paceData, /getSlackConnection\(ownerId: string\)/);

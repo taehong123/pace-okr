@@ -3246,7 +3246,7 @@ function IntegrationModal({ onNotice, onClose }: { onNotice: (message: string) =
     return () => { active = false; window.clearInterval(interval); };
   }, []);
 
-  async function copyCodexConnectionPrompt() {
+  async function copyChatGptConnectionPrompt() {
     setCreatingConnection(true);
     try {
       const response = await fetch("/api/integration-tokens", { method: "POST" });
@@ -3263,7 +3263,7 @@ function IntegrationModal({ onNotice, onClose }: { onNotice: (message: string) =
         return;
       }
       setConnections((current) => [data.connection!, ...current]);
-      onNotice("연결 내용을 복사했습니다. 전체 액세스로 연 대화창에 붙여넣으세요.");
+      onNotice("연결 내용을 복사했습니다. 브라우저 제어가 가능한 ChatGPT 대화에 붙여넣으세요.");
     } catch {
       onNotice("연결 내용을 만들지 못했습니다.");
     } finally {
@@ -3271,7 +3271,7 @@ function IntegrationModal({ onNotice, onClose }: { onNotice: (message: string) =
     }
   }
 
-  async function revokeCodexConnections() {
+  async function revokeChatGptConnections() {
     setRevokingConnections(true);
     try {
       const response = await fetch("/api/integration-tokens", { method: "DELETE" });
@@ -3289,9 +3289,9 @@ function IntegrationModal({ onNotice, onClose }: { onNotice: (message: string) =
   const connectionStatus = loadingConnections ? "확인 중" : hasConnectedConversation ? "연결됨" : connections.length > 0 ? "연결 대기" : "연결 없음";
   return <div className="modal-backdrop"><section className="integration-modal"><header><h2>ChatGPT 연동</h2><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header><div className="integration-sections">
     <section className="integration-card chatgpt-simple">
-      <header><Bot size={18} /><div><b>Codex에 OKRPTR MCP 연결</b><p>설정을 복사해 전체 액세스 대화창에 붙여넣으면 이 기기의 새 대화에서도 계속 사용할 수 있습니다.</p></div><div className={`connection-state ${hasConnectedConversation ? "active" : connections.length > 0 ? "pending" : "inactive"}`}><i />{connectionStatus}</div></header>
-      <div className="chatgpt-simple-actions"><button className="copy-primary" onClick={() => void copyCodexConnectionPrompt()} disabled={creatingConnection}>{creatingConnection ? <LoaderCircle className="spin" size={13} /> : <Copy size={13} />}{creatingConnection ? "복사 준비 중" : "MCP 연결 설정 복사"}</button></div>
-      <details className="connection-management"><summary><span>연결 관리</span><ChevronDown size={13} /></summary><div><span>발급된 연결 키 {connections.length}개</span>{connections.length > 0 && <button onClick={() => void revokeCodexConnections()} disabled={revokingConnections}>{revokingConnections ? "해제 중" : "연결 해제"}</button>}</div></details>
+      <header><Bot size={18} /><div><b>ChatGPT에 OKRPTR MCP 연결</b><p>문구를 복사해 브라우저 제어가 가능한 ChatGPT 대화에 붙여넣으면 설정 화면에서 연결을 진행합니다.</p></div><div className={`connection-state ${hasConnectedConversation ? "active" : connections.length > 0 ? "pending" : "inactive"}`}><i />{connectionStatus}</div></header>
+      <div className="chatgpt-simple-actions"><button className="copy-primary" onClick={() => void copyChatGptConnectionPrompt()} disabled={creatingConnection}>{creatingConnection ? <LoaderCircle className="spin" size={13} /> : <Copy size={13} />}{creatingConnection ? "복사 준비 중" : "ChatGPT 연결 문구 복사"}</button></div>
+      <details className="connection-management"><summary><span>연결 관리</span><ChevronDown size={13} /></summary><div><span>발급된 연결 키 {connections.length}개</span>{connections.length > 0 && <button onClick={() => void revokeChatGptConnections()} disabled={revokingConnections}>{revokingConnections ? "해제 중" : "연결 해제"}</button>}</div></details>
     </section>
   </div><footer><span><CheckCircle2 size={15} />Objective → Key Result → Initiative → Project → Task</span><button onClick={onClose}>닫기</button></footer></section></div>;
 }
