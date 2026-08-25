@@ -1,9 +1,10 @@
 import {
   authorizeRequest,
   createWorkspaceForUser,
-  deleteWorkspaceForUser,
   ensureWorkspace,
   listUserWorkspaces,
+  restoreWorkspaceForUser,
+  scheduleWorkspaceDeletionForUser,
   setActiveWorkspace,
 } from "@/lib/pace-data";
 
@@ -42,6 +43,9 @@ export async function PATCH(request: Request) {
     const payload = (await request.json()) as Record<string, unknown>;
     const workspaceId = typeof payload.workspaceId === "string" ? payload.workspaceId.trim() : "";
     if (!workspaceId) return Response.json({ error: "workspaceId is required" }, { status: 400 });
+    if (payload.action === "restore") {
+      return Response.json(await restoreWorkspaceForUser(authorization.userId, workspaceId));
+    }
     await setActiveWorkspace(authorization.userId, workspaceId);
     await ensureWorkspace(workspaceId);
     return withWorkspaceCookie(Response.json({ currentWorkspaceId: workspaceId }), workspaceId, request);
@@ -56,7 +60,7 @@ export async function DELETE(request: Request) {
   try {
     const workspaceId = new URL(request.url).searchParams.get("workspaceId")?.trim() ?? "";
     if (!workspaceId) return Response.json({ error: "workspaceId is required" }, { status: 400 });
-    const result = await deleteWorkspaceForUser(authorization.userId, workspaceId);
+    const result = await scheduleWorkspaceDeletionForUser(authorization.userId, workspaceId);
     return withWorkspaceCookie(Response.json(result), result.nextWorkspaceId, request);
   } catch (error) {
     return routeError(error);
@@ -77,7 +81,7 @@ function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
   const status = /owner|personal|access/i.test(message)
     ? 403
-    : /required|characters|not found|keep another/i.test(message)
+    : /required|characters|not found|keep another|scheduled/i.test(message)
       ? 400
       : 500;
   return Response.json({ error: message }, { status });

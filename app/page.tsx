@@ -254,7 +254,15 @@ type BootstrapData = {
   team: TeamData;
 };
 type GroupDetailData = { group: WorkspaceGroup; members: GroupMember[]; canManageMembers: boolean };
-type WorkspaceSummary = { id: string; name: string; personal: boolean; role: TeamRole; current: boolean };
+type WorkspaceSummary = {
+  id: string;
+  name: string;
+  personal: boolean;
+  role: TeamRole;
+  current: boolean;
+  deletionRequestedAt: string | null;
+  scheduledDeletionAt: string | null;
+};
 type GoogleConnectionStatus = {
   configured: boolean;
   connected: boolean;
@@ -635,12 +643,15 @@ export default function Home() {
     : 0;
   const selectedTask = activeItems.find((entry) => entry.id === selectedTaskId && entry.kind === "task");
   const selectedProject = activeItems.find((entry) => entry.id === selectedProjectId && entry.kind === "project");
-  const currentWorkspace = workspaces.find((entry) => entry.current) ?? workspaces[0];
+  const activeWorkspaces = workspaces.filter((entry) => !entry.scheduledDeletionAt);
+  const scheduledWorkspaces = workspaces.filter((entry) => Boolean(entry.scheduledDeletionAt));
+  const currentWorkspace = activeWorkspaces.find((entry) => entry.current) ?? activeWorkspaces[0];
   const currentTeamMember = teamMembers.find((member) => member.isCurrent && member.status === "active");
   const accountDisplayName = currentTeamMember?.displayName || authState.user?.displayName || "내 계정";
   const accountInitial = accountDisplayName.slice(0, 1).toLocaleUpperCase() || "O";
 
   async function switchWorkspace(workspaceId: string) {
+    if (workspaces.find((entry) => entry.id === workspaceId)?.scheduledDeletionAt) return;
     if (workspaceSaving || workspaceId === currentWorkspace?.id) {
       setWorkspaceMenuOpen(false);
       return;
@@ -677,7 +688,7 @@ export default function Home() {
 
   async function deleteWorkspace(workspace: WorkspaceSummary) {
     if (workspace.personal || workspace.role !== "owner" || workspaceSaving) return;
-    if (!window.confirm(`'${workspace.name}' 워크스페이스를 삭제할까요?\n멤버, 그룹, OKR, Task, 루틴, 연동 데이터가 함께 삭제됩니다.`)) return;
+    if (!window.confirm(`'${workspace.name}' 워크스페이스 삭제를 예약할까요?\n바로 접근할 수 없게 되며 30일 동안 복구할 수 있습니다. 30일 후 모든 데이터가 영구 삭제됩니다.`)) return;
     setWorkspaceSaving(true);
     const response = await fetch(`/api/workspaces?workspaceId=${encodeURIComponent(workspace.id)}`, { method: "DELETE" });
     if (response.ok) window.location.reload();
@@ -685,6 +696,22 @@ export default function Home() {
       const data = await response.json().catch(() => ({})) as { error?: string };
       setWorkspaceSaving(false);
       showNotice(data.error ?? "워크스페이스를 삭제하지 못했습니다.");
+    }
+  }
+
+  async function restoreWorkspace(workspace: WorkspaceSummary) {
+    if (!workspace.scheduledDeletionAt || workspace.role !== "owner" || workspaceSaving) return;
+    setWorkspaceSaving(true);
+    const response = await fetch("/api/workspaces", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "restore", workspaceId: workspace.id }),
+    });
+    if (response.ok) window.location.reload();
+    else {
+      const data = await response.json().catch(() => ({})) as { error?: string };
+      setWorkspaceSaving(false);
+      showNotice(data.error ?? "워크스페이스를 복구하지 못했습니다.");
     }
   }
 
@@ -1089,9 +1116,9 @@ export default function Home() {
           </button>
           {workspaceMenuOpen && (
             <div className="workspace-menu">
-              <header><b>워크스페이스</b><span>{workspaces.length}</span></header>
+              <header><b>워크스페이스</b><span>{activeWorkspaces.length}</span></header>
               <div className="workspace-list">
-                {workspaces.map((workspace) => (
+                {activeWorkspaces.map((workspace) => (
                   <div className="workspace-row" key={workspace.id}>
                     <button onClick={() => void switchWorkspace(workspace.id)} disabled={workspaceSaving}>
                       <span className="workspace-avatar">{workspace.name.slice(0, 1).toLocaleUpperCase()}</span>
@@ -1099,12 +1126,28 @@ export default function Home() {
                       {workspace.current && <Check size={14} />}
                     </button>
                     {!workspace.personal && workspace.role === "owner" && (
-                      <button className="workspace-delete" onClick={() => void deleteWorkspace(workspace)} disabled={workspaceSaving} aria-label={`${workspace.name} 워크스페이스 삭제`} title="워크스페이스 삭제">
+                      <button className="workspace-delete" onClick={() => void deleteWorkspace(workspace)} disabled={workspaceSaving} aria-label={`${workspace.name} 워크스페이스 삭제 예약`} title="삭제 예약">
                         <Trash2 size={13} />
                       </button>
                     )}
                   </div>
                 ))}
+                {scheduledWorkspaces.length > 0 && (
+                  <section className="workspace-scheduled">
+                    <header><b>삭제 예정</b><span>{scheduledWorkspaces.length}</span></header>
+                    {scheduledWorkspaces.map((workspace) => (
+                      <div className="workspace-row workspace-row-scheduled" key={workspace.id}>
+                        <div className="workspace-scheduled-main">
+                          <span className="workspace-avatar">{workspace.name.slice(0, 1).toLocaleUpperCase()}</span>
+                          <span><b>{workspace.name}</b><small>{workspaceDeletionLabel(workspace.scheduledDeletionAt)}</small></span>
+                        </div>
+                        <button className="workspace-restore" onClick={() => void restoreWorkspace(workspace)} disabled={workspaceSaving} aria-label={`${workspace.name} 워크스페이스 복구`} title="워크스페이스 복구">
+                          <RotateCcw size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </section>
+                )}
               </div>
               <div className="workspace-create">
                 {workspaceCreateOpen ? (
@@ -1353,7 +1396,7 @@ export default function Home() {
       {propertyPanelOpen && (
         <PropertyPanel
           currentWorkspace={currentWorkspace}
-          workspaceCount={workspaces.length}
+          workspaceCount={activeWorkspaces.length}
           onClose={() => setPropertyPanelOpen(false)}
           onCleanup={() => { setPropertyPanelOpen(false); setCleanupOpen(true); }}
           onOpenWorkspaceMenu={() => { setPropertyPanelOpen(false); setWorkspaceMenuOpen(true); }}
@@ -3626,6 +3669,14 @@ function cycleStatusLabel(status: OkrCycle["status"]) { return { planned: "\uC60
 function sourceLabel(source: string) { return { mcp: "MCP", codex: "Codex", slack: "Slack", discord: "Discord", telegram: "Telegram", web: "Web" }[source] ?? "Bot"; }
 function propertyTypeLabel(type: PropertyType) { return { text: "텍스트", number: "숫자", select: "선택", date: "날짜", checkbox: "체크박스" }[type]; }
 function teamRoleLabel(role: TeamRole) { return { owner: "Owner", admin: "Admin", member: "Member", viewer: "Viewer" }[role]; }
+function workspaceDeletionLabel(value: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "30일 후 영구 삭제";
+  const days = Math.max(0, Math.ceil((date.getTime() - Date.now()) / 86_400_000));
+  const deletionDate = date.toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
+  return `${days}일 남음 · ${deletionDate} 영구 삭제`;
+}
 function groupColorLabel(color: GroupColor) { return { gray: "회색", blue: "파랑", green: "초록", yellow: "노랑", orange: "주황", red: "빨강", purple: "보라" }[color]; }
 function dueLabel(value: string | null) { if (!value) return "기한 없음"; const due = new Date(`${value}T00:00:00`); return `${due.getMonth() + 1}월 ${due.getDate()}일`; }
 function trashSummary(record: TrashRecord) { return `OKR ${record.cycleCount}개, 작업 ${record.itemCount}개, 루틴 ${record.routineCount}개 보관`; }

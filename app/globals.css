@@ -135,6 +135,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .workspace-row > button:first-child:only-child { grid-column: 1 / -1; }
 .workspace-delete { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
 .workspace-delete:hover { background: #fff4f2; color: var(--red); }
+.workspace-scheduled { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--line); }
+.workspace-scheduled > header { height: 24px; display: flex; align-items: center; justify-content: space-between; padding: 0 6px; color: var(--muted); }
+.workspace-scheduled > header b { font-size: 9px; font-weight: 650; }
+.workspace-scheduled > header span { font-size: 9px; }
+.workspace-row-scheduled { opacity: .78; }
+.workspace-row-scheduled:hover { background: #fff8f7; }
+.workspace-scheduled-main { min-width: 0; min-height: 40px; display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: center; gap: 8px; padding: 5px 6px; }
+.workspace-scheduled-main > span:nth-child(2) { min-width: 0; display: grid; gap: 1px; }
+.workspace-scheduled-main b, .workspace-scheduled-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-scheduled-main b { color: var(--ink); font-size: 11px; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--ink) 35%, transparent); }
+.workspace-scheduled-main small { color: var(--red); font-size: 9px; }
+.workspace-restore { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #2f7d4d; cursor: pointer; }
+.workspace-restore:hover { background: #eef8f1; color: #20633a; }
 .workspace-avatar { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 4px; background: #f7f7f5; font-size: 10px; font-weight: 700; }
 .workspace-row > button:first-child > span:nth-child(2) { min-width: 0; display: grid; gap: 1px; }
 .workspace-list b, .workspace-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -985,7 +998,8 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .nav-item,
 .profile-row,
 .workspace-create-trigger,
-.workspace-delete { border-radius: var(--radius-control); }
+.workspace-delete,
+.workspace-restore { border-radius: var(--radius-control); }
 .workspace-switcher:hover,
 .workspace-switcher[aria-expanded="true"],
 .profile-row:hover { background: var(--raised); box-shadow: inset 0 0 0 1px var(--line), var(--shadow-raised); }

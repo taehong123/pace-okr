@@ -141,6 +141,13 @@
       "when": 1787630006729,
       "tag": "0020_slack_automations",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1787631823650,
+      "tag": "0021_workspace_deletion_grace",
+      "breakpoints": true
     }
   ]
 }

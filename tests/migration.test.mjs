@@ -119,6 +119,35 @@ test("creates workspace-scoped Slack automations with deduplicated delivery hist
   db.close();
 });
 
+test("adds a 30-day workspace deletion grace period", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON;");
+  const [workspaceMigration, deletionMigration] = await Promise.all([
+    readFile(new URL("../drizzle/0005_wet_roland_deschain.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0021_workspace_deletion_grace.sql", import.meta.url), "utf8"),
+  ]);
+  db.exec(workspaceMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec("INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner')");
+  db.exec(deletionMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    UPDATE workspaces
+    SET deletion_requested_at = '2026-08-25T00:00:00.000Z',
+        scheduled_deletion_at = '2026-09-24T00:00:00.000Z',
+        deletion_requested_by_user_id = 'owner'
+    WHERE id = 'workspace'
+  `);
+
+  assert.deepEqual({ ...db.prepare("SELECT deletion_requested_at, scheduled_deletion_at, deletion_requested_by_user_id FROM workspaces WHERE id = 'workspace'").get() }, {
+    deletion_requested_at: "2026-08-25T00:00:00.000Z",
+    scheduled_deletion_at: "2026-09-24T00:00:00.000Z",
+    deletion_requested_by_user_id: "owner",
+  });
+  assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_workspaces_scheduled_deletion'").get().name, "idx_workspaces_scheduled_deletion");
+  db.exec("UPDATE workspaces SET deletion_requested_at = NULL, scheduled_deletion_at = NULL, deletion_requested_by_user_id = NULL WHERE id = 'workspace'");
+  assert.equal(db.prepare("SELECT scheduled_deletion_at FROM workspaces WHERE id = 'workspace'").get().scheduled_deletion_at, null);
+  db.close();
+});
+
 test("archives Projects with Tasks and preserves structured assignments and hidden properties", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`

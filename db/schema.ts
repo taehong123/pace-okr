@@ -7,11 +7,15 @@ export const workspaces = sqliteTable(
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     ownerUserId: text("owner_user_id").notNull(),
+    deletionRequestedAt: text("deletion_requested_at"),
+    scheduledDeletionAt: text("scheduled_deletion_at"),
+    deletionRequestedByUserId: text("deletion_requested_by_user_id"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
     index("idx_workspaces_owner").on(table.ownerUserId),
+    index("idx_workspaces_scheduled_deletion").on(table.scheduledDeletionAt),
   ],
 );
 

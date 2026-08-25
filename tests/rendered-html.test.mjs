@@ -42,10 +42,11 @@ test("server-renders the OKRPTR application loading shell", async () => {
 });
 
 test("ships product metadata and removes starter assets", async () => {
-  const [layout, page, bootstrapRoute, integrationRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson] = await Promise.all([
+  const [layout, page, bootstrapRoute, workspaceRoute, integrationRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/bootstrap/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/workspaces/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/integration-tokens/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/auth/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/disconnect/route.ts", import.meta.url), "utf8"),
@@ -74,6 +75,11 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /업무 상태가 바뀔 때/);
   assert.match(page, /테스트 전송/);
   assert.match(page, /최근 전송 기록/);
+  assert.match(page, /30일 동안 복구/);
+  assert.match(page, /삭제 예정/);
+  assert.match(page, /workspaceDeletionLabel/);
+  assert.match(workspaceRoute, /scheduleWorkspaceDeletionForUser/);
+  assert.match(workspaceRoute, /restoreWorkspaceForUser/);
   assert.doesNotMatch(page, /OAuth Redirect URL|Slash Command URL/);
   assert.match(page, /연결 관리/);
   assert.match(page, /연결됨/);
@@ -106,6 +112,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(slackAutomation, /replace\(\/&\/g, "&amp;"\)/);
   assert.match(paceData, /getSlackConnection\(ownerId: string\)/);
   assert.match(paceData, /dispatchSlackAutomationEvent/);
+  assert.match(paceData, /scheduledDeletionAt/);
+  assert.match(paceData, /purgeExpiredWorkspaces/);
   assert.match(paceData, /onConflictDoNothing/);
   assert.match(page, /트리거 포인트/);
   assert.match(page, /무엇을 어떻게/);

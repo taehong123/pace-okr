@@ -159,6 +159,9 @@ async function ensureSchema() {
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
           owner_user_id TEXT NOT NULL,
+          deletion_requested_at TEXT,
+          scheduled_deletion_at TEXT,
+          deletion_requested_by_user_id TEXT,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
@@ -517,7 +520,11 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN archived_from_status TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN archive_root_id TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE integration_tokens ADD COLUMN last_used_at TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN deletion_requested_at TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN scheduled_deletion_at TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN deletion_requested_by_user_id TEXT");
       await d1.batch([
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspaces_scheduled_deletion ON workspaces(scheduled_deletion_at)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_routine ON items(owner_id, routine_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_cycle ON items(owner_id, cycle_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_archived ON items(owner_id, archived_at)"),
@@ -542,6 +549,9 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
   try {
     await d1.prepare(`SELECT
       workspace.owner_user_id,
+      workspace.deletion_requested_at,
+      workspace.scheduled_deletion_at,
+      workspace.deletion_requested_by_user_id,
       member.invited_by_user_id,
       preference.active_workspace_id,
       rules.configured,
@@ -1242,23 +1252,31 @@ export async function consumeSlackOAuthState(state: string) {
 
 export async function getSlackConnection(ownerId: string) {
   await ensureSchema();
-  const [connection] = await getDb()
-    .select()
+  const [row] = await getDb()
+    .select({ connection: slackConnections })
     .from(slackConnections)
-    .where(eq(slackConnections.ownerId, ownerId))
+    .innerJoin(workspaces, eq(slackConnections.ownerId, workspaces.id))
+    .where(and(
+      eq(slackConnections.ownerId, ownerId),
+      isNull(workspaces.scheduledDeletionAt),
+    ))
     .orderBy(desc(slackConnections.updatedAt))
     .limit(1);
-  return connection ?? null;
+  return row?.connection ?? null;
 }
 
 export async function getSlackConnectionByTeam(teamId: string) {
   await ensureSchema();
-  const [connection] = await getDb()
-    .select()
+  const [row] = await getDb()
+    .select({ connection: slackConnections })
     .from(slackConnections)
-    .where(eq(slackConnections.teamId, teamId))
+    .innerJoin(workspaces, eq(slackConnections.ownerId, workspaces.id))
+    .where(and(
+      eq(slackConnections.teamId, teamId),
+      isNull(workspaces.scheduledDeletionAt),
+    ))
     .limit(1);
-  return connection ?? null;
+  return row?.connection ?? null;
 }
 
 export async function saveSlackConnection(input: {
@@ -1649,10 +1667,17 @@ export async function authorizeRequest(
   const suppliedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (suppliedToken?.startsWith("okrptr_")) {
     await ensureSchema();
-    const [token] = await getDb().select().from(integrationTokens).where(and(
-      eq(integrationTokens.tokenHash, await hashIntegrationToken(suppliedToken)),
-      isNull(integrationTokens.revokedAt),
-    )).limit(1);
+    const [tokenRow] = await getDb()
+      .select({ token: integrationTokens })
+      .from(integrationTokens)
+      .innerJoin(workspaces, eq(integrationTokens.workspaceId, workspaces.id))
+      .where(and(
+        eq(integrationTokens.tokenHash, await hashIntegrationToken(suppliedToken)),
+        isNull(integrationTokens.revokedAt),
+        isNull(workspaces.scheduledDeletionAt),
+      ))
+      .limit(1);
+    const token = tokenRow?.token;
     if (token) {
       await getDb().update(integrationTokens).set({ lastUsedAt: new Date().toISOString() }).where(eq(integrationTokens.id, token.id));
       const [membership] = await getDb().select().from(workspaceMembers).where(and(
@@ -1809,10 +1834,17 @@ async function resolveWorkspaceMembership(userId: string, email: string | null, 
 }
 
 async function activeWorkspaceMemberships(userId: string) {
-  return getDb().select().from(workspaceMembers).where(and(
-    eq(workspaceMembers.userId, userId),
-    eq(workspaceMembers.status, "active"),
-  )).orderBy(asc(workspaceMembers.createdAt));
+  const rows = await getDb()
+    .select({ membership: workspaceMembers })
+    .from(workspaceMembers)
+    .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
+    .where(and(
+      eq(workspaceMembers.userId, userId),
+      eq(workspaceMembers.status, "active"),
+      isNull(workspaces.scheduledDeletionAt),
+    ))
+    .orderBy(asc(workspaceMembers.createdAt));
+  return rows.map((row) => row.membership);
 }
 
 function requestedWorkspaceId(request: Request) {
@@ -1831,18 +1863,25 @@ function normalizeReturnTo(value: string) {
 }
 
 export async function listUserWorkspaces(userId: string, currentWorkspaceId: string) {
+  await purgeExpiredWorkspaces();
   const rows = await getDb()
     .select({ workspace: workspaces, membership: workspaceMembers })
     .from(workspaceMembers)
     .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
-    .where(and(eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, "active")))
+    .where(and(
+      eq(workspaceMembers.userId, userId),
+      eq(workspaceMembers.status, "active"),
+      or(isNull(workspaces.scheduledDeletionAt), eq(workspaceMembers.role, "owner")),
+    ))
     .orderBy(asc(workspaces.createdAt));
   return rows.map(({ workspace, membership }) => ({
     id: workspace.id,
     name: workspace.name,
     personal: workspace.id === workspace.ownerUserId,
     role: membership.role as TeamRole,
-    current: workspace.id === currentWorkspaceId,
+    current: workspace.id === currentWorkspaceId && !workspace.scheduledDeletionAt,
+    deletionRequestedAt: workspace.deletionRequestedAt,
+    scheduledDeletionAt: workspace.scheduledDeletionAt,
   }));
 }
 
@@ -1855,11 +1894,20 @@ export async function createWorkspaceForUser(userId: string, email: string | nul
   await getDb().insert(workspaces).values({ id, name, ownerUserId: userId, createdAt: now, updatedAt: now });
   await getDb().insert(workspaceMembers).values({ id: crypto.randomUUID(), workspaceId: id, userId, email, displayName, role: "owner", status: "active", createdAt: now, updatedAt: now });
   await setActiveWorkspace(userId, id);
-  return { id, name, personal: false, role: "owner" as TeamRole, current: true };
+  return {
+    id,
+    name,
+    personal: false,
+    role: "owner" as TeamRole,
+    current: true,
+    deletionRequestedAt: null,
+    scheduledDeletionAt: null,
+  };
 }
 
-export async function deleteWorkspaceForUser(userId: string, workspaceId: string) {
+export async function scheduleWorkspaceDeletionForUser(userId: string, workspaceId: string) {
   await ensureSchema();
+  await purgeExpiredWorkspaces();
   const id = workspaceId.trim();
   if (!id) throw new Error("workspaceId is required");
   const [row] = await getDb()
@@ -1872,10 +1920,76 @@ export async function deleteWorkspaceForUser(userId: string, workspaceId: string
   if (row.membership.role !== "owner") throw new Error("Only the workspace owner can delete a workspace");
   if (row.workspace.id === row.workspace.ownerUserId) throw new Error("Personal workspace cannot be deleted");
 
-  const remaining = (await listUserWorkspaces(userId, id)).filter((workspace) => workspace.id !== id);
+  const remaining = (await listUserWorkspaces(userId, id)).filter((workspace) => workspace.id !== id && !workspace.scheduledDeletionAt);
   if (!remaining.length) throw new Error("Create or keep another workspace before deleting this one");
   const nextWorkspace = remaining.find((workspace) => workspace.personal) ?? remaining[0];
   const now = new Date().toISOString();
+  const scheduledDeletionAt = row.workspace.scheduledDeletionAt ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  const deletionRequestedAt = row.workspace.deletionRequestedAt ?? now;
+  await getDb().update(workspaces).set({
+    deletionRequestedAt,
+    scheduledDeletionAt,
+    deletionRequestedByUserId: userId,
+    updatedAt: now,
+  }).where(eq(workspaces.id, id));
+  await getDb().update(userWorkspacePreferences).set({ activeWorkspaceId: null, updatedAt: now }).where(eq(userWorkspacePreferences.activeWorkspaceId, id));
+  await setActiveWorkspace(userId, nextWorkspace.id);
+  return {
+    deleted: false,
+    deletionScheduled: true,
+    id,
+    deletionRequestedAt,
+    scheduledDeletionAt,
+    nextWorkspaceId: nextWorkspace.id,
+    nextWorkspace,
+  };
+}
+
+export async function restoreWorkspaceForUser(userId: string, workspaceId: string) {
+  await ensureSchema();
+  await purgeExpiredWorkspaces();
+  const id = workspaceId.trim();
+  if (!id) throw new Error("workspaceId is required");
+  const [row] = await getDb()
+    .select({ workspace: workspaces, membership: workspaceMembers })
+    .from(workspaceMembers)
+    .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
+    .where(and(eq(workspaceMembers.workspaceId, id), eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, "active")))
+    .limit(1);
+  if (!row) throw new Error("Workspace not found or access denied");
+  if (row.membership.role !== "owner") throw new Error("Only the workspace owner can restore a workspace");
+  if (!row.workspace.scheduledDeletionAt) throw new Error("Workspace is not scheduled for deletion");
+  const now = new Date().toISOString();
+  await getDb().update(workspaces).set({
+    deletionRequestedAt: null,
+    scheduledDeletionAt: null,
+    deletionRequestedByUserId: null,
+    updatedAt: now,
+  }).where(eq(workspaces.id, id));
+  return {
+    restored: true,
+    workspace: {
+      id: row.workspace.id,
+      name: row.workspace.name,
+      personal: false,
+      role: "owner" as TeamRole,
+      current: false,
+      deletionRequestedAt: null,
+      scheduledDeletionAt: null,
+    },
+  };
+}
+
+async function purgeExpiredWorkspaces() {
+  const expired = await getDb()
+    .select({ id: workspaces.id })
+    .from(workspaces)
+    .where(lte(workspaces.scheduledDeletionAt, new Date().toISOString()))
+    .limit(10);
+  for (const workspace of expired) await permanentlyDeleteWorkspace(workspace.id);
+}
+
+async function permanentlyDeleteWorkspace(id: string) {
   const groupRows = await getDb().select({ id: workspaceGroups.id }).from(workspaceGroups).where(eq(workspaceGroups.workspaceId, id));
   if (groupRows.length) await getDb().delete(workspaceGroupMembers).where(inArray(workspaceGroupMembers.groupId, groupRows.map((group) => group.id)));
   await getDb().delete(googleCalendarEvents).where(eq(googleCalendarEvents.ownerId, id));
@@ -1885,6 +1999,7 @@ export async function deleteWorkspaceForUser(userId: string, workspaceId: string
   await getDb().delete(slackAutomations).where(eq(slackAutomations.ownerId, id));
   await getDb().delete(slackConnections).where(eq(slackConnections.ownerId, id));
   await getDb().delete(slackOAuthStates).where(eq(slackOAuthStates.ownerId, id));
+  await getDb().delete(integrationTokens).where(eq(integrationTokens.workspaceId, id));
   await getDb().delete(aiUsageEvents).where(eq(aiUsageEvents.ownerId, id));
   await getDb().delete(activityLog).where(eq(activityLog.ownerId, id));
   await getDb().delete(routineCompletions).where(eq(routineCompletions.ownerId, id));
@@ -1902,19 +2017,26 @@ export async function deleteWorkspaceForUser(userId: string, workspaceId: string
   await getDb().delete(workspaceGroups).where(eq(workspaceGroups.workspaceId, id));
   await getDb().delete(workspaceMembers).where(eq(workspaceMembers.workspaceId, id));
   await getDb().delete(workspaces).where(eq(workspaces.id, id));
-  await getDb().update(userWorkspacePreferences).set({ activeWorkspaceId: null, updatedAt: now }).where(eq(userWorkspacePreferences.activeWorkspaceId, id));
-  await setActiveWorkspace(userId, nextWorkspace.id);
-  return { deleted: true, id, nextWorkspaceId: nextWorkspace.id, nextWorkspace };
 }
 
 export async function setActiveWorkspace(userId: string, workspaceId: string) {
-  const [membership] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, "active"))).limit(1);
-  if (!membership) throw new Error("Workspace not found or access denied");
+  await purgeExpiredWorkspaces();
+  const [row] = await getDb()
+    .select({ membership: workspaceMembers })
+    .from(workspaceMembers)
+    .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
+    .where(and(
+      eq(workspaceMembers.workspaceId, workspaceId),
+      eq(workspaceMembers.userId, userId),
+      eq(workspaceMembers.status, "active"),
+      isNull(workspaces.scheduledDeletionAt),
+    )).limit(1);
+  if (!row) throw new Error("Workspace not found or access denied");
   await getDb().insert(userWorkspacePreferences).values({ userId, activeWorkspaceId: workspaceId, updatedAt: new Date().toISOString() }).onConflictDoUpdate({
     target: userWorkspacePreferences.userId,
     set: { activeWorkspaceId: workspaceId, updatedAt: new Date().toISOString() },
   });
-  return membership;
+  return row.membership;
 }
 
 function normalizeEmail(value: string | null) {
