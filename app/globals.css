@@ -444,13 +444,14 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .spinning { animation: async-spin .9s linear infinite; }
 @keyframes async-spin { to { transform: rotate(360deg); } }
 .trash-list { display: grid; border-top: 1px solid var(--line); }
-.trash-record { min-height: 68px; display: grid; grid-template-columns: 32px minmax(0, 1fr) 86px; align-items: center; gap: 12px; padding: 9px 8px; border-bottom: 1px solid var(--line); }
+.trash-record { min-height: 68px; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 9px 8px; border-bottom: 1px solid var(--line); }
 .trash-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 4px; background: #f1f1ef; color: var(--muted); }
 .trash-record > div { min-width: 0; display: grid; gap: 3px; }
 .trash-record h3 { overflow: hidden; margin: 0; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .trash-record p { margin: 0; color: var(--muted); font-size: 10px; }
 .trash-record small { color: var(--faint); font-size: 9px; }
-.trash-record button { height: 29px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--muted); font-size: 10px; cursor: pointer; }
+.trash-actions { display: flex; gap: 5px; }
+.trash-record button { height: 29px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--muted); font-size: 10px; cursor: pointer; }
 .trash-record button:hover { background: var(--hover); color: var(--ink); }
 .trash-record button.danger:hover { color: var(--red); }
 

@@ -798,7 +798,9 @@ export async function cleanupWorkspaceExecutionData(ownerId: string, createdByUs
 async function archiveWorkspaceExecutionData(ownerId: string, createdByUserId: string | null) {
   const [
     itemRows,
+    itemAssignmentRows,
     propertyValueRows,
+    hiddenPropertyRows,
     checklistRows,
     calendarEventRows,
     activityRows,
@@ -808,7 +810,9 @@ async function archiveWorkspaceExecutionData(ownerId: string, createdByUserId: s
     cycleRows,
   ] = await Promise.all([
     getDb().select().from(items).where(eq(items.ownerId, ownerId)),
+    getDb().select().from(itemAssignments).where(eq(itemAssignments.ownerId, ownerId)),
     getDb().select().from(itemPropertyValues).where(eq(itemPropertyValues.ownerId, ownerId)),
+    getDb().select().from(projectHiddenProperties).where(eq(projectHiddenProperties.ownerId, ownerId)),
     getDb().select().from(checklistItems).where(eq(checklistItems.ownerId, ownerId)),
     getDb().select().from(googleCalendarEvents).where(eq(googleCalendarEvents.ownerId, ownerId)),
     getDb().select().from(activityLog).where(eq(activityLog.ownerId, ownerId)),
@@ -829,7 +833,9 @@ async function archiveWorkspaceExecutionData(ownerId: string, createdByUserId: s
       title: `OKR cleanup ${archivedAt.slice(0, 10)}`,
       payload: JSON.stringify({
         items: itemRows,
+        itemAssignments: itemAssignmentRows,
         itemPropertyValues: propertyValueRows,
+        projectHiddenProperties: hiddenPropertyRows,
         checklistItems: checklistRows,
         googleCalendarEvents: calendarEventRows,
         activityLog: activityRows,
@@ -906,6 +912,54 @@ export async function deleteTrashRecord(ownerId: string, id: string) {
     .where(and(eq(trashRecords.ownerId, ownerId), eq(trashRecords.id, id)))
     .returning();
   if (!record) throw new Error("Trash record not found");
+  return serializeTrashRecord(record);
+}
+
+type WorkspaceCleanupArchive = {
+  items: Array<typeof items.$inferInsert>;
+  itemAssignments: Array<typeof itemAssignments.$inferInsert>;
+  itemPropertyValues: Array<typeof itemPropertyValues.$inferInsert>;
+  projectHiddenProperties: Array<typeof projectHiddenProperties.$inferInsert>;
+  checklistItems: Array<typeof checklistItems.$inferInsert>;
+  googleCalendarEvents: Array<typeof googleCalendarEvents.$inferInsert>;
+  activityLog: Array<typeof activityLog.$inferInsert>;
+  dailyScrums: Array<typeof dailyScrums.$inferInsert>;
+  routineCompletions: Array<typeof routineCompletions.$inferInsert>;
+  routines: Array<typeof routines.$inferInsert>;
+  okrCycles: Array<typeof okrCycles.$inferInsert>;
+};
+
+export async function restoreTrashRecord(ownerId: string, id: string) {
+  const [record] = await getDb().select().from(trashRecords).where(and(eq(trashRecords.ownerId, ownerId), eq(trashRecords.id, id))).limit(1);
+  if (!record) throw new Error("Trash record not found");
+  if (record.category !== "workspace_cleanup") throw new Error("This trash record cannot be restored");
+
+  const payload = JSON.parse(record.payload) as Partial<WorkspaceCleanupArchive>;
+  const [currentItems, currentRoutines, currentScrums] = await Promise.all([
+    getDb().select({ count: sql<number>`count(*)` }).from(items).where(eq(items.ownerId, ownerId)),
+    getDb().select({ count: sql<number>`count(*)` }).from(routines).where(eq(routines.ownerId, ownerId)),
+    getDb().select({ count: sql<number>`count(*)` }).from(dailyScrums).where(eq(dailyScrums.ownerId, ownerId)),
+  ]);
+  if ((currentItems[0]?.count ?? 0) > 0 || (currentRoutines[0]?.count ?? 0) > 0 || (currentScrums[0]?.count ?? 0) > 0) {
+    throw new Error("Restore requires an empty execution workspace");
+  }
+
+  await getDb().delete(okrCycles).where(eq(okrCycles.ownerId, ownerId));
+  if (payload.okrCycles?.length) await getDb().insert(okrCycles).values(payload.okrCycles).onConflictDoNothing();
+  if (payload.routines?.length) await getDb().insert(routines).values(payload.routines).onConflictDoNothing();
+  if (payload.items?.length) await getDb().insert(items).values(payload.items).onConflictDoNothing();
+
+  await Promise.all([
+    payload.itemAssignments?.length ? getDb().insert(itemAssignments).values(payload.itemAssignments).onConflictDoNothing() : Promise.resolve(),
+    payload.itemPropertyValues?.length ? getDb().insert(itemPropertyValues).values(payload.itemPropertyValues).onConflictDoNothing() : Promise.resolve(),
+    payload.projectHiddenProperties?.length ? getDb().insert(projectHiddenProperties).values(payload.projectHiddenProperties).onConflictDoNothing() : Promise.resolve(),
+    payload.checklistItems?.length ? getDb().insert(checklistItems).values(payload.checklistItems).onConflictDoNothing() : Promise.resolve(),
+    payload.googleCalendarEvents?.length ? getDb().insert(googleCalendarEvents).values(payload.googleCalendarEvents).onConflictDoNothing() : Promise.resolve(),
+    payload.activityLog?.length ? getDb().insert(activityLog).values(payload.activityLog).onConflictDoNothing() : Promise.resolve(),
+    payload.dailyScrums?.length ? getDb().insert(dailyScrums).values(payload.dailyScrums).onConflictDoNothing() : Promise.resolve(),
+    payload.routineCompletions?.length ? getDb().insert(routineCompletions).values(payload.routineCompletions).onConflictDoNothing() : Promise.resolve(),
+  ]);
+  await getDb().delete(trashRecords).where(and(eq(trashRecords.ownerId, ownerId), eq(trashRecords.id, id)));
   return serializeTrashRecord(record);
 }
 

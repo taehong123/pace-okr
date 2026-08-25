@@ -1860,6 +1860,7 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPro
   const [rows, setRows] = useState<ChecklistItem[]>([]);
   const [title, setTitle] = useState("");
   const [syncingCalendar, setSyncingCalendar] = useState(false);
+  const [savingChecklist, setSavingChecklist] = useState(false);
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
   const project = task.parentId ? byId.get(task.parentId) : undefined;
   const initiative = project?.parentId ? byId.get(project.parentId) : undefined;
@@ -1896,12 +1897,19 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPro
 
   async function addRow(event: FormEvent) {
     event.preventDefault();
-    if (!title.trim()) return;
-    const response = await fetch("/api/checklists", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taskId: task.id, title }) });
-    if (!response.ok) return;
+    const nextTitle = title.trim();
+    if (!nextTitle || savingChecklist) return;
+    setSavingChecklist(true);
+    const response = await fetch("/api/checklists", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taskId: task.id, title: nextTitle }) });
+    setSavingChecklist(false);
+    if (!response.ok) { onNotice("체크리스트를 추가하지 못했습니다."); return; }
     const data = await response.json() as { item: ChecklistItem };
-    const next = [...rows, data.item];
-    setRows(next); setTitle(""); updateProgress(next);
+    setRows((current) => {
+      const next = [...current, data.item];
+      updateProgress(next);
+      return next;
+    });
+    setTitle("");
   }
 
   async function toggleRow(row: ChecklistItem) {
@@ -1968,7 +1976,7 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPro
           )}
         </section>
         <div className="task-calendar-action"><button onClick={() => void syncCalendar()} disabled={syncingCalendar || !task.dueDate}><CalendarDays size={13} />{syncingCalendar ? "동기화 중" : "Google Calendar에 보내기"}</button></div>
-        <section className="checklist-section"><header><b>체크리스트</b><span>{rows.filter((entry) => entry.completed).length}/{rows.length}</span></header><div>{rows.map((row) => <div className="checklist-row" key={row.id}><button className={`task-check ${row.completed ? "checked" : ""}`} onClick={() => void toggleRow(row)}><Check size={12} /></button><span className={row.completed ? "completed" : ""}>{row.title}</span><button className="icon-button" onClick={() => void deleteRow(row.id)} aria-label="삭제"><Trash2 size={13} /></button></div>)}</div><form className="checklist-form" onSubmit={addRow}><Plus size={14} /><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="항목 추가" /><button disabled={!title.trim()}>추가</button></form></section>
+        <section className="checklist-section"><header><b>체크리스트</b><span>{rows.filter((entry) => entry.completed).length}/{rows.length}</span></header><div>{rows.map((row) => <div className="checklist-row" key={row.id}><button className={`task-check ${row.completed ? "checked" : ""}`} onClick={() => void toggleRow(row)}><Check size={12} /></button><span className={row.completed ? "completed" : ""}>{row.title}</span><button className="icon-button" onClick={() => void deleteRow(row.id)} aria-label="삭제"><Trash2 size={13} /></button></div>)}</div><form className="checklist-form" onSubmit={addRow}><Plus size={14} /><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="항목 추가" disabled={savingChecklist} /><button disabled={!title.trim() || savingChecklist}>{savingChecklist ? "추가 중" : "추가"}</button></form></section>
       </aside>
     </div>
   );
@@ -2165,14 +2173,13 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
     if (!response.ok) { setSaving(false); return; }
     const data = await response.json() as { item: OkrptrItem };
     const filledValues = Object.fromEntries(Object.entries(customValues).filter(([, value]) => value !== null && value !== ""));
-    for (const [propertyId, value] of kind === "project" ? Object.entries(filledValues) : []) {
-      const propertyResponse = await fetch("/api/property-values", {
+    await Promise.all((kind === "project" ? Object.entries(filledValues) : []).map(async ([propertyId, value]) => {
+      await fetch("/api/property-values", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ itemId: data.item.id, propertyId, value }),
       });
-      if (!propertyResponse.ok) break;
-    }
+    }));
     setSaving(false);
     onCreated(data.item, filledValues);
   }
@@ -2931,6 +2938,20 @@ function TrashView({ onNotice }: { onNotice: (message: string) => void }) {
     onNotice("휴지통 기록을 영구 삭제했습니다.");
   }
 
+  async function restore(record: TrashRecord) {
+    const response = await fetch("/api/trash", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: record.id, action: "restore" }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({})) as { error?: string };
+      onNotice(data.error ?? "휴지통 기록을 복구하지 못했습니다.");
+      return;
+    }
+    window.location.reload();
+  }
+
   if (loadError) return <AsyncState icon={AlertTriangle} title="휴지통을 불러오지 못했습니다" detail="삭제 기록은 그대로 보존되어 있습니다." actionLabel="다시 시도" onAction={() => { setRows(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} />;
   if (rows === null) return <AsyncState icon={LoaderCircle} title="휴지통을 불러오는 중입니다" loading />;
   if (!rows.length) return <EmptyState icon={Trash2} title="휴지통이 비어 있습니다" />;
@@ -2945,7 +2966,7 @@ function TrashView({ onNotice }: { onNotice: (message: string) => void }) {
             <p>{trashSummary(record)}</p>
             <small>{formatDateTime(record.archivedAt)}</small>
           </div>
-          <button className="danger" onClick={() => void permanentlyDelete(record)}><Trash2 size={13} />영구 삭제</button>
+          <div className="trash-actions"><button onClick={() => void restore(record)}><RotateCcw size={13} />복구</button><button className="danger" onClick={() => void permanentlyDelete(record)}><Trash2 size={13} />영구 삭제</button></div>
         </article>
       ))}
     </section>

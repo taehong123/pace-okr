@@ -151,6 +151,9 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /추천을 계산하지 못했습니다/);
   assert.match(page, /휴지통을 불러오지 못했습니다/);
   assert.match(page, /다시 시도/);
+  assert.match(page, /savingChecklist/);
+  assert.match(page, /Promise\.all\(\(kind === "project"/);
+  assert.match(page, /void restore\(record\)/);
   assert.match(page, /cycleId=\{selectedOkrCycle\?\.id \?\? null\}/);
   assert.match(page, /cycleId: kind === "task"/);
   assert.doesNotMatch(page, /\/api\/auth\/session/);
@@ -161,6 +164,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(bootstrapRoute, /getTeam/);
   assert.match(bootstrapRoute, /listItems/);
   assert.match(paceData, /createdAt: workspace\.createdAt/);
+  assert.match(paceData, /restoreTrashRecord/);
+  assert.match(paceData, /itemAssignments: itemAssignmentRows/);
   assert.match(bootstrapRoute, /scope !== "shell"/);
   assert.match(itemRoute, /payload\.cycleId === undefined \? undefined : asNullableString/);
   assert.match(paceData, /workspaceReady/);

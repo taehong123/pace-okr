@@ -1,4 +1,4 @@
-import { authorizeRequest, deleteTrashRecord, ensureWorkspace, listTrashRecords } from "@/lib/pace-data";
+import { authorizeRequest, deleteTrashRecord, ensureWorkspace, listTrashRecords, restoreTrashRecord } from "@/lib/pace-data";
 
 export async function GET(request: Request) {
   const authorization = await authorizeRequest(request);
@@ -26,8 +26,23 @@ export async function DELETE(request: Request) {
   }
 }
 
+export async function PATCH(request: Request) {
+  const authorization = await authorizeRequest(request, { allowViewerWrite: false });
+  if (authorization instanceof Response) return authorization;
+
+  try {
+    await ensureWorkspace(authorization.ownerId);
+    const payload = (await request.json()) as { id?: unknown; action?: unknown };
+    const id = typeof payload.id === "string" ? payload.id.trim() : "";
+    if (!id || payload.action !== "restore") return Response.json({ error: "restore id is required" }, { status: 400 });
+    return Response.json({ restored: true, trash: await restoreTrashRecord(authorization.ownerId, id) });
+  } catch (error) {
+    return routeError(error);
+  }
+}
+
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
-  const status = /required|not found/i.test(message) ? 400 : 500;
+  const status = /required|not found|cannot be restored|empty execution workspace/i.test(message) ? 400 : 500;
   return Response.json({ error: message }, { status });
 }
