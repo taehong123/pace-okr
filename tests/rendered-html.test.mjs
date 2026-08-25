@@ -42,10 +42,11 @@ test("server-renders the OKRPTR application loading shell", async () => {
 });
 
 test("ships product metadata and removes starter assets", async () => {
-  const [layout, page, bootstrapRoute, workspaceRoute, integrationRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson] = await Promise.all([
+  const [layout, page, bootstrapRoute, itemRoute, workspaceRoute, integrationRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/bootstrap/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/items/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/workspaces/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/integration-tokens/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/auth/route.ts", import.meta.url), "utf8"),
@@ -150,6 +151,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /추천을 계산하지 못했습니다/);
   assert.match(page, /휴지통을 불러오지 못했습니다/);
   assert.match(page, /다시 시도/);
+  assert.match(page, /cycleId=\{selectedOkrCycle\?\.id \?\? null\}/);
+  assert.match(page, /cycleId: kind === "task"/);
   assert.doesNotMatch(page, /\/api\/auth\/session/);
   assert.match(bootstrapRoute, /Promise\.all/);
   assert.match(bootstrapRoute, /scope === "shell"/);
@@ -159,6 +162,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(bootstrapRoute, /listItems/);
   assert.match(paceData, /createdAt: workspace\.createdAt/);
   assert.match(bootstrapRoute, /scope !== "shell"/);
+  assert.match(itemRoute, /payload\.cycleId === undefined \? undefined : asNullableString/);
   assert.match(paceData, /workspaceReady/);
   assert.match(paceData, /schemaIsCurrent/);
   assert.match(paceData, /workspaceInitializationIsCurrent/);

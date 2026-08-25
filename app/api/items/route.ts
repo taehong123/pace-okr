@@ -61,7 +61,7 @@ export async function POST(request: Request) {
       title,
       description: asString(payload.description),
       kind: asValue(payload.kind, ITEM_KINDS) as ItemKind | undefined,
-      cycleId: asNullableString(payload.cycleId),
+      cycleId: payload.cycleId === undefined ? undefined : asNullableString(payload.cycleId),
       parentId: asNullableString(payload.parentId),
       routineId: asNullableString(payload.routineId),
       status: asValue(payload.status, ITEM_STATUSES) as ItemStatus | undefined,

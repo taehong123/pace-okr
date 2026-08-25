@@ -1428,7 +1428,7 @@ export default function Home() {
         />
       )}
       {teamPanelOpen && <TeamPanel initialTeam={teamData} initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onMembersChange={(members) => setTeamData((current) => current ? { ...current, members } : current)} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
-      {createItemOpen && <CreateItemPanel initialKind={createItemKind} items={items} routines={routines} properties={properties} teamMembers={teamMembers} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
+      {createItemOpen && <CreateItemPanel initialKind={createItemKind} cycleId={selectedOkrCycle?.id ?? null} items={items} routines={routines} properties={properties} teamMembers={teamMembers} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
       {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setArchivedProjects([]); setPropertyValues({}); setOkrCycles([cycle]); setVisibleOkrCycleIds([cycle.id]); setSelectedTaskId(null); setActiveView("trash"); setCleanupOpen(false); showNotice("OKR 데이터를 휴지통에 보관하고 정리했습니다."); }} onNotice={showNotice} />}
       {selectedTask && (
         <TaskDetailPanel
@@ -2099,8 +2099,9 @@ function MemberMentionPicker({
   );
 }
 
-function CreateItemPanel({ initialKind, items, routines, properties, teamMembers, onClose, onCreated }: {
+function CreateItemPanel({ initialKind, cycleId, items, routines, properties, teamMembers, onClose, onCreated }: {
   initialKind: ItemKind;
+  cycleId: string | null;
   items: OkrptrItem[];
   routines: Routine[];
   properties: PropertyDefinition[];
@@ -2148,6 +2149,7 @@ function CreateItemPanel({ initialKind, items, routines, properties, teamMembers
       body: JSON.stringify({
         title,
         kind,
+        cycleId: kind === "task" && (!nextParentId || routineId) ? null : cycleId,
         description: nextDescription,
         parentId: nextParentId,
         routineId,
