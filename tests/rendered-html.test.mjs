@@ -146,10 +146,9 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /accounts\.google\.com\/o\/oauth2\/v2\/auth/);
   assert.match(page, /window\.location\.assign\(url\.toString\(\)\)/);
   assert.match(page, /\/api\/bootstrap/);
-  assert.match(page, /scope=shell/);
-  assert.match(page, /scope=data/);
-  assert.match(page, /const shellRequest = fetch/);
-  assert.match(page, /const dataRequest = fetch/);
+  assert.match(page, /__OKRPTR_BOOTSTRAP_REQUEST__/);
+  assert.match(page, /fetchBootstrapPayload/);
+  assert.doesNotMatch(page, /scope=shell|scope=data/);
   assert.match(page, /workspaceDataState/);
   assert.match(page, /워크스페이스 데이터를 불러오지 못했습니다/);
   assert.match(page, /visibleCount.*20/);
@@ -172,15 +171,13 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /cycleId: kind === "task"/);
   assert.doesNotMatch(page, /\/api\/auth\/session/);
   assert.match(bootstrapRoute, /Promise\.all/);
-  assert.match(bootstrapRoute, /scope === "shell"/);
-  assert.match(bootstrapRoute, /scope === "data"/);
   assert.match(bootstrapRoute, /Object\.assign\(\{\}, \.\.\.await Promise\.all/);
   assert.match(bootstrapRoute, /getTeam/);
   assert.match(bootstrapRoute, /listItems/);
   assert.match(paceData, /createdAt: workspace\.createdAt/);
   assert.match(paceData, /restoreTrashRecord/);
   assert.match(paceData, /itemAssignments: itemAssignmentRows/);
-  assert.match(bootstrapRoute, /scope !== "shell"/);
+  assert.doesNotMatch(bootstrapRoute, /scope ===|scope !==/);
   assert.match(itemRoute, /payload\.cycleId === undefined \? undefined : asNullableString/);
   assert.match(paceData, /workspaceReady/);
   assert.match(paceData, /schemaIsCurrent/);
@@ -208,4 +205,23 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(paceData, /canonicalUserIdForGoogle/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("app/_sites-preview/SkeletonPreview.tsx", projectRoot)));
+});
+
+test("prerenders the startup shell and caches hashed assets", async () => {
+  const [layout, viteConfig, assetHeaders, paceData, staticHtml] = await Promise.all([
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../public/_headers", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../dist/client/index.html", import.meta.url), "utf8"),
+  ]);
+
+  assert.doesNotMatch(layout, /next\/headers|await headers\(\)/);
+  assert.match(layout, /__OKRPTR_BOOTSTRAP_REQUEST__/);
+  assert.match(viteConfig, /prerender:\s*\{\s*routes:\s*"\*"\s*\}/);
+  assert.match(assetHeaders, /max-age=31536000, immutable/);
+  assert.doesNotMatch(paceData, /LEFT JOIN workspace_members AS member ON 1 = 0/);
+  assert.match(paceData, /deletion_requested_by_user_id[\s\S]*FROM workspaces[\s\S]*LIMIT 0/);
+  assert.match(staticHtml, /__OKRPTR_BOOTSTRAP_REQUEST__/);
+  assert.match(staticHtml, /app-loading-shell/);
 });

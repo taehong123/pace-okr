@@ -547,70 +547,12 @@ async function ensureSchema() {
 
 async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
   try {
+    // The latest migration is a sufficient sentinel because migrations run in order.
     await d1.prepare(`SELECT
-      workspace.owner_user_id,
-      workspace.deletion_requested_at,
-      workspace.scheduled_deletion_at,
-      workspace.deletion_requested_by_user_id,
-      member.invited_by_user_id,
-      preference.active_workspace_id,
-      rules.configured,
-      token.last_used_at,
-      cycle.department,
-      workspace_group.archived,
-      group_member.role,
-      item.cycle_id,
-      item.routine_id,
-      item.archived_at,
-      item.archived_from_status,
-      item.archive_root_id,
-      assignment.role,
-      activity.action,
-      property.options,
-      property_value.value,
-      hidden_property.project_id,
-      checklist.completed,
-      scrum.scrum_date,
-      routine.trigger_point,
-      routine.action_place,
-      routine.action_steps,
-      completion.completion_date,
-      usage.estimated_cost_won_micros,
-      google_connection.google_account_id,
-      google_state.expires_at,
-      calendar_event.calendar_id,
-      slack_connection.team_id,
-      slack_automation.trigger_type,
-      slack_delivery.event_key,
-      slack_state.expires_at,
-      trash.created_by_user_id
-    FROM workspaces AS workspace
-    LEFT JOIN workspace_members AS member ON 1 = 0
-    LEFT JOIN user_workspace_preferences AS preference ON 1 = 0
-    LEFT JOIN workspace_rules AS rules ON 1 = 0
-    LEFT JOIN integration_tokens AS token ON 1 = 0
-    LEFT JOIN okr_cycles AS cycle ON 1 = 0
-    LEFT JOIN workspace_groups AS workspace_group ON 1 = 0
-    LEFT JOIN workspace_group_members AS group_member ON 1 = 0
-    LEFT JOIN items AS item ON 1 = 0
-    LEFT JOIN item_assignments AS assignment ON 1 = 0
-    LEFT JOIN activity_log AS activity ON 1 = 0
-    LEFT JOIN property_definitions AS property ON 1 = 0
-    LEFT JOIN item_property_values AS property_value ON 1 = 0
-    LEFT JOIN project_hidden_properties AS hidden_property ON 1 = 0
-    LEFT JOIN checklist_items AS checklist ON 1 = 0
-    LEFT JOIN daily_scrums AS scrum ON 1 = 0
-    LEFT JOIN routines AS routine ON 1 = 0
-    LEFT JOIN routine_completions AS completion ON 1 = 0
-    LEFT JOIN ai_usage_events AS usage ON 1 = 0
-    LEFT JOIN google_connections AS google_connection ON 1 = 0
-    LEFT JOIN google_oauth_states AS google_state ON 1 = 0
-    LEFT JOIN google_calendar_events AS calendar_event ON 1 = 0
-    LEFT JOIN slack_connections AS slack_connection ON 1 = 0
-    LEFT JOIN slack_automations AS slack_automation ON 1 = 0
-    LEFT JOIN slack_automation_deliveries AS slack_delivery ON 1 = 0
-    LEFT JOIN slack_oauth_states AS slack_state ON 1 = 0
-    LEFT JOIN trash_records AS trash ON 1 = 0
+      deletion_requested_at,
+      scheduled_deletion_at,
+      deletion_requested_by_user_id
+    FROM workspaces
     LIMIT 0`).first();
     return true;
   } catch {
@@ -1845,7 +1787,14 @@ async function ensureWorkspaceShell(ownerId: string, email: string | null = null
 }
 
 async function resolveWorkspaceMembership(userId: string, email: string | null, displayName: string, requestedId: string | null) {
-  let memberships = await activeWorkspaceMemberships(userId);
+  const [initialMemberships, invitations, preferenceRows] = await Promise.all([
+    activeWorkspaceMemberships(userId),
+    email
+      ? getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.email, email), eq(workspaceMembers.status, "invited"))).orderBy(asc(workspaceMembers.createdAt))
+      : Promise.resolve([]),
+    getDb().select().from(userWorkspacePreferences).where(eq(userWorkspacePreferences.userId, userId)).limit(1),
+  ]);
+  let memberships = initialMemberships;
   if (!memberships.length) {
     await ensureWorkspaceShell(userId, email, displayName);
     memberships = await activeWorkspaceMemberships(userId);
@@ -1853,7 +1802,6 @@ async function resolveWorkspaceMembership(userId: string, email: string | null, 
 
   let invitationActivated = false;
   if (email) {
-    const invitations = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.email, email), eq(workspaceMembers.status, "invited"))).orderBy(asc(workspaceMembers.createdAt));
     for (const invitation of invitations) {
       const [existingMembership] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, invitation.workspaceId), eq(workspaceMembers.userId, userId))).limit(1);
       if (existingMembership) continue;
@@ -1879,7 +1827,7 @@ async function resolveWorkspaceMembership(userId: string, email: string | null, 
     if (previous?.email === membership.email && previous.displayName === membership.displayName) continue;
     await getDb().update(workspaceMembers).set({ email: membership.email, displayName: membership.displayName, updatedAt: now }).where(eq(workspaceMembers.id, membership.id));
   }
-  const [preference] = await getDb().select().from(userWorkspacePreferences).where(eq(userWorkspacePreferences.userId, userId)).limit(1);
+  const [preference] = preferenceRows;
   return normalizedMemberships.find((entry) => entry.workspaceId === requestedId)
     ?? normalizedMemberships.find((entry) => entry.workspaceId === preference?.activeWorkspaceId)
     ?? normalizedMemberships.find((entry) => entry.workspaceId === userId)

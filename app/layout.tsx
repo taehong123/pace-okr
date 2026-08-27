@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { headers } from "next/headers";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,11 +12,22 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const bootstrapScript = `(() => {
+  const now = new Date();
+  const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+  const path = "/api/bootstrap?date=" + encodeURIComponent(date);
+  window.__OKRPTR_BOOTSTRAP_REQUEST__ = {
+    path,
+    request: fetch(path, { cache: "no-store", credentials: "same-origin" }).then(async (response) => ({
+      ok: response.ok,
+      status: response.status,
+      data: await response.json().catch(() => null),
+    })),
+  };
+})();`;
+
 export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
-  const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const base = new URL(`${protocol}://${host}`);
+  const base = new URL("https://okrptr.com");
 
   return {
     metadataBase: base,
@@ -46,6 +56,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: bootstrapScript }} />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

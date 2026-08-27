@@ -25,8 +25,7 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const date = url.searchParams.get("date") ?? new Date().toISOString().slice(0, 10);
-    const scope = url.searchParams.get("scope");
-    if (scope !== "shell") await ensureWorkspace(authorization.ownerId);
+    await ensureWorkspace(authorization.ownerId);
     const hostname = url.hostname;
     const provider = hostname === "localhost" || hostname === "127.0.0.1"
       ? "local"
@@ -86,11 +85,7 @@ export async function GET(request: Request) {
       };
     };
 
-    const payload = scope === "shell"
-      ? await loadShell()
-      : scope === "data"
-        ? await loadData()
-        : Object.assign({}, ...await Promise.all([loadShell(), loadData()]));
+    const payload = Object.assign({}, ...await Promise.all([loadShell(), loadData()]));
 
     return Response.json(payload, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

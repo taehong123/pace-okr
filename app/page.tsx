@@ -262,6 +262,26 @@ type BootstrapWorkspaceData = {
   archivedProjects: ArchivedProject[];
   routines: Routine[];
 };
+type BootstrapData = BootstrapShellData & BootstrapWorkspaceData;
+type BootstrapFetchResult = { ok: boolean; status: number; data: BootstrapData | null };
+
+declare global {
+  interface Window {
+    __OKRPTR_BOOTSTRAP_REQUEST__?: {
+      path: string;
+      request: Promise<BootstrapFetchResult>;
+    };
+  }
+}
+
+async function fetchBootstrapPayload(path: string): Promise<BootstrapFetchResult> {
+  const response = await fetch(path, { cache: "no-store", credentials: "same-origin" });
+  return {
+    ok: response.ok,
+    status: response.status,
+    data: await response.json().catch(() => null) as BootstrapData | null,
+  };
+}
 type GroupDetailData = { group: WorkspaceGroup; members: GroupMember[]; canManageMembers: boolean };
 type WorkspaceSummary = {
   id: string;
@@ -529,17 +549,27 @@ export default function Home() {
   useEffect(() => {
     let active = true;
     const date = encodeURIComponent(localDate());
-    const shellRequest = fetch(`/api/bootstrap?scope=shell&date=${date}`, { cache: "no-store" });
-    const dataRequest = fetch(`/api/bootstrap?scope=data&date=${date}`, { cache: "no-store" });
+    const path = `/api/bootstrap?date=${date}`;
+    const preload = window.__OKRPTR_BOOTSTRAP_REQUEST__;
+    const request = workspaceDataAttempt === 0 && preload?.path === path
+      ? preload.request
+      : fetchBootstrapPayload(path);
 
-    void shellRequest
-      .then(async (response) => response.ok ? response.json() as Promise<BootstrapShellData> : Promise.reject(new Error("unauthenticated")))
-      .then((data) => {
+    void request
+      .then((result) => {
+        if (!result.ok || !result.data) throw new Error(result.status === 401 || result.status === 403 ? "unauthenticated" : "workspace data unavailable");
+        const data = result.data;
         if (!active) return;
         setWorkspaces(data.workspaces);
         setWorkspaceRules(data.rules);
         setOkrCycles(data.cycles);
         setTeamData(data.team);
+        setItems(data.items);
+        setProperties(data.properties);
+        setPropertyValues(data.propertyValues);
+        setHiddenProperties(data.hiddenByProject ?? {});
+        setArchivedProjects(data.archivedProjects);
+        setRoutines(data.routines);
         const activeCycle = data.cycles.find((cycle) => cycle.status === "active") ?? data.cycles[0];
         setVisibleOkrCycleIds(activeCycle ? [activeCycle.id] : []);
         const currentMember = data.team.members.find((member) => member.isCurrent && member.status === "active");
@@ -547,26 +577,18 @@ export default function Home() {
           setProfilePromptMember(currentMember);
         }
         setAuthState({ status: "authenticated", user: data.user, reason: null });
-      })
-      .catch(() => {
-        if (!active) return;
-        const reason = new URLSearchParams(window.location.search).get("auth");
-        setAuthState({ status: "unauthenticated", user: null, reason });
-      });
-
-    void dataRequest
-      .then(async (response) => response.ok ? response.json() as Promise<BootstrapWorkspaceData> : Promise.reject(new Error("workspace data unavailable")))
-      .then((data) => {
-        if (!active) return;
-        setItems(data.items);
-        setProperties(data.properties);
-        setPropertyValues(data.propertyValues);
-        setHiddenProperties(data.hiddenByProject ?? {});
-        setArchivedProjects(data.archivedProjects);
-        setRoutines(data.routines);
         setWorkspaceDataState("ready");
       })
-      .catch(() => { if (active) setWorkspaceDataState("error"); });
+      .catch((error: unknown) => {
+        if (!active) return;
+        if (error instanceof Error && error.message === "unauthenticated") {
+          const reason = new URLSearchParams(window.location.search).get("auth");
+          setAuthState({ status: "unauthenticated", user: null, reason });
+          return;
+        }
+        setWorkspaceDataState("error");
+        setAuthState({ status: "unauthenticated", user: null, reason: "load_failed" });
+      });
     return () => { active = false; };
   }, [workspaceDataAttempt]);
 
