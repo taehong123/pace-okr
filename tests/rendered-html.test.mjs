@@ -29,8 +29,8 @@ test("server-renders the OKRPTR application loading shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-  assert.match(response.headers.get("cache-control") ?? "", /max-age=300/);
-  assert.match(response.headers.get("cloudflare-cdn-cache-control") ?? "", /max-age=31536000/);
+  assert.doesNotMatch(response.headers.get("cache-control") ?? "", /max-age=300/);
+  assert.equal(response.headers.get("cloudflare-cdn-cache-control"), null);
 
   const html = await response.text();
   assert.match(html, /<title>OKRPTR - 목표를 오늘의 실행으로<\/title>/);
@@ -232,12 +232,14 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   assert.match(layout, /serviceWorker\.register\("\/sw\.js"/);
   assert.match(viteConfig, /prerender:\s*\{\s*routes:\s*"\*"\s*\}/);
   assert.match(assetHeaders, /max-age=31536000, immutable/);
-  assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: public, max-age=31536000/);
+  assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: no-store/);
   assert.doesNotMatch(paceData, /LEFT JOIN workspace_members AS member ON 1 = 0/);
   assert.match(paceData, /deletion_requested_by_user_id[\s\S]*FROM workspaces[\s\S]*LIMIT 0/);
   assert.match(staticHtml, /__OKRPTR_BOOTSTRAP_REQUEST__/);
   assert.match(staticHtml, /app-loading-shell/);
   assert.match(worker, /Cloudflare-CDN-Cache-Control/);
   assert.match(staticHtml, /serviceWorker\.register/);
-  assert.match(await readFile(new URL("../public/sw.js", import.meta.url), "utf8"), /staleWhileRevalidate/);
+  const serviceWorker = await readFile(new URL("../public/sw.js", import.meta.url), "utf8");
+  assert.match(serviceWorker, /staleWhileRevalidate/);
+  assert.doesNotMatch(serviceWorker, /event\.request\.mode === "navigate"/);
 });

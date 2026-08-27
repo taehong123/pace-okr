@@ -19,7 +19,7 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-const STATIC_PAGE_PATHS = new Set(["/", "/privacy", "/terms"]);
+const STATIC_PAGE_PATHS = new Set(["/privacy", "/terms"]);
 const STATIC_PAGE_BROWSER_CACHE = "public, max-age=300, stale-while-revalidate=86400";
 const STATIC_PAGE_EDGE_CACHE = "public, max-age=31536000, stale-while-revalidate=86400";
 

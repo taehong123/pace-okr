@@ -1,9 +1,7 @@
-const CACHE_NAME = "okrptr-shell-v1";
-const SHELL_PATH = "/";
+const CACHE_NAME = "okrptr-assets-v2";
 
-self.addEventListener("install", (event) => {
+self.addEventListener("install", () => {
   self.skipWaiting();
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.add(SHELL_PATH)).catch(() => undefined));
 });
 
 self.addEventListener("activate", (event) => {
@@ -27,11 +25,6 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
-
-  if (event.request.mode === "navigate" && url.pathname === SHELL_PATH) {
-    event.respondWith(staleWhileRevalidate(event.request, SHELL_PATH));
-    return;
-  }
 
   if (url.pathname.startsWith("/_next/static/")) {
     event.respondWith(staleWhileRevalidate(event.request));
