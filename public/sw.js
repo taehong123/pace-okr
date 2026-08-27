@@ -1,7 +1,15 @@
-const CACHE_NAME = "okrptr-assets-v3";
+const CACHE_NAME = "okrptr-assets-v4"; // build:cache
+const PRECACHE_URLS = ["/"]; // build:precache
 
-self.addEventListener("install", () => {
-  self.skipWaiting();
+self.addEventListener("install", (event) => {
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    await Promise.allSettled(PRECACHE_URLS.map(async (path) => {
+      const response = await fetch(path, { cache: "no-store" });
+      if (response.ok) await cache.put(path, response);
+    }));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener("activate", (event) => {
@@ -21,12 +29,26 @@ async function staleWhileRevalidate(request, cacheKey = request) {
   return cached ?? network;
 }
 
+async function cacheFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request);
+  if (cached) return cached;
+  const response = await fetch(request);
+  if (response.ok) void cache.put(request, response.clone());
+  return response;
+}
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
+  if (event.request.mode === "navigate" && url.pathname === "/") {
+    event.respondWith(staleWhileRevalidate(event.request, "/"));
+    return;
+  }
+
   if (url.pathname.startsWith("/_next/static/")) {
-    event.respondWith(staleWhileRevalidate(event.request));
+    event.respondWith(cacheFirst(event.request));
   }
 });

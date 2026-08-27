@@ -245,13 +245,16 @@ test("ships product metadata and removes starter assets", async () => {
 });
 
 test("prerenders the startup shell and caches hashed assets", async () => {
-  const [layout, viteConfig, assetHeaders, paceData, staticHtml, worker] = await Promise.all([
+  const [layout, viteConfig, assetHeaders, paceData, staticHtml, worker, publishScript, serviceWorker, generatedServiceWorker] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../public/_headers", import.meta.url), "utf8"),
     readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
     readFile(new URL("../dist/client/index.html", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/publish-prerender.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../public/sw.js", import.meta.url), "utf8"),
+    readFile(new URL("../dist/client/sw.js", import.meta.url), "utf8"),
   ]);
 
   assert.doesNotMatch(layout, /next\/headers|await headers\(\)/);
@@ -272,9 +275,16 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   assert.match(worker, /HASHED_ASSET_CACHE/);
   assert.match(worker, /APP_SHELL_EDGE_CACHE = "public, max-age=31536000, stale-while-revalidate=86400"/);
   assert.match(staticHtml, /serviceWorker\.register/);
-  const serviceWorker = await readFile(new URL("../public/sw.js", import.meta.url), "utf8");
+  assert.match(publishScript, /build:cache/);
+  assert.match(publishScript, /build:precache/);
+  assert.match(serviceWorker, /PRECACHE_URLS/);
   assert.match(serviceWorker, /staleWhileRevalidate/);
-  assert.doesNotMatch(serviceWorker, /event\.request\.mode === "navigate"/);
+  assert.match(serviceWorker, /event\.request\.mode === "navigate"/);
+  assert.match(serviceWorker, /cacheFirst/);
+  const indexAsset = staticHtml.match(/\/_next\/static\/chunks\/index-[A-Za-z0-9_-]+\.js/)?.[0];
+  assert.ok(indexAsset);
+  assert.match(generatedServiceWorker, new RegExp(indexAsset.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(generatedServiceWorker, /const CACHE_NAME = "okrptr-assets-[A-Za-z0-9_-]+"; \/\/ build:cache/);
 });
 
 test("serves hashed assets with immutable browser and edge caching", async () => {
