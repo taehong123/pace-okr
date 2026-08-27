@@ -954,7 +954,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .routine-toolbar input, .routine-toolbar select { height: 30px; }
 .routine-toolbar textarea { min-height: 30px; padding-top: 7px; resize: vertical; }
 .routine-toolbar > label input { border-radius: 4px; }
-.routine-create { display: grid; grid-template-columns: minmax(140px, 1.2fr) 76px minmax(130px, 1fr) minmax(110px, .8fr) minmax(120px, 1fr) minmax(110px, .8fr) minmax(160px, 1.4fr) 31px; align-items: stretch; gap: 5px; }
+.routine-create { display: grid; grid-template-columns: minmax(100px, 1.1fr) 70px minmax(90px, .9fr) minmax(80px, .7fr) minmax(90px, .8fr) minmax(90px, .8fr) minmax(120px, 1.1fr) 31px; align-items: stretch; gap: 5px; }
 .routine-create > * { min-width: 0; border-radius: 4px; }
 .routine-create button { width: 31px; min-height: 30px; display: grid; place-items: center; padding: 0; border: 0; background: var(--ink); color: white; cursor: pointer; }
 .routine-create button:disabled { opacity: .45; }
@@ -1284,6 +1284,10 @@ button:active:not(:disabled) { transform: translateY(1px); }
   .okr-setup-fields { grid-template-columns: 1fr; }
   .database-actions button span { display: none; }
   .project-property-layout { grid-template-columns: 1fr 260px; }
+  .routine-toolbar { grid-template-columns: 1fr; }
+  .routine-create { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .routine-create textarea { grid-column: 1 / -1; }
+  .routine-create button { width: 100%; }
 }
 
 @media (max-width: 700px) {
