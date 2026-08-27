@@ -187,6 +187,13 @@ type OnboardingPlan = {
   routineSteps: string;
 };
 
+type OkrChatContext = {
+  cycleId: string;
+  cycleName: string;
+  initialMessage: string;
+  sourceKind: ItemKind;
+};
+
 type OrganizedOkr = {
   assistantMessage: string;
   questions: string[];
@@ -470,7 +477,7 @@ export default function Home() {
   const [okrCycles, setOkrCycles] = useState<OkrCycle[]>([]);
   const [selectedOkrCycleId, setSelectedOkrCycleId] = useState<string | null>(null);
   const [visibleOkrCycleIds, setVisibleOkrCycleIds] = useState<string[]>([]);
-  const [activeView, setActiveView] = useState<View>("home");
+  const [activeView, setActiveView] = useState<View>("okr");
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [taskDisplay, setTaskDisplay] = useState<"table" | "board">("table");
   const [capture, setCapture] = useState("");
@@ -492,6 +499,8 @@ export default function Home() {
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [createItemOpen, setCreateItemOpen] = useState(false);
   const [createItemKind, setCreateItemKind] = useState<ItemKind>("task");
+  const [createItemCycleId, setCreateItemCycleId] = useState<string | null>(null);
+  const [okrChatContext, setOkrChatContext] = useState<OkrChatContext | null>(null);
   const [deletingOkrCycleIds, setDeletingOkrCycleIds] = useState<Set<string>>(new Set());
   const [slowDeletingOkrCycleId, setSlowDeletingOkrCycleId] = useState<string | null>(null);
   const [okrListOpen, setOkrListOpen] = useState(false);
@@ -623,6 +632,7 @@ export default function Home() {
   const structuredItems = activeItems.filter((entry) => entry.status !== "inbox");
   const defaultOkrCycle = okrCycles.find((cycle) => cycle.status === "active") ?? okrCycles[0] ?? null;
   const selectedOkrCycle = okrCycles.find((cycle) => cycle.id === selectedOkrCycleId) ?? defaultOkrCycle;
+  const createItemCycle = okrCycles.find((cycle) => cycle.id === createItemCycleId) ?? selectedOkrCycle;
   const visibleOkrCycles = okrCycles.filter((cycle) => visibleOkrCycleIds.includes(cycle.id));
   const displayedOkrCycles = visibleOkrCycles.length ? visibleOkrCycles : selectedOkrCycle ? [selectedOkrCycle] : [];
   const okrViews = useMemo(() => {
@@ -861,11 +871,26 @@ export default function Home() {
     window.setTimeout(() => setNotice(""), 2200);
   }
 
+  function openCreateItem(kind: ItemKind, cycleId: string | null = selectedOkrCycle?.id ?? null) {
+    setCreateItemKind(kind);
+    setCreateItemCycleId(cycleId);
+    setCreateItemOpen(true);
+  }
+
+  function openOkrCreationChat(cycle: OkrCycle, sourceKind: ItemKind, initialMessage = "") {
+    setCreateItemOpen(false);
+    setSelectedOkrCycleId(cycle.id);
+    setVisibleOkrCycleIds((current) => current.includes(cycle.id) ? current : [cycle.id, ...current]);
+    setOkrChatContext({ cycleId: cycle.id, cycleName: cycle.name, initialMessage: initialMessage.trim(), sourceKind });
+    setSelectedProjectId(null);
+    setSelectedTaskId(null);
+    setActiveView("home");
+  }
+
   function connectInbox(entry: OkrptrItem) {
     const project = items.find((itemEntry) => itemEntry.kind === "project");
     if (!project) {
-      setCreateItemKind("project");
-      setCreateItemOpen(true);
+      openCreateItem("project");
       showNotice("먼저 Project를 만들어 주세요.");
       return;
     }
@@ -1007,11 +1032,22 @@ export default function Home() {
     }
   }
 
-  async function createOnboardingPlan(plan: OnboardingPlan) {
+  async function createOnboardingPlan(plan: OnboardingPlan, targetCycleId: string | null = selectedOkrCycle?.id ?? null) {
     const objectiveTitle = plan.objective.trim();
+    const keyResultTitle = plan.keyResult.trim();
+    const initiativeTitle = plan.initiative.trim();
+    const projectTitle = plan.project.trim();
     const routineTitle = plan.routineTitle.trim();
     if (!objectiveTitle && !routineTitle) {
       showNotice("Objective나 루틴 이름을 먼저 적어 주세요.");
+      return false;
+    }
+    if (initiativeTitle && !keyResultTitle) {
+      showNotice("Initiative를 만들려면 Key Result를 먼저 적어 주세요.");
+      return false;
+    }
+    if (projectTitle && !initiativeTitle) {
+      showNotice("Project를 만들려면 Initiative를 먼저 적어 주세요.");
       return false;
     }
     const createdItems: OkrptrItem[] = [];
@@ -1055,24 +1091,27 @@ export default function Home() {
             setWorkspaceRules(data.rules);
           }
         }
+        setOkrChatContext(null);
         setActiveView("routines");
         showNotice("루틴을 만들었습니다.");
         return true;
       }
-      const objectiveItem = await createPlannedItem({ title: objectiveTitle, kind: "objective", status: "in_progress", progress: 0 });
-      const keyResultTitle = plan.keyResult.trim() || "첫 핵심 결과 정의";
-      const keyResultItem = await createPlannedItem({ title: keyResultTitle, kind: "key_result", parentId: objectiveItem.id, status: "todo" });
-      const initiativeTitle = plan.initiative.trim() || "첫 실행 방향 정리";
-      const initiativeItem = await createPlannedItem({ title: initiativeTitle, kind: "initiative", parentId: keyResultItem.id, status: "todo" });
-      const projectTitle = plan.project.trim();
-      const projectItem = projectTitle
-        ? await createPlannedItem({ title: projectTitle, kind: "project", parentId: initiativeItem.id, status: "in_progress" })
+      const objectiveItem = await createPlannedItem({ title: objectiveTitle, kind: "objective", cycleId: targetCycleId, status: "in_progress", progress: 0 });
+      const keyResultItem = keyResultTitle
+        ? await createPlannedItem({ title: keyResultTitle, kind: "key_result", cycleId: targetCycleId, parentId: objectiveItem.id, status: "todo" })
+        : null;
+      const initiativeItem = initiativeTitle && keyResultItem
+        ? await createPlannedItem({ title: initiativeTitle, kind: "initiative", cycleId: targetCycleId, parentId: keyResultItem.id, status: "todo" })
+        : null;
+      const projectItem = projectTitle && initiativeItem
+        ? await createPlannedItem({ title: projectTitle, kind: "project", cycleId: targetCycleId, parentId: initiativeItem.id, status: "in_progress" })
         : null;
       const taskTitles = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean);
       for (const taskTitle of taskTitles) {
         await createPlannedItem({
           title: taskTitle,
           kind: "task",
+          cycleId: projectItem ? targetCycleId : null,
           parentId: projectItem?.id,
           status: projectItem ? "todo" : "inbox",
         });
@@ -1090,6 +1129,11 @@ export default function Home() {
         }
       }
       setItems((current) => [...current, ...createdItems]);
+      if (targetCycleId) {
+        setSelectedOkrCycleId(targetCycleId);
+        setVisibleOkrCycleIds((current) => current.includes(targetCycleId) ? current : [targetCycleId, ...current]);
+      }
+      setOkrChatContext(null);
       setActiveView("okr");
       showNotice("OKR 시작 구성을 만들었습니다.");
       return true;
@@ -1197,7 +1241,7 @@ export default function Home() {
           {navItems.map((entry) => {
             const Icon = entry.icon;
             return (
-              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); setActiveView(entry.id); }}>
+              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); if (entry.id === "home") setOkrChatContext(null); setActiveView(entry.id); }}>
                 <Icon size={16} /><span>{entry.label}</span>
                 {entry.id === "inbox" && inboxItems.length > 0 && <b>{inboxItems.length}</b>}
               </button>
@@ -1208,7 +1252,7 @@ export default function Home() {
           {navItems.slice(0, 4).map((entry) => {
             const Icon = entry.icon;
             return (
-              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); setActiveView(entry.id); }}>
+              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); if (entry.id === "home") setOkrChatContext(null); setActiveView(entry.id); }}>
                 <Icon size={16} /><span>{entry.label}</span>
                 {entry.id === "inbox" && inboxItems.length > 0 && <b>{inboxItems.length}</b>}
               </button>
@@ -1232,7 +1276,7 @@ export default function Home() {
           <aside className="mobile-menu-sheet">
             <header><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : "팀 워크스페이스"}</small></div><button className="icon-button" onClick={() => setMobileMenuOpen(false)} aria-label="닫기"><X size={17} /></button></header>
             <div className="mobile-menu-list">
-              {navItems.slice(4).map((entry) => { const Icon = entry.icon; return <button key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); setActiveView(entry.id); setMobileMenuOpen(false); }}><Icon size={16} /><span>{entry.label}</span><ChevronRight size={14} /></button>; })}
+              {navItems.slice(4).map((entry) => { const Icon = entry.icon; return <button key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); if (entry.id === "home") setOkrChatContext(null); setActiveView(entry.id); setMobileMenuOpen(false); }}><Icon size={16} /><span>{entry.label}</span><ChevronRight size={14} /></button>; })}
               <button onClick={() => { setMobileMenuOpen(false); setIntegrationOpen(true); }}><Link2 size={16} /><span>ChatGPT 연동</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); setAppIntegrationsOpen(true); }}><Plug size={16} /><span>앱 연동</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={16} /><span>팀 멤버</span><ChevronRight size={14} /></button>
@@ -1254,7 +1298,7 @@ export default function Home() {
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setOkrListOpen(true)}><Archive size={14} />목록보기</button>
             ) : activeView === "work" && projectTab === "list" ? (
-              <button className="primary-action" onClick={() => { setCreateItemKind("project"); setCreateItemOpen(true); }}><Plus size={14} />Project 추가</button>
+              <button className="primary-action" onClick={() => openCreateItem("project")}><Plus size={14} />Project 추가</button>
             ) : activeView === "reviews" ? (
               <CadenceSwitch value={cadence} onChange={setCadence} />
             ) : null}
@@ -1296,7 +1340,7 @@ export default function Home() {
             />
           ) : (
             <>
-          {activeView === "home" && <HomeView onCreatePlan={createOnboardingPlan} />}
+          {activeView === "home" && <HomeView onCreatePlan={createOnboardingPlan} context={okrChatContext} defaultCycleId={selectedOkrCycle?.id ?? null} />}
           {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={setSelectedTaskId} onConnect={connectInbox} onPatch={patchItem} />}
           {activeView === "work" && (
             <section className="project-workspace">
@@ -1338,10 +1382,11 @@ export default function Home() {
               <section className="okr-document">
                 {displayedOkrCycles.length ? displayedOkrCycles.map((cycle) => {
                   const view = okrViews[cycle.id] ?? { items: [], depths: {} };
+                  const firstItemKind: ItemKind = view.objective ? "task" : "objective";
                   return (
                     <article className="okr-document-card" key={cycle.id}>
-                      <OkrCurrentFile key={`${cycle.id}-${cycle.name}-${cycle.department}`} cycle={cycle} onRename={(id, name) => void renameOkrFile(id, name)} onDepartmentChange={(id, department) => void setOkrFileDepartment(id, department)} onAddItem={() => { setCreateItemKind("task"); setCreateItemOpen(true); }} />
-                      <TreeView objective={view.objective} items={view.items} depths={view.depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} />
+                      <OkrCurrentFile key={`${cycle.id}-${cycle.name}-${cycle.department}`} cycle={cycle} addItemKind={firstItemKind} onRename={(id, name) => void renameOkrFile(id, name)} onDepartmentChange={(id, department) => void setOkrFileDepartment(id, department)} onAddItem={() => openCreateItem(firstItemKind, cycle.id)} />
+                      <TreeView objective={view.objective} items={view.items} depths={view.depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} onCreateObjective={() => openCreateItem("objective", cycle.id)} onCreateWithChat={() => openOkrCreationChat(cycle, "objective")} />
                     </article>
                   );
                 }) : <EmptyState icon={Archive} title="OKR 파일이 없습니다" />}
@@ -1428,7 +1473,7 @@ export default function Home() {
         />
       )}
       {teamPanelOpen && <TeamPanel initialTeam={teamData} initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onMembersChange={(members) => setTeamData((current) => current ? { ...current, members } : current)} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
-      {createItemOpen && <CreateItemPanel initialKind={createItemKind} cycleId={selectedOkrCycle?.id ?? null} items={items} routines={routines} properties={properties} teamMembers={teamMembers} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} />}
+      {createItemOpen && <CreateItemPanel initialKind={createItemKind} cycleId={createItemCycle?.id ?? null} items={items} routines={routines} properties={properties} teamMembers={teamMembers} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} onCreateWithChat={activeView === "okr" && createItemCycle ? ({ kind, title }) => openOkrCreationChat(createItemCycle, kind, title) : undefined} />}
       {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setArchivedProjects([]); setPropertyValues({}); setOkrCycles([cycle]); setVisibleOkrCycleIds([cycle.id]); setSelectedTaskId(null); setActiveView("trash"); setCleanupOpen(false); showNotice("OKR 데이터를 휴지통에 보관하고 정리했습니다."); }} onNotice={showNotice} />}
       {selectedTask && (
         <TaskDetailPanel
@@ -2107,7 +2152,7 @@ function MemberMentionPicker({
   );
 }
 
-function CreateItemPanel({ initialKind, cycleId, items, routines, properties, teamMembers, onClose, onCreated }: {
+function CreateItemPanel({ initialKind, cycleId, items, routines, properties, teamMembers, onClose, onCreated, onCreateWithChat }: {
   initialKind: ItemKind;
   cycleId: string | null;
   items: OkrptrItem[];
@@ -2116,6 +2161,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
   teamMembers: TeamMember[];
   onClose: () => void;
   onCreated: (item: OkrptrItem, initialValues?: Record<string, PropertyValue>) => void;
+  onCreateWithChat?: (draft: { kind: ItemKind; title: string }) => void;
 }) {
   const [kind, setKind] = useState<ItemKind>(initialKind);
   const [title, setTitle] = useState("");
@@ -2190,6 +2236,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
         <form className="property-form create-item-form" onSubmit={submit}>
           <label><span>유형</span><select value={kind} onChange={(event) => { setKind(event.target.value as ItemKind); setParentId(""); setTaskContainer(""); }} disabled={initialKind === "project"}>{(["objective", "key_result", "initiative", "project", "task"] as ItemKind[]).map((entry) => <option value={entry} key={entry}>{kindLabel(entry)}</option>)}</select></label>
           <label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+          {onCreateWithChat && <div className="create-chat-nudge"><div><Bot size={15} /><span><b>직접 작성이 어렵나요?</b><small>말로 설명하면 OKR 초안을 함께 정리해드려요.</small></span></div><button type="button" onClick={() => onCreateWithChat({ kind, title })}>대화로 같이 만들기<ChevronRight size={13} /></button></div>}
           {kind === "task" ? (
             <label><span>상위 연결</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">인박스에 저장</option><optgroup label="Project">{items.filter((entry) => entry.kind === "project").map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{routines.map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
           ) : parentKind && (
@@ -2459,17 +2506,23 @@ function RecommendationsView({ onNavigate }: { onNavigate: (view: View) => void 
   return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{row.itemIds.length}개 항목 · 우선순위 {row.score}</small></div><button aria-label={`${row.title} 확인`} title="관련 항목 확인" onClick={() => onNavigate(row.kind === "unlinked" ? "inbox" : row.kind === "empty_project" ? "okr" : "work")}><ChevronRight size={15} /></button></article>)}</section>;
 }
 
-function HomeView({ onCreatePlan }: {
-  onCreatePlan: (plan: OnboardingPlan) => Promise<boolean>;
+function HomeView({ onCreatePlan, context, defaultCycleId }: {
+  onCreatePlan: (plan: OnboardingPlan, cycleId: string | null) => Promise<boolean>;
+  context: OkrChatContext | null;
+  defaultCycleId: string | null;
 }) {
   return (
     <div className="home-layout">
-      <HomeOkrChat onCreate={onCreatePlan} />
+      <HomeOkrChat onCreate={onCreatePlan} context={context} defaultCycleId={defaultCycleId} />
     </div>
   );
 }
 
-function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise<boolean> }) {
+function HomeOkrChat({ onCreate, context, defaultCycleId }: {
+  onCreate: (plan: OnboardingPlan, cycleId: string | null) => Promise<boolean>;
+  context: OkrChatContext | null;
+  defaultCycleId: string | null;
+}) {
   const emptyPlan: OnboardingPlan = {
     objective: "",
     keyResult: "",
@@ -2481,13 +2534,15 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
     routinePlace: "",
     routineSteps: "",
   };
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(context?.initialMessage ?? "");
   const [plan, setPlan] = useState<OnboardingPlan>({
     ...emptyPlan,
   });
   const [lastUserMessage, setLastUserMessage] = useState("");
-  const [assistantMessage, setAssistantMessage] = useState("업무나 OKR, 서비스 사용법부터 가벼운 질문까지 편하게 물어보세요. 실행으로 옮길 내용이 있으면 OKR 초안도 함께 정리해드립니다.");
-  const [guideQuestions, setGuideQuestions] = useState<string[]>([]);
+  const [assistantMessage, setAssistantMessage] = useState(context
+    ? `‘${context.cycleName}’에 ${kindLabel(context.sourceKind)}부터 같이 만들어볼게요. 이번 주기 끝에 어떤 상태가 달라져야 하는지 편하게 적어 주세요.`
+    : "업무나 OKR, 서비스 사용법부터 가벼운 질문까지 편하게 물어보세요. 실행으로 옮길 내용이 있으면 OKR 초안도 함께 정리해드립니다.");
+  const [guideQuestions, setGuideQuestions] = useState<string[]>(context ? ["달성하고 싶은 변화는 무엇인가요?", "성공 여부는 어떤 숫자나 상태로 확인할까요?"] : []);
   const [draftOpen, setDraftOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const saveLabel = !plan.objective.trim() && plan.routineTitle.trim() ? "루틴 만들기" : "OKR 만들기";
@@ -2591,7 +2646,7 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
       return;
     }
     setSaving(true);
-    const created = await onCreate(plan);
+    const created = await onCreate(plan, context?.cycleId ?? defaultCycleId);
     setSaving(false);
     if (created) {
       setMessage("");
@@ -2609,6 +2664,7 @@ function HomeOkrChat({ onCreate }: { onCreate: (plan: OnboardingPlan) => Promise
       </header>
       <div className="home-chat-surface">
         <div className="chat-thread">
+          {context && <div className="chat-okr-context"><Target size={14} /><span><b>{context.cycleName}</b>에 초안 저장</span></div>}
           {lastUserMessage && <p className="user-message">{lastUserMessage}</p>}
           <p className="assistant-message">{assistantMessage}</p>
           {guideQuestions.length > 0 && <div className="assistant-followups">{guideQuestions.map((question) => <p className="assistant-message followup-message" key={question}>{question}</p>)}</div>}
@@ -2813,7 +2869,7 @@ function OkrFileRow({
   );
 }
 
-function OkrCurrentFile({ cycle, onRename, onDepartmentChange, onAddItem }: { cycle: OkrCycle; onRename: (id: string, name: string) => void; onDepartmentChange: (id: string, department: string) => void; onAddItem: () => void }) {
+function OkrCurrentFile({ cycle, addItemKind, onRename, onDepartmentChange, onAddItem }: { cycle: OkrCycle; addItemKind: ItemKind; onRename: (id: string, name: string) => void; onDepartmentChange: (id: string, department: string) => void; onAddItem: () => void }) {
   const [nameDraft, setNameDraft] = useState(cycle.name);
   const [departmentDraft, setDepartmentDraft] = useState(cycle.department);
 
@@ -2870,14 +2926,18 @@ function OkrCurrentFile({ cycle, onRename, onDepartmentChange, onAddItem }: { cy
         />
       </label>
       </div>
-      <button type="button" onClick={onAddItem}><Plus size={13} />항목 추가</button>
+      <button type="button" onClick={onAddItem}><Plus size={13} />{addItemKind === "objective" ? "Objective 추가" : "항목 추가"}</button>
     </header>
   );
 }
 
-function TreeView({ objective, items, depths, onComplete }: { objective?: OkrptrItem; items: OkrptrItem[]; depths: Record<string, number>; onComplete: (id: string) => void }) {
-  if (!objective) return <EmptyState icon={Target} title="Objective가 없습니다" />;
+function TreeView({ objective, items, depths, onComplete, onCreateObjective, onCreateWithChat }: { objective?: OkrptrItem; items: OkrptrItem[]; depths: Record<string, number>; onComplete: (id: string) => void; onCreateObjective: () => void; onCreateWithChat: () => void }) {
+  if (!objective) return <OkrEmptyState onCreateObjective={onCreateObjective} onCreateWithChat={onCreateWithChat} />;
   return <section className="outline-section"><div className="objective-row"><Target size={18} /><div><span>Objective</span><h2>{objective.title}</h2></div><b>{objective.progress}%</b></div><div className="hierarchy">{items.filter((entry) => entry.id !== objective.id).map((entry) => <div className="hierarchy-row" key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as CSSProperties}><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><span className="hierarchy-copy"><small>{kindLabel(entry.kind)}</small><b>{entry.title}</b></span><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span><em>{entry.progress}%</em>{!isCompletedStatus(entry.status) && ["project", "task"].includes(entry.kind) ? <button className="row-action" aria-label="완료 처리" title="완료 처리" onClick={() => onComplete(entry.id)}><Check size={13} /></button> : <ChevronRight className="row-chevron" size={15} />}</div>)}</div></section>;
+}
+
+function OkrEmptyState({ onCreateObjective, onCreateWithChat }: { onCreateObjective: () => void; onCreateWithChat: () => void }) {
+  return <div className="okr-empty-state"><span className="okr-empty-icon"><Target size={22} /></span><div><h2>첫 Objective를 만들어보세요</h2><p>직접 한 문장으로 시작하거나, 생각을 말하면서 초안을 만들 수 있습니다.</p></div><div className="okr-empty-actions"><button className="primary" onClick={onCreateObjective}><Plus size={14} />Objective 직접 만들기</button><button onClick={onCreateWithChat}><Bot size={14} />대화로 같이 만들기</button></div></div>;
 }
 
 function BoardView({ items, onOpenItem }: { items: OkrptrItem[]; onOpenItem: (item: OkrptrItem) => void }) {

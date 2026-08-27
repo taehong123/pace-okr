@@ -98,6 +98,14 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /답변 중/);
   assert.match(page, /보내기/);
   assert.match(page, /OKR 만들기/);
+  assert.match(page, /useState<View>\("okr"\)/);
+  assert.match(page, /Objective 직접 만들기/);
+  assert.match(page, /대화로 같이 만들기/);
+  assert.match(page, /createItemCycleId/);
+  assert.match(page, /setCreateItemKind\(kind\)/);
+  assert.match(page, /cycleId: targetCycleId/);
+  assert.match(page, /context\?\.cycleId \?\? defaultCycleId/);
+  assert.doesNotMatch(page, /첫 핵심 결과 정의|첫 실행 방향 정리/);
   assert.match(page, /setDraftOpen\(hasPlanContent\(data\.organized\.plan\)\)/);
   assert.match(okrOrganizeRoute, /Always respond to the user's actual message first/);
   assert.match(okrOrganizeRoute, /leave every plan field empty/);
@@ -160,7 +168,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /savingChecklist/);
   assert.match(page, /Promise\.all\(\(kind === "project"/);
   assert.match(page, /void restore\(record\)/);
-  assert.match(page, /cycleId=\{selectedOkrCycle\?\.id \?\? null\}/);
+  assert.match(page, /cycleId=\{createItemCycle\?\.id \?\? null\}/);
   assert.match(page, /cycleId: kind === "task"/);
   assert.doesNotMatch(page, /\/api\/auth\/session/);
   assert.match(bootstrapRoute, /Promise\.all/);
