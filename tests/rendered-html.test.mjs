@@ -231,6 +231,7 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   assert.match(layout, /__OKRPTR_BOOTSTRAP_REQUEST__/);
   assert.match(layout, /serviceWorker\.register\("\/sw\.js"/);
   assert.match(viteConfig, /prerender:\s*\{\s*routes:\s*"\*"\s*\}/);
+  assert.match(viteConfig, /run_worker_first:\s*\["\/"\]/);
   assert.match(assetHeaders, /max-age=31536000, immutable/);
   assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: no-store/);
   assert.doesNotMatch(paceData, /LEFT JOIN workspace_members AS member ON 1 = 0/);
