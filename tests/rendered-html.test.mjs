@@ -104,7 +104,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /OKR 만들기/);
   assert.match(page, /useState<View>\("okr"\)/);
   assert.match(page, /Objective 직접 만들기/);
-  assert.match(page, /대화로 같이 만들기/);
+  assert.match(page, /AI 대화로 같이 만들기/);
   assert.match(page, /createItemCycleId/);
   assert.match(page, /setCreateItemKind\(kind\)/);
   assert.match(page, /cycleId: targetCycleId/);

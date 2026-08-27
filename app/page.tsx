@@ -2413,7 +2413,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
         <form className="property-form create-item-form" onSubmit={submit}>
           <label><span>유형</span><select value={kind} onChange={(event) => { setKind(event.target.value as ItemKind); setParentId(""); setTaskContainer(""); }} disabled={initialKind === "project"}>{(["objective", "key_result", "initiative", "project", "task"] as ItemKind[]).map((entry) => <option value={entry} key={entry}>{kindLabel(entry)}</option>)}</select></label>
           <label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-          {onCreateWithChat && <div className="create-chat-nudge"><div><Bot size={15} /><span><b>직접 작성이 어렵나요?</b><small>말로 설명하면 OKR 초안을 함께 정리해드려요.</small></span></div><button type="button" onClick={() => onCreateWithChat({ kind, title })}>대화로 같이 만들기<ChevronRight size={13} /></button></div>}
+          {onCreateWithChat && <div className="create-chat-nudge"><div><Bot size={15} /><span><b>직접 작성이 어렵나요?</b><small>말로 설명하면 OKR 초안을 함께 정리해드려요.</small></span></div><button type="button" onClick={() => onCreateWithChat({ kind, title })}>AI 대화로 같이 만들기<ChevronRight size={13} /></button></div>}
           {kind === "task" ? (
             <label><span>상위 연결</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">General에 저장</option><optgroup label="Project">{items.filter((entry) => entry.kind === "project").map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{routines.filter((entry) => entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
           ) : parentKind && (
@@ -3259,7 +3259,7 @@ function TreeView({ objective, items, depths, onComplete, onCreateObjective, onC
 }
 
 function OkrEmptyState({ onCreateObjective, onCreateWithChat }: { onCreateObjective: () => void; onCreateWithChat: () => void }) {
-  return <div className="okr-empty-state"><span className="okr-empty-icon"><Target size={22} /></span><div><h2>첫 Objective를 만들어보세요</h2><p>직접 한 문장으로 시작하거나, 생각을 말하면서 초안을 만들 수 있습니다.</p></div><div className="okr-empty-actions"><button className="primary" onClick={onCreateObjective}><Plus size={14} />Objective 직접 만들기</button><button onClick={onCreateWithChat}><Bot size={14} />대화로 같이 만들기</button></div></div>;
+  return <div className="okr-empty-state"><span className="okr-empty-icon"><Target size={22} /></span><div><h2>첫 Objective를 만들어보세요</h2><p>직접 한 문장으로 시작하거나, 생각을 말하면서 초안을 만들 수 있습니다.</p></div><div className="okr-empty-actions"><button className="primary" onClick={onCreateObjective}><Plus size={14} />Objective 직접 만들기</button><button onClick={onCreateWithChat}><Bot size={14} />AI 대화로 같이 만들기</button></div></div>;
 }
 
 function BoardView({ items, onOpenItem }: { items: OkrptrItem[]; onOpenItem: (item: OkrptrItem) => void }) {
