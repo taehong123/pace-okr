@@ -221,6 +221,7 @@ test("prerenders the startup shell and caches hashed assets", async () => {
 
   assert.doesNotMatch(layout, /next\/headers|await headers\(\)/);
   assert.match(layout, /__OKRPTR_BOOTSTRAP_REQUEST__/);
+  assert.match(layout, /serviceWorker\.register\("\/sw\.js"/);
   assert.match(viteConfig, /prerender:\s*\{\s*routes:\s*"\*"\s*\}/);
   assert.match(assetHeaders, /max-age=31536000, immutable/);
   assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: public, max-age=31536000/);
@@ -229,4 +230,6 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   assert.match(staticHtml, /__OKRPTR_BOOTSTRAP_REQUEST__/);
   assert.match(staticHtml, /app-loading-shell/);
   assert.match(worker, /Cloudflare-CDN-Cache-Control/);
+  assert.match(staticHtml, /serviceWorker\.register/);
+  assert.match(await readFile(new URL("../public/sw.js", import.meta.url), "utf8"), /staleWhileRevalidate/);
 });

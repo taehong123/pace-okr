@@ -282,6 +282,38 @@ async function fetchBootstrapPayload(path: string): Promise<BootstrapFetchResult
     data: await response.json().catch(() => null) as BootstrapData | null,
   };
 }
+
+const BOOTSTRAP_CACHE_KEY = "okrptr.bootstrap.v1";
+const BOOTSTRAP_CACHE_TTL_MS = 30 * 60 * 1000;
+
+function readCachedBootstrap(path: string): BootstrapData | null {
+  if (new URLSearchParams(window.location.search).has("auth")) return null;
+  try {
+    const raw = window.localStorage.getItem(BOOTSTRAP_CACHE_KEY);
+    if (!raw) return null;
+    const cached = JSON.parse(raw) as { path?: string; savedAt?: number; data?: BootstrapData };
+    if (cached.path !== path || typeof cached.savedAt !== "number" || Date.now() - cached.savedAt > BOOTSTRAP_CACHE_TTL_MS || !cached.data?.user || !Array.isArray(cached.data.items)) {
+      window.localStorage.removeItem(BOOTSTRAP_CACHE_KEY);
+      return null;
+    }
+    return cached.data;
+  } catch {
+    window.localStorage.removeItem(BOOTSTRAP_CACHE_KEY);
+    return null;
+  }
+}
+
+function writeCachedBootstrap(path: string, data: BootstrapData) {
+  try {
+    window.localStorage.setItem(BOOTSTRAP_CACHE_KEY, JSON.stringify({ path, savedAt: Date.now(), data }));
+  } catch {
+    window.localStorage.removeItem(BOOTSTRAP_CACHE_KEY);
+  }
+}
+
+function clearCachedBootstrap() {
+  window.localStorage.removeItem(BOOTSTRAP_CACHE_KEY);
+}
 type GroupDetailData = { group: WorkspaceGroup; members: GroupMember[]; canManageMembers: boolean };
 type WorkspaceSummary = {
   id: string;
@@ -555,37 +587,47 @@ export default function Home() {
       ? preload.request
       : fetchBootstrapPayload(path);
 
+    const applyBootstrapData = (data: BootstrapData) => {
+      if (!active) return;
+      setWorkspaces(data.workspaces);
+      setWorkspaceRules(data.rules);
+      setOkrCycles(data.cycles);
+      setTeamData(data.team);
+      setItems(data.items);
+      setProperties(data.properties);
+      setPropertyValues(data.propertyValues);
+      setHiddenProperties(data.hiddenByProject ?? {});
+      setArchivedProjects(data.archivedProjects);
+      setRoutines(data.routines);
+      const activeCycle = data.cycles.find((cycle) => cycle.status === "active") ?? data.cycles[0];
+      setVisibleOkrCycleIds(activeCycle ? [activeCycle.id] : []);
+      const currentMember = data.team.members.find((member) => member.isCurrent && member.status === "active");
+      if (currentMember && memberNameNeedsConfirmation(currentMember) && window.localStorage.getItem(profileNameConfirmationKey(currentMember)) !== currentMember.displayName) {
+        setProfilePromptMember(currentMember);
+      }
+      setAuthState({ status: "authenticated", user: data.user, reason: null });
+      setWorkspaceDataState("ready");
+    };
+
+    const cachedData = workspaceDataAttempt === 0 ? readCachedBootstrap(path) : null;
+    if (cachedData) applyBootstrapData(cachedData);
+
     void request
       .then((result) => {
         if (!result.ok || !result.data) throw new Error(result.status === 401 || result.status === 403 ? "unauthenticated" : "workspace data unavailable");
         const data = result.data;
-        if (!active) return;
-        setWorkspaces(data.workspaces);
-        setWorkspaceRules(data.rules);
-        setOkrCycles(data.cycles);
-        setTeamData(data.team);
-        setItems(data.items);
-        setProperties(data.properties);
-        setPropertyValues(data.propertyValues);
-        setHiddenProperties(data.hiddenByProject ?? {});
-        setArchivedProjects(data.archivedProjects);
-        setRoutines(data.routines);
-        const activeCycle = data.cycles.find((cycle) => cycle.status === "active") ?? data.cycles[0];
-        setVisibleOkrCycleIds(activeCycle ? [activeCycle.id] : []);
-        const currentMember = data.team.members.find((member) => member.isCurrent && member.status === "active");
-        if (currentMember && memberNameNeedsConfirmation(currentMember) && window.localStorage.getItem(profileNameConfirmationKey(currentMember)) !== currentMember.displayName) {
-          setProfilePromptMember(currentMember);
-        }
-        setAuthState({ status: "authenticated", user: data.user, reason: null });
-        setWorkspaceDataState("ready");
+        writeCachedBootstrap(path, data);
+        applyBootstrapData(data);
       })
       .catch((error: unknown) => {
         if (!active) return;
         if (error instanceof Error && error.message === "unauthenticated") {
+          clearCachedBootstrap();
           const reason = new URLSearchParams(window.location.search).get("auth");
           setAuthState({ status: "unauthenticated", user: null, reason });
           return;
         }
+        if (cachedData) return;
         setWorkspaceDataState("error");
         setAuthState({ status: "unauthenticated", user: null, reason: "load_failed" });
       });
@@ -704,7 +746,7 @@ export default function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workspaceId }),
     });
-    if (response.ok) window.location.reload();
+    if (response.ok) { clearCachedBootstrap(); window.location.reload(); }
     else {
       setWorkspaceSaving(false);
       showNotice("워크스페이스를 전환하지 못했습니다.");
@@ -721,7 +763,7 @@ export default function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     });
-    if (response.ok) window.location.reload();
+    if (response.ok) { clearCachedBootstrap(); window.location.reload(); }
     else {
       setWorkspaceSaving(false);
       showNotice("워크스페이스를 만들지 못했습니다.");
@@ -733,7 +775,7 @@ export default function Home() {
     if (!window.confirm(`'${workspace.name}' 워크스페이스 삭제를 예약할까요?\n바로 접근할 수 없게 되며 30일 동안 복구할 수 있습니다. 30일 후 모든 데이터가 영구 삭제됩니다.`)) return;
     setWorkspaceSaving(true);
     const response = await fetch(`/api/workspaces?workspaceId=${encodeURIComponent(workspace.id)}`, { method: "DELETE" });
-    if (response.ok) window.location.reload();
+    if (response.ok) { clearCachedBootstrap(); window.location.reload(); }
     else {
       const data = await response.json().catch(() => ({})) as { error?: string };
       setWorkspaceSaving(false);
@@ -749,7 +791,7 @@ export default function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "restore", workspaceId: workspace.id }),
     });
-    if (response.ok) window.location.reload();
+    if (response.ok) { clearCachedBootstrap(); window.location.reload(); }
     else {
       const data = await response.json().catch(() => ({})) as { error?: string };
       setWorkspaceSaving(false);
@@ -1491,7 +1533,7 @@ export default function Home() {
           onOpenWorkspaceMenu={() => { setPropertyPanelOpen(false); setWorkspaceMenuOpen(true); }}
           onOpenTeamMembers={() => { setPropertyPanelOpen(false); setTeamPanelTab("members"); setTeamPanelOpen(true); }}
           onOpenGroups={() => { setPropertyPanelOpen(false); setTeamPanelTab("groups"); setTeamPanelOpen(true); }}
-          onSignOut={() => { window.location.href = "/api/auth/logout"; }}
+          onSignOut={() => { clearCachedBootstrap(); window.location.href = "/api/auth/logout"; }}
         />
       )}
       {teamPanelOpen && <TeamPanel initialTeam={teamData} initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onMembersChange={(members) => setTeamData((current) => current ? { ...current, members } : current)} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
