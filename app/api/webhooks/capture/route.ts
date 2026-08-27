@@ -20,7 +20,6 @@ export async function POST(request: Request) {
       title: capture.title,
       description: capture.description,
       kind: "task",
-      status: "inbox",
       source: capture.source,
       sourceRef: capture.sourceRef,
     });

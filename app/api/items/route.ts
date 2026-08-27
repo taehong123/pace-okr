@@ -26,6 +26,10 @@ export async function GET(request: Request) {
     await ensureWorkspace(authorization.ownerId);
     const url = new URL(request.url);
     const cadence = asValue(url.searchParams.get("cadence"), ITEM_CADENCES);
+    const requestedStatus = url.searchParams.get("status");
+    if (requestedStatus && !asValue(requestedStatus, ITEM_STATUSES)) {
+      return Response.json({ error: "unsupported status" }, { status: 400 });
+    }
     if (url.searchParams.get("review") === "true" && cadence) {
       const review = await getPeriodReview(authorization.ownerId, cadence);
       const assignments = await getItemAssignmentMap(authorization.ownerId, review.items.map((item) => item.id));
@@ -34,7 +38,7 @@ export async function GET(request: Request) {
 
     const rows = await listItems(authorization.ownerId, {
       kind: asValue(url.searchParams.get("kind"), ITEM_KINDS),
-      status: asValue(url.searchParams.get("status"), ITEM_STATUSES),
+      status: asValue(requestedStatus, ITEM_STATUSES),
       cadence,
       parentId: url.searchParams.get("parentId") ?? undefined,
       query: url.searchParams.get("q") ?? undefined,
@@ -56,6 +60,9 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as Record<string, unknown>;
     const title = typeof payload.title === "string" ? payload.title.trim() : "";
     if (!title) return Response.json({ error: "title is required" }, { status: 400 });
+    if (payload.status !== undefined && !asValue(payload.status, ITEM_STATUSES)) {
+      return Response.json({ error: "unsupported status" }, { status: 400 });
+    }
 
     const item = await createItem(authorization.ownerId, {
       title,
@@ -89,6 +96,9 @@ export async function PATCH(request: Request) {
     const payload = (await request.json()) as Record<string, unknown>;
     const id = asString(payload.id);
     if (!id) return Response.json({ error: "id is required" }, { status: 400 });
+    if (payload.status !== undefined && !asValue(payload.status, ITEM_STATUSES)) {
+      return Response.json({ error: "unsupported status" }, { status: 400 });
+    }
 
     const item = await updateItem(authorization.ownerId, id, {
       title: asOptionalString(payload.title),

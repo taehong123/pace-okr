@@ -42,6 +42,7 @@ export async function POST(request: Request) {
       actionSteps: asString(payload.actionSteps),
       cadence,
       active: typeof payload.active === "boolean" ? payload.active : true,
+      assigneeMemberId: asNullableString(payload.assigneeMemberId),
     });
     return Response.json({ routine: serializeRoutine(routine, asDate(payload.date)) }, { status: 201 });
   } catch (error) {
@@ -69,6 +70,7 @@ export async function PATCH(request: Request) {
       actionSteps: typeof payload.actionSteps === "string" ? payload.actionSteps : undefined,
       cadence,
       active: typeof payload.active === "boolean" ? payload.active : undefined,
+      assigneeMemberId: payload.assigneeMemberId === undefined ? undefined : asNullableString(payload.assigneeMemberId),
     });
     return Response.json({ routine: serializeRoutine(routine, asDate(payload.date)) });
   } catch (error) {
@@ -100,6 +102,11 @@ function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function asNullableString(value: unknown) {
+  const normalized = asString(value);
+  return normalized || null;
+}
+
 function asDate(value: unknown) {
   return typeof value === "string" ? value : today();
 }
@@ -110,6 +117,6 @@ function today() {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
-  const status = /required|unsupported|not found|date|invalid/i.test(message) ? 400 : 500;
+  const status = /required|unsupported|not found|date|invalid|protected|cannot/i.test(message) ? 400 : 500;
   return Response.json({ error: message }, { status });
 }

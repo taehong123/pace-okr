@@ -268,7 +268,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   server.registerTool(
     "capture_item",
     {
-      title: "Capture work to the OKRPTR inbox",
+      title: "Capture work to OKRPTR General",
       description: "Use this first when the user mentions a task, follow-up, idea, or commitment that should be saved quickly without interrupting the conversation.",
       inputSchema: {
         title: z.string().min(1).describe("Short actionable title in the user's language"),
@@ -288,7 +288,6 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
         dueDate: due_date,
         priority: priority as ItemPriority | undefined,
         kind: "task",
-        status: "inbox",
         source: "mcp",
         sourceRef: source_ref,
       });
@@ -296,7 +295,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
       return {
         structuredContent: { item: serialized },
-        content: [{ type: "text", text: `Captured "${item.title}" in the OKRPTR inbox.` }],
+        content: [{ type: "text", text: `Captured "${item.title}" in OKRPTR General.` }],
       };
     },
   );
@@ -355,7 +354,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     "list_items",
     {
       title: "List and search OKRPTR items",
-      description: "Find existing OKRs, projects, tasks, or inbox captures before reviewing, updating, or linking them.",
+      description: "Find existing OKRs, projects, tasks, or General captures before reviewing, updating, or linking them.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS).optional(),
         status: z.enum(ITEM_STATUSES).optional(),
@@ -437,7 +436,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     "link_item",
     {
       title: "Link an item into the OKR hierarchy",
-      description: "Move an inbox capture or existing item under its correct parent. Project requires Initiative; Task requires Project.",
+      description: "Move a General Task or existing item under its correct parent. Project requires Initiative; Task requires Project.",
       inputSchema: { id: z.string(), parent_id: z.string() },
       outputSchema: { item: itemOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -445,6 +444,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     async ({ id, parent_id }) => {
       const item = await updateItem(ownerId, id, {
         parentId: parent_id,
+        routineId: null,
         status: "todo",
         source: "mcp",
       });
@@ -781,7 +781,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     "get_recommendations",
     {
       title: "Get execution recommendations",
-      description: "Prioritize blocked, overdue, unlinked, due-soon, and empty Project work from current OKRPTR data.",
+      description: "Prioritize blocked, overdue, due-soon, and empty Project work from current OKRPTR data.",
       inputSchema: { date: z.string().optional().describe("YYYY-MM-DD; defaults to today") },
       outputSchema: { recommendations: z.array(recommendationOutput), count: z.number() },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },

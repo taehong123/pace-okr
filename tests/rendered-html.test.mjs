@@ -108,7 +108,15 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /cycleId: targetCycleId/);
   assert.match(page, /context\?\.cycleId \?\? defaultCycleId/);
   assert.doesNotMatch(page, /첫 핵심 결과 정의|첫 실행 방향 정리/);
-  assert.match(page, /setDraftOpen\(hasPlanContent\(data\.organized\.plan\)\)/);
+  assert.match(page, /planFieldsWithValues\(mergedPlan\)/);
+  assert.match(page, /visibleFields\.has\("project"\)/);
+  assert.match(page, /첫 Project를 만들어볼까요\?/);
+  assert.match(page, /mode === "project"/);
+  assert.match(page, /my_work: "내 업무"/);
+  assert.match(page, /systemKey === "general"/);
+  assert.doesNotMatch(page, /status: "inbox"|인박스에 저장|인박스에 추가/);
+  assert.match(okrOrganizeRoute, /payload\.mode === "project"/);
+  assert.match(okrOrganizeRoute, /initiative context is required for project mode/);
   assert.match(okrOrganizeRoute, /Always respond to the user's actual message first/);
   assert.match(okrOrganizeRoute, /leave every plan field empty/);
   assert.match(page, /팀 OKR/);

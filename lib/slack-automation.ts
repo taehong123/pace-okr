@@ -12,7 +12,6 @@ export type SlackAutomationContext = {
 };
 
 const statusLabels: Record<string, string> = {
-  inbox: "수신함",
   backlog: "백로그",
   todo: "할 일",
   policy_discussion: "정책 논의",

@@ -21,7 +21,7 @@ export async function PUT(request: Request) {
     return Response.json({ routine });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
-    const status = /required|not found|date|invalid/i.test(message) ? 400 : 500;
+    const status = /required|not found|date|invalid|protected|cannot/i.test(message) ? 400 : 500;
     return Response.json({ error: message }, { status });
   }
 }

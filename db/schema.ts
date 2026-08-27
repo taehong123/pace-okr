@@ -308,6 +308,8 @@ export const routines = sqliteTable(
   {
     id: text("id").primaryKey(),
     ownerId: text("owner_id").notNull(),
+    systemKey: text("system_key"),
+    assigneeMemberId: text("assignee_member_id").references(() => workspaceMembers.id, { onDelete: "set null" }),
     title: text("title").notNull(),
     description: text("description").notNull().default(""),
     triggerPoint: text("trigger_point").notNull().default(""),
@@ -320,6 +322,10 @@ export const routines = sqliteTable(
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
+    uniqueIndex("idx_routines_owner_system_key")
+      .on(table.ownerId, table.systemKey)
+      .where(sql`${table.systemKey} IS NOT NULL`),
+    index("idx_routines_assignee").on(table.assigneeMemberId),
     index("idx_routines_owner_active").on(table.ownerId, table.active),
     index("idx_routines_owner_sort").on(table.ownerId, table.sortOrder),
   ],

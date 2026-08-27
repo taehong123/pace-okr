@@ -55,7 +55,7 @@ export async function PATCH(request: Request) {
     if (!id || (payload.role !== undefined && !role) || (role === undefined && displayName === undefined)) {
       return Response.json({ error: "id and supported changes are required" }, { status: 400 });
     }
-    const member = await updateTeamMember(authorization.ownerId, id, { role, displayName }, authorization.userId, canManageTeam(authorization));
+    const member = await updateTeamMember(authorization.ownerId, id, { role: role ?? undefined, displayName }, authorization.userId, canManageTeam(authorization));
     return Response.json({ member });
   } catch (error) {
     return routeError(error);

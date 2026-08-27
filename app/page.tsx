@@ -8,6 +8,7 @@ import {
   AtSign,
   Bell,
   Bot,
+  Briefcase,
   CalendarCheck,
   CalendarDays,
   Check,
@@ -51,11 +52,11 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 
-type View = "home" | "inbox" | "work" | "routines" | "okr" | "scrum" | "recommendations" | "reviews" | "trash";
+type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "scrum" | "recommendations" | "reviews" | "trash";
 type Cadence = "daily" | "weekly" | "monthly" | "quarterly";
-type ItemStatus = "inbox" | "backlog" | "todo" | "policy_discussion" | "in_progress" | "developing" | "development_done" | "done" | "blocked" | "archived";
+type ItemStatus = "backlog" | "todo" | "policy_discussion" | "in_progress" | "developing" | "development_done" | "done" | "blocked" | "archived";
 type ItemKind = "objective" | "key_result" | "initiative" | "project" | "task";
 type Priority = "low" | "medium" | "high" | "urgent";
 type PropertyType = "text" | "number" | "select" | "date" | "checkbox";
@@ -141,7 +142,7 @@ type Scrum = {
 };
 type Recommendation = {
   id: string;
-  kind: "blocked" | "overdue" | "unlinked" | "due_soon" | "empty_project";
+  kind: "blocked" | "overdue" | "due_soon" | "empty_project";
   title: string;
   detail: string;
   itemIds: string[];
@@ -157,6 +158,8 @@ type Routine = {
   cadence: RoutineCadence;
   active: boolean;
   sortOrder: number;
+  systemKey: string | null;
+  assigneeMemberId: string | null;
   date: string;
   completed: boolean;
   completionId: string | null;
@@ -199,6 +202,21 @@ type OrganizedOkr = {
   questions: string[];
   plan: OnboardingPlan;
 };
+
+type PlanCreationResult = {
+  cycleId: string | null;
+  initiativeId: string | null;
+  initiativeTitle: string;
+  projectId: string | null;
+};
+
+type ProjectChatTarget = {
+  cycleId: string | null;
+  initiativeId: string;
+  initiativeTitle: string;
+};
+
+type ConversationMode = "okr" | "project";
 
 type OrganizeError = {
   code?: string;
@@ -494,6 +512,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
 
 const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "okr", label: "OKR", icon: Target },
+  { id: "my_work", label: "내 업무", icon: Briefcase },
   { id: "work", label: "Project", icon: Table2 },
   { id: "inbox", label: "Task", icon: Inbox },
   { id: "home", label: "대화", icon: Bot },
@@ -508,6 +527,7 @@ const cadenceLabels: Record<Cadence, string> = { daily: "일간", weekly: "주�
 const viewTitles: Record<View, string> = {
   home: "대화",
   inbox: "Task",
+  my_work: "내 업무",
   work: "Project",
   routines: "루틴",
   okr: "OKR",
@@ -690,10 +710,10 @@ export default function Home() {
 
   const teamMembers = teamData?.members ?? [];
   const activeItems = items.filter((entry) => !entry.archivedAt && entry.status !== "archived");
-  const inboxItems = activeItems.filter((entry) => entry.status === "inbox");
   const taskItems = activeItems.filter((entry) => entry.kind === "task");
   const executionItems = activeItems.filter((entry) => entry.kind === "project");
-  const structuredItems = activeItems.filter((entry) => entry.status !== "inbox");
+  const structuredItems = activeItems;
+  const generalRoutine = routines.find((entry) => entry.systemKey === "general") ?? null;
   const defaultOkrCycle = okrCycles.find((cycle) => cycle.status === "active") ?? okrCycles[0] ?? null;
   const selectedOkrCycle = okrCycles.find((cycle) => cycle.id === selectedOkrCycleId) ?? defaultOkrCycle;
   const createItemCycle = okrCycles.find((cycle) => cycle.id === createItemCycleId) ?? selectedOkrCycle;
@@ -713,7 +733,7 @@ export default function Home() {
     return counts;
   }, [okrCycles, structuredItems]);
   const periodItems = activeItems.filter(
-    (entry) => entry.status !== "inbox" && (cadence === "quarterly" || entry.cadence === cadence || entry.kind === "objective"),
+    (entry) => cadence === "quarterly" || entry.cadence === cadence || entry.kind === "objective",
   );
   const completed = periodItems.filter((entry) => isCompletedStatus(entry.status)).length;
   const blocked = periodItems.filter((entry) => entry.status === "blocked").length;
@@ -808,17 +828,17 @@ export default function Home() {
       const response = await fetch("/api/items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, kind: "task", source: "web" }),
+        body: JSON.stringify({ title, kind: "task", source: "web", assigneeMemberId: currentTeamMember?.id }),
       });
       if (!response.ok) throw new Error("save failed");
       const data = (await response.json()) as { item: OkrptrItem };
       setItems((current) => [...current, data.item]);
     } catch {
-      setItems((current) => [...current, item(crypto.randomUUID(), null, "task", title, "inbox", "weekly", 0)]);
+      setItems((current) => [...current, { ...item(crypto.randomUUID(), null, "task", title, "todo", "weekly", 0), routineId: generalRoutine?.id ?? null }]);
     } finally {
       setCapture("");
       setSaving(false);
-      showNotice("인박스에 추가했습니다.");
+      showNotice("General에 추가했습니다.");
     }
   }
 
@@ -949,17 +969,6 @@ export default function Home() {
     setSelectedProjectId(null);
     setSelectedTaskId(null);
     setActiveView("home");
-  }
-
-  function connectInbox(entry: OkrptrItem) {
-    const project = items.find((itemEntry) => itemEntry.kind === "project");
-    if (!project) {
-      openCreateItem("project");
-      showNotice("먼저 Project를 만들어 주세요.");
-      return;
-    }
-    void patchItem(entry.id, { parentId: project.id, status: "todo" });
-    showNotice(`‘${project.title}’에 연결했습니다.`);
   }
 
   function openProjectPage(id: string) {
@@ -1104,15 +1113,15 @@ export default function Home() {
     const routineTitle = plan.routineTitle.trim();
     if (!objectiveTitle && !routineTitle) {
       showNotice("Objective나 루틴 이름을 먼저 적어 주세요.");
-      return false;
+      return null;
     }
     if (initiativeTitle && !keyResultTitle) {
       showNotice("Initiative를 만들려면 Key Result를 먼저 적어 주세요.");
-      return false;
+      return null;
     }
     if (projectTitle && !initiativeTitle) {
       showNotice("Project를 만들려면 Initiative를 먼저 적어 주세요.");
-      return false;
+      return null;
     }
     const createdItems: OkrptrItem[] = [];
     async function createPlannedItem(body: Record<string, unknown>) {
@@ -1127,7 +1136,7 @@ export default function Home() {
       return data.item;
     }
     async function createPlannedRoutine() {
-      if (!routineTitle) return;
+      if (!routineTitle) return null;
       const response = await fetch("/api/routines", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1137,9 +1146,13 @@ export default function Home() {
           actionPlace: plan.routinePlace,
           actionSteps: plan.routineSteps,
           cadence: "daily",
+          assigneeMemberId: currentTeamMember?.id ?? null,
         }),
       });
       if (!response.ok) throw new Error("routine");
+      const data = await response.json() as { routine: Routine };
+      setRoutines((current) => [...current, data.routine]);
+      return data.routine;
     }
     try {
       if (!objectiveTitle) {
@@ -1155,10 +1168,8 @@ export default function Home() {
             setWorkspaceRules(data.rules);
           }
         }
-        setOkrChatContext(null);
-        setActiveView("routines");
         showNotice("루틴을 만들었습니다.");
-        return true;
+        return { cycleId: targetCycleId, initiativeId: null, initiativeTitle: "", projectId: null } satisfies PlanCreationResult;
       }
       const objectiveItem = await createPlannedItem({ title: objectiveTitle, kind: "objective", cycleId: targetCycleId, status: "in_progress", progress: 0 });
       const keyResultItem = keyResultTitle
@@ -1168,7 +1179,7 @@ export default function Home() {
         ? await createPlannedItem({ title: initiativeTitle, kind: "initiative", cycleId: targetCycleId, parentId: keyResultItem.id, status: "todo" })
         : null;
       const projectItem = projectTitle && initiativeItem
-        ? await createPlannedItem({ title: projectTitle, kind: "project", cycleId: targetCycleId, parentId: initiativeItem.id, status: "in_progress" })
+        ? await createPlannedItem({ title: projectTitle, kind: "project", cycleId: targetCycleId, parentId: initiativeItem.id, status: "in_progress", driMemberId: currentTeamMember?.id })
         : null;
       const taskTitles = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean);
       for (const taskTitle of taskTitles) {
@@ -1177,7 +1188,8 @@ export default function Home() {
           kind: "task",
           cycleId: projectItem ? targetCycleId : null,
           parentId: projectItem?.id,
-          status: projectItem ? "todo" : "inbox",
+          status: "todo",
+          assigneeMemberId: currentTeamMember?.id,
         });
       }
       await createPlannedRoutine();
@@ -1197,12 +1209,86 @@ export default function Home() {
         setSelectedOkrCycleId(targetCycleId);
         setVisibleOkrCycleIds((current) => current.includes(targetCycleId) ? current : [targetCycleId, ...current]);
       }
-      setOkrChatContext(null);
-      setActiveView("okr");
       showNotice("OKR 시작 구성을 만들었습니다.");
-      return true;
+      return {
+        cycleId: targetCycleId,
+        initiativeId: initiativeItem?.id ?? null,
+        initiativeTitle: initiativeItem?.title ?? "",
+        projectId: projectItem?.id ?? null,
+      } satisfies PlanCreationResult;
     } catch {
       showNotice("OKR 구성을 만들지 못했습니다.");
+      return null;
+    }
+  }
+
+  async function createProjectFromConversation(plan: OnboardingPlan, target: ProjectChatTarget) {
+    const projectTitle = plan.project.trim();
+    if (!projectTitle) {
+      showNotice("Project 이름을 먼저 정리해 주세요.");
+      return false;
+    }
+    const createdItems: OkrptrItem[] = [];
+    try {
+      const projectResponse = await fetch("/api/items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: projectTitle,
+          kind: "project",
+          cycleId: target.cycleId,
+          parentId: target.initiativeId,
+          status: "in_progress",
+          driMemberId: currentTeamMember?.id,
+        }),
+      });
+      if (!projectResponse.ok) throw new Error("project");
+      const projectData = await projectResponse.json() as { item: OkrptrItem };
+      createdItems.push(projectData.item);
+      for (const title of plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
+        const response = await fetch("/api/items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title,
+            kind: "task",
+            cycleId: target.cycleId,
+            parentId: projectData.item.id,
+            status: "todo",
+            assigneeMemberId: currentTeamMember?.id,
+          }),
+        });
+        if (!response.ok) throw new Error("task");
+        const data = await response.json() as { item: OkrptrItem };
+        createdItems.push(data.item);
+      }
+      if (plan.routineTitle.trim()) {
+        const response = await fetch("/api/routines", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: plan.routineTitle.trim(),
+            triggerPoint: plan.routineTrigger,
+            actionPlace: plan.routinePlace,
+            actionSteps: plan.routineSteps,
+            cadence: "daily",
+            assigneeMemberId: currentTeamMember?.id ?? null,
+          }),
+        });
+        if (!response.ok) throw new Error("routine");
+        const data = await response.json() as { routine: Routine };
+        setRoutines((current) => [...current, data.routine]);
+      }
+      setItems((current) => [...current, ...createdItems]);
+      setOkrChatContext(null);
+      setSelectedProjectId(null);
+      setSelectedTaskId(null);
+      setProjectTab("list");
+      setActiveView("work");
+      showNotice("첫 Project를 만들었습니다.");
+      return true;
+    } catch {
+      showNotice("Project 구성을 만들지 못했습니다.");
       return false;
     }
   }
@@ -1307,7 +1393,6 @@ export default function Home() {
             return (
               <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); if (entry.id === "home") setOkrChatContext(null); setActiveView(entry.id); }}>
                 <Icon size={16} /><span>{entry.label}</span>
-                {entry.id === "inbox" && inboxItems.length > 0 && <b>{inboxItems.length}</b>}
               </button>
             );
           })}
@@ -1318,7 +1403,6 @@ export default function Home() {
             return (
               <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); if (entry.id === "home") setOkrChatContext(null); setActiveView(entry.id); }}>
                 <Icon size={16} /><span>{entry.label}</span>
-                {entry.id === "inbox" && inboxItems.length > 0 && <b>{inboxItems.length}</b>}
               </button>
             );
           })}
@@ -1382,7 +1466,7 @@ export default function Home() {
           {activeView === "inbox" && (
             <form className="quick-capture" onSubmit={submitCapture}>
               <Plus size={15} />
-              <input value={capture} onChange={(event) => setCapture(event.target.value)} placeholder="할 일을 입력하면 인박스에 저장됩니다" aria-label="인박스에 할 일 추가" />
+              <input value={capture} onChange={(event) => setCapture(event.target.value)} placeholder="할 일을 입력하면 General에 저장됩니다" aria-label="General에 할 일 추가" />
               <button disabled={!capture.trim() || saving}>{saving ? "저장 중" : "추가"}</button>
             </form>
           )}
@@ -1404,8 +1488,9 @@ export default function Home() {
             />
           ) : (
             <>
-          {activeView === "home" && <HomeView onCreatePlan={createOnboardingPlan} context={okrChatContext} defaultCycleId={selectedOkrCycle?.id ?? null} />}
-          {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={setSelectedTaskId} onConnect={connectInbox} onPatch={patchItem} />}
+          {activeView === "home" && <HomeView onCreatePlan={createOnboardingPlan} onCreateProject={createProjectFromConversation} context={okrChatContext} defaultCycleId={selectedOkrCycle?.id ?? null} />}
+          {activeView === "my_work" && <MyWorkView items={activeItems} routines={routines} currentMember={currentTeamMember ?? null} onOpenProject={openProjectPage} onOpenTask={setSelectedTaskId} onRoutinesChange={setRoutines} onNotice={showNotice} />}
+          {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={setSelectedTaskId} onPatch={patchItem} />}
           {activeView === "work" && (
             <section className="project-workspace">
               <div className="project-tabs" role="tablist" aria-label="Project 보기">
@@ -1440,7 +1525,7 @@ export default function Home() {
               {projectTab === "archive" && <ProjectArchiveView projects={archivedProjects} onRestore={(id) => void restoreProjectItem(id)} onDelete={(project) => void permanentlyDeleteProjectItem(project)} />}
             </section>
           )}
-          {activeView === "routines" && <RoutineView onNotice={showNotice} onRoutinesChange={setRoutines} />}
+          {activeView === "routines" && <RoutineView teamMembers={teamMembers} onNotice={showNotice} onRoutinesChange={setRoutines} />}
           {activeView === "okr" && (
             <section className="okr-workbench">
               <section className="okr-document">
@@ -1823,10 +1908,10 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
             {visible.map((entry) => (
               <div className="task-table-row" key={entry.id}>
                 <div className="name-cell"><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><button className={`task-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })}><Check size={12} /></button>{entry.kind === "project" ? <button className="name-open-button" onClick={() => onOpenProject(entry.id)}>{entry.title}</button> : <input defaultValue={entry.title} onBlur={(event) => event.target.value.trim() !== entry.title && void onPatch(entry.id, { title: event.target.value })} />}</div>
-                <select className={`status-select status-${entry.status}`} value={entry.status} onChange={(event) => void onPatch(entry.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived" && value !== "inbox").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
+                <select className={`status-select status-${entry.status}`} value={entry.status} onChange={(event) => void onPatch(entry.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <select className={`priority-${entry.priority}`} value={entry.priority} onChange={(event) => void onPatch(entry.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <input className="date-cell" type="date" value={entry.dueDate ?? ""} onChange={(event) => void onPatch(entry.id, { dueDate: event.target.value || null })} />
-                <span className="relation-cell">{entry.parentId ? byId.get(entry.parentId)?.title ?? "연결 없음" : "인박스"}</span>
+                <span className="relation-cell">{entry.parentId ? byId.get(entry.parentId)?.title ?? "연결 없음" : "연결 없음"}</span>
                 <span className="relation-cell assignment-cell">{assignmentLabel(entry, "project_dri")}</span>
                 {properties.map((property) => (hiddenProperties[entry.id] ?? []).includes(property.id)
                   ? <span className="hidden-property-cell" key={property.id} title="이 Project에서 숨긴 속성">—</span>
@@ -1904,7 +1989,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
           <label><span>상위 Initiative</span><select value={project.parentId ?? ""} onChange={(event) => void onPatch(project.id, { parentId: event.target.value || null })}><option value="">선택</option>{initiatives.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>
           <div className="project-field-grid">
             <label><span>우선순위</span><select className={`priority-${project.priority}`} value={project.priority} onChange={(event) => void onPatch(project.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-            <label><span>상태</span><select value={project.status} onChange={(event) => void onPatch(project.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "inbox" && value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+            <label><span>상태</span><select value={project.status} onChange={(event) => void onPatch(project.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
             <label><span>주기</span><select value={project.cadence} onChange={(event) => void onPatch(project.id, { cadence: event.target.value as Cadence })}>{Object.entries(cadenceLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
             <label><span>기한</span><input type="date" value={project.dueDate ?? ""} onChange={(event) => void onPatch(project.id, { dueDate: event.target.value || null })} /></label>
           </div>
@@ -1978,7 +2063,7 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPro
   const routine = task.routineId ? routines.find((entry) => entry.id === task.routineId) : undefined;
   const projectDri = project ? assignmentLabel(project, "project_dri") : "미지정";
   const assigneeIds = task.assignments.filter((entry) => entry.role === "task_assignee").map((entry) => entry.memberId);
-  const lineageTitle = routine ? `Routine · ${routine.title}` : project ? `Project · ${project.title}` : "인박스";
+  const lineageTitle = routine ? `Routine · ${routine.title}` : project ? `Project · ${project.title}` : "General";
   useEffect(() => {
     fetch(`/api/checklists?taskId=${encodeURIComponent(task.id)}`)
       .then(async (response) => response.ok ? response.json() as Promise<{ items: ChecklistItem[] }> : Promise.reject())
@@ -2237,9 +2322,10 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [dueDate, setDueDate] = useState("");
   const [customValues, setCustomValues] = useState<Record<string, PropertyValue>>({});
-  const [projectDriIds, setProjectDriIds] = useState<string[]>([]);
+  const currentMemberId = teamMembers.find((member) => member.isCurrent && member.status === "active")?.id;
+  const [projectDriIds, setProjectDriIds] = useState<string[]>(currentMemberId ? [currentMemberId] : []);
   const [projectWorkerIds, setProjectWorkerIds] = useState<string[]>([]);
-  const [taskAssigneeIds, setTaskAssigneeIds] = useState<string[]>([]);
+  const [taskAssigneeIds, setTaskAssigneeIds] = useState<string[]>(currentMemberId ? [currentMemberId] : []);
   const [saving, setSaving] = useState(false);
   const requiredParent: Record<ItemKind, ItemKind | null> = { objective: null, key_result: "objective", initiative: "key_result", project: "initiative", task: "project" };
   const parentKind = requiredParent[kind];
@@ -2271,7 +2357,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
         description: nextDescription,
         parentId: nextParentId,
         routineId,
-        status: kind === "task" && !nextParentId && !routineId ? "inbox" : status,
+        status,
         priority,
         cadence,
         dueDate: dueDate || null,
@@ -2302,7 +2388,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
           <label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
           {onCreateWithChat && <div className="create-chat-nudge"><div><Bot size={15} /><span><b>직접 작성이 어렵나요?</b><small>말로 설명하면 OKR 초안을 함께 정리해드려요.</small></span></div><button type="button" onClick={() => onCreateWithChat({ kind, title })}>대화로 같이 만들기<ChevronRight size={13} /></button></div>}
           {kind === "task" ? (
-            <label><span>상위 연결</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">인박스에 저장</option><optgroup label="Project">{items.filter((entry) => entry.kind === "project").map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{routines.map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
+            <label><span>상위 연결</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">General에 저장</option><optgroup label="Project">{items.filter((entry) => entry.kind === "project").map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{routines.filter((entry) => entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
           ) : parentKind && (
             <label><span>상위 {kindLabel(parentKind)}</span><select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">선택</option>{parentOptions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>
           )}
@@ -2312,7 +2398,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
               <label><span>본문</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={6} placeholder={"# 배경\n\n## 범위\n\n## 다음 액션"} /></label>
               <div className="project-field-grid">
                 <label><span>우선순위</span><select className={`priority-${priority}`} value={priority} onChange={(event) => setPriority(event.target.value as Priority)}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-                <label><span>상태</span><select value={status} onChange={(event) => setStatus(event.target.value as ItemStatus)}>{Object.entries(statusLabels).filter(([value]) => value !== "inbox" && value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+                <label><span>상태</span><select value={status} onChange={(event) => setStatus(event.target.value as ItemStatus)}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
                 <label><span>주기</span><select value={cadence} onChange={(event) => setCadence(event.target.value as Cadence)}>{Object.entries(cadenceLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
                 <label><span>기한</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
               </div>
@@ -2345,7 +2431,7 @@ function CreatePropertyField({ property, value, onChange }: { property: Property
   return <label><span>{property.name}</span><input type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => onChange(property, event.target.value)} /></label>;
 }
 
-function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: string) => void; onRoutinesChange: (routines: Routine[]) => void }) {
+function RoutineView({ teamMembers, onNotice, onRoutinesChange }: { teamMembers: TeamMember[]; onNotice: (message: string) => void; onRoutinesChange: (routines: Routine[]) => void }) {
   const [date, setDate] = useState(localDate());
   const [rows, setRows] = useState<Routine[] | null>(null);
   const [title, setTitle] = useState("");
@@ -2354,6 +2440,7 @@ function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: strin
   const [actionPlace, setActionPlace] = useState("");
   const [actionSteps, setActionSteps] = useState("");
   const [cadence, setCadence] = useState<RoutineCadence>("daily");
+  const [assigneeMemberId, setAssigneeMemberId] = useState("");
   const [drafts, setDrafts] = useState<Record<string, Pick<Routine, "description" | "triggerPoint" | "actionPlace" | "actionSteps">>>({});
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -2375,7 +2462,7 @@ function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: strin
     const response = await fetch("/api/routines", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, description, triggerPoint, actionPlace, actionSteps, cadence, date }),
+      body: JSON.stringify({ title, description, triggerPoint, actionPlace, actionSteps, cadence, date, assigneeMemberId: assigneeMemberId || null }),
     });
     setSaving(false);
     if (!response.ok) return;
@@ -2390,10 +2477,12 @@ function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: strin
     setTriggerPoint("");
     setActionPlace("");
     setActionSteps("");
+    setAssigneeMemberId("");
     onNotice("루틴을 추가했습니다.");
   }
 
   async function toggleCompletion(routine: Routine) {
+    if (routine.systemKey === "general") return;
     const completed = !routine.completed;
     setRows((current) => current?.map((entry) => entry.id === routine.id ? { ...entry, completed } : entry) ?? null);
     const response = await fetch("/api/routine-completions", {
@@ -2412,6 +2501,7 @@ function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: strin
   }
 
   async function toggleActive(routine: Routine) {
+    if (routine.systemKey === "general") return;
     const active = !routine.active;
     setRows((current) => current?.map((entry) => entry.id === routine.id ? { ...entry, active } : entry) ?? null);
     await fetch("/api/routines", {
@@ -2445,6 +2535,7 @@ function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: strin
   }
 
   async function saveRoutineGuide(routine: Routine) {
+    if (routine.systemKey === "general") return;
     const draft = routineDraft(routine);
     setSaving(true);
     const response = await fetch("/api/routines", {
@@ -2469,6 +2560,7 @@ function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: strin
   }
 
   async function remove(id: string) {
+    if (rows?.find((entry) => entry.id === id)?.systemKey === "general") return;
     const response = await fetch(`/api/routines?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     if (response.ok) {
       setRows((current) => {
@@ -2478,6 +2570,25 @@ function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: strin
       });
       onNotice("루틴을 삭제했습니다.");
     }
+  }
+
+  async function updateAssignee(routine: Routine, memberId: string) {
+    if (routine.systemKey === "general") return;
+    const response = await fetch("/api/routines", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: routine.id, date, assigneeMemberId: memberId || null }),
+    });
+    if (!response.ok) {
+      onNotice("루틴 담당자를 저장하지 못했습니다.");
+      return;
+    }
+    const data = await response.json() as { routine: Routine };
+    setRows((current) => {
+      const next = current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? [];
+      onRoutinesChange(next);
+      return next;
+    });
   }
 
   return (
@@ -2490,6 +2601,7 @@ function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: strin
           <input value={triggerPoint} onChange={(event) => setTriggerPoint(event.target.value)} placeholder="트리거 포인트" aria-label="트리거 포인트" />
           <input value={actionPlace} onChange={(event) => setActionPlace(event.target.value)} placeholder="어디서" aria-label="어디서 실행" />
           <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="목적/메모" aria-label="루틴 목적" />
+          <select value={assigneeMemberId} onChange={(event) => setAssigneeMemberId(event.target.value)} aria-label="루틴 담당자"><option value="">담당자 없음</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select>
           <textarea value={actionSteps} onChange={(event) => setActionSteps(event.target.value)} placeholder="무엇을 어떻게 할지" aria-label="실행 방법" rows={2} />
           <button disabled={!title.trim() || saving} aria-label="루틴 추가" title="루틴 추가"><Plus size={14} /></button>
         </form>
@@ -2498,28 +2610,94 @@ function RoutineView({ onNotice, onRoutinesChange }: { onNotice: (message: strin
         {loadError ? <AsyncState icon={AlertTriangle} title="루틴을 불러오지 못했습니다" detail="잠시 후 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => { setRows(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} /> : rows === null ? <AsyncState icon={LoaderCircle} title="루틴을 불러오는 중입니다" loading /> : rows.length ? rows.map((routine) => {
           const draft = routineDraft(routine);
           return (
-            <article className={`routine-card ${routine.active ? "" : "inactive"}`} key={routine.id}>
+            <article className={`routine-card ${routine.active ? "" : "inactive"} ${routine.systemKey === "general" ? "general-routine" : ""}`} key={routine.id}>
               <header>
-                <button className={`task-check ${routine.completed ? "checked" : ""}`} disabled={!routine.active} onClick={() => void toggleCompletion(routine)} aria-label={routine.completed ? "완료 취소" : "완료 처리"}><Check size={12} /></button>
-                <div><b>{routine.title}</b><small>{routineCadenceLabel(routine.cadence)} · {routine.completed ? "오늘 완료" : "오늘 미완료"}</small></div>
-                <label className="routine-switch"><input type="checkbox" checked={routine.active} onChange={() => void toggleActive(routine)} /><span /><em className="sr-only">루틴 활성 상태</em></label>
-                <button className="icon-button" onClick={() => void remove(routine.id)} aria-label="루틴 삭제" title="루틴 삭제"><Trash2 size={13} /></button>
+                {routine.systemKey === "general" ? <span className="general-routine-icon"><Inbox size={13} /></span> : <button className={`task-check ${routine.completed ? "checked" : ""}`} disabled={!routine.active} onClick={() => void toggleCompletion(routine)} aria-label={routine.completed ? "완료 취소" : "완료 처리"}><Check size={12} /></button>}
+                <div><b>{routine.title}{routine.systemKey === "general" && <em className="system-badge">기본</em>}</b><small>{routine.systemKey === "general" ? "부모가 없는 Task가 모이는 기본 바구니" : `${routineCadenceLabel(routine.cadence)} · ${routine.completed ? "오늘 완료" : "오늘 미완료"}`}</small></div>
+                {routine.systemKey !== "general" && <label className="routine-switch"><input type="checkbox" checked={routine.active} onChange={() => void toggleActive(routine)} /><span /><em className="sr-only">루틴 활성 상태</em></label>}
+                {routine.systemKey !== "general" && <button className="icon-button" onClick={() => void remove(routine.id)} aria-label="루틴 삭제" title="루틴 삭제"><Trash2 size={13} /></button>}
               </header>
-              <div className="routine-guide-grid">
+              {routine.systemKey !== "general" && <div className="routine-guide-grid">
                 <label><span>트리거 포인트</span><input value={draft.triggerPoint} onChange={(event) => updateDraft(routine, "triggerPoint", event.target.value)} placeholder="예: 오전 9시, Slack 알림 확인 후" /></label>
                 <label><span>어디서</span><input value={draft.actionPlace} onChange={(event) => updateDraft(routine, "actionPlace", event.target.value)} placeholder="예: OKRPTR 작업 탭, 캘린더, 책상" /></label>
                 <label><span>목적/메모</span><input value={draft.description} onChange={(event) => updateDraft(routine, "description", event.target.value)} placeholder="왜 반복하는지" /></label>
                 <label className="routine-steps"><span>무엇을 어떻게</span><textarea value={draft.actionSteps} onChange={(event) => updateDraft(routine, "actionSteps", event.target.value)} placeholder="1. 확인할 것&#10;2. 실행할 것&#10;3. 끝났다고 판단하는 기준" rows={3} /></label>
-              </div>
-              <footer>
+              </div>}
+              {routine.systemKey !== "general" && <footer>
+                <label className="routine-assignee"><span>담당자</span><select value={routine.assigneeMemberId ?? ""} onChange={(event) => void updateAssignee(routine, event.target.value)}><option value="">담당자 없음</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>
                 <button className="primary-action" disabled={!hasDraftChange(routine) || saving} onClick={() => void saveRoutineGuide(routine)}><Check size={14} />저장</button>
-              </footer>
+              </footer>}
             </article>
           );
         }) : <EmptyState icon={Repeat2} title="등록된 루틴이 없습니다" />}
       </div>
     </section>
   );
+}
+
+function MyWorkView({ items, routines, currentMember, onOpenProject, onOpenTask, onRoutinesChange, onNotice }: {
+  items: OkrptrItem[];
+  routines: Routine[];
+  currentMember: TeamMember | null;
+  onOpenProject: (id: string) => void;
+  onOpenTask: (id: string) => void;
+  onRoutinesChange: (routines: Routine[]) => void;
+  onNotice: (message: string) => void;
+}) {
+  const [includeCompleted, setIncludeCompleted] = useState(false);
+  const [savingRoutineId, setSavingRoutineId] = useState<string | null>(null);
+  if (!currentMember) return <EmptyState icon={Briefcase} title="현재 멤버 정보를 확인할 수 없습니다" />;
+
+  const visible = (status: ItemStatus) => includeCompleted || !isCompletedStatus(status);
+  const projects = items.filter((entry) => entry.kind === "project" && visible(entry.status) && entry.assignments.some((assignment) => assignment.memberId === currentMember.id && (assignment.role === "project_dri" || assignment.role === "project_worker")));
+  const tasks = items.filter((entry) => entry.kind === "task" && visible(entry.status) && entry.assignments.some((assignment) => assignment.memberId === currentMember.id && assignment.role === "task_assignee"));
+  const assignedRoutines = routines.filter((entry) => entry.systemKey !== "general" && entry.assigneeMemberId === currentMember.id && (includeCompleted || !entry.completed));
+  const byId = new Map(items.map((entry) => [entry.id, entry]));
+
+  async function toggleRoutine(routine: Routine) {
+    setSavingRoutineId(routine.id);
+    const response = await fetch("/api/routine-completions", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ routineId: routine.id, date: localDate(), completed: !routine.completed }),
+    });
+    setSavingRoutineId(null);
+    if (!response.ok) {
+      onNotice("루틴 완료 상태를 저장하지 못했습니다.");
+      return;
+    }
+    const data = await response.json() as { routine: Routine };
+    onRoutinesChange(routines.map((entry) => entry.id === routine.id ? data.routine : entry));
+  }
+
+  return (
+    <section className="my-work-view">
+      <header className="my-work-toolbar">
+        <div><b>{currentMember.displayName}의 업무</b><span>명시적으로 담당된 항목만 표시합니다.</span></div>
+        <label><input type="checkbox" checked={includeCompleted} onChange={(event) => setIncludeCompleted(event.target.checked)} />완료 포함</label>
+      </header>
+      <MyWorkSection title="Project" count={projects.length}>
+        {projects.map((project) => {
+          const roles = project.assignments.filter((assignment) => assignment.memberId === currentMember.id).map((assignment) => assignment.role === "project_dri" ? "주 담당" : "보조 담당");
+          return <button className="my-work-item" key={project.id} onClick={() => onOpenProject(project.id)}><span className="type-icon type-project">P</span><span><b>{project.title}</b><small>{roles.join(" · ")} · {statusLabel(project.status)} · {dueLabel(project.dueDate)}</small></span><ChevronRight size={15} /></button>;
+        })}
+      </MyWorkSection>
+      <MyWorkSection title="Task" count={tasks.length}>
+        {tasks.map((task) => {
+          const project = task.parentId ? byId.get(task.parentId) : null;
+          const routine = task.routineId ? routines.find((entry) => entry.id === task.routineId) : null;
+          return <button className="my-work-item" key={task.id} onClick={() => onOpenTask(task.id)}><span className="type-icon type-task">T</span><span><b>{task.title}</b><small>{statusLabel(task.status)} · {routine ? routine.title : project?.title ?? "General"} · {dueLabel(task.dueDate)}</small></span><ChevronRight size={15} /></button>;
+        })}
+      </MyWorkSection>
+      <MyWorkSection title="Routine" count={assignedRoutines.length}>
+        {assignedRoutines.map((routine) => <article className="my-work-routine" key={routine.id}><div><span className="type-icon"><Repeat2 size={13} /></span><span><b>{routine.title}</b><small>{routineCadenceLabel(routine.cadence)} · {routine.completed ? "오늘 완료" : "오늘 미완료"}</small></span></div>{(routine.triggerPoint || routine.actionPlace || routine.actionSteps || routine.description) && <p>{[routine.triggerPoint, routine.actionPlace, routine.actionSteps || routine.description].filter(Boolean).join(" · ")}</p>}<button className={routine.completed ? "is-complete" : ""} disabled={savingRoutineId === routine.id || !routine.active} onClick={() => void toggleRoutine(routine)}><Check size={14} />{savingRoutineId === routine.id ? "저장 중" : routine.completed ? "완료 취소" : "오늘 완료"}</button></article>)}
+      </MyWorkSection>
+    </section>
+  );
+}
+
+function MyWorkSection({ title, count, children }: { title: string; count: number; children: ReactNode }) {
+  return <section className="my-work-section"><header><b>{title}</b><span>{count}</span></header><div>{count ? children : <p className="my-work-empty">담당된 {title}가 없습니다.</p>}</div></section>;
 }
 
 function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => void; onNotice: (message: string) => void }) {
@@ -2567,23 +2745,25 @@ function RecommendationsView({ onNavigate }: { onNavigate: (view: View) => void 
   if (loadError) return <AsyncState icon={AlertTriangle} title="추천을 계산하지 못했습니다" detail="워크스페이스 데이터를 다시 확인해 주세요." actionLabel="다시 시도" onAction={() => { setRows(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} />;
   if (!rows) return <AsyncState icon={LoaderCircle} title="추천을 계산하는 중입니다" loading />;
   if (!rows.length) return <EmptyState icon={CheckCircle2} title="지금 바로 정리할 항목이 없습니다" />;
-  return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{row.itemIds.length}개 항목 · 우선순위 {row.score}</small></div><button aria-label={`${row.title} 확인`} title="관련 항목 확인" onClick={() => onNavigate(row.kind === "unlinked" ? "inbox" : row.kind === "empty_project" ? "okr" : "work")}><ChevronRight size={15} /></button></article>)}</section>;
+  return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{row.itemIds.length}개 항목 · 우선순위 {row.score}</small></div><button aria-label={`${row.title} 확인`} title="관련 항목 확인" onClick={() => onNavigate(row.kind === "empty_project" ? "okr" : "work")}><ChevronRight size={15} /></button></article>)}</section>;
 }
 
-function HomeView({ onCreatePlan, context, defaultCycleId }: {
-  onCreatePlan: (plan: OnboardingPlan, cycleId: string | null) => Promise<boolean>;
+function HomeView({ onCreatePlan, onCreateProject, context, defaultCycleId }: {
+  onCreatePlan: (plan: OnboardingPlan, cycleId: string | null) => Promise<PlanCreationResult | null>;
+  onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget) => Promise<boolean>;
   context: OkrChatContext | null;
   defaultCycleId: string | null;
 }) {
   return (
     <div className="home-layout">
-      <HomeOkrChat onCreate={onCreatePlan} context={context} defaultCycleId={defaultCycleId} />
+      <HomeOkrChat onCreate={onCreatePlan} onCreateProject={onCreateProject} context={context} defaultCycleId={defaultCycleId} />
     </div>
   );
 }
 
-function HomeOkrChat({ onCreate, context, defaultCycleId }: {
-  onCreate: (plan: OnboardingPlan, cycleId: string | null) => Promise<boolean>;
+function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
+  onCreate: (plan: OnboardingPlan, cycleId: string | null) => Promise<PlanCreationResult | null>;
+  onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget) => Promise<boolean>;
   context: OkrChatContext | null;
   defaultCycleId: string | null;
 }) {
@@ -2607,11 +2787,14 @@ function HomeOkrChat({ onCreate, context, defaultCycleId }: {
     ? `‘${context.cycleName}’에 ${kindLabel(context.sourceKind)}부터 같이 만들어볼게요. 이번 주기 끝에 어떤 상태가 달라져야 하는지 편하게 적어 주세요.`
     : "업무나 OKR, 서비스 사용법부터 가벼운 질문까지 편하게 물어보세요. 실행으로 옮길 내용이 있으면 OKR 초안도 함께 정리해드립니다.");
   const [guideQuestions, setGuideQuestions] = useState<string[]>(context ? ["달성하고 싶은 변화는 무엇인가요?", "성공 여부는 어떤 숫자나 상태로 확인할까요?"] : []);
-  const [draftOpen, setDraftOpen] = useState(false);
+  const [visibleFields, setVisibleFields] = useState<Set<keyof OnboardingPlan>>(new Set());
+  const [mode, setMode] = useState<ConversationMode>("okr");
+  const [projectTarget, setProjectTarget] = useState<ProjectChatTarget | null>(null);
   const [saving, setSaving] = useState(false);
-  const saveLabel = !plan.objective.trim() && plan.routineTitle.trim() ? "루틴 만들기" : "OKR 만들기";
+  const saveLabel = mode === "project" ? "Project 만들기" : !plan.objective.trim() && plan.routineTitle.trim() ? "루틴 만들기" : "OKR 만들기";
   const hasDraft = hasPlanContent(plan);
   function patch(field: keyof OnboardingPlan, value: string) {
+    setVisibleFields((current) => new Set(current).add(field));
     setPlan((current) => ({ ...current, [field]: value }));
   }
   function hasPlanContent(value: OnboardingPlan) {
@@ -2624,16 +2807,20 @@ function HomeOkrChat({ onCreate, context, defaultCycleId }: {
     const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
     const metricLine = lines.find((line) => /kr|key result|핵심|지표|측정|%|명|건|회|원/i.test(line));
     const actionLines = lines.filter((line) => /해야|하기|정리|확인|만들|준비|진행|검토|배포|인터뷰|실험|측정|개선/i.test(line));
-    setPlan((current) => ({
-      ...current,
-      objective: current.objective || lines[0] || text,
-      keyResult: current.keyResult || metricLine || "",
-      initiative: current.initiative || lines[1] || "",
-      project: current.project || "",
-      tasks: current.tasks || actionLines.slice(0, 5).join("\n"),
-    }));
-    setDraftOpen(true);
-    setAssistantMessage("말씀하신 내용을 기본 방식으로 OKR 초안으로 나눴습니다. OpenAI API 키가 설정되면 문맥을 더 깊게 읽어 정리합니다.");
+    const locallyOrganized: OnboardingPlan = mode === "project" ? {
+      ...emptyPlan,
+      project: plan.project || lines[0] || text,
+      tasks: plan.tasks || actionLines.slice(0, 5).join("\n"),
+    } : {
+      ...plan,
+      objective: plan.objective || lines[0] || text,
+      keyResult: plan.keyResult || metricLine || "",
+      initiative: plan.initiative || lines[1] || "",
+      tasks: plan.tasks || actionLines.slice(0, 5).join("\n"),
+    };
+    setPlan(locallyOrganized);
+    setVisibleFields((current) => new Set([...current, ...planFieldsWithValues(locallyOrganized)]));
+    setAssistantMessage(mode === "project" ? "말씀하신 내용을 첫 Project 초안으로 정리했습니다." : "말씀하신 내용을 기본 방식으로 OKR 초안으로 나눴습니다. OpenAI API 키가 설정되면 문맥을 더 깊게 읽어 정리합니다.");
     setGuideQuestions([]);
   }
   async function organizeMessage() {
@@ -2646,7 +2833,7 @@ function HomeOkrChat({ onCreate, context, defaultCycleId }: {
       const response = await fetch("/api/okr-organize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, plan }),
+        body: JSON.stringify({ message: text, plan, mode, parentContext: projectTarget ? { initiativeTitle: projectTarget.initiativeTitle } : undefined }),
       });
       const data = await response.json() as ({ organized: OrganizedOkr } & OrganizeError);
       if (!response.ok) {
@@ -2654,7 +2841,7 @@ function HomeOkrChat({ onCreate, context, defaultCycleId }: {
           if (looksLikePlanningInput(text)) organizeLocally(text);
           else {
             setPlan({ ...emptyPlan });
-            setDraftOpen(false);
+            setVisibleFields(new Set());
           }
           setAssistantMessage(aiLimitMessage(data));
           setGuideQuestions(data.options?.length ? data.options : ["유료 플랜으로 서버 AI 정리 계속 사용", "개인 OpenAI API 키 연결", "ChatGPT에서 OKRPTR MCP로 연결해 직접 정리"]);
@@ -2662,15 +2849,16 @@ function HomeOkrChat({ onCreate, context, defaultCycleId }: {
         }
         throw new Error("organize failed");
       }
-      setPlan(data.organized.plan);
-      setDraftOpen(hasPlanContent(data.organized.plan));
+      const mergedPlan = mergePlan(plan, data.organized.plan);
+      setPlan(mergedPlan);
+      setVisibleFields((current) => new Set([...current, ...planFieldsWithValues(mergedPlan)]));
       setAssistantMessage(data.organized.assistantMessage);
       setGuideQuestions(data.organized.questions);
     } catch {
       if (looksLikePlanningInput(text)) organizeLocally(text);
       else {
         setPlan({ ...emptyPlan });
-        setDraftOpen(false);
+        setVisibleFields(new Set());
         setAssistantMessage("지금은 답변을 불러오지 못했습니다. 잠시 후 다시 보내 주세요.");
         setGuideQuestions([]);
       }
@@ -2680,31 +2868,45 @@ function HomeOkrChat({ onCreate, context, defaultCycleId }: {
   }
   function chooseGuide(kind: "team" | "personal" | "routine" | "free") {
     setPlan({ ...emptyPlan });
+    setVisibleFields(new Set());
+    setMode("okr");
+    setProjectTarget(null);
     setMessage("");
     setLastUserMessage("");
     if (kind === "team") {
       setAssistantMessage("팀 OKR로 시작하겠습니다. 팀이 이번 주기 끝에 달라져야 하는 상태부터 잡고, 공동 지표와 실행 책임을 나눕니다.");
       setGuideQuestions(["팀이 달성해야 하는 결과는 무엇인가요?", "성공 여부를 숫자나 상태로 어떻게 확인할까요?", "어떤 프로젝트와 담당자가 먼저 움직여야 하나요?"]);
-      setDraftOpen(true);
       return;
     }
     if (kind === "personal") {
       setAssistantMessage("개인 OKR로 시작하겠습니다. 역할 안에서 만들고 싶은 변화, 측정 기준, 바로 실행할 일을 분리합니다.");
       setGuideQuestions(["이번 주기 동안 본인이 만들고 싶은 변화는 무엇인가요?", "완료가 아니라 성과를 보여주는 기준은 무엇인가요?", "이번 주에 바로 시작할 일은 무엇인가요?"]);
-      setDraftOpen(true);
       return;
     }
     if (kind === "routine") {
       setAssistantMessage("루틴부터 정리하겠습니다. 반복할 시점, 장소나 도구, 실제 행동 순서를 먼저 잡고 필요하면 OKR에 연결합니다.");
       setGuideQuestions(["언제 이 루틴이 시작돼야 하나요?", "어디서 또는 어떤 도구에서 실행하나요?", "무엇을 어떤 순서로 하면 되나요?"]);
-      setDraftOpen(true);
       return;
     }
     setAssistantMessage("좋습니다. 정해진 양식 없이 질문하거나 지금 생각나는 대로 적어 주세요. 실행 계획이 보이면 OKR 구조도 함께 제안합니다.");
     setGuideQuestions([]);
-    setDraftOpen(false);
   }
   async function save() {
+    if (mode === "project") {
+      if (!projectTarget || !plan.project.trim()) {
+        await organizeMessage();
+        return;
+      }
+      setSaving(true);
+      const created = await onCreateProject(plan, projectTarget);
+      setSaving(false);
+      if (created) {
+        setPlan({ ...emptyPlan });
+        setVisibleFields(new Set());
+        setProjectTarget(null);
+      }
+      return;
+    }
     if (!plan.objective.trim() && !plan.routineTitle.trim()) {
       await organizeMessage();
       return;
@@ -2717,9 +2919,25 @@ function HomeOkrChat({ onCreate, context, defaultCycleId }: {
       setLastUserMessage("");
       setPlan({ ...emptyPlan });
       setGuideQuestions([]);
-      setDraftOpen(false);
-      setAssistantMessage("OKR 구조를 만들었습니다. 다음 목표나 루틴도 이어서 이야기할 수 있습니다.");
+      setVisibleFields(new Set());
+      if (created.initiativeId && !created.projectId) {
+        setProjectTarget({ cycleId: created.cycleId, initiativeId: created.initiativeId, initiativeTitle: created.initiativeTitle });
+        setAssistantMessage("OKR 구조를 만들었습니다. 이 대화에서 첫 실행 Project도 이어서 정리할 수 있습니다.");
+      } else {
+        setProjectTarget(null);
+        setAssistantMessage("OKR 구조를 만들었습니다. 다음 목표도 이어서 이야기할 수 있습니다.");
+      }
     }
+  }
+  function startProjectConversation() {
+    if (!projectTarget) return;
+    setMode("project");
+    setPlan({ ...emptyPlan });
+    setVisibleFields(new Set());
+    setMessage("");
+    setLastUserMessage("");
+    setAssistantMessage(`‘${projectTarget.initiativeTitle}’ 아래 첫 Project를 같이 정리해볼게요. 만들려는 결과와 범위를 편하게 말해 주세요.`);
+    setGuideQuestions(["이 Project가 끝났을 때 무엇이 달라져야 하나요?", "첫 Task로 바로 시작할 일은 무엇인가요?"]);
   }
   return (
     <section className="home-okr-chat" aria-labelledby="home-okr-chat-title">
@@ -2728,36 +2946,46 @@ function HomeOkrChat({ onCreate, context, defaultCycleId }: {
       </header>
       <div className="home-chat-surface">
         <div className="chat-thread">
-          {context && <div className="chat-okr-context"><Target size={14} /><span><b>{context.cycleName}</b>에 초안 저장</span></div>}
+          {context && mode === "okr" && <div className="chat-okr-context"><Target size={14} /><span><b>{context.cycleName}</b>에 초안 저장</span></div>}
+          {mode === "project" && projectTarget && <div className="chat-okr-context"><Briefcase size={14} /><span><b>{projectTarget.initiativeTitle}</b> 아래 Project 작성</span></div>}
           {lastUserMessage && <p className="user-message">{lastUserMessage}</p>}
           <p className="assistant-message">{assistantMessage}</p>
           {guideQuestions.length > 0 && <div className="assistant-followups">{guideQuestions.map((question) => <p className="assistant-message followup-message" key={question}>{question}</p>)}</div>}
           <label className="chat-input"><span>메시지</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void organizeMessage(); }} rows={4} placeholder="질문, 고민, 목표, 해야 할 일을 편하게 적어 주세요." /></label>
-          <div className="chat-presets">
+          {mode === "okr" && <div className="chat-presets">
             <button onClick={() => chooseGuide("team")}>팀 OKR</button>
             <button onClick={() => chooseGuide("personal")}>개인 OKR</button>
             <button onClick={() => chooseGuide("routine")}>루틴부터</button>
             <button onClick={() => chooseGuide("free")}>그냥 말하기</button>
-          </div>
+          </div>}
           <div className="chat-actions">
             <button className="chat-apply" onClick={() => void organizeMessage()} disabled={saving || !message.trim()}><TextCursorInput size={13} />{saving ? "답변 중" : "보내기"}</button>
-            {hasDraft && <button className="welcome-primary" onClick={() => void save()} disabled={saving || (!plan.objective.trim() && !plan.routineTitle.trim())}>{saving ? "생성 중" : saveLabel}<ChevronRight size={14} /></button>}
+            {hasDraft && <button className="welcome-primary" onClick={() => void save()} disabled={saving || (mode === "project" ? !plan.project.trim() : !plan.objective.trim() && !plan.routineTitle.trim())}>{saving ? "생성 중" : saveLabel}<ChevronRight size={14} /></button>}
           </div>
+          {mode === "okr" && projectTarget && <button className="project-nudge-button" onClick={startProjectConversation}><Briefcase size={14} />첫 Project를 만들어볼까요?<ChevronRight size={14} /></button>}
         </div>
-        {draftOpen && <div className="okr-setup-fields home-draft-fields">
-          <label><span>Objective</span><textarea value={plan.objective} onChange={(event) => patch("objective", event.target.value)} rows={3} placeholder="달성하고 싶은 결과" /></label>
-          <label><span>Key Result</span><textarea value={plan.keyResult} onChange={(event) => patch("keyResult", event.target.value)} rows={3} placeholder="성공을 확인할 수 있는 기준" /></label>
-          <label><span>Initiative</span><input value={plan.initiative} onChange={(event) => patch("initiative", event.target.value)} placeholder="성과를 만들 큰 방향" /></label>
-          <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="실제로 진행할 프로젝트" /></label>
-          <label className="wide"><span>첫 Task</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder="한 줄에 하나씩 입력" /></label>
-          <label><span>루틴 이름</span><input value={plan.routineTitle} onChange={(event) => patch("routineTitle", event.target.value)} placeholder="반복해서 할 일의 이름" /></label>
-          <label><span>루틴 트리거</span><input value={plan.routineTrigger} onChange={(event) => patch("routineTrigger", event.target.value)} placeholder="루틴이 시작되는 시점" /></label>
-          <label><span>어디서</span><input value={plan.routinePlace} onChange={(event) => patch("routinePlace", event.target.value)} placeholder="실행할 장소나 도구" /></label>
-          <label className="wide"><span>무엇을 어떻게</span><textarea value={plan.routineSteps} onChange={(event) => patch("routineSteps", event.target.value)} rows={3} placeholder="루틴 실행 방법" /></label>
+        {visibleFields.size > 0 && <div className="okr-setup-fields home-draft-fields">
+          {visibleFields.has("objective") && <label><span>Objective</span><textarea value={plan.objective} onChange={(event) => patch("objective", event.target.value)} rows={3} placeholder="달성하고 싶은 결과" /></label>}
+          {visibleFields.has("keyResult") && <label><span>Key Result</span><textarea value={plan.keyResult} onChange={(event) => patch("keyResult", event.target.value)} rows={3} placeholder="성공을 확인할 수 있는 기준" /></label>}
+          {visibleFields.has("initiative") && <label><span>Initiative</span><input value={plan.initiative} onChange={(event) => patch("initiative", event.target.value)} placeholder="성과를 만들 큰 방향" /></label>}
+          {visibleFields.has("project") && <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="실제로 진행할 프로젝트" /></label>}
+          {visibleFields.has("tasks") && <label className="wide"><span>첫 Task</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder="한 줄에 하나씩 입력" /></label>}
+          {visibleFields.has("routineTitle") && <label><span>루틴 이름</span><input value={plan.routineTitle} onChange={(event) => patch("routineTitle", event.target.value)} placeholder="반복해서 할 일의 이름" /></label>}
+          {visibleFields.has("routineTrigger") && <label><span>루틴 트리거</span><input value={plan.routineTrigger} onChange={(event) => patch("routineTrigger", event.target.value)} placeholder="루틴이 시작되는 시점" /></label>}
+          {visibleFields.has("routinePlace") && <label><span>어디서</span><input value={plan.routinePlace} onChange={(event) => patch("routinePlace", event.target.value)} placeholder="실행할 장소나 도구" /></label>}
+          {visibleFields.has("routineSteps") && <label className="wide"><span>무엇을 어떻게</span><textarea value={plan.routineSteps} onChange={(event) => patch("routineSteps", event.target.value)} rows={3} placeholder="루틴 실행 방법" /></label>}
         </div>}
       </div>
     </section>
   );
+}
+
+function planFieldsWithValues(plan: OnboardingPlan) {
+  return (Object.keys(plan) as (keyof OnboardingPlan)[]).filter((field) => plan[field].trim());
+}
+
+function mergePlan(current: OnboardingPlan, organized: OnboardingPlan) {
+  return Object.fromEntries((Object.keys(current) as (keyof OnboardingPlan)[]).map((field) => [field, organized[field] || current[field]])) as OnboardingPlan;
 }
 
 function aiLimitMessage(error: OrganizeError) {
@@ -3018,7 +3246,7 @@ function BoardView({ items, onOpenItem }: { items: OkrptrItem[]; onOpenItem: (it
   return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <button className="board-item" key={entry.id} onClick={() => onOpenItem(entry)}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
 }
 
-function TaskListView({ items, allItems, routines, onOpenTask, onConnect, onPatch }: { items: OkrptrItem[]; allItems: OkrptrItem[]; routines: Routine[]; onOpenTask: (id: string) => void; onConnect: (item: OkrptrItem) => void; onPatch: (id: string, patch: Partial<OkrptrItem>) => Promise<void> }) {
+function TaskListView({ items, allItems, routines, onOpenTask, onPatch }: { items: OkrptrItem[]; allItems: OkrptrItem[]; routines: Routine[]; onOpenTask: (id: string) => void; onPatch: (id: string, patch: Partial<OkrptrItem>) => Promise<void> }) {
   const [visibleCount, setVisibleCount] = useState(20);
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
   if (!items.length) return <EmptyState icon={Inbox} title="Task가 없습니다" />;
@@ -3028,8 +3256,7 @@ function TaskListView({ items, allItems, routines, onOpenTask, onConnect, onPatc
       {items.slice(0, visibleCount).map((entry) => {
         const project = entry.parentId ? byId.get(entry.parentId) : undefined;
         const routine = entry.routineId ? routines.find((row) => row.id === entry.routineId) : undefined;
-        const relation = routine ? `Routine · ${routine.title}` : project ? `Project · ${project.title}` : "인박스";
-        const disconnected = !entry.parentId && !entry.routineId;
+        const relation = routine ? `Routine · ${routine.title}` : project ? `Project · ${project.title}` : "General";
         return (
           <article className="inbox-item task-list-item" key={entry.id}>
             <button className="task-list-title" onClick={() => onOpenTask(entry.id)}>
@@ -3042,7 +3269,7 @@ function TaskListView({ items, allItems, routines, onOpenTask, onConnect, onPatc
             <span className="task-assignee-cell"><i>담당자</i>{assignmentLabel(entry, "task_assignee")}</span>
             <button className="task-relation-button" onClick={() => onOpenTask(entry.id)}><i>상위 연결</i>{relation}</button>
             <span className={`source-badge source-${entry.source}`}><i>출처</i>{sourceLabel(entry.source)}</span>
-            {disconnected ? <button onClick={() => onConnect(entry)}><Link2 size={14} />연결</button> : <button onClick={() => onOpenTask(entry.id)}><MoreHorizontal size={14} />상세</button>}
+            <button onClick={() => onOpenTask(entry.id)}><MoreHorizontal size={14} />상세</button>
           </article>
         );
       })}
@@ -3856,7 +4083,7 @@ function SlackAutomationManager({ connected, canManage, workspaceName, onNotice 
         <label><span>자동화 이름</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="예: 새 업무 알림" maxLength={80} /></label>
         <label><span>Slack 채널 ID</span><input value={draft.channelId} onChange={(event) => setDraft({ ...draft, channelId: event.target.value.toUpperCase() })} placeholder="C0123456789" maxLength={32} /></label>
         <label><span>트리거</span><select value={draft.triggerType} onChange={(event) => { const triggerType = event.target.value as SlackAutomationTrigger; setDraft({ ...draft, triggerType, triggerStatus: "", messageTemplate: slackAutomationDefaults[triggerType] }); }}><option value="task_created">업무가 생성될 때</option><option value="task_status_changed">업무 상태가 바뀔 때</option></select></label>
-        {draft.triggerType === "task_status_changed" && <label><span>바뀐 상태</span><select value={draft.triggerStatus} onChange={(event) => setDraft({ ...draft, triggerStatus: event.target.value })}><option value="">모든 상태</option>{(["inbox", "backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked"] as ItemStatus[]).map((status) => <option value={status} key={status}>{statusLabel(status)}</option>)}</select></label>}
+        {draft.triggerType === "task_status_changed" && <label><span>바뀐 상태</span><select value={draft.triggerStatus} onChange={(event) => setDraft({ ...draft, triggerStatus: event.target.value })}><option value="">모든 상태</option>{(["backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked"] as ItemStatus[]).map((status) => <option value={status} key={status}>{statusLabel(status)}</option>)}</select></label>}
       </div>
       <label className="slack-message-field"><span>보낼 메시지</span><textarea value={draft.messageTemplate} onChange={(event) => setDraft({ ...draft, messageTemplate: event.target.value })} maxLength={3000} rows={4} /></label>
       <div className="slack-variable-row"><span>변수</span>{["{{title}}", "{{status}}", "{{from_status}}", "{{priority}}", "{{workspace}}"].map((variable) => <button type="button" key={variable} onClick={() => setDraft({ ...draft, messageTemplate: `${draft.messageTemplate}${draft.messageTemplate.endsWith(" ") || draft.messageTemplate.endsWith("\n") ? "" : " "}${variable}` })}>{variable}</button>)}</div>
@@ -3886,7 +4113,7 @@ function formatSlackAutomationTime(value: string | null) {
 
 function EmptyState({ icon: Icon, title }: { icon: LucideIcon; title: string }) { return <div className="empty-state"><Icon size={22} /><span>{title}</span></div>; }
 
-const statusLabels: Record<ItemStatus, string> = { inbox: "\uC778\uBC15\uC2A4", backlog: "\uBC31\uB85C\uADF8", todo: "\uD560 \uC77C", policy_discussion: "\uC815\uCC45 \uB17C\uC758 \uC911", in_progress: "\uC9C4\uD589 \uC911", developing: "\uAC1C\uBC1C \uC911", development_done: "\uAC1C\uBC1C \uC644\uB8CC", done: "\uC644\uB8CC", blocked: "\uB9C9\uD798", archived: "\uC544\uCE74\uC774\uBE0C" };
+const statusLabels: Record<ItemStatus, string> = { backlog: "\uBC31\uB85C\uADF8", todo: "\uD560 \uC77C", policy_discussion: "\uC815\uCC45 \uB17C\uC758 \uC911", in_progress: "\uC9C4\uD589 \uC911", developing: "\uAC1C\uBC1C \uC911", development_done: "\uAC1C\uBC1C \uC644\uB8CC", done: "\uC644\uB8CC", blocked: "\uB9C9\uD798", archived: "\uC544\uCE74\uC774\uBE0C" };
 const priorityLabels: Record<Priority, string> = { low: "낮음", medium: "보통", high: "높음", urgent: "긴급" };
 const groupColors: GroupColor[] = ["gray", "blue", "green", "yellow", "orange", "red", "purple"];
 
@@ -3927,6 +4154,6 @@ function preferredIntroLanguage(): IntroLanguage {
   if (language.startsWith("es")) return "es";
   return "en";
 }
-function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", inbox: "Project나 Routine에 연결된 Task까지 함께 확인", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "반복되는 실행을 날짜별로 기록", okr: "Objective부터 Task까지의 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "클린업으로 보관한 OKR 실행 데이터" }[view]; }
+function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "반복되는 실행을 날짜별로 기록", okr: "Objective부터 Task까지의 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "클린업으로 보관한 OKR 실행 데이터" }[view]; }
 function routineCadenceLabel(cadence: RoutineCadence) { return { daily: "매일", weekly: "매주", monthly: "매월" }[cadence]; }
-function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "unlinked") return "↗"; if (kind === "due_soon") return "3"; return "P"; }
+function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "due_soon") return "3"; return "P"; }

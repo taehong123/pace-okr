@@ -148,6 +148,83 @@ test("adds a 30-day workspace deletion grace period", async () => {
   db.close();
 });
 
+test("creates one General per workspace and migrates parentless Tasks and personal assignments", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE workspaces (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_user_id TEXT NOT NULL
+    );
+    CREATE TABLE workspace_members (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      user_id TEXT, email TEXT NOT NULL DEFAULT '', display_name TEXT NOT NULL DEFAULT '',
+      role TEXT NOT NULL DEFAULT 'member', status TEXT NOT NULL DEFAULT 'active'
+    );
+    CREATE TABLE routines (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', trigger_point TEXT NOT NULL DEFAULT '',
+      action_place TEXT NOT NULL DEFAULT '', action_steps TEXT NOT NULL DEFAULT '',
+      cadence TEXT NOT NULL DEFAULT 'daily', active INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE items (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      cycle_id TEXT, parent_id TEXT, routine_id TEXT REFERENCES routines(id) ON DELETE SET NULL,
+      kind TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'todo', priority TEXT NOT NULL DEFAULT 'medium',
+      cadence TEXT NOT NULL DEFAULT 'weekly', progress INTEGER NOT NULL DEFAULT 0,
+      due_date TEXT, source TEXT NOT NULL DEFAULT 'web', source_ref TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0, archived_at TEXT, archived_from_status TEXT,
+      archive_root_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE item_assignments (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+      member_id TEXT NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
+      role TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(owner_id, item_id, member_id, role)
+    );
+    CREATE TABLE slack_automations (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, trigger_status TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES
+      ('personal', 'Personal', 'personal'), ('team', 'Team', 'owner-user');
+    INSERT INTO workspace_members (id, workspace_id, user_id, display_name, status) VALUES
+      ('personal-member', 'personal', 'personal', '개인 사용자', 'active'),
+      ('team-owner', 'team', 'owner-user', '팀 소유자', 'active'),
+      ('team-member', 'team', 'teammate', '팀 멤버', 'active');
+    INSERT INTO routines (id, owner_id, title) VALUES
+      ('personal-routine', 'personal', 'Daily review'), ('team-routine', 'team', 'Team review');
+    INSERT INTO items (id, owner_id, kind, title, status, due_date, source) VALUES
+      ('personal-project', 'personal', 'project', 'Personal Project', 'todo', '2026-09-01', 'web'),
+      ('personal-inbox', 'personal', 'task', 'Legacy Inbox', 'inbox', '2026-09-02', 'slack'),
+      ('team-orphan', 'team', 'task', 'Team General Task', 'todo', '2026-09-03', 'mcp');
+  `);
+
+  const migration = await readFile(new URL("../drizzle/0021_mixed_maginty.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM routines WHERE system_key = 'general'").get().count, 2);
+  assert.deepEqual({ ...db.prepare("SELECT title, status, due_date, source, routine_id, cycle_id FROM items WHERE id = 'personal-inbox'").get() }, {
+    title: "Legacy Inbox",
+    status: "todo",
+    due_date: "2026-09-02",
+    source: "slack",
+    routine_id: "general-personal",
+    cycle_id: null,
+  });
+  assert.equal(db.prepare("SELECT routine_id FROM items WHERE id = 'team-orphan'").get().routine_id, "general-team");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM item_assignments WHERE owner_id = 'personal'").get().count, 2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM item_assignments WHERE owner_id = 'team'").get().count, 0);
+  assert.equal(db.prepare("SELECT assignee_member_id FROM routines WHERE id = 'personal-routine'").get().assignee_member_id, "personal-member");
+  assert.equal(db.prepare("SELECT assignee_member_id FROM routines WHERE id = 'team-routine'").get().assignee_member_id, null);
+  assert.throws(() => db.exec("INSERT INTO routines (id, owner_id, system_key, title) VALUES ('duplicate', 'personal', 'general', 'Duplicate')"), /UNIQUE constraint failed/);
+  db.close();
+});
+
 test("archives Projects with Tasks and preserves structured assignments and hidden properties", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`

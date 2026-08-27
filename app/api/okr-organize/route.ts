@@ -29,6 +29,8 @@ type OrganizedOkr = {
   };
 };
 
+type ConversationMode = "okr" | "project";
+
 const maxOutputTokens = 1800;
 
 const okrSchema = {
@@ -80,7 +82,15 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as Record<string, unknown>;
     const message = typeof payload.message === "string" ? payload.message.trim() : "";
     const currentPlan = typeof payload.plan === "object" && payload.plan ? payload.plan : {};
+    const mode: ConversationMode = payload.mode === "project" ? "project" : "okr";
+    const parentContext = payload.parentContext && typeof payload.parentContext === "object"
+      ? payload.parentContext as Record<string, unknown>
+      : {};
+    const initiativeTitle = typeof parentContext.initiativeTitle === "string" ? parentContext.initiativeTitle.trim() : "";
     if (!message) return Response.json({ error: "message is required" }, { status: 400 });
+    if (mode === "project" && !initiativeTitle) {
+      return Response.json({ error: "initiative context is required for project mode" }, { status: 400 });
+    }
 
     const runtime = env as RuntimeEnv;
     const apiKey = runtime.OPENAI_API_KEY;
@@ -105,14 +115,17 @@ export async function POST(request: Request) {
         input: [
           {
             role: "system",
-            content:
-              "You are the conversational assistant inside OKRPTR. Always respond to the user's actual message first, in the user's language, including greetings, product questions, general work questions, and ordinary factual questions. Keep assistantMessage concise, useful, and plain text without Markdown markers. When the message contains a real goal, work plan, recurring habit, or execution commitment, also organize only the supported details into the OKR plan. For greetings, casual conversation, product questions, or general questions, leave every plan field empty and usually leave questions empty so the UI shows only the answer. Infer planning intent semantically, not by keyword. Do not invent specific metrics. Ask at most concise follow-up questions when a requested OKR structure is missing essential information. Keep routines separate from the OKR hierarchy. Treat Initiative as the strategic execution direction under a Key Result. Do not create a Project unless the user clearly describes a concrete project with owner, timing, or scope; leave project empty when it is ambiguous or overlaps with the Initiative. Do not invent Tasks; only include tasks explicitly stated or strongly implied by the user.",
+            content: mode === "project"
+              ? "You are the conversational assistant inside OKRPTR, helping plan the first Project under an existing Initiative. Always answer the user's actual message first in the user's language. Keep assistantMessage concise and plain text without Markdown markers. Only put a Project, explicitly stated Tasks, and explicitly stated Routine details into the plan. Keep objective, keyResult, and initiative empty because the Initiative already exists. Do not invent Tasks or Routine details. Ask at most three concise questions when the Project is too vague to create."
+              : "You are the conversational assistant inside OKRPTR. Always respond to the user's actual message first, in the user's language, including greetings, product questions, general work questions, and ordinary factual questions. Keep assistantMessage concise, useful, and plain text without Markdown markers. When the message contains a real goal, work plan, recurring habit, or execution commitment, also organize only the supported details into the OKR plan. For greetings, casual conversation, product questions, or general questions, leave every plan field empty and usually leave questions empty so the UI shows only the answer. Infer planning intent semantically, not by keyword. Do not invent specific metrics. Ask at most concise follow-up questions when a requested OKR structure is missing essential information. Keep routines separate from the OKR hierarchy. Treat Initiative as the strategic execution direction under a Key Result. An Initiative may only exist under a Key Result. Do not create a Project unless the user clearly describes a concrete project with owner, timing, or scope; leave project empty when it is ambiguous or overlaps with the Initiative. Do not invent Tasks; only include Tasks and Routine details explicitly stated by the user.",
           },
           {
             role: "user",
             content: JSON.stringify({
               message,
               currentPlan,
+              mode,
+              parentContext: mode === "project" ? { initiativeTitle } : undefined,
               desiredHierarchy: "Objective > Key Result > Initiative, then optional Project > Task during execution planning",
               projectRule: "If Project and Initiative would be similar, keep the idea as Initiative and leave Project empty.",
               routineShape: "trigger point, where/tool, what/how steps",
@@ -150,7 +163,7 @@ export async function POST(request: Request) {
     const text = extractOutputText(data);
     if (!text) return Response.json({ error: "OpenAI response was empty", code: "empty_openai_response" }, { status: 502 });
 
-    return Response.json({ organized: normalizeOrganized(JSON.parse(text) as OrganizedOkr) });
+    return Response.json({ organized: normalizeOrganized(JSON.parse(text) as OrganizedOkr, mode) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     const status = /required|not configured/i.test(message) ? 400 : 500;
@@ -262,21 +275,27 @@ function extractOutputText(data: Record<string, unknown>) {
     .join("\n");
 }
 
-function normalizeOrganized(value: OrganizedOkr): OrganizedOkr {
+function normalizeOrganized(value: OrganizedOkr, mode: ConversationMode): OrganizedOkr {
+  const plan = {
+    objective: clean(value.plan?.objective),
+    keyResult: clean(value.plan?.keyResult),
+    initiative: clean(value.plan?.initiative),
+    project: clean(value.plan?.project),
+    tasks: clean(value.plan?.tasks),
+    routineTitle: clean(value.plan?.routineTitle),
+    routineTrigger: clean(value.plan?.routineTrigger),
+    routinePlace: clean(value.plan?.routinePlace),
+    routineSteps: clean(value.plan?.routineSteps),
+  };
+  if (mode === "project") {
+    plan.objective = "";
+    plan.keyResult = "";
+    plan.initiative = "";
+  }
   return {
     assistantMessage: clean(value.assistantMessage) || "말씀하신 내용을 OKR 초안으로 정리했습니다.",
     questions: Array.isArray(value.questions) ? value.questions.map(clean).filter(Boolean).slice(0, 3) : [],
-    plan: {
-      objective: clean(value.plan?.objective),
-      keyResult: clean(value.plan?.keyResult),
-      initiative: clean(value.plan?.initiative),
-      project: clean(value.plan?.project),
-      tasks: clean(value.plan?.tasks),
-      routineTitle: clean(value.plan?.routineTitle),
-      routineTrigger: clean(value.plan?.routineTrigger),
-      routinePlace: clean(value.plan?.routinePlace),
-      routineSteps: clean(value.plan?.routineSteps),
-    },
+    plan,
   };
 }
 

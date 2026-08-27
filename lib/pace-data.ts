@@ -57,13 +57,14 @@ import {
 } from "@/lib/slack-automation";
 
 export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "task"] as const;
-export const ITEM_STATUSES = ["inbox", "backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked", "archived"] as const;
+export const ITEM_STATUSES = ["backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked", "archived"] as const;
 export const ITEM_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export const ITEM_CADENCES = ["daily", "weekly", "monthly", "quarterly"] as const;
 export const OKR_CYCLE_STATUSES = ["planned", "active", "closed"] as const;
 export const PROPERTY_TYPES = ["text", "number", "select", "date", "checkbox"] as const;
 export const ITEM_ASSIGNMENT_ROLES = ["project_dri", "project_worker", "task_assignee"] as const;
 export const ROUTINE_CADENCES = ["daily", "weekly", "monthly"] as const;
+export const GENERAL_ROUTINE_SYSTEM_KEY = "general";
 const LEGACY_SEED_OBJECTIVE_TITLE = "셀프 서브 도입으로 팀의 성장 속도를 높인다";
 const LEGACY_SEED_ITEM_TITLES = [
   LEGACY_SEED_OBJECTIVE_TITLE,
@@ -363,6 +364,8 @@ async function ensureSchema() {
         d1.prepare(`CREATE TABLE IF NOT EXISTS routines (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL,
+          system_key TEXT,
+          assignee_member_id TEXT REFERENCES workspace_members(id) ON DELETE SET NULL,
           title TEXT NOT NULL,
           description TEXT NOT NULL DEFAULT '',
           trigger_point TEXT NOT NULL DEFAULT '',
@@ -374,6 +377,8 @@ async function ensureSchema() {
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_routines_owner_system_key ON routines(owner_id, system_key) WHERE system_key IS NOT NULL"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_routines_assignee ON routines(assignee_member_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_routines_owner_active ON routines(owner_id, active)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_routines_owner_sort ON routines(owner_id, sort_order)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS routine_completions (
@@ -513,6 +518,8 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN trigger_point TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN action_place TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN action_steps TEXT NOT NULL DEFAULT ''");
+      await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN system_key TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN assignee_member_id TEXT REFERENCES workspace_members(id) ON DELETE SET NULL");
       await addColumnIfMissing(d1, "ALTER TABLE okr_cycles ADD COLUMN department TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN cycle_id TEXT REFERENCES okr_cycles(id) ON DELETE SET NULL");
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN routine_id TEXT REFERENCES routines(id) ON DELETE SET NULL");
@@ -524,6 +531,8 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN scheduled_deletion_at TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN deletion_requested_by_user_id TEXT");
       await d1.batch([
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_routines_owner_system_key ON routines(owner_id, system_key) WHERE system_key IS NOT NULL"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_routines_assignee ON routines(assignee_member_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspaces_scheduled_deletion ON workspaces(scheduled_deletion_at)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_routine ON items(owner_id, routine_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_cycle ON items(owner_id, cycle_id)"),
@@ -554,6 +563,11 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       deletion_requested_by_user_id
     FROM workspaces
     LIMIT 0`).first();
+    await d1.prepare(`SELECT
+      system_key,
+      assignee_member_id
+    FROM routines
+    LIMIT 0`).first();
     return true;
   } catch {
     return false;
@@ -574,17 +588,97 @@ export async function ensureWorkspace(ownerId: string) {
   if (!ready) {
     ready = (async () => {
       await ensureSchema();
-      if (await workspaceInitializationIsCurrent(ownerId)) return;
-      await migrateLegacyHierarchy(ownerId);
-      await removeLegacySeedWorkspaceData(ownerId);
-      await seedProjectExecutionProperties(ownerId);
-      await migrateLegacyItemAssignments(ownerId);
-      await ensureActiveOkrCycle(ownerId);
+      if (!await workspaceInitializationIsCurrent(ownerId)) {
+        await migrateLegacyHierarchy(ownerId);
+        await removeLegacySeedWorkspaceData(ownerId);
+        await seedProjectExecutionProperties(ownerId);
+        await migrateLegacyItemAssignments(ownerId);
+        await ensureActiveOkrCycle(ownerId);
+      }
+      const general = await ensureGeneralRoutine(ownerId);
+      await migrateInboxTasksToGeneral(ownerId, general.id);
+      await migratePersonalWorkspaceAssignments(ownerId);
     })();
     workspaceReady.set(ownerId, ready);
     void ready.catch(() => workspaceReady.delete(ownerId));
   }
   await ready;
+}
+
+function generalRoutineId(ownerId: string) {
+  return `general-${ownerId}`;
+}
+
+export async function ensureGeneralRoutine(ownerId: string) {
+  const now = new Date().toISOString();
+  await getDb().insert(routines).values({
+    id: generalRoutineId(ownerId),
+    ownerId,
+    systemKey: GENERAL_ROUTINE_SYSTEM_KEY,
+    assigneeMemberId: null,
+    title: "General",
+    description: "Project나 개별 Routine에 속하지 않는 일반 업무",
+    cadence: "daily",
+    active: true,
+    sortOrder: -1000,
+    createdAt: now,
+    updatedAt: now,
+  }).onConflictDoNothing();
+  const [general] = await getDb()
+    .select()
+    .from(routines)
+    .where(and(eq(routines.ownerId, ownerId), eq(routines.systemKey, GENERAL_ROUTINE_SYSTEM_KEY)))
+    .limit(1);
+  if (!general) throw new Error("General routine could not be initialized");
+  return general;
+}
+
+async function migrateInboxTasksToGeneral(ownerId: string, routineId: string) {
+  await getDb().update(items).set({
+    routineId,
+    cycleId: null,
+    status: "todo",
+    updatedAt: new Date().toISOString(),
+  }).where(and(
+    eq(items.ownerId, ownerId),
+    eq(items.kind, "task"),
+    isNull(items.parentId),
+    isNull(items.routineId),
+  ));
+  await getDb().update(items).set({ status: "todo", updatedAt: new Date().toISOString() })
+    .where(and(eq(items.ownerId, ownerId), eq(items.status, "inbox")));
+  await getDb().update(items).set({ archivedFromStatus: "todo", updatedAt: new Date().toISOString() })
+    .where(and(eq(items.ownerId, ownerId), eq(items.archivedFromStatus, "inbox")));
+  await getDb().update(slackAutomations).set({ triggerStatus: "todo", updatedAt: new Date().toISOString() })
+    .where(and(eq(slackAutomations.ownerId, ownerId), eq(slackAutomations.triggerStatus, "inbox")));
+}
+
+async function migratePersonalWorkspaceAssignments(ownerId: string) {
+  const [workspace] = await getDb().select().from(workspaces).where(eq(workspaces.id, ownerId)).limit(1);
+  if (!workspace || workspace.ownerUserId !== ownerId) return;
+  const members = await getDb().select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(
+    eq(workspaceMembers.workspaceId, ownerId),
+    eq(workspaceMembers.status, "active"),
+  ));
+  if (members.length !== 1) return;
+  const memberId = members[0].id;
+  const d1 = (env as RuntimeEnv).DB;
+  const now = new Date().toISOString();
+  await d1.batch([
+    d1.prepare(`INSERT OR IGNORE INTO item_assignments
+      (id, owner_id, item_id, member_id, role, created_at, updated_at)
+      SELECT lower(hex(randomblob(16))), owner_id, id, ?,
+        CASE kind WHEN 'project' THEN 'project_dri' ELSE 'task_assignee' END, ?, ?
+      FROM items
+      WHERE owner_id = ? AND kind IN ('project', 'task') AND archived_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM item_assignments AS assignment
+          WHERE assignment.owner_id = items.owner_id AND assignment.item_id = items.id
+            AND assignment.role = CASE items.kind WHEN 'project' THEN 'project_dri' ELSE 'task_assignee' END
+        )`).bind(memberId, now, now, ownerId),
+    d1.prepare(`UPDATE routines SET assignee_member_id = ?, updated_at = ?
+      WHERE owner_id = ? AND system_key IS NULL AND assignee_member_id IS NULL`).bind(memberId, now, ownerId),
+  ]);
 }
 
 async function workspaceInitializationIsCurrent(ownerId: string) {
@@ -2517,10 +2611,13 @@ export async function createItem(
     sourceRef?: string | null;
   },
 ) {
+  await ensureWorkspace(ownerId);
   const kind = input.kind ?? "task";
-  const hasTaskContainer = Boolean(input.parentId || input.routineId);
-  const status = input.status ?? (kind === "task" && !hasTaskContainer ? "inbox" : "todo");
-  await validateParent(ownerId, kind, input.parentId ?? null, status, input.routineId ?? null);
+  const parentId = input.parentId ?? null;
+  let routineId = input.routineId ?? null;
+  if (kind === "task" && !parentId && !routineId) routineId = (await ensureGeneralRoutine(ownerId)).id;
+  const status = input.status ?? "todo";
+  await validateParent(ownerId, kind, parentId, routineId);
   const rules = await getWorkspaceRules(ownerId);
   const cycleId = input.cycleId === undefined ? await defaultCycleIdForKind(ownerId, kind) : input.cycleId;
 
@@ -2531,8 +2628,8 @@ export async function createItem(
       id,
       ownerId,
       cycleId,
-      parentId: input.parentId ?? null,
-      routineId: input.routineId ?? null,
+      parentId,
+      routineId,
       kind,
       title: input.title.trim(),
       description: input.description?.trim() ?? "",
@@ -2568,28 +2665,39 @@ export async function updateItem(
     source: string;
   }>,
 ) {
+  await ensureWorkspace(ownerId);
   const current = await getItem(ownerId, id);
   if (!current) throw new Error("Item not found");
   if (current.archivedAt) throw new Error("Restore the item before changing it");
   if (patch.status === "archived") throw new Error("Use the Project archive action instead");
 
-  if (patch.parentId !== undefined || patch.status !== undefined || patch.routineId !== undefined) {
+  const normalizedPatch = { ...patch };
+  if (current.kind === "task") {
+    if (normalizedPatch.parentId) normalizedPatch.routineId = null;
+    if (normalizedPatch.routineId) normalizedPatch.parentId = null;
+    const nextParentId = normalizedPatch.parentId === undefined ? current.parentId : normalizedPatch.parentId;
+    let nextRoutineId = normalizedPatch.routineId === undefined ? current.routineId : normalizedPatch.routineId;
+    if (!nextParentId && !nextRoutineId) {
+      nextRoutineId = (await ensureGeneralRoutine(ownerId)).id;
+      normalizedPatch.routineId = nextRoutineId;
+    }
+  }
+
+  if (normalizedPatch.parentId !== undefined || normalizedPatch.status !== undefined || normalizedPatch.routineId !== undefined) {
     await validateParent(
       ownerId,
       current.kind as ItemKind,
-      patch.parentId === undefined ? current.parentId : patch.parentId,
-      patch.status ?? (current.status as ItemStatus),
-      patch.routineId === undefined ? current.routineId : patch.routineId,
+      normalizedPatch.parentId === undefined ? current.parentId : normalizedPatch.parentId,
+      normalizedPatch.routineId === undefined ? current.routineId : normalizedPatch.routineId,
     );
   }
 
-  const nextStatus = patch.status ?? (current.status as ItemStatus);
+  const nextStatus = normalizedPatch.status ?? (current.status as ItemStatus);
   const values = {
-    ...patch,
-    title: patch.title?.trim(),
-    description: patch.description?.trim(),
-    progress:
-      completedStatuses.has(nextStatus) ? 100 : patch.progress === undefined ? undefined : clampProgress(patch.progress),
+    ...normalizedPatch,
+    title: normalizedPatch.title?.trim(),
+    description: normalizedPatch.description?.trim(),
+    progress: completedStatuses.has(nextStatus) ? 100 : normalizedPatch.progress === undefined ? undefined : clampProgress(normalizedPatch.progress),
     updatedAt: new Date().toISOString(),
   };
 
@@ -2599,7 +2707,7 @@ export async function updateItem(
     .where(and(eq(items.ownerId, ownerId), eq(items.id, id)))
     .returning();
 
-  await logActivity(ownerId, id, "updated", patch.source ?? "web", patch);
+  await logActivity(ownerId, id, "updated", normalizedPatch.source ?? "web", normalizedPatch);
   if (current.status !== updated.status) {
     await dispatchSlackAutomationEvent(ownerId, {
       triggerType: "task_status_changed",
@@ -3176,12 +3284,14 @@ export async function createRoutine(
     actionSteps?: string;
     cadence?: RoutineCadence;
     active?: boolean;
+    assigneeMemberId?: string | null;
   },
 ) {
   const title = input.title.trim();
   if (!title) throw new Error("Routine title is required");
   const cadence = input.cadence ?? "daily";
   if (!ROUTINE_CADENCES.includes(cadence)) throw new Error("Unsupported routine cadence");
+  await validateRoutineAssignee(ownerId, input.assigneeMemberId ?? null);
   const [last] = await getDb()
     .select({ sortOrder: routines.sortOrder })
     .from(routines)
@@ -3193,6 +3303,8 @@ export async function createRoutine(
     .values({
       id: crypto.randomUUID(),
       ownerId,
+      systemKey: null,
+      assigneeMemberId: input.assigneeMemberId ?? null,
       title,
       description: input.description?.trim() ?? "",
       triggerPoint: input.triggerPoint?.trim() ?? "",
@@ -3217,14 +3329,17 @@ export async function updateRoutine(
     actionSteps: string;
     cadence: RoutineCadence;
     active: boolean;
+    assigneeMemberId: string | null;
   }>,
 ) {
   const current = await getRoutine(ownerId, id);
   if (!current) throw new Error("Routine not found");
+  if (current.systemKey === GENERAL_ROUTINE_SYSTEM_KEY) throw new Error("General routine is protected");
   if (patch.title !== undefined && !patch.title.trim()) throw new Error("Routine title is required");
   if (patch.cadence !== undefined && !ROUTINE_CADENCES.includes(patch.cadence)) {
     throw new Error("Unsupported routine cadence");
   }
+  if (patch.assigneeMemberId !== undefined) await validateRoutineAssignee(ownerId, patch.assigneeMemberId);
   const [updated] = await getDb()
     .update(routines)
     .set({
@@ -3235,6 +3350,7 @@ export async function updateRoutine(
       actionSteps: patch.actionSteps?.trim(),
       cadence: patch.cadence,
       active: patch.active,
+      assigneeMemberId: patch.assigneeMemberId,
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(routines.ownerId, ownerId), eq(routines.id, id)))
@@ -3245,6 +3361,7 @@ export async function updateRoutine(
 export async function deleteRoutine(ownerId: string, id: string) {
   const current = await getRoutine(ownerId, id);
   if (!current) throw new Error("Routine not found");
+  if (current.systemKey === GENERAL_ROUTINE_SYSTEM_KEY) throw new Error("General routine is protected");
   await getDb()
     .delete(routineCompletions)
     .where(and(eq(routineCompletions.ownerId, ownerId), eq(routineCompletions.routineId, id)));
@@ -3264,6 +3381,7 @@ export async function setRoutineCompletion(
   const date = normalizeDate(completionDate);
   const routine = await getRoutine(ownerId, routineId);
   if (!routine) throw new Error("Routine not found");
+  if (routine.systemKey === GENERAL_ROUTINE_SYSTEM_KEY) throw new Error("General routine cannot be completed");
   if (!completed) {
     await getDb()
       .delete(routineCompletions)
@@ -3296,6 +3414,16 @@ async function getRoutine(ownerId: string, id: string) {
   return routine ?? null;
 }
 
+async function validateRoutineAssignee(ownerId: string, memberId: string | null) {
+  if (!memberId) return;
+  const [member] = await getDb().select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(
+    eq(workspaceMembers.workspaceId, ownerId),
+    eq(workspaceMembers.id, memberId),
+    eq(workspaceMembers.status, "active"),
+  )).limit(1);
+  if (!member) throw new Error("Routine assignee must be an active workspace member");
+}
+
 export function serializeRoutine(
   routine: typeof routines.$inferSelect,
   date: string,
@@ -3303,6 +3431,8 @@ export function serializeRoutine(
 ) {
   return {
     id: routine.id,
+    systemKey: routine.systemKey,
+    assigneeMemberId: routine.assigneeMemberId,
     title: routine.title,
     description: routine.description,
     triggerPoint: routine.triggerPoint,
@@ -3329,7 +3459,7 @@ export async function getDailyScrum(ownerId: string, scrumDate: string) {
     .where(and(eq(dailyScrums.ownerId, ownerId), eq(dailyScrums.scrumDate, date)))
     .limit(1);
   const tasks = await listItems(ownerId, { kind: "task", limit: 200 });
-  const activeTasks = tasks.filter((task) => task.status !== "inbox" && task.status !== "done");
+  const activeTasks = tasks.filter((task) => task.status !== "done");
   const yesterdayTasks = tasks
     .filter(
       (task) =>
@@ -3390,7 +3520,7 @@ export async function saveDailyScrum(
   return getDailyScrum(ownerId, date);
 }
 
-export type RecommendationKind = "blocked" | "overdue" | "unlinked" | "due_soon" | "empty_project";
+export type RecommendationKind = "blocked" | "overdue" | "due_soon" | "empty_project";
 export type Recommendation = {
   id: string;
   kind: RecommendationKind;
@@ -3421,7 +3551,7 @@ export async function getRecommendations(ownerId: string, requestedDate?: string
     });
   }
 
-  const overdue = openTasks.filter((task) => task.status !== "inbox" && task.dueDate !== null && task.dueDate < date);
+  const overdue = openTasks.filter((task) => task.dueDate !== null && task.dueDate < date);
   if (overdue.length) {
     recommendations.push({
       id: "overdue-tasks",
@@ -3433,21 +3563,8 @@ export async function getRecommendations(ownerId: string, requestedDate?: string
     });
   }
 
-  const unlinked = openTasks.filter((task) => task.status === "inbox" || task.parentId === null);
-  if (unlinked.length) {
-    recommendations.push({
-      id: "unlinked-tasks",
-      kind: "unlinked",
-      title: `미연결 Task ${unlinked.length}개의 Project를 정하세요`,
-      detail: "인박스에서 Project에 연결하면 OKR 진행 상황과 데일리 계획에 함께 반영됩니다.",
-      itemIds: unlinked.map((task) => task.id),
-      score: 75,
-    });
-  }
-
   const urgent = openTasks.filter(
     (task) =>
-      task.status !== "inbox" &&
       task.dueDate !== null &&
       task.dueDate >= date &&
       task.dueDate <= dueSoon &&
@@ -3530,12 +3647,8 @@ async function validateParent(
   ownerId: string,
   kind: ItemKind,
   parentId: string | null,
-  status: ItemStatus,
   routineId: string | null = null,
 ) {
-  if (status === "inbox" && (kind !== "task" || parentId !== null || routineId !== null)) {
-    throw new Error("Only an unlinked Task can use inbox status");
-  }
   if (routineId && kind !== "task") {
     throw new Error("Only Task can be linked under Routine");
   }
@@ -3554,7 +3667,6 @@ async function validateParent(
   }
 
   if (!parentId) {
-    if (kind === "task" && status === "inbox") return;
     throw new Error(`${kind} requires a ${expected} parent`);
   }
 
@@ -3588,7 +3700,7 @@ async function migrateLegacyHierarchy(ownerId: string) {
           SELECT id FROM items WHERE owner_id = ? AND kind = 'task'
         )`).bind(ownerId, ownerId),
     d1.prepare(`UPDATE items
-      SET kind = 'task', parent_id = NULL, status = 'inbox', source = 'migration',
+      SET kind = 'task', parent_id = NULL, status = 'todo', source = 'migration',
         updated_at = CURRENT_TIMESTAMP
       WHERE owner_id = ? AND kind = 'action'`).bind(ownerId),
     d1.prepare(`INSERT OR IGNORE INTO items

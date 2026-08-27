@@ -8,7 +8,7 @@ const guide = {
   hierarchy: "Objective > Key Result > Initiative > Project > Task. Routines are separate and may own Tasks.",
   values: {
     kind: ["objective", "key_result", "initiative", "project", "task"],
-    status: ["inbox", "backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked", "archived"],
+    status: ["backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked", "archived"],
     priority: ["low", "medium", "high", "urgent"],
     cadence: ["daily", "weekly", "monthly", "quarterly"],
   },
@@ -46,7 +46,7 @@ const guide = {
   ],
   behavior: [
     "Fetch workspace rules before interpreting unstructured work.",
-    "Use inbox Task capture when the hierarchy is unclear.",
+    "Use General Task capture when no Project or named Routine is known.",
     "For counts, fetch items once and group locally by kind; fetch routines separately.",
     "Do not delete cycles, routines, groups, members, or workspace data without immediate user confirmation.",
     "Return concise summaries instead of raw JSON unless raw data is requested.",
