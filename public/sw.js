@@ -1,4 +1,4 @@
-const CACHE_NAME = "okrptr-assets-v2";
+const CACHE_NAME = "okrptr-assets-v3";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
