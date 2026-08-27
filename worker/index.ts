@@ -19,6 +19,10 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
+const STATIC_PAGE_PATHS = new Set(["/", "/privacy", "/terms"]);
+const STATIC_PAGE_BROWSER_CACHE = "public, max-age=300, stale-while-revalidate=86400";
+const STATIC_PAGE_EDGE_CACHE = "public, max-age=31536000, stale-while-revalidate=86400";
+
 // Image security config. SVG sources with .svg extension auto-skip the
 // optimization endpoint on the client side (served directly, no proxy).
 // To route SVGs through the optimizer (with security headers), set
@@ -40,7 +44,18 @@ const worker = {
       }, allowedWidths);
     }
 
-    return handler.fetch(request, env, ctx);
+    const response = await handler.fetch(request, env, ctx);
+    if ((request.method === "GET" || request.method === "HEAD") && response.ok && STATIC_PAGE_PATHS.has(url.pathname)) {
+      const headers = new Headers(response.headers);
+      headers.set("Cache-Control", STATIC_PAGE_BROWSER_CACHE);
+      headers.set("Cloudflare-CDN-Cache-Control", STATIC_PAGE_EDGE_CACHE);
+      return new Response(request.method === "HEAD" ? null : response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    }
+    return response;
   },
 };
 

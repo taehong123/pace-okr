@@ -29,6 +29,8 @@ test("server-renders the OKRPTR application loading shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+  assert.match(response.headers.get("cache-control") ?? "", /max-age=300/);
+  assert.match(response.headers.get("cloudflare-cdn-cache-control") ?? "", /max-age=31536000/);
 
   const html = await response.text();
   assert.match(html, /<title>OKRPTR - 목표를 오늘의 실행으로<\/title>/);
@@ -208,12 +210,13 @@ test("ships product metadata and removes starter assets", async () => {
 });
 
 test("prerenders the startup shell and caches hashed assets", async () => {
-  const [layout, viteConfig, assetHeaders, paceData, staticHtml] = await Promise.all([
+  const [layout, viteConfig, assetHeaders, paceData, staticHtml, worker] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../public/_headers", import.meta.url), "utf8"),
     readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
     readFile(new URL("../dist/client/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
   ]);
 
   assert.doesNotMatch(layout, /next\/headers|await headers\(\)/);
@@ -225,4 +228,5 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   assert.match(paceData, /deletion_requested_by_user_id[\s\S]*FROM workspaces[\s\S]*LIMIT 0/);
   assert.match(staticHtml, /__OKRPTR_BOOTSTRAP_REQUEST__/);
   assert.match(staticHtml, /app-loading-shell/);
+  assert.match(worker, /Cloudflare-CDN-Cache-Control/);
 });
