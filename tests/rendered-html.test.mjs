@@ -143,7 +143,12 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /트리거 포인트/);
   assert.match(page, /무엇을 어떻게/);
   assert.match(page, /연결 해제/);
-  assert.match(page, /Objective → Key Result → Initiative → Project → Task/);
+  assert.match(page, /Objective → Key Result → Initiative → Project → Task \/ Routine → Task/);
+  assert.match(page, /taskParent/);
+  assert.match(page, /routineId: taskUsesRoutine \? routineItem\?\.id : undefined/);
+  assert.match(okrOrganizeRoute, /Routine is a Project-like execution container but remains independent from the OKR hierarchy/);
+  assert.match(okrOrganizeRoute, /independent execution: Routine > Task/);
+  assert.doesNotMatch(paceData, /validateRoutineInitiative|idx_routines_owner_initiative/);
   assert.match(page, /OKR이 오늘의 일로 이어지도록/);
   assert.match(page, /Connect your OKRs to today's work/);
   assert.match(page, /目標を実行に変えるワークスペース/);

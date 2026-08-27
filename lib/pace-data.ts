@@ -1082,8 +1082,8 @@ export async function getWorkspaceRules(ownerId: string) {
     .insert(workspaceRules)
     .values({
       workspaceId: ownerId,
-      captureInstruction: "대화에서 나온 일은 우선 있는 그대로 잡고, 실행 구조가 명확할 때만 Project 아래 Task로 연결합니다.",
-      structureInstruction: "Objective > Key Result > Initiative까지 먼저 정리합니다. Project는 담당자, 시기, 범위, KR 기여 예상치가 보일 때 나중에 만들고, Initiative와 비슷하면 Project는 비워둡니다.",
+      captureInstruction: "대화에서 나온 일은 우선 있는 그대로 잡고, 실행 구조가 명확할 때만 Project 또는 독립 Routine 아래 Task로 연결합니다.",
+      structureInstruction: "OKR은 Objective > Key Result > Initiative > Project > Task로 정리합니다. Routine은 Project처럼 Task를 담는 실행 컨테이너지만 OKR 계층과 독립적으로 관리합니다.",
       routineInstruction: "루틴은 트리거 포인트, 어디서/어떤 도구로, 무엇을 어떻게 할지까지 함께 정리합니다.",
       defaultPriority: "medium",
       defaultCadence: "weekly",
@@ -3362,6 +3362,11 @@ export async function deleteRoutine(ownerId: string, id: string) {
   const current = await getRoutine(ownerId, id);
   if (!current) throw new Error("Routine not found");
   if (current.systemKey === GENERAL_ROUTINE_SYSTEM_KEY) throw new Error("General routine is protected");
+  const general = await ensureGeneralRoutine(ownerId);
+  await getDb()
+    .update(items)
+    .set({ routineId: general.id, cycleId: null, updatedAt: new Date().toISOString() })
+    .where(and(eq(items.ownerId, ownerId), eq(items.routineId, id)));
   await getDb()
     .delete(routineCompletions)
     .where(and(eq(routineCompletions.ownerId, ownerId), eq(routineCompletions.routineId, id)));

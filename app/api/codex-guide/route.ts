@@ -5,7 +5,7 @@ const guide = {
     header: "Authorization: Bearer <OKRPTR_ACCESS_TOKEN>",
     note: "The token is scoped to one OKRPTR workspace. Never print or persist it in source files or logs.",
   },
-  hierarchy: "Objective > Key Result > Initiative > Project > Task. Routines are separate and may own Tasks.",
+  hierarchy: "OKR: Objective > Key Result > Initiative > Project > Task. Routine is an independent Project-like container and may own Tasks without an Initiative.",
   values: {
     kind: ["objective", "key_result", "initiative", "project", "task"],
     status: ["backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked", "archived"],

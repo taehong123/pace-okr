@@ -9,7 +9,7 @@ Objective -> Key Result -> Initiative -> Project -> Task
 
 Small execution steps live as checklist items inside a Task, not as another
 hierarchy level. New work can enter through the web UI, an MCP conversation, or
-a bot webhook. Unstructured captures land in the Inbox and can be linked later.
+a bot webhook. Unstructured captures land in the protected General routine and can be linked later.
 
 ## Product surfaces
 
@@ -17,7 +17,7 @@ a bot webhook. Unstructured captures land in the Inbox and can be linked later.
 - Notion-style inline editing and custom Task properties
 - Task-internal checklists with automatic progress calculation
 - Separate daily, weekly, and monthly Routines with dated completion history
-- Inbox for unstructured conversational captures
+- General routine for unstructured conversational captures
 - Daily scrum with yesterday, today, and blocker notes
 - Data-driven recommendations for blocked, overdue, unlinked, and due-soon work
 - Daily, weekly, monthly, and quarterly reviews
@@ -27,7 +27,7 @@ a bot webhook. Unstructured captures land in the Inbox and can be linked later.
 - D1 persistence and a Streamable HTTP MCP endpoint at `/api/mcp`
 - Generic bot capture webhook at `/api/webhooks/capture`
 - Google Calendar connection for sending due-dated Tasks to a user's primary calendar
-- Slack bot installation with a `/okrptr` slash command for capturing work into Inbox Tasks
+- Slack bot installation with a `/okrptr` slash command for capturing work into General Tasks
 
 ## MCP tools
 
@@ -42,9 +42,10 @@ a bot webhook. Unstructured captures land in the Inbox and can be linked later.
 - `list_groups`, `create_group`, `update_group`, `archive_group`, `delete_group`
 - `list_group_members`, `add_group_member`, `update_group_member`, `remove_group_member`
 
-The MCP endpoint enforces the hierarchy. Project belongs under Initiative, and
-Task belongs under Project. Only Inbox Tasks may temporarily have no parent.
-Routines remain outside this hierarchy because they represent recurring work.
+The MCP endpoint enforces the OKR hierarchy from Objective through Project and
+Task. Routine is an independent Project-like execution container that can also
+own Tasks without an Initiative. Tasks without an explicit Project or Routine
+are placed in the protected General routine.
 Invited members join the shared workspace when they sign in with the invited
 email. Viewer access is enforced as read-only by the API.
 Private groups are only listed for their members and workspace administrators.

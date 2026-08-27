@@ -184,6 +184,7 @@ type OnboardingPlan = {
   initiative: string;
   project: string;
   tasks: string;
+  taskParent: "" | "project" | "routine";
   routineTitle: string;
   routineTrigger: string;
   routinePlace: string;
@@ -439,7 +440,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
     title: "OKR이 오늘의 일로 이어지도록.",
     description: "OKRPTR은 목표, 프로젝트, 할 일과 반복 루틴을 한곳에 연결하고 대화와 봇에서도 바로 기록할 수 있는 실행 관리 서비스입니다.",
     hierarchyLabel: "목표에서 실행까지",
-    routineNote: "Routine은 이 계층 밖에서 반복되는 일을 관리합니다.",
+    routineNote: "Routine은 Project처럼 Task를 담는 실행 컨테이너지만 OKR 계층과 독립적입니다.",
     points: [
       { title: "대화에서 바로 등록", description: "MCP를 연결하면 AI 대화와 봇에서 Task, 프로젝트, 루틴을 바로 만들 수 있습니다." },
       { title: "책임과 맥락을 선명하게", description: "Project의 DRI와 속성, Task의 담당자와 소속을 한눈에 관리합니다." },
@@ -454,7 +455,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
     title: "Connect your OKRs to today's work.",
     description: "OKRPTR brings goals, projects, tasks, and recurring routines together, with fast capture from AI conversations and bots.",
     hierarchyLabel: "From goal to execution",
-    routineNote: "Routines stay outside this hierarchy and track recurring work.",
+    routineNote: "Routines are Project-like Task containers, but remain independent from the OKR hierarchy.",
     points: [
       { title: "Capture from conversation", description: "Connect MCP to create tasks, projects, and routines directly from AI chats and bots." },
       { title: "Make ownership explicit", description: "Track Project DRIs and properties alongside each Task's assignee and work context." },
@@ -469,7 +470,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
     title: "OKRを、今日やる仕事までつなげる。",
     description: "OKRPTRは目標、プロジェクト、タスク、繰り返しルーティンを一か所につなぎ、AIとの会話やボットからすぐに記録できる実行管理サービスです。",
     hierarchyLabel: "目標から実行まで",
-    routineNote: "Routineはこの階層の外で、繰り返す仕事を管理します。",
+    routineNote: "RoutineはProjectのようにTaskを持てますが、OKR階層とは独立しています。",
     points: [
       { title: "会話からすぐに登録", description: "MCPを接続すると、AIチャットやボットからタスク、プロジェクト、ルーティンを作成できます。" },
       { title: "責任と文脈を明確に", description: "ProjectのDRIとプロパティ、Taskの担当者と所属を一目で管理できます。" },
@@ -484,7 +485,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
     title: "让 OKR 真正落到今天的工作。",
     description: "OKRPTR 将目标、项目、任务和周期性例行工作连接在一起，并支持从 AI 对话和机器人中快速记录。",
     hierarchyLabel: "从目标到执行",
-    routineNote: "Routine 独立于此层级，用于管理周期性工作。",
+    routineNote: "Routine 像 Project 一样可以包含 Task，但独立于 OKR 层级。",
     points: [
       { title: "从对话直接记录", description: "连接 MCP 后，可以从 AI 对话和机器人中直接创建任务、项目和例行工作。" },
       { title: "明确责任和工作背景", description: "集中管理 Project 负责人和属性，以及 Task 的负责人和所属关系。" },
@@ -499,7 +500,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
     title: "Conecta tus OKR con el trabajo de hoy.",
     description: "OKRPTR reúne objetivos, proyectos, tareas y rutinas recurrentes, con captura rápida desde conversaciones con IA y bots.",
     hierarchyLabel: "Del objetivo a la ejecución",
-    routineNote: "Las rutinas quedan fuera de esta jerarquía y organizan el trabajo recurrente.",
+    routineNote: "Las rutinas pueden contener Task como un Project, pero son independientes de la jerarquía OKR.",
     points: [
       { title: "Registra desde una conversación", description: "Conecta MCP para crear tareas, proyectos y rutinas directamente desde chats con IA y bots." },
       { title: "Aclara responsables y contexto", description: "Gestiona responsables y propiedades de Project junto con la persona asignada y el contexto de cada Task." },
@@ -1156,7 +1157,17 @@ export default function Home() {
     }
     try {
       if (!objectiveTitle) {
-        await createPlannedRoutine();
+        const routineItem = await createPlannedRoutine();
+        for (const taskTitle of plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
+          await createPlannedItem({
+            title: taskTitle,
+            kind: "task",
+            cycleId: null,
+            routineId: routineItem?.id,
+            status: "todo",
+            assigneeMemberId: currentTeamMember?.id,
+          });
+        }
         if (workspaceRules) {
           const response = await fetch("/api/workspace-rules", {
             method: "PUT",
@@ -1169,6 +1180,7 @@ export default function Home() {
           }
         }
         showNotice("루틴을 만들었습니다.");
+        setItems((current) => [...current, ...createdItems]);
         return { cycleId: targetCycleId, initiativeId: null, initiativeTitle: "", projectId: null } satisfies PlanCreationResult;
       }
       const objectiveItem = await createPlannedItem({ title: objectiveTitle, kind: "objective", cycleId: targetCycleId, status: "in_progress", progress: 0 });
@@ -1181,18 +1193,20 @@ export default function Home() {
       const projectItem = projectTitle && initiativeItem
         ? await createPlannedItem({ title: projectTitle, kind: "project", cycleId: targetCycleId, parentId: initiativeItem.id, status: "in_progress", driMemberId: currentTeamMember?.id })
         : null;
+      const routineItem = await createPlannedRoutine();
+      const taskUsesRoutine = Boolean(routineItem) && (plan.taskParent === "routine" || !projectItem);
       const taskTitles = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean);
       for (const taskTitle of taskTitles) {
         await createPlannedItem({
           title: taskTitle,
           kind: "task",
-          cycleId: projectItem ? targetCycleId : null,
-          parentId: projectItem?.id,
+          cycleId: taskUsesRoutine ? null : projectItem ? targetCycleId : null,
+          parentId: taskUsesRoutine ? undefined : projectItem?.id,
+          routineId: taskUsesRoutine ? routineItem?.id : undefined,
           status: "todo",
           assigneeMemberId: currentTeamMember?.id,
         });
       }
-      await createPlannedRoutine();
       if (workspaceRules) {
         const response = await fetch("/api/workspace-rules", {
           method: "PUT",
@@ -1224,50 +1238,39 @@ export default function Home() {
 
   async function createProjectFromConversation(plan: OnboardingPlan, target: ProjectChatTarget) {
     const projectTitle = plan.project.trim();
-    if (!projectTitle) {
-      showNotice("Project 이름을 먼저 정리해 주세요.");
+    const routineTitle = plan.routineTitle.trim();
+    if (!projectTitle && !routineTitle) {
+      showNotice("Project 또는 Routine 이름을 먼저 정리해 주세요.");
       return false;
     }
     const createdItems: OkrptrItem[] = [];
     try {
-      const projectResponse = await fetch("/api/items", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: projectTitle,
-          kind: "project",
-          cycleId: target.cycleId,
-          parentId: target.initiativeId,
-          status: "in_progress",
-          driMemberId: currentTeamMember?.id,
-        }),
-      });
-      if (!projectResponse.ok) throw new Error("project");
-      const projectData = await projectResponse.json() as { item: OkrptrItem };
-      createdItems.push(projectData.item);
-      for (const title of plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
-        const response = await fetch("/api/items", {
+      let projectItem: OkrptrItem | null = null;
+      if (projectTitle) {
+        const projectResponse = await fetch("/api/items", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            title,
-            kind: "task",
+            title: projectTitle,
+            kind: "project",
             cycleId: target.cycleId,
-            parentId: projectData.item.id,
-            status: "todo",
-            assigneeMemberId: currentTeamMember?.id,
+            parentId: target.initiativeId,
+            status: "in_progress",
+            driMemberId: currentTeamMember?.id,
           }),
         });
-        if (!response.ok) throw new Error("task");
-        const data = await response.json() as { item: OkrptrItem };
-        createdItems.push(data.item);
+        if (!projectResponse.ok) throw new Error("project");
+        const projectData = await projectResponse.json() as { item: OkrptrItem };
+        projectItem = projectData.item;
+        createdItems.push(projectItem);
       }
-      if (plan.routineTitle.trim()) {
+      let routineItem: Routine | null = null;
+      if (routineTitle) {
         const response = await fetch("/api/routines", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            title: plan.routineTitle.trim(),
+            title: routineTitle,
             triggerPoint: plan.routineTrigger,
             actionPlace: plan.routinePlace,
             actionSteps: plan.routineSteps,
@@ -1277,18 +1280,42 @@ export default function Home() {
         });
         if (!response.ok) throw new Error("routine");
         const data = await response.json() as { routine: Routine };
+        routineItem = data.routine;
         setRoutines((current) => [...current, data.routine]);
+      }
+      const taskUsesRoutine = Boolean(routineItem) && (plan.taskParent === "routine" || !projectItem);
+      for (const title of plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
+        const response = await fetch("/api/items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title,
+            kind: "task",
+            cycleId: taskUsesRoutine ? null : target.cycleId,
+            parentId: taskUsesRoutine ? undefined : projectItem?.id,
+            routineId: taskUsesRoutine ? routineItem?.id : undefined,
+            status: "todo",
+            assigneeMemberId: currentTeamMember?.id,
+          }),
+        });
+        if (!response.ok) throw new Error("task");
+        const data = await response.json() as { item: OkrptrItem };
+        createdItems.push(data.item);
       }
       setItems((current) => [...current, ...createdItems]);
       setOkrChatContext(null);
       setSelectedProjectId(null);
       setSelectedTaskId(null);
-      setProjectTab("list");
-      setActiveView("work");
-      showNotice("첫 Project를 만들었습니다.");
+      if (projectItem) {
+        setProjectTab("list");
+        setActiveView("work");
+      } else {
+        setActiveView("routines");
+      }
+      showNotice(projectItem ? "첫 Project를 만들었습니다." : "첫 Routine을 만들었습니다.");
       return true;
     } catch {
-      showNotice("Project 구성을 만들지 못했습니다.");
+      showNotice("실행 구성을 만들지 못했습니다.");
       return false;
     }
   }
@@ -2773,6 +2800,7 @@ function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
     initiative: "",
     project: "",
     tasks: "",
+    taskParent: "",
     routineTitle: "",
     routineTrigger: "",
     routinePlace: "",
@@ -2791,7 +2819,7 @@ function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
   const [mode, setMode] = useState<ConversationMode>("okr");
   const [projectTarget, setProjectTarget] = useState<ProjectChatTarget | null>(null);
   const [saving, setSaving] = useState(false);
-  const saveLabel = mode === "project" ? "Project 만들기" : !plan.objective.trim() && plan.routineTitle.trim() ? "루틴 만들기" : "OKR 만들기";
+  const saveLabel = mode === "project" ? plan.project.trim() ? "Project 만들기" : plan.routineTitle.trim() ? "Routine 만들기" : "실행 항목 만들기" : !plan.objective.trim() && plan.routineTitle.trim() ? "Routine 만들기" : "OKR 만들기";
   const hasDraft = hasPlanContent(plan);
   function patch(field: keyof OnboardingPlan, value: string) {
     setVisibleFields((current) => new Set(current).add(field));
@@ -2811,6 +2839,7 @@ function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
       ...emptyPlan,
       project: plan.project || lines[0] || text,
       tasks: plan.tasks || actionLines.slice(0, 5).join("\n"),
+      taskParent: "project",
     } : {
       ...plan,
       objective: plan.objective || lines[0] || text,
@@ -2893,7 +2922,7 @@ function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
   }
   async function save() {
     if (mode === "project") {
-      if (!projectTarget || !plan.project.trim()) {
+      if (!projectTarget || !plan.project.trim() && !plan.routineTitle.trim()) {
         await organizeMessage();
         return;
       }
@@ -2960,7 +2989,7 @@ function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
           </div>}
           <div className="chat-actions">
             <button className="chat-apply" onClick={() => void organizeMessage()} disabled={saving || !message.trim()}><TextCursorInput size={13} />{saving ? "답변 중" : "보내기"}</button>
-            {hasDraft && <button className="welcome-primary" onClick={() => void save()} disabled={saving || (mode === "project" ? !plan.project.trim() : !plan.objective.trim() && !plan.routineTitle.trim())}>{saving ? "생성 중" : saveLabel}<ChevronRight size={14} /></button>}
+            {hasDraft && <button className="welcome-primary" onClick={() => void save()} disabled={saving || (mode === "project" ? !plan.project.trim() && !plan.routineTitle.trim() : !plan.objective.trim() && !plan.routineTitle.trim())}>{saving ? "생성 중" : saveLabel}<ChevronRight size={14} /></button>}
           </div>
           {mode === "okr" && projectTarget && <button className="project-nudge-button" onClick={startProjectConversation}><Briefcase size={14} />첫 Project를 만들어볼까요?<ChevronRight size={14} /></button>}
         </div>
@@ -2969,7 +2998,8 @@ function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
           {visibleFields.has("keyResult") && <label><span>Key Result</span><textarea value={plan.keyResult} onChange={(event) => patch("keyResult", event.target.value)} rows={3} placeholder="성공을 확인할 수 있는 기준" /></label>}
           {visibleFields.has("initiative") && <label><span>Initiative</span><input value={plan.initiative} onChange={(event) => patch("initiative", event.target.value)} placeholder="성과를 만들 큰 방향" /></label>}
           {visibleFields.has("project") && <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="실제로 진행할 프로젝트" /></label>}
-          {visibleFields.has("tasks") && <label className="wide"><span>첫 Task</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder="한 줄에 하나씩 입력" /></label>}
+          {visibleFields.has("tasks") && <label className="wide"><span>{plan.taskParent === "routine" || !plan.project.trim() && plan.routineTitle.trim() ? "첫 Task · Routine 아래" : plan.project.trim() ? "첫 Task · Project 아래" : "첫 Task · General"}</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder="한 줄에 하나씩 입력" /></label>}
+          {visibleFields.has("tasks") && plan.project.trim() && plan.routineTitle.trim() && <label><span>Task 상위</span><select value={plan.taskParent || "project"} onChange={(event) => patch("taskParent", event.target.value)}><option value="project">Project</option><option value="routine">Routine</option></select></label>}
           {visibleFields.has("routineTitle") && <label><span>루틴 이름</span><input value={plan.routineTitle} onChange={(event) => patch("routineTitle", event.target.value)} placeholder="반복해서 할 일의 이름" /></label>}
           {visibleFields.has("routineTrigger") && <label><span>루틴 트리거</span><input value={plan.routineTrigger} onChange={(event) => patch("routineTrigger", event.target.value)} placeholder="루틴이 시작되는 시점" /></label>}
           {visibleFields.has("routinePlace") && <label><span>어디서</span><input value={plan.routinePlace} onChange={(event) => patch("routinePlace", event.target.value)} placeholder="실행할 장소나 도구" /></label>}
@@ -3875,7 +3905,7 @@ function IntegrationModal({ onNotice, onClose }: { onNotice: (message: string) =
       <div className="chatgpt-simple-actions"><button className="copy-primary" onClick={() => void copyChatGptConnectionPrompt()} disabled={creatingConnection}>{creatingConnection ? <LoaderCircle className="spin" size={13} /> : <Copy size={13} />}{creatingConnection ? "복사 준비 중" : "ChatGPT 연결 문구 복사"}</button></div>
       <details className="connection-management"><summary><span>연결 관리</span><ChevronDown size={13} /></summary><div><span>발급된 연결 키 {connections.length}개</span>{connections.length > 0 && <button onClick={() => void revokeChatGptConnections()} disabled={revokingConnections}>{revokingConnections ? "해제 중" : "연결 해제"}</button>}</div></details>
     </section>
-  </div><footer><span><CheckCircle2 size={15} />Objective → Key Result → Initiative → Project → Task</span><button onClick={onClose}>닫기</button></footer></section></div>;
+  </div><footer><span><CheckCircle2 size={15} />OKR · Objective → Key Result → Initiative → Project → Task / Routine → Task</span><button onClick={onClose}>닫기</button></footer></section></div>;
 }
 
 function AppIntegrationsModal({ google, slack, workspaceName, canManageSlack, onGoogleChange, onSlackChange, onNotice, onClose }: { google: GoogleConnectionStatus | null; slack: SlackConnectionStatus | null; workspaceName: string; canManageSlack: boolean; onGoogleChange: (status: GoogleConnectionStatus | null) => void; onSlackChange: (status: SlackConnectionStatus | null) => void; onNotice: (message: string) => void; onClose: () => void }) {
@@ -4154,6 +4184,6 @@ function preferredIntroLanguage(): IntroLanguage {
   if (language.startsWith("es")) return "es";
   return "en";
 }
-function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "반복되는 실행을 날짜별로 기록", okr: "Objective부터 Task까지의 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "클린업으로 보관한 OKR 실행 데이터" }[view]; }
+function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "클린업으로 보관한 OKR 실행 데이터" }[view]; }
 function routineCadenceLabel(cadence: RoutineCadence) { return { daily: "매일", weekly: "매주", monthly: "매월" }[cadence]; }
 function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "due_soon") return "3"; return "P"; }

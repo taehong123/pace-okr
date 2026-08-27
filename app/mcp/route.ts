@@ -208,7 +208,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     {
       instructions:
         [
-          "Capture first, structure later. Use capture_item for quick natural-language intake. The hierarchy is Objective > Key Result > Initiative > Project > Task. Routines are separate recurring work with trigger points, places/tools, concrete action steps, and dated completion records. Tasks have one assignee and belong to either a Project or Routine; custom properties belong to Projects. Team access uses Owner, Admin, Member, and read-only Viewer roles. Workspace groups have @handles, open or private visibility, and Lead or Member roles. Use list_properties before setting unfamiliar Project property names.",
+          "Capture first, structure later. Use capture_item for quick natural-language intake. The OKR hierarchy is Objective > Key Result > Initiative > Project > Task. Routine is an independent Project-like execution container that does not require an Initiative and may own Tasks. Routines add trigger points, places/tools, concrete action steps, and dated completion records. Tasks have one assignee and belong to either a Project or Routine; custom properties belong to Projects. Team access uses Owner, Admin, Member, and read-only Viewer roles. Workspace groups have @handles, open or private visibility, and Lead or Member roles. Use list_properties before setting unfamiliar Project property names.",
           `Workspace capture rule: ${rules.captureInstruction}`,
           `Workspace structure rule: ${rules.structureInstruction}`,
           `Workspace routine rule: ${rules.routineInstruction}`,
@@ -821,7 +821,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     "create_routine",
     {
       title: "Create a recurring routine",
-      description: "Create recurring work that stays separate from the OKR hierarchy.",
+      description: "Create an independent Project-like recurring-work container that may own Tasks.",
       inputSchema: {
         title: z.string().min(1),
         description: z.string().optional(),
