@@ -22,6 +22,8 @@ interface ExecutionContext {
 const STATIC_PAGE_PATHS = new Set(["/privacy", "/terms"]);
 const STATIC_PAGE_BROWSER_CACHE = "public, max-age=300, stale-while-revalidate=86400";
 const STATIC_PAGE_EDGE_CACHE = "public, max-age=31536000, stale-while-revalidate=86400";
+const APP_SHELL_BROWSER_CACHE = "private, no-cache, no-store, max-age=0, must-revalidate";
+const APP_SHELL_EDGE_CACHE = "no-store";
 
 // Image security config. SVG sources with .svg extension auto-skip the
 // optimization endpoint on the client side (served directly, no proxy).
@@ -45,10 +47,13 @@ const worker = {
     }
 
     const response = await handler.fetch(request, env, ctx);
-    if ((request.method === "GET" || request.method === "HEAD") && response.ok && STATIC_PAGE_PATHS.has(url.pathname)) {
+    const isAppShell = url.pathname === "/";
+    const shouldSetPageCache = STATIC_PAGE_PATHS.has(url.pathname)
+      || (isAppShell && process.env.VINEXT_PRERENDER !== "1");
+    if ((request.method === "GET" || request.method === "HEAD") && response.ok && shouldSetPageCache) {
       const headers = new Headers(response.headers);
-      headers.set("Cache-Control", STATIC_PAGE_BROWSER_CACHE);
-      headers.set("Cloudflare-CDN-Cache-Control", STATIC_PAGE_EDGE_CACHE);
+      headers.set("Cache-Control", isAppShell ? APP_SHELL_BROWSER_CACHE : STATIC_PAGE_BROWSER_CACHE);
+      headers.set("Cloudflare-CDN-Cache-Control", isAppShell ? APP_SHELL_EDGE_CACHE : STATIC_PAGE_EDGE_CACHE);
       return new Response(request.method === "HEAD" ? null : response.body, {
         status: response.status,
         statusText: response.statusText,

@@ -29,8 +29,8 @@ test("server-renders the OKRPTR application loading shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-  assert.doesNotMatch(response.headers.get("cache-control") ?? "", /max-age=300/);
-  assert.equal(response.headers.get("cloudflare-cdn-cache-control"), null);
+  assert.match(response.headers.get("cache-control") ?? "", /no-store/);
+  assert.equal(response.headers.get("cloudflare-cdn-cache-control"), "no-store");
 
   const html = await response.text();
   assert.match(html, /<title>OKRPTR - 목표를 오늘의 실행으로<\/title>/);
