@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "vinext dev",
-    "build": "vinext build && node scripts/publish-prerender.mjs",
+    "build": "vinext build",
     "start": "vinext start",
     "test": "npm run build && node --test tests/rendered-html.test.mjs tests/migration.test.mjs",
     "test:mcp": "node scripts/mcp-smoke.mjs",
