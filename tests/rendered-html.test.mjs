@@ -215,7 +215,7 @@ test("prerenders the startup shell and caches hashed assets", async () => {
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../public/_headers", import.meta.url), "utf8"),
     readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
-    readFile(new URL("../dist/server/prerendered-routes/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../dist/client/index.html", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
   ]);
 
@@ -223,6 +223,7 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   assert.match(layout, /__OKRPTR_BOOTSTRAP_REQUEST__/);
   assert.match(viteConfig, /prerender:\s*\{\s*routes:\s*"\*"\s*\}/);
   assert.match(assetHeaders, /max-age=31536000, immutable/);
+  assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: public, max-age=31536000/);
   assert.doesNotMatch(paceData, /LEFT JOIN workspace_members AS member ON 1 = 0/);
   assert.match(paceData, /deletion_requested_by_user_id[\s\S]*FROM workspaces[\s\S]*LIMIT 0/);
   assert.match(staticHtml, /__OKRPTR_BOOTSTRAP_REQUEST__/);
