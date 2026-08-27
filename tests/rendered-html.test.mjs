@@ -25,12 +25,31 @@ async function render(path = "/") {
   );
 }
 
+async function renderAsset(path) {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("asset-test", `${process.pid}-${Date.now()}-${path}`);
+  const { default: worker } = await import(workerUrl.href);
+
+  return worker.fetch(
+    new Request(`http://localhost${path}`),
+    {
+      ASSETS: {
+        fetch: async () => new Response("asset", { status: 200, headers: { "Content-Type": "text/javascript" } }),
+      },
+    },
+    {
+      waitUntil() {},
+      passThroughOnException() {},
+    },
+  );
+}
+
 test("server-renders the OKRPTR application loading shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-  assert.match(response.headers.get("cache-control") ?? "", /no-store/);
-  assert.equal(response.headers.get("cloudflare-cdn-cache-control"), "no-store");
+  assert.match(response.headers.get("cache-control") ?? "", /public, max-age=0, stale-while-revalidate=86400/);
+  assert.match(response.headers.get("cloudflare-cdn-cache-control") ?? "", /public, max-age=31536000, stale-while-revalidate=86400/);
 
   const html = await response.text();
   assert.match(html, /<title>OKRPTR - 목표를 오늘의 실행으로<\/title>/);
@@ -86,6 +105,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /workspaceDeletionLabel/);
   assert.match(workspaceRoute, /scheduleWorkspaceDeletionForUser/);
   assert.match(workspaceRoute, /restoreWorkspaceForUser/);
+  assert.match(bootstrapRoute, /Cache-Control": "no-store"/);
   assert.doesNotMatch(page, /OAuth Redirect URL|Slash Command URL/);
   assert.match(page, /연결 관리/);
   assert.match(page, /연결됨/);
@@ -238,16 +258,31 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   assert.match(layout, /__OKRPTR_BOOTSTRAP_REQUEST__/);
   assert.match(layout, /serviceWorker\.register\("\/sw\.js"/);
   assert.match(viteConfig, /prerender:\s*\{\s*routes:\s*"\*"\s*\}/);
-  assert.match(viteConfig, /run_worker_first:\s*\["\/"\]/);
+  assert.match(viteConfig, /run_worker_first:\s*\["\/", "\/_next\/static\/\*", "\/favicon\.svg", "\/sw\.js"\]/);
   assert.match(assetHeaders, /max-age=31536000, immutable/);
-  assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: no-store/);
+  assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: public, max-age=31536000, immutable/);
+  assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: public, max-age=31536000, stale-while-revalidate=86400/);
+  assert.doesNotMatch(layout, /Geist_Mono|font-geist-mono/);
   assert.doesNotMatch(paceData, /LEFT JOIN workspace_members AS member ON 1 = 0/);
   assert.match(paceData, /deletion_requested_by_user_id[\s\S]*FROM workspaces[\s\S]*LIMIT 0/);
   assert.match(staticHtml, /__OKRPTR_BOOTSTRAP_REQUEST__/);
   assert.match(staticHtml, /app-loading-shell/);
   assert.match(worker, /Cloudflare-CDN-Cache-Control/);
+  assert.match(worker, /pathname\.startsWith\("\/_next\/static\/"\)/);
+  assert.match(worker, /HASHED_ASSET_CACHE/);
+  assert.match(worker, /APP_SHELL_EDGE_CACHE = "public, max-age=31536000, stale-while-revalidate=86400"/);
   assert.match(staticHtml, /serviceWorker\.register/);
   const serviceWorker = await readFile(new URL("../public/sw.js", import.meta.url), "utf8");
   assert.match(serviceWorker, /staleWhileRevalidate/);
   assert.doesNotMatch(serviceWorker, /event\.request\.mode === "navigate"/);
+});
+
+test("serves hashed assets with immutable browser and edge caching", async () => {
+  const staticHtml = await readFile(new URL("../dist/client/index.html", import.meta.url), "utf8");
+  const assetPath = staticHtml.match(/\/_next\/static\/chunks\/index-[A-Za-z0-9_-]+\.js/)?.[0];
+  assert.ok(assetPath);
+  const response = await renderAsset(assetPath);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "public, max-age=31536000, immutable");
+  assert.equal(response.headers.get("cloudflare-cdn-cache-control"), "public, max-age=31536000, immutable");
 });

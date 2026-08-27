@@ -15,7 +15,7 @@ const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
   assets: {
-    run_worker_first: ["/"],
+    run_worker_first: ["/", "/_next/static/*", "/favicon.svg", "/sw.js"],
   },
   d1_databases: d1
     ? [
