@@ -70,6 +70,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /ChatGPT 연결 문구 복사/);
   assert.match(page, /앱 연동/);
   assert.match(page, /mobile-navigation/);
+  assert.match(page, /label: "AI 대화"/);
+  assert.match(page, /home: "AI 대화"/);
   assert.match(page, /더보기/);
   assert.match(page, /개인 연결/);
   assert.match(page, /워크스페이스 연결/);

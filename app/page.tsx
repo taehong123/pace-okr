@@ -516,7 +516,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "my_work", label: "내 업무", icon: Briefcase },
   { id: "work", label: "Project", icon: Table2 },
   { id: "inbox", label: "Task", icon: Inbox },
-  { id: "home", label: "대화", icon: Bot },
+  { id: "home", label: "AI 대화", icon: Bot },
   { id: "routines", label: "루틴", icon: Repeat2 },
   { id: "scrum", label: "데일리", icon: CalendarCheck },
   { id: "recommendations", label: "추천", icon: Lightbulb },
@@ -526,7 +526,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
 
 const cadenceLabels: Record<Cadence, string> = { daily: "일간", weekly: "주간", monthly: "월간", quarterly: "분기" };
 const viewTitles: Record<View, string> = {
-  home: "대화",
+  home: "AI 대화",
   inbox: "Task",
   my_work: "내 업무",
   work: "Project",
