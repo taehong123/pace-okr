@@ -31,5 +31,5 @@ export async function PATCH(request: Request) {
 }
 
 function isPropertyValue(value: unknown): value is PropertyValue {
-  return value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+  return value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean" || (Array.isArray(value) && value.every((entry) => typeof entry === "string"));
 }

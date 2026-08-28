@@ -702,3 +702,59 @@ test("cleanup removes execution data while preserving workspace groups", async (
   });
   db.close();
 });
+
+test("adds lossless Project properties, documents, and body templates", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE property_definitions (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL,
+      options TEXT NOT NULL DEFAULT '[]', sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE items (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'todo'
+    );
+    CREATE TABLE item_property_values (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL,
+      item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+      property_id TEXT NOT NULL REFERENCES property_definitions(id) ON DELETE CASCADE,
+      value TEXT NOT NULL DEFAULT 'null', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO property_definitions (id, owner_id, name, type)
+      VALUES ('timing', 'workspace', 'Timing', 'text');
+    INSERT INTO items (id, owner_id, kind, title, description)
+      VALUES ('project', 'workspace', 'project', 'Launch', 'Original description');
+    INSERT INTO item_property_values (id, owner_id, item_id, property_id, value)
+      VALUES ('timing-value', 'workspace', 'project', 'timing', '"Q3"');
+  `);
+
+  const migration = await readFile(new URL("../drizzle/0022_project_documents_and_templates.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+
+  assert.deepEqual({ ...db.prepare("SELECT default_value, system_key, active FROM property_definitions WHERE id = 'timing'").get() }, {
+    default_value: "null",
+    system_key: null,
+    active: 1,
+  });
+  assert.equal(db.prepare("SELECT legacy_value FROM item_property_values WHERE id = 'timing-value'").get().legacy_value, null);
+
+  db.exec(`
+    UPDATE property_definitions SET active = 0 WHERE id = 'timing';
+    INSERT INTO project_documents (id, owner_id, project_id, content, plain_text, version)
+      VALUES ('document', 'workspace', 'project', '[{"type":"paragraph","content":"Original description"}]', 'Original description', 1);
+    INSERT INTO project_templates (id, owner_id, name, content, plain_text)
+      VALUES ('template', 'workspace', 'Launch brief', '[{"type":"heading","content":"Purpose"}]', 'Purpose');
+    DELETE FROM project_templates WHERE id = 'template';
+  `);
+
+  assert.equal(db.prepare("SELECT value FROM item_property_values WHERE id = 'timing-value'").get().value, '"Q3"');
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM project_documents WHERE project_id = 'project'").get().count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM project_templates").get().count, 0);
+  assert.throws(() => db.exec(`
+    INSERT INTO project_documents (id, owner_id, project_id, content, plain_text)
+      VALUES ('duplicate', 'workspace', 'project', '[]', '');
+  `), /UNIQUE constraint failed/);
+  db.close();
+});

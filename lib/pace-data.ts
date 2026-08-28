@@ -16,7 +16,9 @@ import {
   integrationTokens,
   okrCycles,
   propertyDefinitions,
+  projectDocuments,
   projectHiddenProperties,
+  projectTemplates,
   routineCompletions,
   routines,
   slackAutomationDeliveries,
@@ -32,6 +34,8 @@ import {
   workspaces,
   type PaceItem,
   type PropertyDefinition,
+  type ProjectDocument,
+  type ProjectTemplate,
   type WorkspaceGroup,
   type WorkspaceGroupMember,
   type WorkspaceMember,
@@ -61,7 +65,7 @@ export const ITEM_STATUSES = ["backlog", "todo", "policy_discussion", "in_progre
 export const ITEM_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export const ITEM_CADENCES = ["daily", "weekly", "monthly", "quarterly"] as const;
 export const OKR_CYCLE_STATUSES = ["planned", "active", "closed"] as const;
-export const PROPERTY_TYPES = ["text", "number", "select", "date", "checkbox"] as const;
+export const PROPERTY_TYPES = ["text", "number", "select", "date", "checkbox", "member", "members"] as const;
 export const ITEM_ASSIGNMENT_ROLES = ["project_dri", "project_worker", "task_assignee"] as const;
 export const ROUTINE_CADENCES = ["daily", "weekly", "monthly"] as const;
 export const GENERAL_ROUTINE_SYSTEM_KEY = "general";
@@ -90,7 +94,7 @@ export type ItemPriority = (typeof ITEM_PRIORITIES)[number];
 export type ItemCadence = (typeof ITEM_CADENCES)[number];
 export type OkrCycleStatus = (typeof OKR_CYCLE_STATUSES)[number];
 export type PropertyType = (typeof PROPERTY_TYPES)[number];
-export type PropertyValue = string | number | boolean | null;
+export type PropertyValue = string | number | boolean | string[] | null;
 export type ItemAssignmentRole = (typeof ITEM_ASSIGNMENT_ROLES)[number];
 export type RoutineCadence = (typeof ROUTINE_CADENCES)[number];
 export type WorkspaceRuleInput = Partial<{
@@ -134,7 +138,14 @@ export type RequestAuthorization = {
 
 export type IntegrationTokenSummary = Pick<IntegrationToken, "id" | "name" | "tokenPrefix" | "createdAt" | "lastUsedAt" | "revokedAt">;
 
-const DEFAULT_PROJECT_EXECUTION_PROPERTIES: { name: string; type: PropertyType; options?: string[] }[] = [
+const DEFAULT_PROJECT_EXECUTION_PROPERTIES: { name: string; type: PropertyType; systemKey?: string; options?: string[]; defaultValue?: PropertyValue }[] = [
+  { name: "상위 Initiative", type: "text", systemKey: "parent_id" },
+  { name: "상태", type: "select", systemKey: "status", options: [...ITEM_STATUSES.filter((status) => status !== "archived")] },
+  { name: "우선순위", type: "select", systemKey: "priority", options: [...ITEM_PRIORITIES] },
+  { name: "주기", type: "select", systemKey: "cadence", options: [...ITEM_CADENCES] },
+  { name: "기한", type: "date", systemKey: "due_date" },
+  { name: "DRI", type: "member", systemKey: "project_dri" },
+  { name: "하위 업무자", type: "members", systemKey: "project_workers" },
   { name: "시기", type: "select", options: ["이번 주", "이번 달", "이번 분기", "다음 분기", "미정"] },
   { name: "KR 기여 예상치", type: "number" },
   { name: "예상 기간", type: "number" },
@@ -323,18 +334,21 @@ async function ensureSchema() {
           name TEXT NOT NULL,
           type TEXT NOT NULL,
           options TEXT NOT NULL DEFAULT '[]',
+          default_value TEXT NOT NULL DEFAULT 'null',
+          system_key TEXT,
+          active INTEGER NOT NULL DEFAULT 1,
           sort_order INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_property_definitions_owner_name ON property_definitions(owner_id, name)"),
-        d1.prepare("CREATE INDEX IF NOT EXISTS idx_property_definitions_owner_sort ON property_definitions(owner_id, sort_order)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS item_property_values (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL,
           item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
           property_id TEXT NOT NULL REFERENCES property_definitions(id) ON DELETE CASCADE,
           value TEXT NOT NULL DEFAULT 'null',
+          legacy_value TEXT,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_item_property_values_unique ON item_property_values(owner_id, item_id, property_id)"),
@@ -350,6 +364,32 @@ async function ensureSchema() {
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_project_hidden_properties_unique ON project_hidden_properties(owner_id, project_id, property_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_project_hidden_properties_project ON project_hidden_properties(owner_id, project_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_project_hidden_properties_property ON project_hidden_properties(owner_id, property_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS project_documents (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          project_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+          content TEXT NOT NULL DEFAULT '[]',
+          plain_text TEXT NOT NULL DEFAULT '',
+          version INTEGER NOT NULL DEFAULT 1,
+          updated_by_user_id TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_project_documents_project ON project_documents(owner_id, project_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_project_documents_owner_updated ON project_documents(owner_id, updated_at)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS project_templates (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          content TEXT NOT NULL DEFAULT '[]',
+          plain_text TEXT NOT NULL DEFAULT '',
+          created_by_user_id TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_project_templates_owner_name ON project_templates(owner_id, name)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_project_templates_owner_updated ON project_templates(owner_id, updated_at)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS checklist_items (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL,
@@ -539,6 +579,10 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN deletion_requested_at TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN scheduled_deletion_at TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN deletion_requested_by_user_id TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE property_definitions ADD COLUMN default_value TEXT NOT NULL DEFAULT 'null'");
+      await addColumnIfMissing(d1, "ALTER TABLE property_definitions ADD COLUMN system_key TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE property_definitions ADD COLUMN active INTEGER NOT NULL DEFAULT 1");
+      await addColumnIfMissing(d1, "ALTER TABLE item_property_values ADD COLUMN legacy_value TEXT");
       await d1.batch([
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_routines_owner_system_key ON routines(owner_id, system_key) WHERE system_key IS NOT NULL"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_routines_assignee ON routines(assignee_member_id)"),
@@ -547,6 +591,8 @@ async function ensureSchema() {
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_cycle ON items(owner_id, cycle_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_archived ON items(owner_id, archived_at)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_archive_root ON items(owner_id, archive_root_id)"),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_property_definitions_owner_system ON property_definitions(owner_id, system_key) WHERE system_key IS NOT NULL"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_property_definitions_owner_active_sort ON property_definitions(owner_id, active, sort_order)"),
         d1.prepare(`UPDATE items
           SET archived_at = COALESCE(updated_at, CURRENT_TIMESTAMP),
               archived_from_status = CASE kind WHEN 'project' THEN 'backlog' ELSE 'todo' END,
@@ -577,6 +623,8 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       assignee_member_id
     FROM routines
     LIMIT 0`).first();
+    await d1.prepare(`SELECT default_value, system_key, active FROM property_definitions LIMIT 0`).first();
+    await d1.prepare(`SELECT version FROM project_documents LIMIT 0`).first();
     return true;
   } catch {
     return false;
@@ -604,6 +652,7 @@ export async function ensureWorkspace(ownerId: string) {
         await migrateLegacyItemAssignments(ownerId);
         await ensureActiveOkrCycle(ownerId);
       }
+      await seedProjectExecutionProperties(ownerId);
       const general = await ensureGeneralRoutine(ownerId);
       await migrateInboxTasksToGeneral(ownerId, general.id);
       await migratePersonalWorkspaceAssignments(ownerId);
@@ -2124,6 +2173,8 @@ async function permanentlyDeleteWorkspace(id: string) {
   await getDb().delete(itemPropertyValues).where(eq(itemPropertyValues.ownerId, id));
   await getDb().delete(itemAssignments).where(eq(itemAssignments.ownerId, id));
   await getDb().delete(projectHiddenProperties).where(eq(projectHiddenProperties.ownerId, id));
+  await getDb().delete(projectDocuments).where(eq(projectDocuments.ownerId, id));
+  await getDb().delete(projectTemplates).where(eq(projectTemplates.ownerId, id));
   await getDb().delete(propertyDefinitions).where(eq(propertyDefinitions.ownerId, id));
   await getDb().delete(dailyScrums).where(eq(dailyScrums.ownerId, id));
   await getDb().delete(trashRecords).where(eq(trashRecords.ownerId, id));
@@ -2744,17 +2795,31 @@ export async function createItem(
     dueDate?: string | null;
     source?: string;
     sourceRef?: string | null;
+    templateId?: string | null;
+    createdByUserId?: string | null;
   },
 ) {
   await ensureWorkspace(ownerId);
   const kind = input.kind ?? "task";
-  const parentId = input.parentId ?? null;
+  const projectProperties = kind === "project" ? await listProjectPropertyDefinitions(ownerId) : [];
+  const systemDefault = (key: string) => parsePropertyValue(projectProperties.find((property) => property.systemKey === key)?.defaultValue ?? "null");
+  const defaultParentId = systemDefault("parent_id");
+  const parentId = input.parentId ?? (typeof defaultParentId === "string" ? defaultParentId : null);
   let routineId = input.routineId ?? null;
   if (kind === "task" && !parentId && !routineId) routineId = (await ensureGeneralRoutine(ownerId)).id;
-  const status = input.status ?? "todo";
+  const defaultStatus = systemDefault("status");
+  const status = input.status ?? (typeof defaultStatus === "string" && ITEM_STATUSES.includes(defaultStatus as ItemStatus) ? defaultStatus as ItemStatus : "todo");
   await validateParent(ownerId, kind, parentId, routineId);
   const rules = await getWorkspaceRules(ownerId);
   const cycleId = input.cycleId === undefined ? await defaultCycleIdForKind(ownerId, kind) : input.cycleId;
+  const defaultPriority = systemDefault("priority");
+  const defaultCadence = systemDefault("cadence");
+  const defaultDueDate = systemDefault("due_date");
+  if (input.templateId) {
+    const template = await getProjectTemplate(ownerId, input.templateId);
+    if (!template) throw new Error("Template not found");
+    if (kind !== "project") throw new Error("Templates can only be applied to Projects");
+  }
 
   const id = crypto.randomUUID();
   const [created] = await getDb()
@@ -2769,18 +2834,31 @@ export async function createItem(
       title: input.title.trim(),
       description: input.description?.trim() ?? "",
       status,
-      priority: input.priority ?? rules.defaultPriority,
-      cadence: input.cadence ?? rules.defaultCadence,
+      priority: input.priority ?? (typeof defaultPriority === "string" && ITEM_PRIORITIES.includes(defaultPriority as ItemPriority) ? defaultPriority as ItemPriority : rules.defaultPriority),
+      cadence: input.cadence ?? (typeof defaultCadence === "string" && ITEM_CADENCES.includes(defaultCadence as ItemCadence) ? defaultCadence as ItemCadence : rules.defaultCadence),
       progress: clampProgress(input.progress ?? 0),
-      dueDate: input.dueDate ?? null,
+      dueDate: input.dueDate ?? (typeof defaultDueDate === "string" ? defaultDueDate : null),
       source: input.source ?? "web",
       sourceRef: input.sourceRef ?? null,
     })
     .returning();
 
+  if (kind === "project") {
+    for (const property of projectProperties.filter((entry) => !entry.systemKey)) {
+      const defaultValue = parsePropertyValue(property.defaultValue);
+      if (defaultValue !== null) await setPropertyValue(ownerId, created.id, property.id, defaultValue);
+    }
+    const defaultDri = systemDefault("project_dri");
+    const defaultWorkers = systemDefault("project_workers");
+    if (typeof defaultDri === "string") await replaceItemAssignmentRole(ownerId, created.id, "project_dri", [defaultDri]);
+    if (Array.isArray(defaultWorkers)) await replaceItemAssignmentRole(ownerId, created.id, "project_worker", defaultWorkers);
+    if (input.templateId) await applyProjectTemplate(ownerId, created.id, input.templateId, input.createdByUserId);
+  }
+
+  const finalCreated = kind === "project" && input.templateId ? await getItem(ownerId, created.id) ?? created : created;
   await logActivity(ownerId, created.id, "created", created.source, { kind, status });
-  await dispatchSlackAutomationEvent(ownerId, { triggerType: "task_created", item: created });
-  return created;
+  await dispatchSlackAutomationEvent(ownerId, { triggerType: "task_created", item: finalCreated });
+  return finalCreated;
 }
 
 export async function updateItem(
@@ -3041,8 +3119,10 @@ export async function listPropertyDefinitions(ownerId: string) {
     .orderBy(asc(propertyDefinitions.sortOrder), asc(propertyDefinitions.createdAt));
 }
 
-export async function listProjectPropertyDefinitions(ownerId: string) {
-  return (await listPropertyDefinitions(ownerId)).filter((property) => !isReservedAssignmentPropertyName(property.name));
+export async function listProjectPropertyDefinitions(ownerId: string, includeInactive = false) {
+  return (await listPropertyDefinitions(ownerId)).filter((property) =>
+    (includeInactive || property.active) && (property.systemKey || !isReservedAssignmentPropertyName(property.name)),
+  );
 }
 
 export async function getPropertyDefinition(ownerId: string, id: string) {
@@ -3056,7 +3136,7 @@ export async function getPropertyDefinition(ownerId: string, id: string) {
 
 export async function createPropertyDefinition(
   ownerId: string,
-  input: { name: string; type: PropertyType; options?: string[] },
+  input: { name: string; type: PropertyType; options?: string[]; defaultValue?: PropertyValue },
 ) {
   const name = input.name.trim();
   if (!name) throw new Error("Property name is required");
@@ -3076,6 +3156,8 @@ export async function createPropertyDefinition(
       name,
       type: input.type,
       options: JSON.stringify(normalizeOptions(input.options ?? [])),
+      defaultValue: JSON.stringify(normalizePropertyValue({ name, type: input.type, options: JSON.stringify(normalizeOptions(input.options ?? [])) } as PropertyDefinition, input.defaultValue ?? null)),
+      active: true,
       sortOrder: (existing.at(-1)?.sortOrder ?? 0) + 10,
     })
     .returning();
@@ -3085,17 +3167,93 @@ export async function createPropertyDefinition(
 export async function deletePropertyDefinition(ownerId: string, id: string) {
   const property = await getPropertyDefinition(ownerId, id);
   if (!property) throw new Error("Property not found");
-
   await getDb()
-    .delete(projectHiddenProperties)
-    .where(and(eq(projectHiddenProperties.ownerId, ownerId), eq(projectHiddenProperties.propertyId, id)));
-  await getDb()
-    .delete(itemPropertyValues)
-    .where(and(eq(itemPropertyValues.ownerId, ownerId), eq(itemPropertyValues.propertyId, id)));
-  await getDb()
-    .delete(propertyDefinitions)
+    .update(propertyDefinitions)
+    .set({ active: false, updatedAt: new Date().toISOString() })
     .where(and(eq(propertyDefinitions.ownerId, ownerId), eq(propertyDefinitions.id, id)));
-  return property;
+  return { ...property, active: false };
+}
+
+export async function analyzePropertyTypeChange(
+  ownerId: string,
+  id: string,
+  input: { type: PropertyType; options?: string[] },
+) {
+  const property = await getPropertyDefinition(ownerId, id);
+  if (!property) throw new Error("Property not found");
+  const rows = await getDb().select().from(itemPropertyValues).where(and(
+    eq(itemPropertyValues.ownerId, ownerId),
+    eq(itemPropertyValues.propertyId, id),
+  ));
+  const candidate = { ...property, type: input.type, options: JSON.stringify(normalizeOptions(input.options ?? [])) };
+  let convertibleCount = 0;
+  let incompatibleCount = 0;
+  for (const row of rows) {
+    try {
+      normalizePropertyValue(candidate, parsePropertyValue(row.value));
+      convertibleCount += 1;
+    } catch {
+      incompatibleCount += 1;
+    }
+  }
+  return { valueCount: rows.length, convertibleCount, incompatibleCount };
+}
+
+export async function updatePropertyDefinition(
+  ownerId: string,
+  id: string,
+  patch: Partial<{ name: string; type: PropertyType; options: string[]; defaultValue: PropertyValue; sortOrder: number; active: boolean }>,
+) {
+  const property = await getPropertyDefinition(ownerId, id);
+  if (!property) throw new Error("Property not found");
+  const name = patch.name === undefined ? property.name : patch.name.trim();
+  if (!name) throw new Error("Property name is required");
+  const type = patch.type ?? property.type as PropertyType;
+  if (!PROPERTY_TYPES.includes(type)) throw new Error("Unsupported property type");
+  if (!property.systemKey && isReservedAssignmentPropertyName(name)) throw new Error("Assignment fields are managed as workspace member tags");
+  const existing = await listPropertyDefinitions(ownerId);
+  if (existing.some((entry) => entry.id !== id && entry.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    throw new Error("Property name already exists");
+  }
+  const options = patch.options === undefined ? parseOptions(property.options) : normalizeOptions(patch.options);
+  const nextDefinition = { ...property, name, type, options: JSON.stringify(options) };
+  const nextDefault = patch.defaultValue === undefined
+    ? parsePropertyValue(property.defaultValue)
+    : normalizePropertyValue(nextDefinition, patch.defaultValue);
+
+  if (type !== property.type || patch.options !== undefined) {
+    const rows = await getDb().select().from(itemPropertyValues).where(and(
+      eq(itemPropertyValues.ownerId, ownerId),
+      eq(itemPropertyValues.propertyId, id),
+    ));
+    for (const row of rows) {
+      try {
+        const normalized = normalizePropertyValue(nextDefinition, parsePropertyValue(row.value));
+        await getDb().update(itemPropertyValues).set({
+          value: JSON.stringify(normalized),
+          legacyValue: null,
+          updatedAt: new Date().toISOString(),
+        }).where(eq(itemPropertyValues.id, row.id));
+      } catch {
+        await getDb().update(itemPropertyValues).set({
+          value: "null",
+          legacyValue: row.value,
+          updatedAt: new Date().toISOString(),
+        }).where(eq(itemPropertyValues.id, row.id));
+      }
+    }
+  }
+
+  const [updated] = await getDb().update(propertyDefinitions).set({
+    name,
+    type,
+    options: JSON.stringify(options),
+    defaultValue: JSON.stringify(nextDefault),
+    sortOrder: patch.sortOrder ?? property.sortOrder,
+    active: patch.active ?? property.active,
+    updatedAt: new Date().toISOString(),
+  }).where(and(eq(propertyDefinitions.ownerId, ownerId), eq(propertyDefinitions.id, id))).returning();
+  return updated;
 }
 
 export async function setPropertyValue(
@@ -3110,10 +3268,21 @@ export async function setPropertyValue(
   ]);
   if (!itemRecord) throw new Error("Item not found");
   if (!property) throw new Error("Property not found");
+  if (!property.active) throw new Error("Restore the property before changing its value");
+  if (property.systemKey) throw new Error("System properties must be changed through the Project fields");
   if (itemRecord.kind !== "project") throw new Error("Custom properties can only be set on Project items");
   if (itemRecord.archivedAt) throw new Error("Restore the Project before changing its properties");
 
   const normalized = normalizePropertyValue(property, value);
+  if ((property.type === "member" || property.type === "members") && normalized !== null) {
+    const memberIds = (Array.isArray(normalized) ? normalized : [normalized]).filter((entry): entry is string => typeof entry === "string");
+    const members = await getDb().select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(
+      eq(workspaceMembers.workspaceId, ownerId),
+      eq(workspaceMembers.status, "active"),
+      inArray(workspaceMembers.id, memberIds),
+    ));
+    if (members.length !== new Set(memberIds).size) throw new Error("Property members must be active workspace members");
+  }
   if (normalized === null) {
     await getDb()
       .delete(itemPropertyValues)
@@ -3183,10 +3352,25 @@ export async function getProjectPropertyValueMap(ownerId: string) {
 }
 
 export async function getProjectPropertyUsageCounts(ownerId: string) {
-  const values = await getProjectPropertyValueMap(ownerId);
+  const [values, definitions, projects, assignments] = await Promise.all([
+    getProjectPropertyValueMap(ownerId),
+    listProjectPropertyDefinitions(ownerId, true),
+    getDb().select().from(items).where(and(eq(items.ownerId, ownerId), eq(items.kind, "project"))),
+    getDb().select({ itemId: itemAssignments.itemId, role: itemAssignments.role }).from(itemAssignments).where(and(
+      eq(itemAssignments.ownerId, ownerId),
+      inArray(itemAssignments.role, ["project_dri", "project_worker"]),
+    )),
+  ]);
   const counts: Record<string, number> = {};
   for (const itemValues of Object.values(values)) {
     for (const propertyId of Object.keys(itemValues)) counts[propertyId] = (counts[propertyId] ?? 0) + 1;
+  }
+  for (const property of definitions.filter((entry) => entry.systemKey)) {
+    if (property.systemKey === "parent_id") counts[property.id] = projects.filter((project) => Boolean(project.parentId)).length;
+    else if (property.systemKey === "due_date") counts[property.id] = projects.filter((project) => Boolean(project.dueDate)).length;
+    else if (property.systemKey === "project_dri") counts[property.id] = new Set(assignments.filter((entry) => entry.role === "project_dri").map((entry) => entry.itemId)).size;
+    else if (property.systemKey === "project_workers") counts[property.id] = new Set(assignments.filter((entry) => entry.role === "project_worker").map((entry) => entry.itemId)).size;
+    else counts[property.id] = projects.length;
   }
   return counts;
 }
@@ -3274,9 +3458,229 @@ export function serializePropertyDefinition(property: PropertyDefinition, valueC
     name: property.name,
     type: property.type,
     options: parseOptions(property.options),
+    defaultValue: parsePropertyValue(property.defaultValue),
+    systemKey: property.systemKey,
+    active: property.active,
     sortOrder: property.sortOrder,
     valueCount,
   };
+}
+
+export async function getProjectDocument(ownerId: string, projectId: string) {
+  const project = await getItem(ownerId, projectId);
+  if (!project || project.kind !== "project") throw new Error("Project not found");
+  const [document] = await getDb().select().from(projectDocuments).where(and(
+    eq(projectDocuments.ownerId, ownerId),
+    eq(projectDocuments.projectId, projectId),
+  )).limit(1);
+  if (document) return serializeProjectDocument(document);
+  return {
+    id: null,
+    projectId,
+    content: JSON.stringify(blocksFromPlainText(project.description)),
+    plainText: project.description,
+    version: 0,
+    updatedAt: project.updatedAt,
+  };
+}
+
+export async function saveProjectDocument(
+  ownerId: string,
+  projectId: string,
+  input: { content: string; plainText: string; expectedVersion: number; userId?: string | null },
+) {
+  const project = await getItem(ownerId, projectId);
+  if (!project || project.kind !== "project") throw new Error("Project not found");
+  if (project.archivedAt) throw new Error("Restore the Project before changing its document");
+  const content = normalizeBlockContent(input.content);
+  const plainText = normalizeDocumentText(input.plainText);
+  const [current] = await getDb().select().from(projectDocuments).where(and(
+    eq(projectDocuments.ownerId, ownerId),
+    eq(projectDocuments.projectId, projectId),
+  )).limit(1);
+  const currentVersion = current?.version ?? 0;
+  if (input.expectedVersion !== currentVersion) throw new Error("Document version conflict");
+  const now = new Date().toISOString();
+  const nextVersion = currentVersion + 1;
+  const d1 = (env as RuntimeEnv).DB;
+  const documentStatement = current
+    ? d1.prepare(`UPDATE project_documents
+        SET content = ?, plain_text = ?, version = ?, updated_by_user_id = ?, updated_at = ?
+        WHERE owner_id = ? AND project_id = ? AND version = ?`)
+      .bind(content, plainText, nextVersion, input.userId ?? null, now, ownerId, projectId, currentVersion)
+    : d1.prepare(`INSERT INTO project_documents
+        (id, owner_id, project_id, content, plain_text, version, updated_by_user_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(crypto.randomUUID(), ownerId, projectId, content, plainText, nextVersion, input.userId ?? null, now, now);
+  await d1.batch([
+    documentStatement,
+    d1.prepare(`UPDATE items SET description = ?, updated_at = ?
+        WHERE owner_id = ? AND id = ? AND EXISTS (
+          SELECT 1 FROM project_documents
+          WHERE owner_id = ? AND project_id = ? AND version = ? AND updated_at = ?
+        )`)
+      .bind(plainText, now, ownerId, projectId, ownerId, projectId, nextVersion, now),
+  ]);
+  const [saved] = await getDb().select().from(projectDocuments).where(and(
+    eq(projectDocuments.ownerId, ownerId),
+    eq(projectDocuments.projectId, projectId),
+  )).limit(1);
+  if (!saved) throw new Error("Project document could not be saved");
+  if (saved.version !== nextVersion || saved.updatedAt !== now) throw new Error("Document version conflict");
+  await logActivity(ownerId, projectId, "project_document_updated", "web", { version: nextVersion });
+  return serializeProjectDocument(saved);
+}
+
+export async function listProjectTemplates(ownerId: string) {
+  const rows = await getDb().select().from(projectTemplates).where(eq(projectTemplates.ownerId, ownerId)).orderBy(
+    desc(projectTemplates.updatedAt),
+    asc(projectTemplates.name),
+  );
+  return rows.map(serializeProjectTemplate);
+}
+
+export async function getProjectTemplate(ownerId: string, id: string) {
+  const [template] = await getDb().select().from(projectTemplates).where(and(
+    eq(projectTemplates.ownerId, ownerId),
+    eq(projectTemplates.id, id),
+  )).limit(1);
+  return template ?? null;
+}
+
+export async function createProjectTemplate(
+  ownerId: string,
+  input: { name: string; description?: string; content?: string; plainText?: string; userId?: string | null },
+) {
+  const name = normalizeTemplateName(input.name);
+  const existing = await listProjectTemplates(ownerId);
+  if (existing.some((entry) => entry.name.toLocaleLowerCase() === name.toLocaleLowerCase())) throw new Error("Template name already exists");
+  const now = new Date().toISOString();
+  const [created] = await getDb().insert(projectTemplates).values({
+    id: crypto.randomUUID(),
+    ownerId,
+    name,
+    description: normalizeTemplateDescription(input.description ?? ""),
+    content: normalizeBlockContent(input.content ?? "[]"),
+    plainText: normalizeDocumentText(input.plainText ?? ""),
+    createdByUserId: input.userId ?? null,
+    createdAt: now,
+    updatedAt: now,
+  }).returning();
+  return serializeProjectTemplate(created);
+}
+
+export async function updateProjectTemplate(
+  ownerId: string,
+  id: string,
+  patch: Partial<{ name: string; description: string; content: string; plainText: string }>,
+) {
+  const template = await getProjectTemplate(ownerId, id);
+  if (!template) throw new Error("Template not found");
+  const name = patch.name === undefined ? template.name : normalizeTemplateName(patch.name);
+  if (name.toLocaleLowerCase() !== template.name.toLocaleLowerCase()) {
+    const existing = await listProjectTemplates(ownerId);
+    if (existing.some((entry) => entry.id !== id && entry.name.toLocaleLowerCase() === name.toLocaleLowerCase())) throw new Error("Template name already exists");
+  }
+  const [updated] = await getDb().update(projectTemplates).set({
+    name,
+    description: patch.description === undefined ? template.description : normalizeTemplateDescription(patch.description),
+    content: patch.content === undefined ? template.content : normalizeBlockContent(patch.content),
+    plainText: patch.plainText === undefined ? template.plainText : normalizeDocumentText(patch.plainText),
+    updatedAt: new Date().toISOString(),
+  }).where(and(eq(projectTemplates.ownerId, ownerId), eq(projectTemplates.id, id))).returning();
+  return serializeProjectTemplate(updated);
+}
+
+export async function deleteProjectTemplate(ownerId: string, id: string) {
+  const template = await getProjectTemplate(ownerId, id);
+  if (!template) throw new Error("Template not found");
+  await getDb().delete(projectTemplates).where(and(eq(projectTemplates.ownerId, ownerId), eq(projectTemplates.id, id)));
+  return { deleted: true, id, name: template.name };
+}
+
+export async function applyProjectTemplate(ownerId: string, projectId: string, templateId: string, userId?: string | null) {
+  const template = await getProjectTemplate(ownerId, templateId);
+  if (!template) throw new Error("Template not found");
+  const document = await getProjectDocument(ownerId, projectId);
+  const templateBlocks = parseBlockArray(template.content);
+  const existingBlocks = parseBlockArray(document.content);
+  const content = JSON.stringify([...templateBlocks, ...existingBlocks]);
+  const plainText = [template.plainText.trim(), document.plainText.trim()].filter(Boolean).join("\n\n");
+  return saveProjectDocument(ownerId, projectId, {
+    content,
+    plainText,
+    expectedVersion: document.version,
+    userId,
+  });
+}
+
+function serializeProjectDocument(document: ProjectDocument) {
+  return {
+    id: document.id,
+    projectId: document.projectId,
+    content: document.content,
+    plainText: document.plainText,
+    version: document.version,
+    updatedAt: document.updatedAt,
+  };
+}
+
+function serializeProjectTemplate(template: ProjectTemplate) {
+  return {
+    id: template.id,
+    name: template.name,
+    description: template.description,
+    content: template.content,
+    plainText: template.plainText,
+    createdAt: template.createdAt,
+    updatedAt: template.updatedAt,
+  };
+}
+
+function normalizeBlockContent(value: string) {
+  if (value.length > 500_000) throw new Error("Project document is too large");
+  return JSON.stringify(parseBlockArray(value));
+}
+
+function parseBlockArray(value: string): Record<string, unknown>[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("Document content must be valid block JSON");
+  }
+  if (!Array.isArray(parsed) || !parsed.every((entry) => entry && typeof entry === "object" && !Array.isArray(entry))) {
+    throw new Error("Document content must be a block array");
+  }
+  return parsed as Record<string, unknown>[];
+}
+
+function blocksFromPlainText(value: string) {
+  const lines = value.split(/\r?\n/);
+  const blocks = lines.map((line) => {
+    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+    if (heading) return { type: "heading", props: { level: heading[1].length }, content: heading[2] };
+    return { type: "paragraph", content: line };
+  });
+  return blocks.length ? blocks : [{ type: "paragraph", content: "" }];
+}
+
+function normalizeDocumentText(value: string) {
+  if (value.length > 200_000) throw new Error("Project document text is too large");
+  return value.replace(/\r\n/g, "\n").trim();
+}
+
+function normalizeTemplateName(value: string) {
+  const name = value.trim().replace(/\s+/g, " ");
+  if (!name) throw new Error("Template name is required");
+  if (name.length > 100) throw new Error("Template name is too long");
+  return name;
+}
+
+function normalizeTemplateDescription(value: string) {
+  const description = value.trim();
+  if (description.length > 500) throw new Error("Template description is too long");
+  return description;
 }
 
 export async function getPeriodReview(ownerId: string, cadence: ItemCadence) {
@@ -3890,9 +4294,25 @@ async function removeLegacySeedWorkspaceData(ownerId: string) {
 }
 
 async function seedProjectExecutionProperties(ownerId: string) {
-  const existing = await listPropertyDefinitions(ownerId);
+  let existing = await listPropertyDefinitions(ownerId);
+  for (const definition of DEFAULT_PROJECT_EXECUTION_PROPERTIES.filter((entry) => entry.systemKey)) {
+    if (existing.some((property) => property.systemKey === definition.systemKey)) continue;
+    const legacy = existing.find((property) => !property.systemKey && property.name.toLocaleLowerCase() === definition.name.toLocaleLowerCase());
+    if (!legacy) continue;
+    await getDb().update(propertyDefinitions).set({
+      systemKey: definition.systemKey,
+      type: definition.type,
+      options: JSON.stringify(normalizeOptions(definition.options ?? [])),
+      active: true,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(propertyDefinitions.id, legacy.id));
+  }
+  existing = await listPropertyDefinitions(ownerId);
   const existingNames = new Set(existing.map((property) => property.name.toLocaleLowerCase()));
-  const missing = DEFAULT_PROJECT_EXECUTION_PROPERTIES.filter((property) => !existingNames.has(property.name.toLocaleLowerCase()));
+  const existingSystemKeys = new Set(existing.map((property) => property.systemKey).filter(Boolean));
+  const missing = DEFAULT_PROJECT_EXECUTION_PROPERTIES.filter((property) => property.systemKey
+    ? !existingSystemKeys.has(property.systemKey)
+    : !existingNames.has(property.name.toLocaleLowerCase()));
   if (!missing.length) return;
 
   const baseSortOrder = existing.at(-1)?.sortOrder ?? 0;
@@ -3903,6 +4323,9 @@ async function seedProjectExecutionProperties(ownerId: string) {
       name: property.name,
       type: property.type,
       options: JSON.stringify(normalizeOptions(property.options ?? [])),
+      defaultValue: JSON.stringify(property.defaultValue ?? null),
+      systemKey: property.systemKey ?? null,
+      active: true,
       sortOrder: baseSortOrder + ((index + 1) * 10),
     })),
   );
@@ -3976,7 +4399,7 @@ function parseOptions(value: string) {
 function parsePropertyValue(value: string): PropertyValue {
   try {
     const parsed = JSON.parse(value) as unknown;
-    return typeof parsed === "string" || typeof parsed === "number" || typeof parsed === "boolean" || parsed === null
+    return typeof parsed === "string" || typeof parsed === "number" || typeof parsed === "boolean" || parsed === null || (Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string"))
       ? parsed
       : null;
   } catch {
@@ -3985,7 +4408,15 @@ function parsePropertyValue(value: string): PropertyValue {
 }
 
 function normalizePropertyValue(property: PropertyDefinition, value: PropertyValue): PropertyValue {
-  if (value === null || value === "") return null;
+  if (value === null || value === "" || (Array.isArray(value) && value.length === 0)) return null;
+  if (property.type === "members") {
+    if (!Array.isArray(value)) throw new Error(`${property.name} must be a member list`);
+    return [...new Set(value.map((entry) => entry.trim()).filter(Boolean))];
+  }
+  if (property.type === "member") {
+    if (Array.isArray(value) || typeof value !== "string") throw new Error(`${property.name} must be one member`);
+    return value.trim() || null;
+  }
   if (property.type === "number") {
     const number = typeof value === "number" ? value : Number(value);
     if (!Number.isFinite(number)) throw new Error(`${property.name} must be a number`);

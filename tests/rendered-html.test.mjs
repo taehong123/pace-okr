@@ -316,3 +316,41 @@ test("serves hashed assets with immutable browser and edge caching", async () =>
   assert.equal(response.headers.get("cache-control"), "public, max-age=31536000, immutable");
   assert.equal(response.headers.get("cloudflare-cdn-cache-control"), "public, max-age=31536000, immutable");
 });
+
+test("ships Project property, Task table, document, template, and MCP surfaces", async () => {
+  const [page, editor, propertiesRoute, documentsRoute, templatesRoute, mcpRoute, paceData] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/project-block-editor.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/properties/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/project-documents/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/project-templates/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/mcp/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /목록.*속성 관리.*템플릿 관리.*아카이브/s);
+  assert.match(page, /연결된 Task/);
+  assert.match(page, /템플릿 불러오기/);
+  assert.doesNotMatch(page, /window\.prompt/);
+  assert.match(page, /저장 중.*저장됨.*저장 실패/s);
+  assert.match(page, /expectedVersion/);
+  assert.match(editor, /BlockNoteSchema\.create/);
+  assert.match(editor, /defaultBlockSpecs\.table/);
+  assert.doesNotMatch(editor, /defaultBlockSpecs\.(image|video|audio|file)/);
+  assert.match(propertiesRoute, /payload\.preview === true/);
+  assert.match(propertiesRoute, /includeInactive/);
+  assert.match(documentsRoute, /version conflict/i);
+  assert.match(documentsRoute, /applyProjectTemplate/);
+  assert.match(templatesRoute, /createProjectTemplate/);
+  assert.match(templatesRoute, /deleteProjectTemplate/);
+  assert.match(mcpRoute, /list_project_templates/);
+  assert.match(mcpRoute, /get_project_document/);
+  assert.match(mcpRoute, /update_project_document/);
+  assert.match(mcpRoute, /apply_project_template/);
+  assert.ok(
+    paceData.indexOf('ADD COLUMN system_key') < paceData.indexOf('idx_property_definitions_owner_system'),
+    "property compatibility columns must be added before dependent indexes",
+  );
+  assert.match(paceData, /legacyValue: row\.value/);
+  assert.match(paceData, /\.\.\.templateBlocks, \.\.\.existingBlocks/);
+});

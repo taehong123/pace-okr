@@ -61,7 +61,7 @@ export async function GET(request: Request) {
     const loadData = async () => {
       const [itemRows, propertyRows, propertyValues, propertyUsageCounts, hiddenByProject, archivedRows, routines] = await Promise.all([
         listItems(authorization.ownerId),
-        listProjectPropertyDefinitions(authorization.ownerId),
+        listProjectPropertyDefinitions(authorization.ownerId, true),
         getProjectPropertyValueMap(authorization.ownerId),
         getProjectPropertyUsageCounts(authorization.ownerId),
         getProjectHiddenPropertyMap(authorization.ownerId),

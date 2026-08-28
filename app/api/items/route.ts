@@ -69,15 +69,17 @@ export async function POST(request: Request) {
       description: asString(payload.description),
       kind: asValue(payload.kind, ITEM_KINDS) as ItemKind | undefined,
       cycleId: payload.cycleId === undefined ? undefined : asNullableString(payload.cycleId),
-      parentId: asNullableString(payload.parentId),
+      parentId: payload.parentId === undefined ? undefined : asNullableString(payload.parentId),
       routineId: asNullableString(payload.routineId),
       status: asValue(payload.status, ITEM_STATUSES) as ItemStatus | undefined,
       priority: asValue(payload.priority, ITEM_PRIORITIES) as ItemPriority | undefined,
       cadence: asValue(payload.cadence, ITEM_CADENCES) as ItemCadence | undefined,
       progress: typeof payload.progress === "number" ? payload.progress : undefined,
-      dueDate: asNullableString(payload.dueDate),
+      dueDate: payload.dueDate === undefined ? undefined : asNullableString(payload.dueDate),
       source: asString(payload.source) || "web",
       sourceRef: asNullableString(payload.sourceRef),
+      templateId: asNullableString(payload.templateId),
+      createdByUserId: authorization.userId,
     });
     await saveAssignments(authorization.ownerId, item.id, item.kind as ItemKind, payload);
     const assignments = await getItemAssignmentMap(authorization.ownerId, [item.id]);

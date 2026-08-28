@@ -18,11 +18,13 @@ import {
   createGroup,
   createItem,
   createPropertyDefinition,
+  createProjectTemplate,
   createRoutine,
   deletePropertyDefinition,
   deleteGroup,
   deleteRoutine,
   ensureWorkspace,
+  getProjectDocument,
   getTeam,
   getDailyScrum,
   getItemPropertiesByName,
@@ -35,6 +37,7 @@ import {
   listGroups,
   listItems,
   listProjectPropertyDefinitions,
+  listProjectTemplates,
   listRoutines,
   inviteTeamMember,
   removeTeamMember,
@@ -44,12 +47,14 @@ import {
   restoreProject,
   saveDailyScrum,
   saveWorkspaceRules,
+  saveProjectDocument,
   serializeChecklistItem,
   serializeItem,
   serializePropertyDefinition,
   serializeRoutine,
   setItemPropertiesByName,
   setPropertyValue,
+  applyProjectTemplate,
   updateChecklistItem,
   updateGroup,
   updateGroupMember,
@@ -71,13 +76,16 @@ import {
   type TeamRole,
 } from "@/lib/pace-data";
 
-const propertyValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+const propertyValueSchema = z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()]);
 
 const propertyDefinitionOutput = z.object({
   id: z.string(),
   name: z.string(),
   type: z.string(),
   options: z.array(z.string()),
+  defaultValue: propertyValueSchema,
+  systemKey: z.string().nullable(),
+  active: z.boolean(),
   sortOrder: z.number(),
   valueCount: z.number(),
 });
@@ -88,6 +96,25 @@ const itemAssignmentOutput = z.object({
   displayName: z.string(),
   email: z.string(),
   role: z.enum(["project_dri", "project_worker", "task_assignee"]),
+});
+
+const projectDocumentOutput = z.object({
+  id: z.string().nullable(),
+  projectId: z.string(),
+  content: z.string(),
+  plainText: z.string(),
+  version: z.number(),
+  updatedAt: z.string(),
+});
+
+const projectTemplateOutput = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  content: z.string(),
+  plainText: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });
 
 const itemOutput = z.object({
@@ -204,11 +231,11 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   const { ownerId } = authorization;
   const rules = await getWorkspaceRules(ownerId);
   const server = new McpServer(
-    { name: "okrptr", version: "0.6.0" },
+    { name: "okrptr", version: "0.7.0" },
     {
       instructions:
         [
-          "Capture first, structure later. Use capture_item for quick natural-language intake. The OKR hierarchy is Objective > Key Result > Initiative > Project > Task. Routine is an independent Project-like execution container that does not require an Initiative and may own Tasks. Routines add trigger points, places/tools, concrete action steps, and dated completion records. Tasks have one assignee and belong to either a Project or Routine; custom properties belong to Projects. Team access uses Owner, Admin, Member, and read-only Viewer roles. Workspace groups have @handles, open or private visibility, and Lead or Member roles. Use list_properties before setting unfamiliar Project property names.",
+          "Capture first, structure later. Use capture_item for quick natural-language intake. The OKR hierarchy is Objective > Key Result > Initiative > Project > Task. Routine is an independent Project-like execution container that does not require an Initiative and may own Tasks. Routines add trigger points, places/tools, concrete action steps, and dated completion records. Tasks have one assignee and belong to either a Project or Routine; managed properties and block documents belong to Projects. Team access uses Owner, Admin, Member, and read-only Viewer roles. Workspace groups have @handles, open or private visibility, and Lead or Member roles. Use list_properties before setting unfamiliar Project property names and list_project_templates before applying a template.",
           `Workspace capture rule: ${rules.captureInstruction}`,
           `Workspace structure rule: ${rules.structureInstruction}`,
           `Workspace routine rule: ${rules.routineInstruction}`,
@@ -315,6 +342,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
         cadence: z.enum(ITEM_CADENCES).optional(),
         progress: z.number().min(0).max(100).optional(),
         due_date: z.string().optional(),
+        template_id: z.string().optional().describe("Optional Project body template ID; ignored for non-Project items"),
         properties: z.record(z.string(), propertyValueSchema).optional().describe("Project-only custom values keyed by property name"),
         dri_member_id: z.string().optional().describe("Active workspace member ID for a Project DRI"),
         worker_member_ids: z.array(z.string()).optional().describe("Active workspace member IDs for Project workers"),
@@ -334,6 +362,8 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
         cadence: input.cadence as ItemCadence | undefined,
         progress: input.progress,
         dueDate: input.due_date,
+        templateId: input.template_id,
+        createdByUserId: authorization.userId,
         source: "mcp",
       });
       if (input.properties && item.kind === "project") {
@@ -517,13 +547,13 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     "list_properties",
     {
       title: "List Project properties",
-      description: "List the custom fields available on Projects, including IDs, types, usage counts, and select options.",
-      inputSchema: {},
+      description: "List managed Project fields, including defaults, system roles, visibility state, types, usage counts, and select options.",
+      inputSchema: { include_inactive: z.boolean().default(false) },
       outputSchema: { properties: z.array(propertyDefinitionOutput), count: z.number() },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async () => {
-      const definitions = await listProjectPropertyDefinitions(ownerId);
+    async ({ include_inactive }) => {
+      const definitions = await listProjectPropertyDefinitions(ownerId, include_inactive);
       const properties = definitions.map((definition) => serializePropertyDefinition(definition));
       return {
         structuredContent: { properties, count: properties.length },
@@ -541,15 +571,17 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
         name: z.string().min(1),
         type: z.enum(PROPERTY_TYPES),
         options: z.array(z.string().min(1)).optional(),
+        default_value: propertyValueSchema.optional(),
       },
       outputSchema: { property: propertyDefinitionOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ name, type, options }) => {
+    async ({ name, type, options, default_value }) => {
       const property = await createPropertyDefinition(ownerId, {
         name,
         type: type as PropertyType,
         options,
+        defaultValue: default_value as PropertyValue | undefined,
       });
       const serialized = serializePropertyDefinition(property);
       return {
@@ -596,11 +628,11 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   server.registerTool(
     "delete_property",
     {
-      title: "Delete a Project property",
-      description: "Delete a custom Project field and all Project values stored under it. The property can be provided by ID or exact name.",
+      title: "Remove a Project property",
+      description: "Remove a custom Project field from active screens while preserving all existing values as restorable legacy data. The property can be provided by ID or exact name.",
       inputSchema: { property: z.string().min(1).describe("Property ID or exact name") },
       outputSchema: { deleted: z.boolean(), propertyId: z.string(), propertyName: z.string() },
-      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     async ({ property }) => {
       const definition = await resolveProperty(ownerId, property);
@@ -612,7 +644,118 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       };
       return {
         structuredContent,
-        content: [{ type: "text", text: `Deleted Project property "${definition.name}".` }],
+        content: [{ type: "text", text: `Removed Project property "${definition.name}" while preserving its values.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "list_project_templates",
+    {
+      title: "List Project document templates",
+      description: "List reusable block-document templates. Templates contain body content only and never copy properties, assignments, or Tasks.",
+      inputSchema: {},
+      outputSchema: { templates: z.array(projectTemplateOutput), count: z.number() },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async () => {
+      const templates = await listProjectTemplates(ownerId);
+      return {
+        structuredContent: { templates, count: templates.length },
+        content: [{ type: "text", text: `Found ${templates.length} Project document templates.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "create_project_template",
+    {
+      title: "Create a Project document template",
+      description: "Create a reusable Project body template from BlockNote-compatible block JSON and its plain-text representation.",
+      inputSchema: {
+        name: z.string().min(1),
+        description: z.string().optional(),
+        content: z.string().describe("JSON array of BlockNote-compatible blocks"),
+        plain_text: z.string().default(""),
+      },
+      outputSchema: { template: projectTemplateOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ name, description, content, plain_text }) => {
+      const template = await createProjectTemplate(ownerId, {
+        name,
+        description,
+        content,
+        plainText: plain_text,
+        userId: authorization.userId,
+      });
+      return {
+        structuredContent: { template },
+        content: [{ type: "text", text: `Created Project template "${template.name}".` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "get_project_document",
+    {
+      title: "Get a Project document",
+      description: "Read a Project block document, its searchable plain text, and the version required for conflict-safe updates.",
+      inputSchema: { project_id: z.string() },
+      outputSchema: { document: projectDocumentOutput },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ project_id }) => {
+      const document = await getProjectDocument(ownerId, project_id);
+      return {
+        structuredContent: { document },
+        content: [{ type: "text", text: `Returned the Project document at version ${document.version}.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "update_project_document",
+    {
+      title: "Update a Project document",
+      description: "Replace a Project block document with conflict detection. Read the document first and pass its current version.",
+      inputSchema: {
+        project_id: z.string(),
+        content: z.string().describe("JSON array of BlockNote-compatible blocks"),
+        plain_text: z.string(),
+        expected_version: z.number().int().min(0),
+      },
+      outputSchema: { document: projectDocumentOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ project_id, content, plain_text, expected_version }) => {
+      const document = await saveProjectDocument(ownerId, project_id, {
+        content,
+        plainText: plain_text,
+        expectedVersion: expected_version,
+        userId: authorization.userId,
+      });
+      return {
+        structuredContent: { document },
+        content: [{ type: "text", text: `Saved the Project document at version ${document.version}.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "apply_project_template",
+    {
+      title: "Apply a Project document template",
+      description: "Insert a template above the Project's existing body. The existing content remains below and the result is an independent copy.",
+      inputSchema: { project_id: z.string(), template_id: z.string() },
+      outputSchema: { document: projectDocumentOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ project_id, template_id }) => {
+      const document = await applyProjectTemplate(ownerId, project_id, template_id, authorization.userId);
+      return {
+        structuredContent: { document },
+        content: [{ type: "text", text: `Applied the template above the existing Project document.` }],
       };
     },
   );

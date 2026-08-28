@@ -1,6 +1,6 @@
 {
   "name": "okrptr",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -15,6 +15,12 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@blocknote/core": "^0.54.0",
+    "@blocknote/mantine": "^0.54.0",
+    "@blocknote/react": "^0.54.0",
+    "@mantine/core": "^9.5.2",
+    "@mantine/hooks": "^9.5.2",
+    "@mantine/utils": "^6.0.22",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "drizzle-orm": "0.45.2",
     "lucide-react": "^1.31.0",

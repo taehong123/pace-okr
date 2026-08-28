@@ -226,13 +226,19 @@ export const propertyDefinitions = sqliteTable(
     name: text("name").notNull(),
     type: text("type").notNull(),
     options: text("options").notNull().default("[]"),
+    defaultValue: text("default_value").notNull().default("null"),
+    systemKey: text("system_key"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
     uniqueIndex("idx_property_definitions_owner_name").on(table.ownerId, table.name),
-    index("idx_property_definitions_owner_sort").on(table.ownerId, table.sortOrder),
+    uniqueIndex("idx_property_definitions_owner_system")
+      .on(table.ownerId, table.systemKey)
+      .where(sql`${table.systemKey} IS NOT NULL`),
+    index("idx_property_definitions_owner_active_sort").on(table.ownerId, table.active, table.sortOrder),
   ],
 );
 
@@ -244,12 +250,51 @@ export const itemPropertyValues = sqliteTable(
     itemId: text("item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
     propertyId: text("property_id").notNull().references(() => propertyDefinitions.id, { onDelete: "cascade" }),
     value: text("value").notNull().default("null"),
+    legacyValue: text("legacy_value"),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
     uniqueIndex("idx_item_property_values_unique").on(table.ownerId, table.itemId, table.propertyId),
     index("idx_item_property_values_owner_item").on(table.ownerId, table.itemId),
     index("idx_item_property_values_owner_property").on(table.ownerId, table.propertyId),
+  ],
+);
+
+export const projectDocuments = sqliteTable(
+  "project_documents",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    projectId: text("project_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    content: text("content").notNull().default("[]"),
+    plainText: text("plain_text").notNull().default(""),
+    version: integer("version").notNull().default(1),
+    updatedByUserId: text("updated_by_user_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_project_documents_project").on(table.ownerId, table.projectId),
+    index("idx_project_documents_owner_updated").on(table.ownerId, table.updatedAt),
+  ],
+);
+
+export const projectTemplates = sqliteTable(
+  "project_templates",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    content: text("content").notNull().default("[]"),
+    plainText: text("plain_text").notNull().default(""),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_project_templates_owner_name").on(table.ownerId, table.name),
+    index("idx_project_templates_owner_updated").on(table.ownerId, table.updatedAt),
   ],
 );
 
@@ -529,6 +574,8 @@ export type ItemAssignment = typeof itemAssignments.$inferSelect;
 export type PropertyDefinition = typeof propertyDefinitions.$inferSelect;
 export type ItemPropertyValue = typeof itemPropertyValues.$inferSelect;
 export type ProjectHiddenProperty = typeof projectHiddenProperties.$inferSelect;
+export type ProjectDocument = typeof projectDocuments.$inferSelect;
+export type ProjectTemplate = typeof projectTemplates.$inferSelect;
 export type ChecklistItem = typeof checklistItems.$inferSelect;
 export type DailyScrum = typeof dailyScrums.$inferSelect;
 export type Routine = typeof routines.$inferSelect;

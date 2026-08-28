@@ -8,6 +8,7 @@ import {
   AtSign,
   Bell,
   Bot,
+  BookTemplate,
   Briefcase,
   CalendarCheck,
   CalendarDays,
@@ -52,21 +53,21 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 
 type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "scrum" | "recommendations" | "reviews" | "trash";
 type Cadence = "daily" | "weekly" | "monthly" | "quarterly";
 type ItemStatus = "backlog" | "todo" | "policy_discussion" | "in_progress" | "developing" | "development_done" | "done" | "blocked" | "archived";
 type ItemKind = "objective" | "key_result" | "initiative" | "project" | "task";
 type Priority = "low" | "medium" | "high" | "urgent";
-type PropertyType = "text" | "number" | "select" | "date" | "checkbox";
-type PropertyValue = string | number | boolean | null;
+type PropertyType = "text" | "number" | "select" | "date" | "checkbox" | "member" | "members";
+type PropertyValue = string | number | boolean | string[] | null;
 type RoutineCadence = "daily" | "weekly" | "monthly";
 type TeamRole = "owner" | "admin" | "member" | "viewer";
 type GroupColor = "gray" | "blue" | "green" | "yellow" | "orange" | "red" | "purple";
 type GroupVisibility = "open" | "private";
 type GroupRole = "lead" | "member";
-type ProjectTab = "list" | "properties" | "archive";
+type ProjectTab = "list" | "properties" | "templates" | "archive";
 type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
 type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "openai" | "local" };
 type AuthState = { status: "loading" | "authenticated" | "unauthenticated"; user: AuthUser | null; reason: string | null };
@@ -122,9 +123,16 @@ type PropertyDefinition = {
   name: string;
   type: PropertyType;
   options: string[];
+  defaultValue: PropertyValue;
+  systemKey: string | null;
+  active: boolean;
   sortOrder: number;
   valueCount: number;
 };
+
+type ProjectDocument = { id: string | null; projectId: string; content: string; plainText: string; version: number; updatedAt: string };
+type ProjectTemplate = { id: string; name: string; description: string; content: string; plainText: string; createdAt: string; updatedAt: string };
+type ProjectBlockEditorChange = { content: string; plainText: string };
 
 type PropertyValueMap = Record<string, Record<string, PropertyValue>>;
 type ProjectHiddenPropertyMap = Record<string, string[]>;
@@ -1662,7 +1670,11 @@ export default function Home() {
               onPatch={patchItem}
               onPropertyChange={setPropertyValue}
               onPropertyVisibility={(propertyId, hidden) => void setProjectPropertyVisibility(selectedProject.id, propertyId, hidden)}
-              onAssignmentsChange={(assignments) => updateItemAssignments(selectedProject.id, assignments)}
+              onAssignmentsChange={updateItemAssignments}
+              onTaskCreated={(created) => setItems((current) => [...current, created])}
+              onOpenTask={(id) => { setSelectedProjectId(null); setSelectedTaskId(id); }}
+              readOnly={currentWorkspace?.role === "viewer"}
+              onNotice={showNotice}
               onArchive={() => void archiveProjectItem(selectedProject)}
             />
           ) : (
@@ -1674,6 +1686,7 @@ export default function Home() {
               <div className="project-tabs" role="tablist" aria-label="Project 보기">
                 <button className={projectTab === "list" ? "active" : ""} onClick={() => setProjectTab("list")}><Table2 size={14} />목록</button>
                 <button className={projectTab === "properties" ? "active" : ""} onClick={() => setProjectTab("properties")}><Settings2 size={14} />속성 관리</button>
+                <button className={projectTab === "templates" ? "active" : ""} onClick={() => setProjectTab("templates")}><BookTemplate size={14} />템플릿 관리</button>
                 <button className={projectTab === "archive" ? "active" : ""} onClick={() => setProjectTab("archive")}><Archive size={14} />아카이브{archivedProjects.length > 0 && <span>{archivedProjects.length}</span>}</button>
               </div>
               {projectTab === "list" && <TaskDatabase
@@ -1692,14 +1705,12 @@ export default function Home() {
               />}
               {projectTab === "properties" && <ProjectPropertyManager
                 properties={properties}
-                onCreated={(property) => setProperties((current) => [...current, property])}
-                onDeleted={(id) => {
-                  setProperties((current) => current.filter((entry) => entry.id !== id));
-                  setPropertyValues((current) => Object.fromEntries(Object.entries(current).map(([itemId, values]) => [itemId, Object.fromEntries(Object.entries(values).filter(([propertyId]) => propertyId !== id))])));
-                  setHiddenProperties((current) => Object.fromEntries(Object.entries(current).map(([projectId, ids]) => [projectId, ids.filter((entry) => entry !== id)])));
-                }}
+                teamMembers={teamMembers}
+                readOnly={currentWorkspace?.role === "viewer"}
+                onChanged={(next) => setProperties([...next].sort((left, right) => left.sortOrder - right.sortOrder))}
                 onNotice={showNotice}
               />}
+              {projectTab === "templates" && <ProjectTemplateManager readOnly={currentWorkspace?.role === "viewer"} onNotice={showNotice} />}
               {projectTab === "archive" && <ProjectArchiveView projects={archivedProjects} onRestore={(id) => void restoreProjectItem(id)} onDelete={(project) => void permanentlyDeleteProjectItem(project)} />}
             </section>
           )}
@@ -2059,6 +2070,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
 }) {
   const [query, setQuery] = useState("");
   const visible = items.filter((entry) => entry.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const customProperties = properties.filter((property) => !property.systemKey && property.active);
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
   const emptyLabel = items.every((entry) => entry.kind === "project") ? "Project" : "Task";
   return (
@@ -2077,10 +2089,10 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
       </div>
       {display === "board" ? <BoardView items={visible} onOpenItem={(entry) => entry.kind === "project" ? onOpenProject(entry.id) : onOpenTask(entry.id)} /> : (
         <div className="database-scroll">
-          <div className="task-table" style={{ "--custom-columns": properties.length } as CSSProperties}>
+          <div className="task-table" style={{ "--custom-columns": customProperties.length } as CSSProperties}>
             <div className="task-table-row task-table-head">
               <span><ListChecks size={12} />이름</span><span><Activity size={12} />상태</span><span><Zap size={12} />우선순위</span><span><CalendarDays size={12} />기한</span><span><Link2 size={12} />상위 Initiative</span><span><Users size={12} />DRI</span>
-              {properties.map((property) => <span key={property.id}>{property.type === "number" ? <Hash size={12} /> : <TextCursorInput size={12} />}{property.name}</span>)}
+              {customProperties.map((property) => <span key={property.id}>{property.type === "number" ? <Hash size={12} /> : <TextCursorInput size={12} />}{property.name}</span>)}
               <button aria-label="속성 추가" title="속성 추가" onClick={onOpenProperties}><Plus size={13} /></button>
             </div>
             {visible.map((entry) => (
@@ -2091,7 +2103,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
                 <input className="date-cell" type="date" value={entry.dueDate ?? ""} onChange={(event) => void onPatch(entry.id, { dueDate: event.target.value || null })} />
                 <span className="relation-cell">{entry.parentId ? byId.get(entry.parentId)?.title ?? "연결 없음" : "연결 없음"}</span>
                 <span className="relation-cell assignment-cell">{assignmentLabel(entry, "project_dri")}</span>
-                {properties.map((property) => (hiddenProperties[entry.id] ?? []).includes(property.id)
+                {customProperties.map((property) => (hiddenProperties[entry.id] ?? []).includes(property.id)
                   ? <span className="hidden-property-cell" key={property.id} title="이 Project에서 숨긴 속성">—</span>
                   : <PropertyCell key={property.id} itemId={entry.id} property={property} value={values[entry.id]?.[property.id] ?? null} onChange={onPropertyChange} />)}
                 {entry.kind === "task" ? <button className="row-menu" aria-label="Task detail" title="Task detail" onClick={() => onOpenTask(entry.id)}><MoreHorizontal size={15} /></button> : entry.kind === "project" ? <button className="row-menu" aria-label="Project 속성" title="Project 속성" onClick={() => onOpenProject(entry.id)}><MoreHorizontal size={15} /></button> : <span className="row-menu" />}
@@ -2108,10 +2120,11 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
 function PropertyCell({ itemId, property, value, onChange }: { itemId: string; property: PropertyDefinition; value: PropertyValue; onChange: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void> }) {
   if (property.type === "checkbox") return <label className="property-checkbox"><input type="checkbox" checked={Boolean(value)} onChange={(event) => void onChange(itemId, property.id, event.target.checked)} /><span><Check size={11} /></span></label>;
   if (property.type === "select") return <select className="property-input" value={typeof value === "string" ? value : ""} onChange={(event) => void onChange(itemId, property.id, event.target.value || null)}><option value="">-</option>{property.options.map((option) => <option key={option}>{option}</option>)}</select>;
+  if (property.type === "member" || property.type === "members") return <span className="relation-cell assignment-cell">{Array.isArray(value) ? `${value.length}명` : value ? "1명" : "미지정"}</span>;
   return <input className="property-input" type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => { const raw = event.target.value; void onChange(itemId, property.id, property.type === "number" ? (raw ? Number(raw) : null) : raw || null); }} />;
 }
 
-function ProjectPageView({ project, allItems, properties, propertyValues, hiddenPropertyIds, teamMembers, onClose, onPatch, onPropertyChange, onPropertyVisibility, onAssignmentsChange, onArchive }: {
+function ProjectPageView({ project, allItems, properties, propertyValues, hiddenPropertyIds, teamMembers, onClose, onPatch, onPropertyChange, onPropertyVisibility, onAssignmentsChange, onTaskCreated, onOpenTask, readOnly, onNotice, onArchive }: {
   project: OkrptrItem;
   allItems: OkrptrItem[];
   properties: PropertyDefinition[];
@@ -2122,18 +2135,37 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
   onPatch: (id: string, patch: Partial<OkrptrItem>) => Promise<void>;
   onPropertyChange: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void>;
   onPropertyVisibility: (propertyId: string, hidden: boolean) => void;
-  onAssignmentsChange: (assignments: ItemAssignment[]) => void;
+  onAssignmentsChange: (itemId: string, assignments: ItemAssignment[]) => void;
+  onTaskCreated: (task: OkrptrItem) => void;
+  onOpenTask: (id: string) => void;
+  readOnly: boolean;
+  onNotice: (message: string) => void;
   onArchive: () => void;
 }) {
+  const [quickTaskTitle, setQuickTaskTitle] = useState("");
+  const [creatingTask, setCreatingTask] = useState(false);
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
   const initiative = project.parentId ? byId.get(project.parentId) : undefined;
   const keyResult = initiative?.parentId ? byId.get(initiative.parentId) : undefined;
   const objective = keyResult?.parentId ? byId.get(keyResult.parentId) : undefined;
   const initiatives = allItems.filter((entry) => entry.kind === "initiative");
-  const visibleProperties = properties.filter((property) => !hiddenPropertyIds.includes(property.id));
-  const hiddenPropertyDefinitions = properties.filter((property) => hiddenPropertyIds.includes(property.id));
+  const activeProperties = properties.filter((property) => property.active);
+  const customProperties = activeProperties.filter((property) => !property.systemKey);
+  const visibleProperties = customProperties.filter((property) => !hiddenPropertyIds.includes(property.id));
+  const hiddenPropertyDefinitions = activeProperties.filter((property) => hiddenPropertyIds.includes(property.id));
+  const systemProperties = new Map(properties.filter((property) => property.systemKey).map((property) => [property.systemKey!, property]));
+  const linkedTasks = allItems.filter((entry) => entry.kind === "task" && entry.parentId === project.id && !entry.archivedAt);
   const driIds = project.assignments.filter((entry) => entry.role === "project_dri").map((entry) => entry.memberId);
   const workerIds = project.assignments.filter((entry) => entry.role === "project_worker").map((entry) => entry.memberId);
+
+  function systemProperty(key: string) {
+    return systemProperties.get(key);
+  }
+
+  function systemPropertyVisible(key: string) {
+    const property = systemProperty(key);
+    return property ? property.active && !hiddenPropertyIds.includes(property.id) : true;
+  }
 
   async function saveAssignments(role: "project_dri" | "project_worker", memberIds: string[]) {
     const response = await fetch("/api/item-assignments", {
@@ -2143,7 +2175,36 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
     });
     if (!response.ok) return;
     const data = await response.json() as { assignments: ItemAssignment[] };
-    onAssignmentsChange(data.assignments);
+    onAssignmentsChange(project.id, data.assignments);
+  }
+
+  async function saveTaskAssignee(task: OkrptrItem, memberId: string) {
+    const response = await fetch("/api/item-assignments", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemId: task.id, role: "task_assignee", memberIds: memberId ? [memberId] : [] }),
+    });
+    if (!response.ok) { onNotice("담당자를 저장하지 못했습니다."); return; }
+    const data = await response.json() as { assignments: ItemAssignment[] };
+    onAssignmentsChange(task.id, data.assignments);
+  }
+
+  async function createLinkedTask(event: FormEvent) {
+    event.preventDefault();
+    const title = quickTaskTitle.trim();
+    if (!title || creatingTask || readOnly) return;
+    setCreatingTask(true);
+    const response = await fetch("/api/items", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, kind: "task", parentId: project.id, cycleId: project.cycleId, source: "web" }),
+    });
+    setCreatingTask(false);
+    if (!response.ok) { onNotice("Task를 만들지 못했습니다."); return; }
+    const data = await response.json() as { item: OkrptrItem };
+    onTaskCreated(data.item);
+    setQuickTaskTitle("");
+    onNotice("Project에 Task를 추가했습니다.");
   }
   return (
     <div className="modal-backdrop align-right">
@@ -2151,70 +2212,202 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
         <header className="project-page-head">
           <div>
             <p>Project page</p>
-            <input
+            <textarea
               className="project-title-input"
               defaultValue={project.title}
-              onBlur={(event) => event.target.value.trim() !== project.title && void onPatch(project.id, { title: event.target.value })}
+              readOnly={readOnly}
+              onBlur={(event) => !readOnly && event.target.value.trim() !== project.title && void onPatch(project.id, { title: event.target.value })}
               aria-label="Project 이름"
+              rows={1}
             />
           </div>
           <div className="project-page-actions">
-            <button type="button" onClick={onArchive}><Archive size={13} />아카이브</button>
+            {!readOnly && <button type="button" onClick={onArchive}><Archive size={13} />아카이브</button>}
             <button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button>
           </div>
         </header>
         <form className="property-form project-detail-form">
-          <label><span>상위 Initiative</span><select value={project.parentId ?? ""} onChange={(event) => void onPatch(project.id, { parentId: event.target.value || null })}><option value="">선택</option>{initiatives.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>
+          {systemPropertyVisible("parent_id") && <ProjectSystemPropertySlot property={systemProperty("parent_id")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemProperty("parent_id")?.name ?? "상위 Initiative"}</span><select disabled={readOnly} value={project.parentId ?? ""} onChange={(event) => void onPatch(project.id, { parentId: event.target.value || null })}><option value="">선택</option>{initiatives.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label></ProjectSystemPropertySlot>}
           <div className="project-field-grid">
-            <label><span>우선순위</span><select className={`priority-${project.priority}`} value={project.priority} onChange={(event) => void onPatch(project.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-            <label><span>상태</span><select value={project.status} onChange={(event) => void onPatch(project.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-            <label><span>주기</span><select value={project.cadence} onChange={(event) => void onPatch(project.id, { cadence: event.target.value as Cadence })}>{Object.entries(cadenceLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-            <label><span>기한</span><input type="date" value={project.dueDate ?? ""} onChange={(event) => void onPatch(project.id, { dueDate: event.target.value || null })} /></label>
+            {systemPropertyVisible("priority") && <ProjectSystemPropertySlot property={systemProperty("priority")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemProperty("priority")?.name ?? "우선순위"}</span><select disabled={readOnly} className={`priority-${project.priority}`} value={project.priority} onChange={(event) => void onPatch(project.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></ProjectSystemPropertySlot>}
+            {systemPropertyVisible("status") && <ProjectSystemPropertySlot property={systemProperty("status")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemProperty("status")?.name ?? "상태"}</span><select disabled={readOnly} value={project.status} onChange={(event) => void onPatch(project.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></ProjectSystemPropertySlot>}
+            {systemPropertyVisible("cadence") && <ProjectSystemPropertySlot property={systemProperty("cadence")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemProperty("cadence")?.name ?? "주기"}</span><select disabled={readOnly} value={project.cadence} onChange={(event) => void onPatch(project.id, { cadence: event.target.value as Cadence })}>{Object.entries(cadenceLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></ProjectSystemPropertySlot>}
+            {systemPropertyVisible("due_date") && <ProjectSystemPropertySlot property={systemProperty("due_date")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemProperty("due_date")?.name ?? "기한"}</span><input disabled={readOnly} type="date" value={project.dueDate ?? ""} onChange={(event) => void onPatch(project.id, { dueDate: event.target.value || null })} /></label></ProjectSystemPropertySlot>}
           </div>
-          {teamMembers.length > 0 && <MemberMentionPicker label="DRI" members={teamMembers} selectedIds={driIds} onChange={(ids) => void saveAssignments("project_dri", ids)} placeholder="@실명으로 찾기" maxSelected={1} />}
-          {teamMembers.length > 0 && <MemberMentionPicker label="하위 업무자" members={teamMembers} selectedIds={workerIds} onChange={(ids) => void saveAssignments("project_worker", ids)} placeholder="@실명으로 여러 명 태그" />}
+          {teamMembers.length > 0 && systemPropertyVisible("project_dri") && <ProjectSystemPropertySlot property={systemProperty("project_dri")} readOnly={readOnly} onHide={onPropertyVisibility}><MemberMentionPicker label={systemProperty("project_dri")?.name ?? "DRI"} members={teamMembers} selectedIds={driIds} onChange={(ids) => !readOnly && void saveAssignments("project_dri", ids)} placeholder="@실명으로 찾기" maxSelected={1} /></ProjectSystemPropertySlot>}
+          {teamMembers.length > 0 && systemPropertyVisible("project_workers") && <ProjectSystemPropertySlot property={systemProperty("project_workers")} readOnly={readOnly} onHide={onPropertyVisibility}><MemberMentionPicker label={systemProperty("project_workers")?.name ?? "하위 업무자"} members={teamMembers} selectedIds={workerIds} onChange={(ids) => !readOnly && void saveAssignments("project_worker", ids)} placeholder="@실명으로 여러 명 태그" /></ProjectSystemPropertySlot>}
         </form>
-        <section className="project-page-body">
-          <label>
-            <span>본문</span>
-            <textarea
-              defaultValue={project.description}
-              rows={13}
-              placeholder={"# 배경\n\n## 범위\n\n## 결정사항\n\n## 다음 액션"}
-              onBlur={(event) => event.target.value !== project.description && void onPatch(project.id, { description: event.target.value })}
-            />
-          </label>
+        <section className="project-custom-properties">
+          <header><b>Project 속성</b><span>변경 즉시 저장</span></header>
+          {visibleProperties.length ? visibleProperties.map((property) => <ProjectPropertyField key={property.id} projectId={project.id} property={property} value={propertyValues[project.id]?.[property.id] ?? null} members={teamMembers} readOnly={readOnly} onChange={onPropertyChange} onHide={() => onPropertyVisibility(property.id, true)} />) : <EmptyState icon={Settings2} title="표시 중인 커스텀 속성이 없습니다" />}
+          {hiddenPropertyDefinitions.length > 0 && <div className="hidden-property-list"><span>숨긴 속성 {hiddenPropertyDefinitions.length}</span>{hiddenPropertyDefinitions.map((property) => <button key={property.id} onClick={() => onPropertyVisibility(property.id, false)}><Eye size={13} />{property.name}</button>)}</div>}
         </section>
-        <section className="task-lineage">
+        <section className="task-lineage project-lineage-compact">
           <header><b>상위 OKR</b><span>Objective → KR → Initiative</span></header>
           <LineageRow label="Objective" value={objective?.title ?? "미연결"} />
           <LineageRow label="Key Result" value={keyResult?.title ?? "미연결"} />
           <LineageRow label="Initiative" value={initiative?.title ?? "미연결"} />
         </section>
-        <section className="project-custom-properties">
-          <header><b>Project 속성</b><span>변경 즉시 저장</span></header>
-          {visibleProperties.length ? visibleProperties.map((property) => <ProjectPropertyField key={property.id} projectId={project.id} property={property} value={propertyValues[project.id]?.[property.id] ?? null} onChange={onPropertyChange} onHide={() => onPropertyVisibility(property.id, true)} />) : <EmptyState icon={Settings2} title="표시 중인 Project 속성이 없습니다" />}
-          {hiddenPropertyDefinitions.length > 0 && <div className="hidden-property-list"><span>숨긴 속성 {hiddenPropertyDefinitions.length}</span>{hiddenPropertyDefinitions.map((property) => <button key={property.id} onClick={() => onPropertyVisibility(property.id, false)}><Eye size={13} />{property.name}</button>)}</div>}
+        <section className="project-linked-tasks">
+          <header><div><b>연결된 Task</b><span>{linkedTasks.length}개</span></div></header>
+          <form className="project-task-quick-add" onSubmit={createLinkedTask}>
+            <input value={quickTaskTitle} onChange={(event) => setQuickTaskTitle(event.target.value)} placeholder="새 Task 빠른 추가" disabled={readOnly || creatingTask} />
+            <button disabled={readOnly || creatingTask || !quickTaskTitle.trim()} aria-label="Task 추가" title="Task 추가"><Plus size={15} /></button>
+          </form>
+          <div className="project-task-table">
+            <div className="project-task-row project-task-head"><span>Task</span><span>상태</span><span>담당자</span><span>마감일</span><span>진행률</span></div>
+            {linkedTasks.map((task) => {
+              const assignee = task.assignments.find((assignment) => assignment.role === "task_assignee")?.memberId ?? "";
+              return <div className="project-task-row" key={task.id}>
+                <button className="project-task-title" onClick={() => onOpenTask(task.id)}>{task.title}</button>
+                <select disabled={readOnly} className={`status-${task.status}`} value={task.status} onChange={(event) => void onPatch(task.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
+                <select disabled={readOnly} value={assignee} onChange={(event) => void saveTaskAssignee(task, event.target.value)}><option value="">미지정</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select>
+                <input disabled={readOnly} type="date" value={task.dueDate ?? ""} onChange={(event) => void onPatch(task.id, { dueDate: event.target.value || null })} />
+                <label className="project-task-progress"><input disabled={readOnly} type="range" min="0" max="100" step="5" value={task.progress} onChange={(event) => void onPatch(task.id, { progress: Number(event.target.value) })} /><span>{task.progress}%</span></label>
+              </div>;
+            })}
+            {!linkedTasks.length && <div className="project-task-empty">연결된 Task가 없습니다.</div>}
+          </div>
         </section>
+        <ProjectDocumentSection key={project.id} projectId={project.id} readOnly={readOnly} onNotice={onNotice} />
       </aside>
     </div>
   );
 }
 
-function ProjectPropertyField({ projectId, property, value, onChange, onHide }: { projectId: string; property: PropertyDefinition; value: PropertyValue; onChange: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void>; onHide: () => void }) {
+function ProjectSystemPropertySlot({ property, readOnly, onHide, children }: { property?: PropertyDefinition; readOnly: boolean; onHide: (propertyId: string, hidden: boolean) => void; children: ReactNode }) {
+  return <div className="project-system-property">{children}{property && !readOnly && <button type="button" className="icon-button" onClick={() => onHide(property.id, true)} aria-label={`${property.name} 숨기기`} title="이 Project에서 숨기기"><EyeOff size={13} /></button>}</div>;
+}
+
+type ProjectBlockEditorProps = { initialContent: string; editable?: boolean; onChange?: (change: ProjectBlockEditorChange) => void };
+
+function ClientProjectBlockEditor(props: ProjectBlockEditorProps) {
+  const [Editor, setEditor] = useState<ComponentType<ProjectBlockEditorProps> | null>(null);
+  useEffect(() => {
+    let active = true;
+    void import("@/app/project-block-editor").then((module) => { if (active) setEditor(() => module.default); });
+    return () => { active = false; };
+  }, []);
+  return Editor ? <Editor {...props} /> : <div className="project-editor-loading"><LoaderCircle size={16} />편집기를 불러오는 중</div>;
+}
+
+function ProjectDocumentSection({ projectId, readOnly, onNotice }: { projectId: string; readOnly: boolean; onNotice: (message: string) => void }) {
+  const [document, setDocument] = useState<ProjectDocument | null>(null);
+  const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
+  const [templateId, setTemplateId] = useState("");
+  const [templateName, setTemplateName] = useState("");
+  const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [savingState, setSavingState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const versionRef = useRef(0);
+  const savingRef = useRef(false);
+  const pendingChangeRef = useRef<ProjectBlockEditorChange | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void Promise.all([
+      fetch(`/api/project-documents?projectId=${encodeURIComponent(projectId)}`, { signal: controller.signal }).then(async (response) => response.ok ? response.json() as Promise<{ document: ProjectDocument }> : Promise.reject()),
+      fetch("/api/project-templates", { signal: controller.signal }).then(async (response) => response.ok ? response.json() as Promise<{ templates: ProjectTemplate[] }> : Promise.reject()),
+    ]).then(([documentData, templateData]) => {
+      versionRef.current = documentData.document.version;
+      setDocument(documentData.document);
+      setTemplates(templateData.templates);
+    }).catch((error: unknown) => {
+      if (!(error instanceof DOMException && error.name === "AbortError")) setSavingState("error");
+    }).finally(() => setLoading(false));
+    return () => controller.abort();
+  }, [projectId]);
+
+  async function flushDocumentSave() {
+    if (savingRef.current || !pendingChangeRef.current) return;
+    savingRef.current = true;
+    const change = pendingChangeRef.current;
+    pendingChangeRef.current = null;
+    setSavingState("saving");
+    const response = await fetch("/api/project-documents", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, ...change, expectedVersion: versionRef.current }),
+    });
+    const data = await response.json() as { document?: ProjectDocument; error?: string };
+    savingRef.current = false;
+    if (!response.ok || !data.document) {
+      setSavingState("error");
+      if (response.status === 409) onNotice("다른 변경이 먼저 저장되었습니다. 문서를 다시 불러와 주세요.");
+      return;
+    }
+    versionRef.current = data.document.version;
+    setDocument((current) => current ? { ...data.document!, content: change.content, plainText: change.plainText } : data.document!);
+    setSavingState("saved");
+    window.setTimeout(() => setSavingState((current) => current === "saved" ? "idle" : current), 1600);
+    if (pendingChangeRef.current) void flushDocumentSave();
+  }
+
+  function queueDocumentSave(change: ProjectBlockEditorChange) {
+    pendingChangeRef.current = change;
+    void flushDocumentSave();
+  }
+
+  async function applyTemplate() {
+    if (!templateId || readOnly) return;
+    const selected = templates.find((template) => template.id === templateId);
+    const response = await fetch("/api/project-documents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, templateId }),
+    });
+    const data = await response.json() as { document?: ProjectDocument };
+    if (!response.ok || !data.document) { onNotice("템플릿을 불러오지 못했습니다."); return; }
+    versionRef.current = data.document.version;
+    setDocument(data.document);
+    setTemplateId("");
+    onNotice(`'${selected?.name ?? "템플릿"}'을 기존 내용 위에 추가했습니다.`);
+  }
+
+  async function createTemplateFromDocument(event: FormEvent) {
+    event.preventDefault();
+    if (!document || readOnly) return;
+    const name = templateName.trim();
+    if (!name) return;
+    const response = await fetch("/api/project-templates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, content: document.content, plainText: document.plainText }),
+    });
+    const data = await response.json() as { template?: ProjectTemplate; error?: string };
+    if (!response.ok || !data.template) { onNotice(data.error ?? "템플릿을 만들지 못했습니다."); return; }
+    setTemplates((current) => [data.template!, ...current]);
+    setTemplateName("");
+    setCreatingTemplate(false);
+    onNotice("현재 문서를 템플릿으로 저장했습니다.");
+  }
+
+  return <section className="project-document-section">
+    <header><div><b>프로젝트 문서</b><span>{savingState === "saving" ? "저장 중" : savingState === "saved" ? "저장됨" : savingState === "error" ? "저장 실패" : "자동 저장"}</span></div>{!readOnly && <div className="project-document-actions"><select value={templateId} onChange={(event) => setTemplateId(event.target.value)} aria-label="본문 템플릿 선택"><option value="">템플릿 불러오기</option>{templates.map((template) => <option value={template.id} key={template.id}>{template.name}</option>)}</select><button disabled={!templateId} onClick={() => void applyTemplate()}><BookTemplate size={13} />불러오기</button><button onClick={() => setCreatingTemplate(true)}><Copy size={13} />템플릿으로 저장</button></div>}</header>
+    {creatingTemplate && <form className="project-document-template-create" onSubmit={(event) => void createTemplateFromDocument(event)}><input aria-label="새 템플릿 이름" value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="템플릿 이름" /><button disabled={!templateName.trim()}><Check size={13} />저장</button><button type="button" className="icon-button" aria-label="템플릿 만들기 취소" onClick={() => { setCreatingTemplate(false); setTemplateName(""); }}><X size={13} /></button></form>}
+    {loading ? <div className="project-editor-loading"><LoaderCircle size={16} />문서를 불러오는 중</div> : document ? <ClientProjectBlockEditor key={`${document.projectId}:${document.version}`} initialContent={document.content} editable={!readOnly} onChange={readOnly ? undefined : queueDocumentSave} /> : <div className="project-editor-error">문서를 불러오지 못했습니다.</div>}
+  </section>;
+}
+
+function ProjectPropertyField({ projectId, property, value, members, readOnly, onChange, onHide }: { projectId: string; property: PropertyDefinition; value: PropertyValue; members: TeamMember[]; readOnly: boolean; onChange: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void>; onHide: () => void }) {
+  const memberIds = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
   return (
     <div className="project-property-field-row">
       <label className="project-property-field">
         <span>{property.name}</span>
         {property.type === "checkbox" ? (
-          <input type="checkbox" checked={Boolean(value)} onChange={(event) => void onChange(projectId, property.id, event.target.checked)} />
+          <input disabled={readOnly} type="checkbox" checked={Boolean(value)} onChange={(event) => void onChange(projectId, property.id, event.target.checked)} />
+        ) : property.type === "member" ? (
+          <select disabled={readOnly} value={memberIds[0] ?? ""} onChange={(event) => void onChange(projectId, property.id, event.target.value || null)}><option value="">선택 안 함</option>{members.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select>
+        ) : property.type === "members" ? (
+          <select disabled={readOnly} multiple value={memberIds} onChange={(event) => void onChange(projectId, property.id, Array.from(event.target.selectedOptions, (option) => option.value))}>{members.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select>
         ) : property.type === "select" ? (
-          <select value={typeof value === "string" ? value : ""} onChange={(event) => void onChange(projectId, property.id, event.target.value || null)}><option value="">선택 안 함</option>{property.options.map((option) => <option key={option}>{option}</option>)}</select>
+          <select disabled={readOnly} value={typeof value === "string" ? value : ""} onChange={(event) => void onChange(projectId, property.id, event.target.value || null)}><option value="">선택 안 함</option>{property.options.map((option) => <option key={option}>{option}</option>)}</select>
         ) : (
-          <input type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => { const raw = event.target.value; void onChange(projectId, property.id, property.type === "number" ? (raw ? Number(raw) : null) : raw || null); }} />
+          <input disabled={readOnly} type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => { const raw = event.target.value; void onChange(projectId, property.id, property.type === "number" ? (raw ? Number(raw) : null) : raw || null); }} />
         )}
       </label>
-      <button className="icon-button" onClick={onHide} aria-label={`${property.name} 숨기기`} title="이 Project에서 숨기기"><EyeOff size={14} /></button>
+      {!readOnly && <button className="icon-button" onClick={onHide} aria-label={`${property.name} 숨기기`} title="이 Project에서 숨기기"><EyeOff size={14} /></button>}
     </div>
   );
 }
@@ -2495,25 +2688,36 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
   const [description, setDescription] = useState("");
   const [parentId, setParentId] = useState("");
   const [taskContainer, setTaskContainer] = useState("");
-  const [status, setStatus] = useState<ItemStatus>("todo");
-  const [priority, setPriority] = useState<Priority>("medium");
-  const [cadence, setCadence] = useState<Cadence>("weekly");
-  const [dueDate, setDueDate] = useState("");
+  const [status, setStatus] = useState<ItemStatus>(() => propertySystemDefault(properties, "status", "todo") as ItemStatus);
+  const [priority, setPriority] = useState<Priority>(() => propertySystemDefault(properties, "priority", "medium") as Priority);
+  const [cadence, setCadence] = useState<Cadence>(() => propertySystemDefault(properties, "cadence", "weekly") as Cadence);
+  const [dueDate, setDueDate] = useState(() => propertySystemDefault(properties, "due_date", ""));
   const [customValues, setCustomValues] = useState<Record<string, PropertyValue>>({});
+  const [availableTemplates, setAvailableTemplates] = useState<ProjectTemplate[]>([]);
+  const [templateId, setTemplateId] = useState("");
   const currentMemberId = teamMembers.find((member) => member.isCurrent && member.status === "active")?.id;
-  const [projectDriIds, setProjectDriIds] = useState<string[]>(currentMemberId ? [currentMemberId] : []);
-  const [projectWorkerIds, setProjectWorkerIds] = useState<string[]>([]);
+  const [projectDriIds, setProjectDriIds] = useState<string[]>(() => { const value = properties.find((property) => property.systemKey === "project_dri")?.defaultValue; return typeof value === "string" ? [value] : currentMemberId ? [currentMemberId] : []; });
+  const [projectWorkerIds, setProjectWorkerIds] = useState<string[]>(() => { const value = properties.find((property) => property.systemKey === "project_workers")?.defaultValue; return Array.isArray(value) ? value : []; });
   const [taskAssigneeIds, setTaskAssigneeIds] = useState<string[]>(currentMemberId ? [currentMemberId] : []);
   const [saving, setSaving] = useState(false);
   const requiredParent: Record<ItemKind, ItemKind | null> = { objective: null, key_result: "objective", initiative: "key_result", project: "initiative", task: "project" };
   const parentKind = requiredParent[kind];
   const parentOptions = parentKind ? items.filter((entry) => entry.kind === parentKind) : [];
-  const projectProperties = kind === "project" ? properties : [];
+  const projectProperties = kind === "project" ? properties.filter((property) => property.active && !property.systemKey) : [];
 
-  function updateCustomValue(property: PropertyDefinition, value: string | boolean) {
+  useEffect(() => {
+    if (kind !== "project") return;
+    let active = true;
+    void fetch("/api/project-templates").then(async (response) => response.ok ? response.json() as Promise<{ templates: ProjectTemplate[] }> : Promise.reject()).then((data) => { if (active) setAvailableTemplates(data.templates); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [kind]);
+
+  function updateCustomValue(property: PropertyDefinition, value: PropertyValue) {
     setCustomValues((current) => ({
       ...current,
-      [property.id]: property.type === "number" ? (value === "" ? null : Number(value)) : value === "" ? null : value,
+      [property.id]: property.type === "number"
+        ? (value === "" || value === null ? null : Number(value))
+        : value === "" ? null : value,
     }));
   }
 
@@ -2542,6 +2746,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
         driMemberId: kind === "project" ? projectDriIds[0] ?? "" : undefined,
         workerMemberIds: kind === "project" ? projectWorkerIds : undefined,
         assigneeMemberId: kind === "task" ? taskAssigneeIds[0] ?? "" : undefined,
+        templateId: kind === "project" ? templateId || undefined : undefined,
       }),
     });
     if (!response.ok) { setSaving(false); return; }
@@ -2573,6 +2778,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
           {kind === "project" && (
             <section className="create-project-fields">
               <header><b>Project 속성</b><span>생성할 때 바로 지정</span></header>
+              {availableTemplates.length > 0 && <label><span>본문 템플릿</span><select value={templateId} onChange={(event) => setTemplateId(event.target.value)}><option value="">나중에 불러오기</option>{availableTemplates.map((template) => <option value={template.id} key={template.id}>{template.name}</option>)}</select></label>}
               <label><span>본문</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={6} placeholder={"# 배경\n\n## 범위\n\n## 다음 액션"} /></label>
               <div className="project-field-grid">
                 <label><span>우선순위</span><select className={`priority-${priority}`} value={priority} onChange={(event) => setPriority(event.target.value as Priority)}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
@@ -2586,7 +2792,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
               {teamMembers.length > 0 && (
                 <MemberMentionPicker label="하위 업무자" members={teamMembers} selectedIds={projectWorkerIds} onChange={setProjectWorkerIds} placeholder="@실명으로 여러 명 태그" />
               )}
-              {projectProperties.length > 0 && <div className="project-field-grid custom-project-fields">{projectProperties.map((property) => <CreatePropertyField key={property.id} property={property} value={customValues[property.id] ?? null} onChange={updateCustomValue} />)}</div>}
+              {projectProperties.length > 0 && <div className="project-field-grid custom-project-fields">{projectProperties.map((property) => <CreatePropertyField key={property.id} property={property} value={customValues[property.id] ?? property.defaultValue} members={teamMembers} onChange={updateCustomValue} />)}</div>}
             </section>
           )}
           {kind === "task" && teamMembers.length > 0 && (
@@ -2599,13 +2805,15 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
   );
 }
 
-function CreatePropertyField({ property, value, onChange }: { property: PropertyDefinition; value: PropertyValue; onChange: (property: PropertyDefinition, value: string | boolean) => void }) {
+function CreatePropertyField({ property, value, members, onChange }: { property: PropertyDefinition; value: PropertyValue; members: TeamMember[]; onChange: (property: PropertyDefinition, value: PropertyValue) => void }) {
   if (property.type === "checkbox") {
     return <label><span>{property.name}</span><input type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(property, event.target.checked)} /></label>;
   }
   if (property.type === "select") {
     return <label><span>{property.name}</span><select value={typeof value === "string" ? value : ""} onChange={(event) => onChange(property, event.target.value)}><option value="">선택 안 함</option>{property.options.map((option) => <option key={option}>{option}</option>)}</select></label>;
   }
+  if (property.type === "member") return <label><span>{property.name}</span><select value={typeof value === "string" ? value : ""} onChange={(event) => onChange(property, event.target.value || null)}><option value="">선택 안 함</option>{members.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>;
+  if (property.type === "members") return <label><span>{property.name}</span><select multiple value={Array.isArray(value) ? value : []} onChange={(event) => onChange(property, Array.from(event.target.selectedOptions, (option) => option.value))}>{members.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>;
   return <label><span>{property.name}</span><input type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => onChange(property, event.target.value)} /></label>;
 }
 
@@ -3693,11 +3901,43 @@ function ReviewView({ items, cadence, completed, blocked, averageProgress }: { i
   return <section className="review-content"><div className="metrics-row"><div><span>완료</span><strong>{completed}<small> / {items.length}</small></strong></div><div><span>평균 진행</span><strong>{averageProgress}<small>%</small></strong></div><div><span>막힘</span><strong>{blocked}</strong></div></div><div className="review-progress"><div><b>{cadenceLabels[cadence]} 진행률</b><span>{averageProgress}%</span></div><span><i style={{ width: `${averageProgress}%` }} /></span></div><div className="review-list"><span>검토할 항목</span>{items.slice(0, 7).map((entry) => <div key={entry.id}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b><em>{entry.progress}%</em></div>)}</div></section>;
 }
 
-function ProjectPropertyManager({ properties, onCreated, onDeleted, onNotice }: { properties: PropertyDefinition[]; onCreated: (property: PropertyDefinition) => void; onDeleted: (id: string) => void; onNotice: (message: string) => void }) {
+function ProjectPropertyManager({ properties, teamMembers, readOnly, onChanged, onNotice }: { properties: PropertyDefinition[]; teamMembers: TeamMember[]; readOnly: boolean; onChanged: (properties: PropertyDefinition[]) => void; onNotice: (message: string) => void }) {
+  const [catalog, setCatalog] = useState<PropertyDefinition[]>(properties);
+  const [selectedId, setSelectedId] = useState<string | null>(properties[0]?.id ?? null);
+  const [creatingNew, setCreatingNew] = useState(properties.length === 0);
   const [name, setName] = useState("");
   const [type, setType] = useState<PropertyType>("text");
   const [options, setOptions] = useState("");
+  const [defaultValue, setDefaultValue] = useState<PropertyValue>(null);
   const [saving, setSaving] = useState(false);
+  const onChangedRef = useRef(onChanged);
+  const onNoticeRef = useRef(onNotice);
+  const selected = catalog.find((property) => property.id === selectedId) ?? null;
+
+  useEffect(() => {
+    onChangedRef.current = onChanged;
+    onNoticeRef.current = onNotice;
+  }, [onChanged, onNotice]);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/properties?includeInactive=true")
+      .then(async (response) => response.ok ? response.json() as Promise<{ properties: PropertyDefinition[] }> : Promise.reject())
+      .then((data) => {
+        if (!active) return;
+        setCatalog(data.properties);
+        onChangedRef.current(data.properties);
+        setSelectedId((current) => current ?? data.properties[0]?.id ?? null);
+      })
+      .catch(() => onNoticeRef.current("속성 목록을 새로 불러오지 못했습니다."));
+    return () => { active = false; };
+  }, []);
+
+  function applyCatalog(next: PropertyDefinition[]) {
+    const sorted = [...next].sort((left, right) => left.sortOrder - right.sortOrder);
+    setCatalog(sorted);
+    onChanged(sorted);
+  }
 
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -3706,27 +3946,147 @@ function ProjectPropertyManager({ properties, onCreated, onDeleted, onNotice }: 
     const response = await fetch("/api/properties", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, type, options: options.split(",").map((entry) => entry.trim()).filter(Boolean) }),
+      body: JSON.stringify({ name, type, options: options.split(",").map((entry) => entry.trim()).filter(Boolean), defaultValue }),
     });
     setSaving(false);
     if (!response.ok) { onNotice("속성을 추가하지 못했습니다."); return; }
     const data = await response.json() as { property: PropertyDefinition };
-    onCreated({ ...data.property, valueCount: data.property.valueCount ?? 0 });
+    const created = { ...data.property, valueCount: data.property.valueCount ?? 0 };
+    applyCatalog([...catalog, created]);
+    setSelectedId(created.id);
+    setCreatingNew(false);
     setName("");
     setOptions("");
+    setDefaultValue(null);
     onNotice("모든 Project에 새 속성을 추가했습니다.");
   }
 
-  async function remove(property: PropertyDefinition) {
-    const detail = property.valueCount > 0 ? `\n${property.valueCount}개 Project에 저장된 값도 함께 삭제됩니다.` : "";
-    if (!window.confirm(`'${property.name}' 속성을 삭제할까요?${detail}`)) return;
+  async function deactivate(property: PropertyDefinition) {
+    const detail = property.valueCount > 0 ? `\n${property.valueCount}개 Project의 값은 보존되며 화면에서만 숨겨집니다.` : "";
+    if (!window.confirm(`'${property.name}' 속성을 제거할까요?${detail}`)) return;
     const response = await fetch(`/api/properties?id=${encodeURIComponent(property.id)}`, { method: "DELETE" });
     if (!response.ok) { onNotice("속성을 삭제하지 못했습니다."); return; }
-    onDeleted(property.id);
-    onNotice("Project 속성을 삭제했습니다.");
+    applyCatalog(catalog.map((entry) => entry.id === property.id ? { ...entry, active: false } : entry));
+    onNotice("속성을 제거했습니다. 기존 값은 보존됩니다.");
   }
 
-  return <section className="project-property-manager"><header><div><h2>Project 속성</h2><p>모든 Project에 적용되는 필드를 관리합니다.</p></div><span>{properties.length}개</span></header><div className="project-property-layout"><div className="project-property-catalog">{properties.length ? properties.map((property) => <article className="project-property-item" key={property.id}><span className="property-type-icon">{property.type === "number" ? <Hash size={14} /> : <TextCursorInput size={14} />}</span><div><b>{property.name}</b><small>{propertyTypeLabel(property.type)} · 값이 있는 Project {property.valueCount}개</small></div><button className="icon-button" onClick={() => void remove(property)} aria-label={`${property.name} 삭제`} title="속성 삭제"><Trash2 size={14} /></button></article>) : <EmptyState icon={Settings2} title="아직 Project 속성이 없습니다" />}</div><form className="project-property-create" onSubmit={create}><h3>새 속성</h3><label><span>이름</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="예: 리스크, 예산, 출시일" /></label><label><span>유형</span><select value={type} onChange={(event) => setType(event.target.value as PropertyType)}>{(["text", "number", "select", "date", "checkbox"] as PropertyType[]).map((entry) => <option value={entry} key={entry}>{propertyTypeLabel(entry)}</option>)}</select></label>{type === "select" && <label><span>선택 옵션</span><input value={options} onChange={(event) => setOptions(event.target.value)} placeholder="쉼표로 구분" /></label>}<button className="primary-action" disabled={!name.trim() || saving}><Plus size={14} />{saving ? "추가 중" : "속성 추가"}</button></form></div></section>;
+  async function saveProperty(property: PropertyDefinition, draft: PropertyDefinition) {
+    setSaving(true);
+    if (draft.type !== property.type || draft.options.join("\u0000") !== property.options.join("\u0000")) {
+      const previewResponse = await fetch("/api/properties", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: property.id, type: draft.type, options: draft.options, preview: true }) });
+      const preview = await previewResponse.json() as { analysis?: { convertibleCount: number; incompatibleCount: number } };
+      if (!previewResponse.ok || !preview.analysis) { setSaving(false); onNotice("속성 유형 변경을 확인하지 못했습니다."); return; }
+      if (!window.confirm(`유형을 변경할까요?\n변환 가능 ${preview.analysis.convertibleCount}개 · 보존할 기존 값 ${preview.analysis.incompatibleCount}개`)) { setSaving(false); return; }
+    }
+    const response = await fetch("/api/properties", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: property.id, name: draft.name, type: draft.type, options: draft.options, defaultValue: draft.defaultValue, sortOrder: draft.sortOrder, active: draft.active }) });
+    setSaving(false);
+    const data = await response.json() as { property?: PropertyDefinition; error?: string };
+    if (!response.ok || !data.property) { onNotice(data.error ?? "속성을 저장하지 못했습니다."); return; }
+    applyCatalog(catalog.map((entry) => entry.id === property.id ? { ...data.property!, valueCount: property.valueCount } : entry));
+    onNotice("속성 설정을 저장했습니다.");
+  }
+
+  async function restore(property: PropertyDefinition) {
+    const response = await fetch("/api/properties", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: property.id, active: true }) });
+    const data = await response.json() as { property?: PropertyDefinition };
+    if (!response.ok || !data.property) { onNotice("속성을 복원하지 못했습니다."); return; }
+    applyCatalog(catalog.map((entry) => entry.id === property.id ? { ...data.property!, valueCount: property.valueCount } : entry));
+    onNotice("속성과 기존 값을 복원했습니다.");
+  }
+
+  async function move(property: PropertyDefinition, direction: -1 | 1) {
+    const ordered = [...catalog].sort((left, right) => left.sortOrder - right.sortOrder);
+    const index = ordered.findIndex((entry) => entry.id === property.id);
+    const target = ordered[index + direction];
+    if (!target) return;
+    const [firstResponse, secondResponse] = await Promise.all([
+      fetch("/api/properties", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: property.id, sortOrder: target.sortOrder }) }),
+      fetch("/api/properties", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: target.id, sortOrder: property.sortOrder }) }),
+    ]);
+    if (!firstResponse.ok || !secondResponse.ok) { onNotice("속성 순서를 바꾸지 못했습니다."); return; }
+    applyCatalog(catalog.map((entry) => entry.id === property.id ? { ...entry, sortOrder: target.sortOrder } : entry.id === target.id ? { ...entry, sortOrder: property.sortOrder } : entry));
+  }
+
+  return <section className="project-property-manager"><header><div><h2>Project 속성</h2><p>기본 속성과 커스텀 속성의 이름, 유형, 기본값과 순서를 관리합니다.</p></div><button disabled={readOnly} onClick={() => { setCreatingNew(true); setSelectedId(null); }}><Plus size={13} />새 속성</button></header><div className="project-property-layout"><div className="project-property-catalog">{catalog.map((property) => <article className={`project-property-item ${selectedId === property.id ? "selected" : ""} ${property.active ? "" : "inactive"}`} key={property.id}><button type="button" className="project-property-select" onClick={() => { setSelectedId(property.id); setCreatingNew(false); }}><span className="property-type-icon">{property.type === "number" ? <Hash size={14} /> : property.type === "member" || property.type === "members" ? <Users size={14} /> : <TextCursorInput size={14} />}</span><div><b>{property.name}{property.systemKey && <em>기본</em>}</b><small>{propertyTypeLabel(property.type)} · 값 {property.valueCount}개{!property.active && " · 제거됨"}</small></div></button><div className="property-order-actions"><button className="icon-button rotate-up" onClick={() => void move(property, -1)} aria-label={`${property.name} 위로`} title="위로"><ChevronDown size={13} /></button><button className="icon-button" onClick={() => void move(property, 1)} aria-label={`${property.name} 아래로`} title="아래로"><ChevronDown size={13} /></button></div></article>)}</div><div className="project-property-editor">{creatingNew ? <form className="project-property-create" onSubmit={create}><h3>새 속성</h3><label><span>이름</span><input disabled={readOnly} value={name} onChange={(event) => setName(event.target.value)} placeholder="예: 리스크, 예산, 출시일" /></label><label><span>유형</span><select disabled={readOnly} value={type} onChange={(event) => { setType(event.target.value as PropertyType); setDefaultValue(null); }}>{(["text", "number", "select", "date", "checkbox", "member", "members"] as PropertyType[]).map((entry) => <option value={entry} key={entry}>{propertyTypeLabel(entry)}</option>)}</select></label>{type === "select" && <label><span>선택 옵션</span><input value={options} onChange={(event) => setOptions(event.target.value)} placeholder="쉼표로 구분" /></label>}<PropertyDefaultInput type={type} options={options.split(",").map((entry) => entry.trim()).filter(Boolean)} value={defaultValue} members={teamMembers} disabled={readOnly} onChange={setDefaultValue} /><button className="primary-action" disabled={readOnly || !name.trim() || saving}><Plus size={14} />{saving ? "추가 중" : "속성 추가"}</button></form> : selected ? <PropertyDefinitionEditor key={`${selected.id}:${selected.name}:${selected.type}:${selected.active}:${String(selected.defaultValue)}`} property={selected} members={teamMembers} readOnly={readOnly} saving={saving} onSave={(draft) => void saveProperty(selected, draft)} onDeactivate={() => void deactivate(selected)} onRestore={() => void restore(selected)} /> : <EmptyState icon={Settings2} title="편집할 속성을 선택하세요" />}</div></div></section>;
+}
+
+function PropertyDefinitionEditor({ property, members, readOnly, saving, onSave, onDeactivate, onRestore }: { property: PropertyDefinition; members: TeamMember[]; readOnly: boolean; saving: boolean; onSave: (property: PropertyDefinition) => void; onDeactivate: () => void; onRestore: () => void }) {
+  const [draft, setDraft] = useState(property);
+  return <form className="project-property-create" onSubmit={(event) => { event.preventDefault(); onSave(draft); }}><h3>{property.systemKey ? "기본 속성 편집" : "속성 편집"}</h3><label><span>이름</span><input disabled={readOnly} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label><label><span>유형</span><select disabled={readOnly} value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as PropertyType, defaultValue: null })}>{(["text", "number", "select", "date", "checkbox", "member", "members"] as PropertyType[]).map((entry) => <option value={entry} key={entry}>{propertyTypeLabel(entry)}</option>)}</select></label>{draft.type === "select" && <label><span>선택 옵션</span><input disabled={readOnly} value={draft.options.join(", ")} onChange={(event) => setDraft({ ...draft, options: event.target.value.split(",").map((entry) => entry.trim()).filter(Boolean) })} /></label>}<PropertyDefaultInput type={draft.type} options={draft.options} value={draft.defaultValue} members={members} disabled={readOnly} onChange={(value) => setDraft({ ...draft, defaultValue: value })} /><div className="property-editor-actions"><button className="primary-action" disabled={readOnly || saving}>{saving ? "저장 중" : "변경 저장"}</button>{property.active ? <button type="button" className="danger" disabled={readOnly} onClick={onDeactivate}><Trash2 size={13} />제거</button> : <button type="button" disabled={readOnly} onClick={onRestore}><RotateCcw size={13} />복원</button>}</div></form>;
+}
+
+function PropertyDefaultInput({ type, options, value, members, disabled = false, onChange }: { type: PropertyType; options: string[]; value: PropertyValue; members: TeamMember[]; disabled?: boolean; onChange: (value: PropertyValue) => void }) {
+  if (type === "checkbox") return <label><span>생성 시 기본값</span><input disabled={disabled} type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} /></label>;
+  if (type === "select") return <label><span>생성 시 기본값</span><select disabled={disabled} value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value || null)}><option value="">없음</option>{options.map((option) => <option key={option}>{option}</option>)}</select></label>;
+  if (type === "member") return <label><span>생성 시 기본값</span><select disabled={disabled} value={typeof value === "string" ? value : ""} onChange={(event) => onChange(event.target.value || null)}><option value="">없음</option>{members.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>;
+  if (type === "members") return <label><span>생성 시 기본값</span><select disabled={disabled} multiple value={Array.isArray(value) ? value : []} onChange={(event) => onChange(Array.from(event.target.selectedOptions, (option) => option.value))}>{members.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>;
+  return <label><span>생성 시 기본값</span><input disabled={disabled} type={type === "number" ? "number" : type === "date" ? "date" : "text"} value={value === null || Array.isArray(value) ? "" : String(value)} onChange={(event) => onChange(type === "number" ? (event.target.value ? Number(event.target.value) : null) : event.target.value || null)} /></label>;
+}
+
+function ProjectTemplateManager({ readOnly, onNotice }: { readOnly: boolean; onNotice: (message: string) => void }) {
+  const [templates, setTemplates] = useState<ProjectTemplate[] | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [templateName, setTemplateName] = useState("");
+  const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const selected = templates?.find((template) => template.id === selectedId) ?? null;
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/project-templates").then(async (response) => response.ok ? response.json() as Promise<{ templates: ProjectTemplate[] }> : Promise.reject()).then((data) => {
+      if (!active) return;
+      setTemplates(data.templates);
+      setSelectedId(data.templates[0]?.id ?? null);
+    }).catch(() => setTemplates([]));
+    return () => { active = false; };
+  }, []);
+
+  async function createTemplate(event: FormEvent) {
+    event.preventDefault();
+    if (readOnly) return;
+    const name = templateName.trim();
+    if (!name) return;
+    const content = JSON.stringify([{ type: "heading", props: { level: 2 }, content: "목적" }, { type: "paragraph", content: "" }, { type: "heading", props: { level: 2 }, content: "배경" }, { type: "paragraph", content: "" }, { type: "heading", props: { level: 2 }, content: "범위" }, { type: "paragraph", content: "" }, { type: "heading", props: { level: 2 }, content: "성공 기준" }, { type: "checkListItem", props: { checked: false }, content: "" }]);
+    const response = await fetch("/api/project-templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, content, plainText: "목적\n\n배경\n\n범위\n\n성공 기준" }) });
+    const data = await response.json() as { template?: ProjectTemplate; error?: string };
+    if (!response.ok || !data.template) { onNotice(data.error ?? "템플릿을 만들지 못했습니다."); return; }
+    setTemplates((current) => [data.template!, ...(current ?? [])]);
+    setSelectedId(data.template.id);
+    setTemplateName("");
+    setCreatingTemplate(false);
+    onNotice("새 본문 템플릿을 만들었습니다.");
+  }
+
+  async function patchTemplate(id: string, patch: Partial<ProjectTemplate>, quiet = false) {
+    setSaving(true);
+    const response = await fetch("/api/project-templates", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...patch }) });
+    const data = await response.json() as { template?: ProjectTemplate; error?: string };
+    setSaving(false);
+    if (!response.ok || !data.template) { onNotice(data.error ?? "템플릿을 저장하지 못했습니다."); return; }
+    setTemplates((current) => current?.map((template) => template.id === id ? data.template! : template) ?? []);
+    if (!quiet) onNotice("템플릿을 저장했습니다.");
+  }
+
+  async function duplicateTemplate(template: ProjectTemplate) {
+    let name = `${template.name} 복사본`;
+    let suffix = 2;
+    while (templates?.some((entry) => entry.name === name)) name = `${template.name} 복사본 ${suffix++}`;
+    const response = await fetch("/api/project-templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, description: template.description, content: template.content, plainText: template.plainText }) });
+    const data = await response.json() as { template?: ProjectTemplate };
+    if (!response.ok || !data.template) { onNotice("템플릿을 복제하지 못했습니다."); return; }
+    setTemplates((current) => [data.template!, ...(current ?? [])]);
+    setSelectedId(data.template.id);
+  }
+
+  async function removeTemplate(template: ProjectTemplate) {
+    if (!window.confirm(`'${template.name}' 템플릿을 삭제할까요?\n이미 적용된 Project 문서는 바뀌지 않습니다.`)) return;
+    const response = await fetch(`/api/project-templates?id=${encodeURIComponent(template.id)}`, { method: "DELETE" });
+    if (!response.ok) { onNotice("템플릿을 삭제하지 못했습니다."); return; }
+    setTemplates((current) => current?.filter((entry) => entry.id !== template.id) ?? []);
+    setSelectedId((templates ?? []).find((entry) => entry.id !== template.id)?.id ?? null);
+  }
+
+  return <section className="project-template-manager"><header><div><h2>본문 템플릿</h2><p>속성과 Task를 포함하지 않는 Project 문서 양식을 관리합니다.</p></div><button disabled={readOnly} onClick={() => setCreatingTemplate(true)}><Plus size={13} />새 템플릿</button></header>{templates === null ? <div className="project-editor-loading"><LoaderCircle size={16} />템플릿을 불러오는 중</div> : <div className="project-template-layout"><aside className="project-template-list">{creatingTemplate && <form className="project-template-create" onSubmit={(event) => void createTemplate(event)}><input aria-label="새 템플릿 이름" value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="템플릿 이름" /><button disabled={!templateName.trim()} aria-label="템플릿 만들기"><Check size={13} /></button><button type="button" aria-label="템플릿 만들기 취소" onClick={() => { setCreatingTemplate(false); setTemplateName(""); }}><X size={13} /></button></form>}{templates.map((template) => <button className={selectedId === template.id ? "selected" : ""} onClick={() => setSelectedId(template.id)} key={template.id}><BookTemplate size={14} /><span><b>{template.name}</b><small>{formatDateTime(template.updatedAt)}</small></span></button>)}{!templates.length && !creatingTemplate && <EmptyState icon={BookTemplate} title="저장된 템플릿이 없습니다" />}</aside><div className="project-template-editor">{selected ? <><div className="project-template-meta"><input disabled={readOnly} defaultValue={selected.name} onBlur={(event) => event.target.value.trim() !== selected.name && void patchTemplate(selected.id, { name: event.target.value })} aria-label="템플릿 이름" /><textarea disabled={readOnly} defaultValue={selected.description} onBlur={(event) => event.target.value !== selected.description && void patchTemplate(selected.id, { description: event.target.value })} placeholder="템플릿 설명" rows={2} /><div><span>{saving ? "저장 중" : "자동 저장"}</span>{!readOnly && <><button onClick={() => void duplicateTemplate(selected)}><Copy size={13} />복제</button><button className="danger" onClick={() => void removeTemplate(selected)}><Trash2 size={13} />삭제</button></>}</div></div><ClientProjectBlockEditor key={selected.id} initialContent={selected.content} editable={!readOnly} onChange={readOnly ? undefined : (change) => void patchTemplate(selected.id, change, true)} /></> : <EmptyState icon={BookTemplate} title="편집할 템플릿을 선택하세요" />}</div></div>}</section>;
 }
 
 function ProjectArchiveView({ projects, onRestore, onDelete }: { projects: ArchivedProject[]; onRestore: (id: string) => void; onDelete: (project: ArchivedProject) => void }) {
@@ -4468,7 +4828,8 @@ function statusLabel(status: ItemStatus) { return statusLabels[status]; }
 function isCompletedStatus(status: ItemStatus) { return status === "done" || status === "development_done"; }
 function cycleStatusLabel(status: OkrCycle["status"]) { return { planned: "\uC608\uC815", active: "\uC9C4\uD589 \uC911", closed: "\uC885\uB8CC" }[status]; }
 function sourceLabel(source: string) { return { mcp: "MCP", codex: "Codex", slack: "Slack", discord: "Discord", telegram: "Telegram", web: "Web" }[source] ?? "Bot"; }
-function propertyTypeLabel(type: PropertyType) { return { text: "텍스트", number: "숫자", select: "선택", date: "날짜", checkbox: "체크박스" }[type]; }
+function propertyTypeLabel(type: PropertyType) { return { text: "텍스트", number: "숫자", select: "선택", date: "날짜", checkbox: "체크박스", member: "멤버 1명", members: "멤버 여러 명" }[type]; }
+function propertySystemDefault(properties: PropertyDefinition[], systemKey: string, fallback: string) { const value = properties.find((property) => property.systemKey === systemKey && property.active)?.defaultValue; return typeof value === "string" ? value : fallback; }
 function teamRoleLabel(role: TeamRole) { return { owner: "Owner", admin: "Admin", member: "Member", viewer: "Viewer" }[role]; }
 function workspaceDeletionLabel(value: string | null) {
   if (!value) return "";
