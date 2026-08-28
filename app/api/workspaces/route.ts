@@ -3,6 +3,7 @@ import {
   createWorkspaceForUser,
   ensureWorkspace,
   listUserWorkspaces,
+  permanentlyDeleteWorkspaceForUser,
   restoreWorkspaceForUser,
   scheduleWorkspaceDeletionForUser,
   setActiveWorkspace,
@@ -19,15 +20,23 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const authorization = await authorizeRequest(request, { allowViewerWrite: true });
+  const authorization = await authorizeRequest(request);
   if (authorization instanceof Response) return authorization;
   try {
     const payload = (await request.json()) as Record<string, unknown>;
+    if (payload.confirmed !== true) {
+      return Response.json({ error: "Explicit workspace creation confirmation is required" }, { status: 400 });
+    }
+    const hostname = new URL(request.url).hostname;
+    const name = typeof payload.name === "string" ? payload.name : "";
+    if (hostname !== "localhost" && hostname !== "127.0.0.1" && /^OKRPTR(?:\s+|[-_])QA\b/i.test(name.trim())) {
+      return Response.json({ error: "Test workspace names cannot be created in production" }, { status: 400 });
+    }
     const workspace = await createWorkspaceForUser(
       authorization.userId,
       authorization.email,
       authorization.displayName,
-      typeof payload.name === "string" ? payload.name : "",
+      name,
     );
     await ensureWorkspace(workspace.id);
     return withWorkspaceCookie(Response.json({ workspace }, { status: 201 }), workspace.id, request);
@@ -55,11 +64,21 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const authorization = await authorizeRequest(request, { allowViewerWrite: true });
+  const authorization = await authorizeRequest(request);
   if (authorization instanceof Response) return authorization;
   try {
-    const workspaceId = new URL(request.url).searchParams.get("workspaceId")?.trim() ?? "";
+    const url = new URL(request.url);
+    const workspaceId = url.searchParams.get("workspaceId")?.trim() ?? "";
     if (!workspaceId) return Response.json({ error: "workspaceId is required" }, { status: 400 });
+    if (url.searchParams.get("permanent") === "true") {
+      const payload = await request.json().catch(() => ({})) as Record<string, unknown>;
+      const result = await permanentlyDeleteWorkspaceForUser(
+        authorization.userId,
+        workspaceId,
+        typeof payload.confirmationName === "string" ? payload.confirmationName : "",
+      );
+      return withWorkspaceCookie(Response.json(result), result.nextWorkspaceId, request);
+    }
     const result = await scheduleWorkspaceDeletionForUser(authorization.userId, workspaceId);
     return withWorkspaceCookie(Response.json(result), result.nextWorkspaceId, request);
   } catch (error) {
@@ -81,7 +100,7 @@ function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
   const status = /owner|personal|access/i.test(message)
     ? 403
-    : /required|characters|not found|keep another|scheduled/i.test(message)
+    : /required|characters|not found|keep another|scheduled|confirmation|test workspace/i.test(message)
       ? 400
       : 500;
   return Response.json({ error: message }, { status });

@@ -889,7 +889,7 @@ export default function Home() {
     const response = await fetch("/api/workspaces", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, confirmed: true }),
     });
     if (response.ok) { clearCachedBootstrap(); window.location.reload(); }
     else {
@@ -924,6 +924,29 @@ export default function Home() {
       const data = await response.json().catch(() => ({})) as { error?: string };
       setWorkspaceSaving(false);
       showNotice(data.error ?? "워크스페이스를 복구하지 못했습니다.");
+    }
+  }
+
+  async function permanentlyDeleteWorkspace(workspace: WorkspaceSummary) {
+    if (!workspace.scheduledDeletionAt || workspace.role !== "owner" || workspaceSaving) return;
+    const confirmationName = window.prompt(
+      `이 작업은 되돌릴 수 없습니다. '${workspace.name}' 워크스페이스와 그 안의 모든 데이터를 즉시 영구삭제하려면 워크스페이스 이름을 그대로 입력하세요.`,
+    );
+    if (confirmationName !== workspace.name) {
+      if (confirmationName !== null) showNotice("워크스페이스 이름이 일치하지 않아 삭제하지 않았습니다.");
+      return;
+    }
+    setWorkspaceSaving(true);
+    const response = await fetch(`/api/workspaces?workspaceId=${encodeURIComponent(workspace.id)}&permanent=true`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmationName }),
+    });
+    if (response.ok) { clearCachedBootstrap(); window.location.reload(); }
+    else {
+      const data = await response.json().catch(() => ({})) as { error?: string };
+      setWorkspaceSaving(false);
+      showNotice(data.error ?? "워크스페이스를 영구삭제하지 못했습니다.");
     }
   }
 
@@ -1547,6 +1570,9 @@ export default function Home() {
                         </div>
                         <button className="workspace-restore" onClick={() => void restoreWorkspace(workspace)} disabled={workspaceSaving} aria-label={`${workspace.name} 워크스페이스 복구`} title="워크스페이스 복구">
                           <RotateCcw size={13} />
+                        </button>
+                        <button className="workspace-delete workspace-delete-permanent" onClick={() => void permanentlyDeleteWorkspace(workspace)} disabled={workspaceSaving} aria-label={`${workspace.name} 워크스페이스 즉시 영구삭제`} title="즉시 영구삭제">
+                          <Trash2 size={13} />
                         </button>
                       </div>
                     ))}

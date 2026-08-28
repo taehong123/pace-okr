@@ -112,6 +112,10 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /workspaceDeletionLabel/);
   assert.match(workspaceRoute, /scheduleWorkspaceDeletionForUser/);
   assert.match(workspaceRoute, /restoreWorkspaceForUser/);
+  assert.match(workspaceRoute, /permanentlyDeleteWorkspaceForUser/);
+  assert.match(workspaceRoute, /payload\.confirmed !== true/);
+  assert.match(workspaceRoute, /Test workspace names cannot be created in production/);
+  assert.match(page, /permanentlyDeleteWorkspace/);
   assert.match(bootstrapRoute, /Cache-Control": "no-store"/);
   assert.match(bootstrapRoute, /okrptr_workspace_id/);
   assert.doesNotMatch(page, /OAuth Redirect URL|Slash Command URL/);
@@ -372,7 +376,8 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.match(paceData, /export async function permanentlyDeleteTrashedItems/);
   assert.match(paceData, /archiveProject[\s\S]*trashItems/);
   assert.doesNotMatch(paceData.match(/async function migrateLegacyHierarchy[\s\S]*?\n}/)?.[0] ?? "", /legacy-project-/);
-  assert.match(paceData, /removeLegacySeedWorkspaceData\(ownerId\);[\s\S]*workspaceInitializationIsCurrent/);
+  assert.match(paceData, /workspaceInitializationIsCurrent\(ownerId\)\) return;[\s\S]*removeLegacySeedWorkspaceData\(ownerId\)/);
+  assert.match(paceData, /Workspace name confirmation does not match/);
 });
 
 test("keeps the Task page as stable one-line rows with details in the side panel", async () => {

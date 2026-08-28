@@ -645,14 +645,12 @@ export async function ensureWorkspace(ownerId: string) {
   if (!ready) {
     ready = (async () => {
       await ensureSchema();
+      if (await workspaceInitializationIsCurrent(ownerId)) return;
       await migrateLegacyHierarchy(ownerId);
       await removeLegacySeedWorkspaceData(ownerId);
-      if (!await workspaceInitializationIsCurrent(ownerId)) {
-        await seedProjectExecutionProperties(ownerId);
-        await migrateLegacyItemAssignments(ownerId);
-        await ensureActiveOkrCycle(ownerId);
-      }
       await seedProjectExecutionProperties(ownerId);
+      await migrateLegacyItemAssignments(ownerId);
+      await ensureActiveOkrCycle(ownerId);
       const general = await ensureGeneralRoutine(ownerId);
       await migrateInboxTasksToGeneral(ownerId, general.id);
       await migratePersonalWorkspaceAssignments(ownerId);
@@ -740,15 +738,44 @@ async function migratePersonalWorkspaceAssignments(ownerId: string) {
 }
 
 async function workspaceInitializationIsCurrent(ownerId: string) {
-  const rows = await getDb()
-    .select({ name: propertyDefinitions.name })
-    .from(propertyDefinitions)
-    .where(and(
-      eq(propertyDefinitions.ownerId, ownerId),
-      inArray(propertyDefinitions.name, DEFAULT_PROJECT_EXECUTION_PROPERTIES.map((property) => property.name)),
-    ));
+  const [rows, generalRows, seedItems, seedRoutines, legacyHierarchy] = await Promise.all([
+    getDb()
+      .select({ name: propertyDefinitions.name })
+      .from(propertyDefinitions)
+      .where(and(
+        eq(propertyDefinitions.ownerId, ownerId),
+        inArray(propertyDefinitions.name, DEFAULT_PROJECT_EXECUTION_PROPERTIES.map((property) => property.name)),
+      )),
+    getDb().select({ id: routines.id }).from(routines).where(and(
+      eq(routines.ownerId, ownerId),
+      eq(routines.systemKey, GENERAL_ROUTINE_SYSTEM_KEY),
+    )).limit(1),
+    getDb().select({ id: items.id }).from(items).where(and(
+      eq(items.ownerId, ownerId),
+      inArray(items.title, LEGACY_SEED_ITEM_TITLES),
+    )).limit(1),
+    getDb().select({ id: routines.id }).from(routines).where(and(
+      eq(routines.ownerId, ownerId),
+      inArray(routines.title, LEGACY_SEED_ROUTINE_TITLES),
+    )).limit(1),
+    (env as RuntimeEnv).DB.prepare(`SELECT 1 AS pending
+      FROM items AS current_item
+      WHERE current_item.owner_id = ? AND (
+        current_item.kind = 'action'
+        OR (current_item.kind = 'task' AND current_item.parent_id IS NULL AND current_item.routine_id IS NULL)
+        OR (current_item.kind = 'task' AND current_item.parent_id IN (
+          SELECT parent_item.id FROM items AS parent_item
+          WHERE parent_item.owner_id = current_item.owner_id AND parent_item.kind = 'initiative'
+        ))
+      )
+      LIMIT 1`).bind(ownerId).first(),
+  ]);
   const names = new Set(rows.map((row) => row.name));
-  return DEFAULT_PROJECT_EXECUTION_PROPERTIES.every((property) => names.has(property.name));
+  return DEFAULT_PROJECT_EXECUTION_PROPERTIES.every((property) => names.has(property.name))
+    && generalRows.length > 0
+    && seedItems.length === 0
+    && seedRoutines.length === 0
+    && !legacyHierarchy;
 }
 
 export async function listOkrCycles(ownerId: string) {
@@ -2145,6 +2172,50 @@ export async function restoreWorkspaceForUser(userId: string, workspaceId: strin
   };
 }
 
+export async function permanentlyDeleteWorkspaceForUser(userId: string, workspaceId: string, confirmationName: string) {
+  await ensureSchema();
+  const id = workspaceId.trim();
+  if (!id) throw new Error("workspaceId is required");
+  const [row] = await getDb()
+    .select({ workspace: workspaces, membership: workspaceMembers })
+    .from(workspaceMembers)
+    .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
+    .where(and(eq(workspaceMembers.workspaceId, id), eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, "active")))
+    .limit(1);
+  if (!row) throw new Error("Workspace not found or access denied");
+  if (row.membership.role !== "owner") throw new Error("Only the workspace owner can permanently delete a workspace");
+  if (row.workspace.id === row.workspace.ownerUserId) throw new Error("Personal workspace cannot be deleted");
+  if (!row.workspace.scheduledDeletionAt) throw new Error("Workspace must be scheduled for deletion first");
+  if (confirmationName !== row.workspace.name) throw new Error("Workspace name confirmation does not match");
+
+  const remainingRows = await getDb()
+    .select({ workspace: workspaces, membership: workspaceMembers })
+    .from(workspaceMembers)
+    .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
+    .where(and(
+      eq(workspaceMembers.userId, userId),
+      eq(workspaceMembers.status, "active"),
+      isNull(workspaces.scheduledDeletionAt),
+    ))
+    .orderBy(asc(workspaces.createdAt));
+  const nextRow = remainingRows.find((entry) => entry.workspace.id === entry.workspace.ownerUserId) ?? remainingRows[0];
+  if (!nextRow) throw new Error("Keep another workspace before permanently deleting this one");
+
+  await permanentlyDeleteWorkspace(id);
+  const nextWorkspace = {
+    id: nextRow.workspace.id,
+    name: nextRow.workspace.name,
+    createdAt: nextRow.workspace.createdAt,
+    personal: nextRow.workspace.id === nextRow.workspace.ownerUserId,
+    role: nextRow.membership.role as TeamRole,
+    current: true,
+    deletionRequestedAt: null,
+    scheduledDeletionAt: null,
+  };
+  await setActiveWorkspace(userId, nextWorkspace.id);
+  return { deleted: true, id, nextWorkspaceId: nextWorkspace.id, nextWorkspace };
+}
+
 async function purgeExpiredWorkspaces() {
   const expired = await getDb()
     .select({ id: workspaces.id })
@@ -2181,6 +2252,7 @@ async function permanentlyDeleteWorkspace(id: string) {
   await getDb().delete(items).where(eq(items.ownerId, id));
   await getDb().delete(okrCycles).where(eq(okrCycles.ownerId, id));
   await getDb().delete(workspaceRules).where(eq(workspaceRules.workspaceId, id));
+  await getDb().update(userWorkspacePreferences).set({ activeWorkspaceId: null, updatedAt: new Date().toISOString() }).where(eq(userWorkspacePreferences.activeWorkspaceId, id));
   await getDb().delete(workspaceGroups).where(eq(workspaceGroups.workspaceId, id));
   await getDb().delete(workspaceMembers).where(eq(workspaceMembers.workspaceId, id));
   await getDb().delete(workspaces).where(eq(workspaces.id, id));
