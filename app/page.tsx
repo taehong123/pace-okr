@@ -23,6 +23,7 @@ import {
   EyeOff,
   Filter,
   Hash,
+  House,
   Inbox,
   Lightbulb,
   Link2,
@@ -862,6 +863,13 @@ export default function Home() {
     setActiveView("home");
   }
 
+  function goToMobileHome() {
+    setSelectedProjectId(null);
+    setSelectedTaskId(null);
+    setMobileMenuOpen(false);
+    setActiveView("okr");
+  }
+
   async function switchWorkspace(workspaceId: string) {
     if (workspaces.find((entry) => entry.id === workspaceId)?.scheduledDeletionAt) return;
     if (workspaceSaving || workspaceId === currentWorkspace?.id) {
@@ -1665,7 +1673,17 @@ export default function Home() {
 
       <section className="workspace">
         <header className="workspace-topbar">
-          <span>OKRPTR</span><ChevronRight size={13} /><b>{selectedProject ? "Project" : viewTitles[activeView]}</b>
+          <span className="workspace-brand">OKRPTR</span>
+          <button
+            type="button"
+            className="workspace-mobile-home"
+            onClick={goToMobileHome}
+            aria-label="홈으로 이동"
+            aria-current={activeView === "okr" && !selectedProject && !selectedTask ? "page" : undefined}
+          >
+            <House size={15} /><span>홈</span>
+          </button>
+          <ChevronRight size={13} /><b>{selectedProject ? "Project" : viewTitles[activeView]}</b>
           <div><button className="mobile-assistant-trigger" aria-label="AI 대화 열기" title="AI 대화 열기" onClick={openAssistant}><span aria-hidden="true">🤖</span></button><button aria-label="팀 멤버" title="팀 멤버" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={15} /></button><button aria-label="알림" title="알림"><Bell size={15} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
         </header>
         <div className="page-body">
