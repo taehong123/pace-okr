@@ -354,3 +354,20 @@ test("ships Project property, Task table, document, template, and MCP surfaces",
   assert.match(paceData, /legacyValue: row\.value/);
   assert.match(paceData, /\.\.\.templateBlocks, \.\.\.existingBlocks/);
 });
+
+test("keeps the Task page as stable one-line rows with details in the side panel", async () => {
+  const [page, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /aria-label="Task 목록"/);
+  assert.match(page, /task-list-inline-meta/);
+  assert.doesNotMatch(page, /task-list-status/);
+  assert.match(page, /aria-label="Task 정보"/);
+  assert.match(page, /onPatch\(\{ status:/);
+  assert.match(page, /onPatch\(\{ priority:/);
+  assert.match(styles, /\.task-list-open[^}]*grid-template-columns:[^}]*minmax\(260px, \.85fr\)/s);
+  assert.match(styles, /\.task-list-open b, \.task-list-inline-meta[^}]*white-space: nowrap/s);
+  assert.match(styles, /\.task-detail-panel \{ width: min\(520px, 100vw\); \}/);
+});

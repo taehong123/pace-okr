@@ -1820,6 +1820,7 @@ export default function Home() {
           routines={routines}
           teamMembers={teamMembers}
           onClose={() => setSelectedTaskId(null)}
+          onPatch={(patch) => patchItem(selectedTask.id, patch)}
           onProgress={(progress) => setItems((current) => current.map((entry) => entry.id === selectedTask.id ? { ...entry, progress } : entry))}
           onAssignmentsChange={(assignments) => updateItemAssignments(selectedTask.id, assignments)}
           onNotice={showNotice}
@@ -2412,12 +2413,13 @@ function ProjectPropertyField({ projectId, property, value, members, readOnly, o
   );
 }
 
-function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onProgress, onAssignmentsChange, onNotice }: {
+function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPatch, onProgress, onAssignmentsChange, onNotice }: {
   task: OkrptrItem;
   allItems: OkrptrItem[];
   routines: Routine[];
   teamMembers: TeamMember[];
   onClose: () => void;
+  onPatch: (patch: Partial<OkrptrItem>) => Promise<void>;
   onProgress: (progress: number) => void;
   onAssignmentsChange: (assignments: ItemAssignment[]) => void;
   onNotice: (message: string) => void;
@@ -2519,11 +2521,17 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPro
   return (
     <div className="modal-backdrop align-right">
       <aside className="property-panel task-detail-panel">
-        <header><div><p>{lineageTitle}</p><h2>{task.title}</h2></div><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header>
-        <div className="task-meta"><span className={`status-tag status-${task.status}`}>{statusLabel(task.status)}</span><span><CalendarDays size={13} />{dueLabel(task.dueDate)}</span><b>{task.progress}%</b></div>
+        <header><div><p>{lineageTitle}</p><textarea className="task-title-input" defaultValue={task.title} rows={1} aria-label="Task 이름" onBlur={(event) => { const nextTitle = event.currentTarget.value.trim(); if (nextTitle && nextTitle !== task.title) void onPatch({ title: nextTitle }); }} /></div><button className="icon-button" onClick={onClose} aria-label="닫기"><X size={17} /></button></header>
+        <section className="task-detail-fields" aria-label="Task 정보">
+          <label><span>상태</span><select className={`status-${task.status}`} value={task.status} onChange={(event) => void onPatch({ status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+          <label><span>우선순위</span><select className={`priority-${task.priority}`} value={task.priority} onChange={(event) => void onPatch({ priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+          <label><span>기한</span><input type="date" value={task.dueDate ?? ""} onChange={(event) => void onPatch({ dueDate: event.target.value || null })} /></label>
+          <label className="task-progress-field"><span>진행률</span><div><input type="range" min="0" max="100" step="5" value={task.progress} onChange={(event) => void onPatch({ progress: Number(event.target.value) })} /><b>{task.progress}%</b></div></label>
+        </section>
         {teamMembers.length > 0 && <section className="task-assignee-editor"><MemberMentionPicker label="담당자" members={teamMembers} selectedIds={assigneeIds} onChange={(ids) => void saveAssignee(ids)} placeholder="@실명으로 찾기" maxSelected={1} /></section>}
         <section className="task-lineage">
           <header><b>상위 맵핑</b><span>{routine ? "Routine 기반 Task" : project ? "OKR 실행 구조" : "아직 연결 전"}</span></header>
+          <LineageRow label="등록 경로" value={sourceLabel(task.source)} />
           {routine ? (
             <>
               <LineageRow label="Routine" value={routine.title} />
@@ -3801,25 +3809,20 @@ function TaskListView({ items, allItems, routines, onOpenTask, onPatch }: { item
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
   if (!items.length) return <EmptyState icon={Inbox} title="Task가 없습니다" />;
   return (
-    <section className="inbox-list task-list">
-      <div className="list-head task-list-head"><span>이름</span><span>담당자</span><span>상위 연결</span><span>등록 경로</span><span /></div>
+    <section className="task-list" aria-label="Task 목록">
       {items.slice(0, visibleCount).map((entry) => {
         const project = entry.parentId ? byId.get(entry.parentId) : undefined;
         const routine = entry.routineId ? routines.find((row) => row.id === entry.routineId) : undefined;
         const relation = routine ? `Routine · ${routine.title}` : project ? `Project · ${project.title}` : "General";
+        const assignee = assignmentLabel(entry, "task_assignee");
         return (
-          <article className="inbox-item task-list-item" key={entry.id}>
-            <button className="task-list-title" onClick={() => onOpenTask(entry.id)}>
-              <span className="page-icon"><ListChecks size={15} /></span>
-              <span><b>{entry.title}</b><small>{statusLabel(entry.status)} · {priorityLabels[entry.priority]}</small></span>
+          <article className={`task-list-row ${isCompletedStatus(entry.status) ? "completed" : ""}`} key={entry.id}>
+            <button className={`task-list-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })} aria-label={`${entry.title} ${isCompletedStatus(entry.status) ? "완료 취소" : "완료"}`}><Check size={13} /></button>
+            <button className="task-list-open" onClick={() => onOpenTask(entry.id)}>
+              <b>{entry.title}</b>
+              <span className="task-list-inline-meta"><i className={`status-dot status-${entry.status}`} />{statusLabel(entry.status)}<em>·</em>{assignee}<em>·</em>{relation}{entry.dueDate && <><em>·</em>{dueLabel(entry.dueDate)}</>}</span>
             </button>
-            <select className={`task-list-status status-${entry.status}`} value={entry.status} onChange={(event) => void onPatch(entry.id, { status: event.target.value as ItemStatus })} aria-label={`${entry.title} 상태 변경`}>
-              {Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}
-            </select>
-            <span className="task-assignee-cell"><i>담당자</i>{assignmentLabel(entry, "task_assignee")}</span>
-            <button className="task-relation-button" onClick={() => onOpenTask(entry.id)}><i>상위 연결</i>{relation}</button>
-            <span className={`source-badge source-${entry.source}`}><i>출처</i>{sourceLabel(entry.source)}</span>
-            <button onClick={() => onOpenTask(entry.id)}><MoreHorizontal size={14} />상세</button>
+            <button className="task-list-chevron" onClick={() => onOpenTask(entry.id)} aria-label={`${entry.title} 상세 열기`}><ChevronRight size={15} /></button>
           </article>
         );
       })}

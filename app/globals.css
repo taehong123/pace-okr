@@ -440,27 +440,29 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .row-action { width: 23px; height: 23px; padding: 0; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--green); cursor: pointer; }
 .row-chevron { color: var(--faint); }
 .list-head { min-height: 34px; display: grid; grid-template-columns: minmax(0, 1fr) 100px 72px; align-items: center; gap: 12px; padding: 0 8px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; }
-.task-list-head { grid-template-columns: minmax(0, 1fr) 140px minmax(160px, .8fr) 100px 76px; }
 .inbox-item { min-height: 52px; display: grid; grid-template-columns: minmax(0, 1fr) 100px 72px; align-items: center; gap: 12px; padding: 0 8px; border-bottom: 1px solid var(--line); }
-.task-list-item { grid-template-columns: minmax(0, 1fr) 140px minmax(160px, .8fr) 100px 76px; }
-.task-list-status { display: none; }
-.task-assignee-cell i, .task-relation-button i, .source-badge i { display: none; font-style: normal; }
 .inbox-item > div { min-width: 0; display: flex; align-items: center; gap: 9px; }
 .inbox-item h3 { overflow: hidden; margin: 0; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.task-list-title, .task-relation-button { min-width: 0; border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
-.task-list-title { display: flex; align-items: center; gap: 9px; padding: 0; }
-.task-list-title > span:last-child { min-width: 0; display: grid; gap: 2px; }
-.task-list-title b, .task-relation-button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; }
-.task-list-title small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.task-assignee-cell { overflow: hidden; color: var(--blue); font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.task-relation-button { height: 30px; padding: 0 6px; color: var(--muted); }
-.task-list-title:hover b, .task-relation-button:hover { color: var(--blue); }
-.page-icon { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 4px; background: #f1f1ef; color: var(--muted); }
-.source-badge { justify-self: start; padding: 3px 6px; border-radius: 3px; background: #f1f1ef; color: var(--muted); font-size: 9px; }
-.source-mcp { background: #e7f3f8; color: var(--blue); }
-.source-slack, .source-discord, .source-telegram { background: #faebdd; color: #d9730d; }
 .inbox-item > button { height: 27px; display: flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--muted); font-size: 10px; cursor: pointer; }
 .inbox-item > button:hover { background: var(--hover); color: var(--ink); }
+.task-list { display: grid; border-top: 1px solid var(--line); }
+.task-list-row { min-width: 0; min-height: 50px; display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px; align-items: center; gap: 8px; padding: 0 6px; border-bottom: 1px solid var(--line); }
+.task-list-row:hover { background: var(--hover); }
+.task-list-check, .task-list-chevron { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--faint); cursor: pointer; }
+.task-list-check { border: 1px solid var(--line-strong); }
+.task-list-check svg { opacity: 0; }
+.task-list-check:hover { border-color: var(--green); color: var(--green); }
+.task-list-check:hover svg, .task-list-check.checked svg { opacity: 1; }
+.task-list-check.checked { border-color: #9fc8ae; background: #edf6f0; color: var(--green); }
+.task-list-open { min-width: 0; min-height: 49px; display: grid; grid-template-columns: minmax(180px, 1fr) minmax(260px, .85fr); align-items: center; gap: 18px; padding: 0; border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.task-list-open b, .task-list-inline-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-list-open b { font-size: 12px; font-weight: 500; }
+.task-list-open:hover b { color: var(--blue); }
+.task-list-inline-meta { color: var(--muted); font-size: 10px; }
+.task-list-inline-meta .status-dot { width: 6px; height: 6px; margin-right: 6px; display: inline-block; vertical-align: 1px; }
+.task-list-inline-meta em { margin: 0 6px; color: var(--faint); font-style: normal; }
+.task-list-chevron:hover { background: var(--raised); color: var(--ink); }
+.task-list-row.completed .task-list-open b { color: var(--faint); text-decoration: line-through; }
 .task-list-more { width: 100%; min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
 .task-list-more:hover { background: var(--hover); color: var(--ink); }
 .task-list-more span { color: var(--faint); font-size: 9px; }
@@ -919,10 +921,18 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .group-member-row select { width: 74px; height: 28px; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--ink); font-size: 9px; }
 .group-member-row .danger:hover { color: var(--red); }
 
-.task-detail-panel { width: min(460px, 100vw); }
+.task-detail-panel { width: min(520px, 100vw); }
 .task-detail-panel > header { min-height: 78px; height: auto; }
 .task-detail-panel > header > div { min-width: 0; padding: 12px 0; }
-.task-detail-panel h2 { overflow-wrap: anywhere; font-size: 15px; line-height: 1.4; }
+.task-title-input { width: 100%; min-width: 0; min-height: 25px; max-height: 4lh; margin-top: 4px; padding: 0; overflow: hidden; border: 0; outline: 0; resize: none; field-sizing: content; background: transparent; color: var(--ink); font-family: inherit; font-size: 15px; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
+.task-title-input:focus { background: white; box-shadow: inset 0 -1px 0 var(--line-strong); }
+.task-detail-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 13px 18px; border-bottom: 1px solid var(--line); background: #f1f4f5; }
+.task-detail-fields > label { min-width: 0; display: grid; gap: 5px; }
+.task-detail-fields > label > span { color: var(--muted); font-size: 9px; }
+.task-detail-fields select, .task-detail-fields input[type="date"] { width: 100%; min-width: 0; height: 32px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; outline: 0; background: white; color: var(--ink); font-size: 10px; }
+.task-progress-field > div { min-width: 0; height: 32px; display: grid; grid-template-columns: minmax(0, 1fr) 34px; align-items: center; gap: 8px; }
+.task-progress-field input { width: 100%; accent-color: var(--blue); }
+.task-progress-field b { color: var(--muted); font-size: 10px; text-align: right; }
 .project-detail-panel { width: min(900px, 100vw); max-height: 100vh; overflow-y: auto; background: #f3f5f6; }
 .project-detail-panel.archived { background: #fbfbfa; }
 .project-detail-panel > header { min-height: 78px; height: auto; }
@@ -1514,24 +1524,21 @@ button:active:not(:disabled) { transform: translateY(1px); }
   .project-property-catalog { border-right: 0; border-bottom: 1px solid var(--line); }
   .project-archive-row { grid-template-columns: 30px minmax(0, 1fr) 132px; }
   .project-archive-row > .status-tag { display: none; }
-  .task-list-head { display: none; }
-  .task-list { display: grid; gap: 9px; border-top: 0; }
-  .task-list-item { min-height: 0; grid-template-columns: minmax(0, 1fr) 112px; gap: 8px 10px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); }
-  .task-list-title { min-height: 44px; align-items: flex-start; }
-  .task-list-title b { display: -webkit-box; overflow: hidden; white-space: normal; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-  .task-list-title small { margin-top: 2px; font-size: 10px; }
-  .task-list-status { width: 112px; min-height: 44px; display: block; grid-column: 2; grid-row: 1; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; background: white; font-size: 11px; font-weight: 600; }
-  .task-assignee-cell, .task-relation-button, .task-list-item .source-badge { min-height: 24px; grid-column: 1 / -1; display: grid; grid-template-columns: 68px minmax(0, 1fr); align-items: center; gap: 6px; padding: 0; }
-  .task-assignee-cell i, .task-relation-button i, .source-badge i { display: block; color: var(--faint); font-size: 9px; }
-  .task-relation-button { height: 32px; justify-content: start; border: 0; }
-  .task-list-item .source-badge { justify-self: stretch; border-radius: 0; background: transparent; }
-  .task-list-item > button:last-child { min-height: 44px; grid-column: 1 / -1; align-self: center; }
-  .task-list-more { border: 1px solid var(--line); border-radius: 6px; background: var(--raised); }
+  .task-list { border-top: 1px solid var(--line); }
+  .task-list-row { min-height: 58px; grid-template-columns: 28px minmax(0, 1fr) 28px; gap: 7px; padding: 0 2px; }
+  .task-list-open { min-height: 57px; grid-template-columns: minmax(0, 1fr); align-content: center; gap: 4px; }
+  .task-list-open b { font-size: 12px; }
+  .task-list-inline-meta { font-size: 9px; }
+  .task-list-more { border-radius: 0; }
   .async-state { min-height: 210px; grid-template-columns: 28px minmax(0, 1fr); }
   .async-state button { min-height: 44px; grid-column: 1 / -1; justify-content: center; }
 }
 
 @media (max-width: 760px) {
+  .task-detail-panel { width: 100vw; min-height: 100dvh; height: 100dvh; border-left: 0; }
+  .task-detail-panel > header { position: sticky; top: 0; z-index: 8; background: var(--raised); }
+  .task-detail-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-right: 12px; padding-left: 12px; }
+  .task-assignee-editor, .task-lineage, .task-calendar-action, .checklist-section { padding-right: 12px; padding-left: 12px; }
   .project-detail-panel { width: 100vw; max-width: none; min-height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
   .project-detail-panel > header { position: sticky; top: 0; z-index: 8; padding: 8px 12px 12px; background: #f3f5f6; }
   .project-detail-panel > header.project-page-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
