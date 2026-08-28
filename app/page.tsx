@@ -3176,20 +3176,20 @@ function MyWorkView({ items, routines, currentMember, onOpenProject, onOpenTask,
     <section className="my-work-view">
       <header className="my-work-toolbar">
         <div><b>{currentMember.displayName}의 업무</b><span>명시적으로 담당된 항목만 표시합니다.</span></div>
-        {canDelete && (projects.length > 0 || tasks.length > 0) && <button onClick={() => onSelectItems([...projects, ...tasks].map((item) => item.id))}><ListChecks size={13} />현재 목록 선택</button>}
+        {canDelete && (projects.length > 0 || tasks.length > 0) && <button onClick={() => onSelectItems([...tasks, ...projects].map((item) => item.id))}><ListChecks size={13} />현재 목록 선택</button>}
         <label><input type="checkbox" checked={includeCompleted} onChange={(event) => setIncludeCompleted(event.target.checked)} />완료 포함</label>
       </header>
-      <MyWorkSection title="Project" count={projects.length}>
-        {projects.map((project) => {
-          const roles = project.assignments.filter((assignment) => assignment.memberId === currentMember.id).map((assignment) => assignment.role === "project_dri" ? "주 담당" : "보조 담당");
-          return <div className="my-work-selectable" key={project.id}>{canDelete && <DeleteSelectCheckbox item={project} selected={selectedItemIds.has(project.id)} onToggle={onToggleSelect} />}<button className="my-work-item" onClick={() => onOpenProject(project.id)}><span className="type-icon type-project">P</span><span><b>{project.title}</b><small>{roles.join(" · ")} · {statusLabel(project.status)} · {dueLabel(project.dueDate)}</small></span><ChevronRight size={15} /></button></div>;
-        })}
-      </MyWorkSection>
       <MyWorkSection title="Task" count={tasks.length}>
         {tasks.map((task) => {
           const project = task.parentId ? byId.get(task.parentId) : null;
           const routine = task.routineId ? routines.find((entry) => entry.id === task.routineId) : null;
           return <div className="my-work-selectable" key={task.id}>{canDelete && <DeleteSelectCheckbox item={task} selected={selectedItemIds.has(task.id)} onToggle={onToggleSelect} />}<button className="my-work-item" onClick={() => onOpenTask(task.id)}><span className="type-icon type-task">T</span><span><b>{task.title}</b><small>{statusLabel(task.status)} · {routine?.systemKey === "general" ? "미분류 Task" : routine ? routine.title : project?.title ?? "미분류 Task"} · {dueLabel(task.dueDate)}</small></span><ChevronRight size={15} /></button></div>;
+        })}
+      </MyWorkSection>
+      <MyWorkSection title="Project" count={projects.length}>
+        {projects.map((project) => {
+          const roles = project.assignments.filter((assignment) => assignment.memberId === currentMember.id).map((assignment) => assignment.role === "project_dri" ? "주 담당" : "보조 담당");
+          return <div className="my-work-selectable" key={project.id}>{canDelete && <DeleteSelectCheckbox item={project} selected={selectedItemIds.has(project.id)} onToggle={onToggleSelect} />}<button className="my-work-item" onClick={() => onOpenProject(project.id)}><span className="type-icon type-project">P</span><span><b>{project.title}</b><small>{roles.join(" · ")} · {statusLabel(project.status)} · {dueLabel(project.dueDate)}</small></span><ChevronRight size={15} /></button></div>;
         })}
       </MyWorkSection>
       <MyWorkSection title="Routine" count={assignedRoutines.length}>

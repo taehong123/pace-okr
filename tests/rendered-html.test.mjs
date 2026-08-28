@@ -150,6 +150,12 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /첫 Project를 만들어볼까요\?/);
   assert.match(page, /mode === "project"/);
   assert.match(page, /my_work: "내 업무"/);
+  const myWorkView = page.match(/function MyWorkView[\s\S]*?function MyWorkSection/)?.[0] ?? "";
+  assert.ok(
+    myWorkView.indexOf('title="Task"') < myWorkView.indexOf('title="Project"')
+      && myWorkView.indexOf('title="Project"') < myWorkView.indexOf('title="Routine"'),
+    "My Work sections must be ordered Task, Project, Routine",
+  );
   assert.match(page, /systemKey === "general"/);
   assert.doesNotMatch(page, /status: "inbox"|인박스에 저장|인박스에 추가/);
   assert.match(okrOrganizeRoute, /"onboarding".*"coach"/);
