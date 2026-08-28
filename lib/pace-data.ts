@@ -762,6 +762,7 @@ async function workspaceInitializationIsCurrent(ownerId: string) {
       FROM items AS current_item
       WHERE current_item.owner_id = ? AND (
         current_item.kind = 'action'
+        OR (current_item.kind = 'project' AND current_item.id LIKE 'legacy-project-%' AND current_item.source = 'migration')
         OR (current_item.kind = 'task' AND current_item.parent_id IS NULL AND current_item.routine_id IS NULL)
         OR (current_item.kind = 'task' AND current_item.parent_id IN (
           SELECT parent_item.id FROM items AS parent_item
@@ -4477,6 +4478,18 @@ async function migrateLegacyHierarchy(ownerId: string) {
         AND parent_id IN (
           SELECT id FROM items WHERE owner_id = ? AND kind = 'initiative'
         )`).bind(ownerId, ownerId),
+    d1.prepare(`UPDATE items
+      SET parent_id = NULL, routine_id = NULL, status = 'todo', source = 'migration',
+        updated_at = CURRENT_TIMESTAMP
+      WHERE owner_id = ? AND kind = 'task'
+        AND parent_id IN (
+          SELECT id FROM items
+          WHERE owner_id = ? AND kind = 'project'
+            AND id LIKE 'legacy-project-%' AND source = 'migration'
+        )`).bind(ownerId, ownerId),
+    d1.prepare(`DELETE FROM items
+      WHERE owner_id = ? AND kind = 'project'
+        AND id LIKE 'legacy-project-%' AND source = 'migration'`).bind(ownerId),
   ]);
 }
 

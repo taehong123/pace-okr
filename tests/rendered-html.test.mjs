@@ -375,7 +375,9 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.match(paceData, /export async function restoreTrashedItems/);
   assert.match(paceData, /export async function permanentlyDeleteTrashedItems/);
   assert.match(paceData, /archiveProject[\s\S]*trashItems/);
-  assert.doesNotMatch(paceData.match(/async function migrateLegacyHierarchy[\s\S]*?\n}/)?.[0] ?? "", /legacy-project-/);
+  const legacyMigration = paceData.match(/async function migrateLegacyHierarchy[\s\S]*?\n}/)?.[0] ?? "";
+  assert.doesNotMatch(legacyMigration, /INSERT[^\n]*legacy-project-/);
+  assert.match(legacyMigration, /DELETE FROM items[\s\S]*legacy-project-/);
   assert.match(paceData, /workspaceInitializationIsCurrent\(ownerId\)\) return;[\s\S]*removeLegacySeedWorkspaceData\(ownerId\)/);
   assert.match(paceData, /Workspace name confirmation does not match/);
 });
