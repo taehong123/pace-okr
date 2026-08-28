@@ -24,7 +24,7 @@ export async function POST(request: Request) {
   const channelName = body.get("channel_name") || body.get("channel_id") || "Slack";
 
   if (!text || text === "help") {
-    return slackMessage("사용법: /okrptr 고객 인터뷰 질문지 정리\n입력한 내용은 OKRPTR General Task로 저장됩니다.");
+    return slackMessage("사용법: /okrptr 고객 인터뷰 질문지 정리\n입력한 내용은 OKRPTR 미분류 Task로 저장됩니다.");
   }
 
   const connection = teamId ? await getSlackConnectionByTeam(teamId) : null;
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
 
   return Response.json({
     response_type: "ephemeral",
-    text: `OKRPTR General에 저장했습니다: ${serializeItem(item).title}`,
+    text: `OKRPTR 미분류 Task에 저장했습니다: ${serializeItem(item).title}`,
   });
 }
 

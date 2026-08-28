@@ -215,7 +215,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /다시 시도/);
   assert.match(page, /savingChecklist/);
   assert.match(page, /Promise\.all\(\(kind === "project"/);
-  assert.match(page, /void restore\(record\)/);
+  assert.match(page, /void restoreRecord\(record\)/);
+  assert.match(page, /void restoreItem\(entry\)/);
   assert.match(page, /cycleId=\{createItemCycle\?\.id \?\? null\}/);
   assert.match(page, /cycleId: kind === "task"/);
   assert.doesNotMatch(page, /\/api\/auth\/session/);
@@ -317,21 +318,30 @@ test("serves hashed assets with immutable browser and edge caching", async () =>
   assert.equal(response.headers.get("cloudflare-cdn-cache-control"), "public, max-age=31536000, immutable");
 });
 
-test("ships Project property, Task table, document, template, and MCP surfaces", async () => {
-  const [page, editor, propertiesRoute, documentsRoute, templatesRoute, mcpRoute, paceData] = await Promise.all([
+test("ships Project property, Task table, document, template, trash, and MCP surfaces", async () => {
+  const [page, editor, propertiesRoute, documentsRoute, templatesRoute, itemTrashRoute, mcpRoute, paceData] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/project-block-editor.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/properties/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/project-documents/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/project-templates/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/item-trash/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/mcp/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /목록.*속성 관리.*템플릿 관리.*아카이브/s);
+  assert.match(page, /목록.*속성 관리.*템플릿 관리/s);
+  assert.doesNotMatch(page, /setProjectTab\("archive"\)/);
+  assert.match(page, /모든 Project·Task 선택/);
+  assert.match(page, /현재 목록 선택/);
+  assert.match(page, /bulk-delete-bar/);
+  assert.match(page, /DeleteSelectCheckbox/);
+  assert.match(page, /삭제한 Project·Task와 전체 데이터 정리 기록/);
+  assert.match(page, /전체 OKR 클린업 기록/);
+  assert.match(page, /confirmationText !== "영구 삭제"/);
   assert.match(page, /연결된 Task/);
   assert.match(page, /템플릿 불러오기/);
-  assert.doesNotMatch(page, /window\.prompt/);
+  assert.match(page, /window\.prompt/);
   assert.match(page, /저장 중.*저장됨.*저장 실패/s);
   assert.match(page, /expectedVersion/);
   assert.match(editor, /BlockNoteSchema\.create/);
@@ -343,6 +353,10 @@ test("ships Project property, Task table, document, template, and MCP surfaces",
   assert.match(documentsRoute, /applyProjectTemplate/);
   assert.match(templatesRoute, /createProjectTemplate/);
   assert.match(templatesRoute, /deleteProjectTemplate/);
+  assert.match(itemTrashRoute, /listTrashedItems/);
+  assert.match(itemTrashRoute, /scope === "all_project_task"/);
+  assert.match(itemTrashRoute, /restoreTrashedItems/);
+  assert.match(itemTrashRoute, /permanentlyDeleteTrashedItems/);
   assert.match(mcpRoute, /list_project_templates/);
   assert.match(mcpRoute, /get_project_document/);
   assert.match(mcpRoute, /update_project_document/);
@@ -353,6 +367,12 @@ test("ships Project property, Task table, document, template, and MCP surfaces",
   );
   assert.match(paceData, /legacyValue: row\.value/);
   assert.match(paceData, /\.\.\.templateBlocks, \.\.\.existingBlocks/);
+  assert.match(paceData, /export async function trashItems/);
+  assert.match(paceData, /export async function restoreTrashedItems/);
+  assert.match(paceData, /export async function permanentlyDeleteTrashedItems/);
+  assert.match(paceData, /archiveProject[\s\S]*trashItems/);
+  assert.doesNotMatch(paceData.match(/async function migrateLegacyHierarchy[\s\S]*?\n}/)?.[0] ?? "", /legacy-project-/);
+  assert.match(paceData, /removeLegacySeedWorkspaceData\(ownerId\);[\s\S]*workspaceInitializationIsCurrent/);
 });
 
 test("keeps the Task page as stable one-line rows with details in the side panel", async () => {

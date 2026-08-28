@@ -48,7 +48,7 @@ function buildChatGptPrompt(origin: string, workspaceName: string, token: string
     "5. 연결을 저장한 뒤 새 대화에서 OKRPTR 연결을 활성화하고 MCP 도구 목록을 조회합니다. 워크스페이스 규칙과 현재 항목을 실제로 조회해 연결을 확인합니다.",
     "6. 브라우저 컨트롤이나 계정 권한 때문에 직접 설정할 수 없다면 연결된 것처럼 말하지 말고, 사용자가 직접 해야 하는 마지막 한 단계만 짧고 정확하게 알려 주세요.",
     "7. 이후 사용자가 OKR, Project, Task, Routine에 관한 조회나 변경을 요청하면 OKRPTR MCP 도구를 실제로 호출합니다. 조회는 바로 실행하고, 삭제·전체 정리·멤버 변경은 실행 직전에 대상과 영향을 확인합니다.",
-    "8. OKR 계층은 Objective > Key Result > Initiative > Project > Task입니다. Routine은 Initiative 연결이 필요 없는 독립 실행 컨테이너이며 Task를 가질 수 있습니다. Project나 개별 Routine이 없는 Task는 General에 저장합니다.",
+    "8. OKR 계층은 Objective > Key Result > Initiative > Project > Task입니다. Routine은 Initiative 연결이 필요 없는 독립 실행 컨테이너이며 Task를 가질 수 있습니다. Project나 개별 Routine이 없는 Task는 미분류 Task 저장소에 저장합니다.",
     "",
     "지금 바로 브라우저 컨트롤로 설정과 연결 확인을 완료한 뒤, 워크스페이스 이름과 현재 Objective, Project, Task, Routine 개수만 알려 주세요.",
   ].join("\n");

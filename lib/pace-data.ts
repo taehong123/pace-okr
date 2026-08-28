@@ -645,9 +645,9 @@ export async function ensureWorkspace(ownerId: string) {
   if (!ready) {
     ready = (async () => {
       await ensureSchema();
+      await migrateLegacyHierarchy(ownerId);
+      await removeLegacySeedWorkspaceData(ownerId);
       if (!await workspaceInitializationIsCurrent(ownerId)) {
-        await migrateLegacyHierarchy(ownerId);
-        await removeLegacySeedWorkspaceData(ownerId);
         await seedProjectExecutionProperties(ownerId);
         await migrateLegacyItemAssignments(ownerId);
         await ensureActiveOkrCycle(ownerId);
@@ -3011,11 +3011,25 @@ export async function replaceItemAssignmentRole(
   return (await getItemAssignmentMap(ownerId, [itemId]))[itemId] ?? [];
 }
 
-export async function listArchivedProjects(ownerId: string) {
-  const projects = await getDb()
+export type TrashedItemRoot = {
+  item: PaceItem;
+  taskCount: number;
+};
+
+export async function listTrashedItems(ownerId: string): Promise<TrashedItemRoot[]> {
+  const roots = await getDb()
     .select()
     .from(items)
-    .where(and(eq(items.ownerId, ownerId), eq(items.kind, "project"), sql`${items.archivedAt} IS NOT NULL`))
+    .where(and(
+      eq(items.ownerId, ownerId),
+      inArray(items.kind, ["project", "task"]),
+      sql`${items.archivedAt} IS NOT NULL`,
+      or(
+        eq(items.kind, "project"),
+        isNull(items.archiveRootId),
+        sql`${items.archiveRootId} = ${items.id}`,
+      ),
+    ))
     .orderBy(desc(items.archivedAt));
   const archivedTasks = await getDb()
     .select({ archiveRootId: items.archiveRootId })
@@ -3025,56 +3039,212 @@ export async function listArchivedProjects(ownerId: string) {
   for (const task of archivedTasks) {
     if (task.archiveRootId) taskCounts.set(task.archiveRootId, (taskCounts.get(task.archiveRootId) ?? 0) + 1);
   }
-  return projects.map((project) => ({ project, taskCount: taskCounts.get(project.id) ?? 0 }));
+  return roots.map((item) => ({ item, taskCount: item.kind === "project" ? taskCounts.get(item.id) ?? 0 : 0 }));
+}
+
+export async function listArchivedProjects(ownerId: string) {
+  return (await listTrashedItems(ownerId))
+    .filter((entry) => entry.item.kind === "project")
+    .map((entry) => ({ project: entry.item, taskCount: entry.taskCount }));
+}
+
+export async function trashItems(
+  ownerId: string,
+  input: { itemIds?: string[]; scope?: "all_project_task" },
+) {
+  const requestedIds = [...new Set((input.itemIds ?? []).map((id) => id.trim()).filter(Boolean))];
+  if (input.scope !== "all_project_task" && requestedIds.length === 0) throw new Error("itemIds are required");
+  const candidates = await getDb()
+    .select()
+    .from(items)
+    .where(and(
+      eq(items.ownerId, ownerId),
+      inArray(items.kind, ["project", "task"]),
+      isNull(items.archivedAt),
+      input.scope === "all_project_task" ? undefined : inArray(items.id, requestedIds),
+    ));
+  if (!candidates.length) return { trashedRootIds: [] as string[], projectCount: 0, taskCount: 0, affectedItemCount: 0 };
+  if (input.scope !== "all_project_task" && candidates.length !== requestedIds.length) {
+    throw new Error("One or more Project or Task items were not found");
+  }
+
+  const projectIds = new Set(candidates.filter((item) => item.kind === "project").map((item) => item.id));
+  const standaloneTaskIds = candidates
+    .filter((item) => item.kind === "task" && (!item.parentId || !projectIds.has(item.parentId)))
+    .map((item) => item.id);
+  const selectedProjectIds = [...projectIds];
+  const projectTaskRows = selectedProjectIds.length
+    ? await getDb().select({ id: items.id }).from(items).where(and(
+      eq(items.ownerId, ownerId),
+      eq(items.kind, "task"),
+      inArray(items.parentId, selectedProjectIds),
+      isNull(items.archivedAt),
+    ))
+    : [];
+  const now = new Date().toISOString();
+  const d1 = (env as RuntimeEnv).DB;
+  const statements = [
+    ...selectedProjectIds.flatMap((projectId) => [
+      d1.prepare(`UPDATE items
+        SET archived_from_status = CASE
+              WHEN archived_at IS NULL OR archived_from_status IS NULL THEN status
+              ELSE archived_from_status
+            END,
+            status = 'archived',
+            archived_at = COALESCE(archived_at, ?),
+            archive_root_id = ?,
+            updated_at = ?
+        WHERE owner_id = ? AND (id = ? OR (parent_id = ? AND kind = 'task'))`)
+        .bind(now, projectId, now, ownerId, projectId, projectId),
+      d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
+        VALUES (?, ?, ?, 'item_trashed', 'web', ?, ?)`)
+        .bind(crypto.randomUUID(), ownerId, projectId, JSON.stringify({ rootId: projectId, kind: "project" }), now),
+    ]),
+    ...standaloneTaskIds.flatMap((taskId) => [
+      d1.prepare(`UPDATE items
+        SET archived_from_status = CASE
+              WHEN archived_from_status IS NULL THEN status
+              ELSE archived_from_status
+            END,
+            status = 'archived', archived_at = ?, archive_root_id = id, updated_at = ?
+        WHERE owner_id = ? AND id = ? AND kind = 'task' AND archived_at IS NULL`)
+        .bind(now, now, ownerId, taskId),
+      d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
+        VALUES (?, ?, ?, 'item_trashed', 'web', ?, ?)`)
+        .bind(crypto.randomUUID(), ownerId, taskId, JSON.stringify({ rootId: taskId, kind: "task" }), now),
+    ]),
+  ];
+  if (statements.length) await d1.batch(statements);
+  const trashedTaskIds = new Set([...projectTaskRows.map((entry) => entry.id), ...standaloneTaskIds]);
+  return {
+    trashedRootIds: [...selectedProjectIds, ...standaloneTaskIds],
+    projectCount: selectedProjectIds.length,
+    taskCount: trashedTaskIds.size,
+    affectedItemCount: selectedProjectIds.length + trashedTaskIds.size,
+  };
+}
+
+export async function restoreTrashedItems(ownerId: string, itemIds: string[]) {
+  const requestedIds = [...new Set(itemIds.map((id) => id.trim()).filter(Boolean))];
+  if (!requestedIds.length) throw new Error("itemIds are required");
+  const roots = await getDb().select().from(items).where(and(
+    eq(items.ownerId, ownerId),
+    inArray(items.id, requestedIds),
+    inArray(items.kind, ["project", "task"]),
+    sql`${items.archivedAt} IS NOT NULL`,
+  ));
+  if (roots.length !== requestedIds.length) throw new Error("One or more trashed items were not found");
+  const now = new Date().toISOString();
+  const d1 = (env as RuntimeEnv).DB;
+  const statements: D1PreparedStatement[] = [];
+  let restoredCount = 0;
+  for (const root of roots) {
+    if (root.kind === "project") {
+      const [{ count }] = await getDb().select({ count: sql<number>`count(*)` }).from(items).where(and(
+        eq(items.ownerId, ownerId),
+        or(eq(items.id, root.id), eq(items.archiveRootId, root.id)),
+      ));
+      restoredCount += Number(count ?? 0);
+      statements.push(d1.prepare(`UPDATE items
+        SET status = CASE
+              WHEN archived_from_status IS NULL OR archived_from_status = 'archived'
+                THEN CASE kind WHEN 'project' THEN 'backlog' ELSE 'todo' END
+              ELSE archived_from_status
+            END,
+            archived_at = NULL, archived_from_status = NULL, archive_root_id = NULL, updated_at = ?
+        WHERE owner_id = ? AND (id = ? OR archive_root_id = ?)`)
+        .bind(now, ownerId, root.id, root.id));
+    } else {
+      let parentActive = false;
+      if (root.parentId) {
+        const parent = await getItem(ownerId, root.parentId);
+        parentActive = Boolean(parent && parent.kind === "project" && !parent.archivedAt);
+      }
+      let routineId = root.routineId;
+      if (!parentActive) {
+        const routine = routineId ? await getRoutine(ownerId, routineId) : null;
+        routineId = routine ? routine.id : (await ensureGeneralRoutine(ownerId)).id;
+      }
+      statements.push(d1.prepare(`UPDATE items
+        SET status = CASE WHEN archived_from_status IS NULL OR archived_from_status = 'archived' THEN 'todo' ELSE archived_from_status END,
+            parent_id = ?, routine_id = ?, archived_at = NULL, archived_from_status = NULL,
+            archive_root_id = NULL, updated_at = ?
+        WHERE owner_id = ? AND id = ? AND kind = 'task'`)
+        .bind(parentActive ? root.parentId : null, parentActive ? null : routineId, now, ownerId, root.id));
+      restoredCount += 1;
+    }
+    statements.push(d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
+      VALUES (?, ?, ?, 'item_restored', 'web', ?, ?)`)
+      .bind(crypto.randomUUID(), ownerId, root.id, JSON.stringify({ rootId: root.id, kind: root.kind }), now));
+  }
+  await d1.batch(statements);
+  return { restored: true, restoredRootIds: roots.map((root) => root.id), restoredCount };
+}
+
+export async function permanentlyDeleteTrashedItems(ownerId: string, itemIds: string[], confirmationText: string) {
+  if (confirmationText !== "영구 삭제") throw new Error("Permanent deletion confirmation does not match");
+  const requestedIds = [...new Set(itemIds.map((id) => id.trim()).filter(Boolean))];
+  if (!requestedIds.length) throw new Error("itemIds are required");
+  const roots = await getDb().select().from(items).where(and(
+    eq(items.ownerId, ownerId),
+    inArray(items.id, requestedIds),
+    inArray(items.kind, ["project", "task"]),
+    sql`${items.archivedAt} IS NOT NULL`,
+  ));
+  if (roots.length !== requestedIds.length) throw new Error("One or more trashed items were not found");
+  const projectIds = new Set(roots.filter((root) => root.kind === "project").map((root) => root.id));
+  const standaloneTaskIds = roots.filter((root) => root.kind === "task" && (!root.parentId || !projectIds.has(root.parentId))).map((root) => root.id);
+  const affectedRows = await getDb().select({ id: items.id, kind: items.kind }).from(items).where(and(
+    eq(items.ownerId, ownerId),
+    or(
+      selectedIdCondition(items.id, standaloneTaskIds),
+      selectedIdCondition(items.id, [...projectIds]),
+      selectedIdCondition(items.archiveRootId, [...projectIds]),
+      selectedIdCondition(items.parentId, [...projectIds]),
+    ),
+  ));
+  const affectedIds = [...new Set(affectedRows.map((row) => row.id))];
+  if (!affectedIds.length) return { deleted: true, deletedRootIds: [] as string[], deletedProjectCount: 0, deletedTaskCount: 0, deletedItemCount: 0 };
+  const placeholders = affectedIds.map(() => "?").join(", ");
+  const d1 = (env as RuntimeEnv).DB;
+  await d1.batch([
+    d1.prepare(`DELETE FROM activity_log WHERE owner_id = ? AND item_id IN (${placeholders})`).bind(ownerId, ...affectedIds),
+    d1.prepare(`DELETE FROM google_calendar_events WHERE owner_id = ? AND item_id IN (${placeholders})`).bind(ownerId, ...affectedIds),
+    d1.prepare(`DELETE FROM checklist_items WHERE owner_id = ? AND task_id IN (${placeholders})`).bind(ownerId, ...affectedIds),
+    d1.prepare(`DELETE FROM item_property_values WHERE owner_id = ? AND item_id IN (${placeholders})`).bind(ownerId, ...affectedIds),
+    d1.prepare(`DELETE FROM item_assignments WHERE owner_id = ? AND item_id IN (${placeholders})`).bind(ownerId, ...affectedIds),
+    d1.prepare(`DELETE FROM project_documents WHERE owner_id = ? AND project_id IN (${placeholders})`).bind(ownerId, ...affectedIds),
+    d1.prepare(`DELETE FROM project_hidden_properties WHERE owner_id = ? AND project_id IN (${placeholders})`).bind(ownerId, ...affectedIds),
+    d1.prepare(`UPDATE slack_automation_deliveries SET item_id = NULL WHERE owner_id = ? AND item_id IN (${placeholders})`).bind(ownerId, ...affectedIds),
+    d1.prepare(`DELETE FROM items WHERE owner_id = ? AND id IN (${placeholders})`).bind(ownerId, ...affectedIds),
+  ]);
+  return {
+    deleted: true,
+    deletedRootIds: roots.map((root) => root.id),
+    deletedProjectCount: affectedRows.filter((row) => row.kind === "project").length,
+    deletedTaskCount: affectedRows.filter((row) => row.kind === "task").length,
+    deletedItemCount: affectedRows.length,
+  };
+}
+
+function selectedIdCondition(column: typeof items.id | typeof items.parentId | typeof items.archiveRootId, ids: string[]) {
+  return ids.length ? inArray(column, ids) : sql`0 = 1`;
 }
 
 export async function archiveProject(ownerId: string, projectId: string) {
   const project = await getItem(ownerId, projectId);
   if (!project || project.kind !== "project") throw new Error("Project not found");
   if (project.archivedAt) throw new Error("Project is already archived");
-  const now = new Date().toISOString();
-  const d1 = (env as RuntimeEnv).DB;
-  const result = await d1.batch([
-    d1.prepare(`UPDATE items
-      SET archived_from_status = status,
-          status = 'archived',
-          archived_at = ?,
-          archive_root_id = ?,
-          updated_at = ?
-      WHERE owner_id = ? AND archived_at IS NULL
-        AND (id = ? OR (parent_id = ? AND kind = 'task'))`)
-      .bind(now, projectId, now, ownerId, projectId, projectId),
-    d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
-      VALUES (?, ?, ?, 'project_archived', 'web', ?, ?)`)
-      .bind(crypto.randomUUID(), ownerId, projectId, JSON.stringify({ projectId }), now),
-  ]);
-  return { project: (await getItem(ownerId, projectId))!, affectedCount: Number(result[0].meta.changes ?? 0) };
+  const result = await trashItems(ownerId, { itemIds: [projectId] });
+  return { project: (await getItem(ownerId, projectId))!, affectedCount: result.affectedItemCount };
 }
 
 export async function restoreProject(ownerId: string, projectId: string) {
   const project = await getItem(ownerId, projectId);
   if (!project || project.kind !== "project") throw new Error("Project not found");
   if (!project.archivedAt) throw new Error("Project is not archived");
-  const now = new Date().toISOString();
-  const d1 = (env as RuntimeEnv).DB;
-  const result = await d1.batch([
-    d1.prepare(`UPDATE items
-      SET status = CASE
-            WHEN archived_from_status IS NULL OR archived_from_status = 'archived'
-              THEN CASE kind WHEN 'project' THEN 'backlog' ELSE 'todo' END
-            ELSE archived_from_status
-          END,
-          archived_at = NULL,
-          archived_from_status = NULL,
-          archive_root_id = NULL,
-          updated_at = ?
-      WHERE owner_id = ? AND (id = ? OR archive_root_id = ?)`)
-      .bind(now, ownerId, projectId, projectId),
-    d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
-      VALUES (?, ?, ?, 'project_restored', 'web', ?, ?)`)
-      .bind(crypto.randomUUID(), ownerId, projectId, JSON.stringify({ projectId }), now),
-  ]);
-  return { project: (await getItem(ownerId, projectId))!, affectedCount: Number(result[0].meta.changes ?? 0) };
+  const result = await restoreTrashedItems(ownerId, [projectId]);
+  return { project: (await getItem(ownerId, projectId))!, affectedCount: result.restoredCount };
 }
 
 export async function permanentlyDeleteArchivedProject(ownerId: string, projectId: string, confirmationTitle: string) {
@@ -3082,33 +3252,14 @@ export async function permanentlyDeleteArchivedProject(ownerId: string, projectI
   if (!project || project.kind !== "project") throw new Error("Project not found");
   if (!project.archivedAt) throw new Error("Archive the Project before deleting it permanently");
   if (confirmationTitle.trim() !== project.title) throw new Error("Project title confirmation does not match");
-
-  const linkedItems = await getDb()
-    .select({ id: items.id, kind: items.kind })
-    .from(items)
-    .where(and(eq(items.ownerId, ownerId), or(eq(items.id, projectId), eq(items.archiveRootId, projectId))));
-  const deletedTaskCount = linkedItems.filter((entry) => entry.kind === "task").length;
-  const d1 = (env as RuntimeEnv).DB;
-  const itemScope = `SELECT id FROM items WHERE owner_id = ? AND (id = ? OR archive_root_id = ?)`;
-
-  await d1.batch([
-    d1.prepare(`DELETE FROM activity_log WHERE owner_id = ? AND item_id IN (${itemScope})`)
-      .bind(ownerId, ownerId, projectId, projectId),
-    d1.prepare(`DELETE FROM google_calendar_events WHERE owner_id = ? AND item_id IN (${itemScope})`)
-      .bind(ownerId, ownerId, projectId, projectId),
-    d1.prepare(`DELETE FROM checklist_items WHERE owner_id = ? AND task_id IN (${itemScope})`)
-      .bind(ownerId, ownerId, projectId, projectId),
-    d1.prepare(`DELETE FROM item_property_values WHERE owner_id = ? AND item_id IN (${itemScope})`)
-      .bind(ownerId, ownerId, projectId, projectId),
-    d1.prepare(`DELETE FROM item_assignments WHERE owner_id = ? AND item_id IN (${itemScope})`)
-      .bind(ownerId, ownerId, projectId, projectId),
-    d1.prepare(`DELETE FROM project_hidden_properties WHERE owner_id = ? AND project_id = ?`)
-      .bind(ownerId, projectId),
-    d1.prepare("DELETE FROM items WHERE owner_id = ? AND (id = ? OR archive_root_id = ?)")
-      .bind(ownerId, projectId, projectId),
-  ]);
-
-  return { deleted: true, projectId, title: project.title, deletedTaskCount, deletedItemCount: linkedItems.length };
+  const result = await permanentlyDeleteTrashedItems(ownerId, [projectId], "영구 삭제");
+  return {
+    deleted: true,
+    projectId,
+    title: project.title,
+    deletedTaskCount: result.deletedTaskCount,
+    deletedItemCount: result.deletedItemCount,
+  };
 }
 
 export async function listPropertyDefinitions(ownerId: string) {
@@ -4247,22 +4398,9 @@ async function migrateLegacyHierarchy(ownerId: string) {
       SET kind = 'task', parent_id = NULL, status = 'todo', source = 'migration',
         updated_at = CURRENT_TIMESTAMP
       WHERE owner_id = ? AND kind = 'action'`).bind(ownerId),
-    d1.prepare(`INSERT OR IGNORE INTO items
-      (id, owner_id, parent_id, kind, title, description, status, priority, cadence,
-       progress, due_date, source, source_ref, sort_order, created_at, updated_at)
-      SELECT 'legacy-project-' || initiative.id, initiative.owner_id, initiative.id,
-        'project', initiative.title || ' 실행', '', 'in_progress', 'medium',
-        initiative.cadence, 0, NULL, 'migration', NULL, initiative.sort_order + 1,
-        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-      FROM items AS initiative
-      WHERE initiative.owner_id = ? AND initiative.kind = 'initiative'
-        AND EXISTS (
-          SELECT 1 FROM items AS child
-          WHERE child.owner_id = initiative.owner_id
-            AND child.parent_id = initiative.id AND child.kind = 'task'
-        )`).bind(ownerId),
     d1.prepare(`UPDATE items
-      SET parent_id = 'legacy-project-' || parent_id, updated_at = CURRENT_TIMESTAMP
+      SET parent_id = NULL, routine_id = NULL, status = 'todo', source = 'migration',
+        updated_at = CURRENT_TIMESTAMP
       WHERE owner_id = ? AND kind = 'task'
         AND parent_id IN (
           SELECT id FROM items WHERE owner_id = ? AND kind = 'initiative'
@@ -4271,13 +4409,6 @@ async function migrateLegacyHierarchy(ownerId: string) {
 }
 
 async function removeLegacySeedWorkspaceData(ownerId: string) {
-  const [legacyObjective] = await getDb()
-    .select({ id: items.id })
-    .from(items)
-    .where(and(eq(items.ownerId, ownerId), eq(items.kind, "objective"), eq(items.title, LEGACY_SEED_OBJECTIVE_TITLE)))
-    .limit(1);
-  if (!legacyObjective) return;
-
   const seedItems = await getDb()
     .select({ id: items.id })
     .from(items)

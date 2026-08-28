@@ -295,7 +295,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   server.registerTool(
     "capture_item",
     {
-      title: "Capture work to OKRPTR General",
+      title: "Capture unclassified work to OKRPTR",
       description: "Use this first when the user mentions a task, follow-up, idea, or commitment that should be saved quickly without interrupting the conversation.",
       inputSchema: {
         title: z.string().min(1).describe("Short actionable title in the user's language"),
@@ -322,7 +322,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
       return {
         structuredContent: { item: serialized },
-        content: [{ type: "text", text: `Captured "${item.title}" in OKRPTR General.` }],
+        content: [{ type: "text", text: `Captured "${item.title}" as an unclassified OKRPTR Task.` }],
       };
     },
   );
@@ -384,7 +384,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     "list_items",
     {
       title: "List and search OKRPTR items",
-      description: "Find existing OKRs, projects, tasks, or General captures before reviewing, updating, or linking them.",
+      description: "Find existing OKRs, projects, tasks, or unclassified captures before reviewing, updating, or linking them.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS).optional(),
         status: z.enum(ITEM_STATUSES).optional(),
@@ -466,7 +466,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     "link_item",
     {
       title: "Link an item into the OKR hierarchy",
-      description: "Move a General Task or existing item under its correct parent. Project requires Initiative; Task requires Project.",
+      description: "Move an unclassified Task or existing item under its correct parent. Project requires Initiative; Task requires Project.",
       inputSchema: { id: z.string(), parent_id: z.string() },
       outputSchema: { item: itemOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -489,8 +489,8 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   server.registerTool(
     "archive_project",
     {
-      title: "Archive a Project with its Tasks",
-      description: "Remove a Project and its direct Tasks from active views while preserving them for restoration.",
+      title: "Move a Project and its Tasks to trash",
+      description: "Compatibility alias that moves a Project and its direct Tasks to the unified trash while preserving them for restoration.",
       inputSchema: { id: z.string() },
       outputSchema: { project: itemOutput, archivedTaskCount: z.number() },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
@@ -501,7 +501,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       const archivedTaskCount = Math.max(0, result.affectedCount - 1);
       return {
         structuredContent: { project, archivedTaskCount },
-        content: [{ type: "text", text: `Archived "${result.project.title}" with ${archivedTaskCount} Tasks.` }],
+        content: [{ type: "text", text: `Moved "${result.project.title}" and ${archivedTaskCount} Tasks to trash.` }],
       };
     },
   );
@@ -509,8 +509,8 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   server.registerTool(
     "restore_project",
     {
-      title: "Restore an archived Project",
-      description: "Restore an archived Project and its direct Tasks to their previous statuses.",
+      title: "Restore a trashed Project",
+      description: "Compatibility alias that restores a trashed Project and its direct Tasks to their previous statuses.",
       inputSchema: { id: z.string() },
       outputSchema: { project: itemOutput, restoredCount: z.number() },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -520,7 +520,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       const project = (await serializeItemsForMcp(ownerId, [result.project]))[0];
       return {
         structuredContent: { project, restoredCount: result.affectedCount },
-        content: [{ type: "text", text: `Restored "${result.project.title}" and its archived Tasks.` }],
+        content: [{ type: "text", text: `Restored "${result.project.title}" and its trashed Tasks.` }],
       };
     },
   );
@@ -528,8 +528,8 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   server.registerTool(
     "delete_archived_project",
     {
-      title: "Permanently delete an archived Project",
-      description: "Permanently delete an archived Project, its archived Tasks, checklists, property values, and assignments. Ask for explicit confirmation immediately before calling, then pass the exact Project title as confirmation_title.",
+      title: "Permanently delete a trashed Project",
+      description: "Compatibility alias that permanently deletes a trashed Project, its Tasks, checklists, property values, and assignments. Ask for explicit confirmation immediately before calling, then pass the exact Project title as confirmation_title.",
       inputSchema: { id: z.string(), confirmation_title: z.string() },
       outputSchema: { deleted: z.boolean(), projectId: z.string(), title: z.string(), deletedTaskCount: z.number(), deletedItemCount: z.number() },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
