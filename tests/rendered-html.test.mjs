@@ -374,6 +374,7 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.match(paceData, /export async function trashItems/);
   assert.match(paceData, /export async function restoreTrashedItems/);
   assert.match(paceData, /export async function permanentlyDeleteTrashedItems/);
+  assert.match(paceData, /taskIdsByArchivedParent/);
   assert.match(paceData, /archiveProject[\s\S]*trashItems/);
   const legacyMigration = paceData.match(/async function migrateLegacyHierarchy[\s\S]*?\n}/)?.[0] ?? "";
   assert.doesNotMatch(legacyMigration, /INSERT[^\n]*legacy-project-/);

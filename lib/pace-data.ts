@@ -3142,9 +3142,29 @@ export async function trashItems(
   }
 
   const projectIds = new Set(candidates.filter((item) => item.kind === "project").map((item) => item.id));
-  const standaloneTaskIds = candidates
-    .filter((item) => item.kind === "task" && (!item.parentId || !projectIds.has(item.parentId)))
-    .map((item) => item.id);
+  const candidateTasks = candidates.filter((item) => item.kind === "task");
+  const unselectedParentIds = [...new Set(candidateTasks
+    .map((item) => item.parentId)
+    .filter((parentId): parentId is string => typeof parentId === "string" && !projectIds.has(parentId)))];
+  const archivedParentProjects = unselectedParentIds.length
+    ? await getDb().select({ id: items.id }).from(items).where(and(
+      eq(items.ownerId, ownerId),
+      eq(items.kind, "project"),
+      inArray(items.id, unselectedParentIds),
+      sql`${items.archivedAt} IS NOT NULL`,
+    ))
+    : [];
+  const archivedParentProjectIds = new Set(archivedParentProjects.map((project) => project.id));
+  const taskIdsByArchivedParent = new Map<string, string[]>();
+  const standaloneTaskIds: string[] = [];
+  for (const task of candidateTasks) {
+    if (task.parentId && projectIds.has(task.parentId)) continue;
+    if (task.parentId && archivedParentProjectIds.has(task.parentId)) {
+      taskIdsByArchivedParent.set(task.parentId, [...(taskIdsByArchivedParent.get(task.parentId) ?? []), task.id]);
+    } else {
+      standaloneTaskIds.push(task.id);
+    }
+  }
   const selectedProjectIds = [...projectIds];
   const projectTaskRows = selectedProjectIds.length
     ? await getDb().select({ id: items.id }).from(items).where(and(
@@ -3173,6 +3193,20 @@ export async function trashItems(
         VALUES (?, ?, ?, 'item_trashed', 'web', ?, ?)`)
         .bind(crypto.randomUUID(), ownerId, projectId, JSON.stringify({ rootId: projectId, kind: "project" }), now),
     ]),
+    ...[...taskIdsByArchivedParent.entries()].flatMap(([projectId, taskIds]) => [
+      d1.prepare(`UPDATE items
+        SET archived_from_status = CASE
+              WHEN archived_from_status IS NULL THEN status
+              ELSE archived_from_status
+            END,
+            status = 'archived', archived_at = ?, archive_root_id = ?, updated_at = ?
+        WHERE owner_id = ? AND kind = 'task' AND archived_at IS NULL
+          AND id IN (${taskIds.map(() => "?").join(", ")})`)
+        .bind(now, projectId, now, ownerId, ...taskIds),
+      d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
+        VALUES (?, ?, ?, 'item_trashed', 'web', ?, ?)`)
+        .bind(crypto.randomUUID(), ownerId, projectId, JSON.stringify({ rootId: projectId, kind: "project", addedTaskCount: taskIds.length }), now),
+    ]),
     ...standaloneTaskIds.flatMap((taskId) => [
       d1.prepare(`UPDATE items
         SET archived_from_status = CASE
@@ -3188,9 +3222,10 @@ export async function trashItems(
     ]),
   ];
   if (statements.length) await d1.batch(statements);
-  const trashedTaskIds = new Set([...projectTaskRows.map((entry) => entry.id), ...standaloneTaskIds]);
+  const appendedTaskIds = [...taskIdsByArchivedParent.values()].flat();
+  const trashedTaskIds = new Set([...projectTaskRows.map((entry) => entry.id), ...appendedTaskIds, ...standaloneTaskIds]);
   return {
-    trashedRootIds: [...selectedProjectIds, ...standaloneTaskIds],
+    trashedRootIds: [...new Set([...selectedProjectIds, ...taskIdsByArchivedParent.keys(), ...standaloneTaskIds])],
     projectCount: selectedProjectIds.length,
     taskCount: trashedTaskIds.size,
     affectedItemCount: selectedProjectIds.length + trashedTaskIds.size,
