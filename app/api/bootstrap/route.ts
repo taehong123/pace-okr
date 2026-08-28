@@ -87,7 +87,13 @@ export async function GET(request: Request) {
 
     const payload = Object.assign({}, ...await Promise.all([loadShell(), loadData()]));
 
-    return Response.json(payload, { headers: { "Cache-Control": "no-store" } });
+    const headers = new Headers({ "Cache-Control": "no-store" });
+    const secure = url.protocol === "https:" ? "; Secure" : "";
+    headers.append(
+      "Set-Cookie",
+      `okrptr_workspace_id=${encodeURIComponent(authorization.ownerId)}; Path=/; HttpOnly${secure}; SameSite=Lax; Max-Age=31536000`,
+    );
+    return Response.json(payload, { headers });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load workspace";
     return Response.json({ error: message }, { status: 500, headers: { "Cache-Control": "no-store" } });

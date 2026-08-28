@@ -112,6 +112,17 @@ export type AiUsageSummary = {
   requestsThisMinute: number;
 };
 
+export type OkrPlanInput = {
+  cycleId: string;
+  targetId?: string | null;
+  targetKind?: "objective" | "key_result" | "initiative" | null;
+  objective?: string;
+  keyResult?: string;
+  initiative?: string;
+  project?: string;
+  driMemberId?: string | null;
+};
+
 export type RequestAuthorization = {
   ownerId: string;
   userId: string;
@@ -377,8 +388,6 @@ async function ensureSchema() {
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
-        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_routines_owner_system_key ON routines(owner_id, system_key) WHERE system_key IS NOT NULL"),
-        d1.prepare("CREATE INDEX IF NOT EXISTS idx_routines_assignee ON routines(assignee_member_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_routines_owner_active ON routines(owner_id, active)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_routines_owner_sort ON routines(owner_id, sort_order)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS routine_completions (
@@ -1894,7 +1903,7 @@ async function resolveWorkspaceMembership(userId: string, email: string | null, 
     memberships = await activeWorkspaceMemberships(userId);
   }
 
-  let invitationActivated = false;
+  const activatedWorkspaceIds: string[] = [];
   if (email) {
     for (const invitation of invitations) {
       const [existingMembership] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, invitation.workspaceId), eq(workspaceMembers.userId, userId))).limit(1);
@@ -1905,11 +1914,11 @@ async function resolveWorkspaceMembership(userId: string, email: string | null, 
         status: "active",
         updatedAt: new Date().toISOString(),
       }).where(eq(workspaceMembers.id, invitation.id));
-      invitationActivated = true;
+      activatedWorkspaceIds.push(invitation.workspaceId);
     }
   }
 
-  if (invitationActivated) memberships = await activeWorkspaceMemberships(userId);
+  if (activatedWorkspaceIds.length) memberships = await activeWorkspaceMemberships(userId);
   const now = new Date().toISOString();
   const normalizedMemberships = memberships.map((membership) => ({
     ...membership,
@@ -1922,11 +1931,20 @@ async function resolveWorkspaceMembership(userId: string, email: string | null, 
     await getDb().update(workspaceMembers).set({ email: membership.email, displayName: membership.displayName, updatedAt: now }).where(eq(workspaceMembers.id, membership.id));
   }
   const [preference] = preferenceRows;
-  return normalizedMemberships.find((entry) => entry.workspaceId === requestedId)
+  const newlyJoined = [...activatedWorkspaceIds].reverse().find((workspaceId) => normalizedMemberships.some((entry) => entry.workspaceId === workspaceId));
+  const selected = (newlyJoined ? normalizedMemberships.find((entry) => entry.workspaceId === newlyJoined) : null)
+    ?? normalizedMemberships.find((entry) => entry.workspaceId === requestedId)
     ?? normalizedMemberships.find((entry) => entry.workspaceId === preference?.activeWorkspaceId)
     ?? normalizedMemberships.find((entry) => entry.workspaceId === userId)
     ?? normalizedMemberships[0]
     ?? null;
+  if (newlyJoined && selected) {
+    await getDb().insert(userWorkspacePreferences).values({ userId, activeWorkspaceId: selected.workspaceId, updatedAt: now }).onConflictDoUpdate({
+      target: userWorkspacePreferences.userId,
+      set: { activeWorkspaceId: selected.workspaceId, updatedAt: now },
+    });
+  }
+  return selected;
 }
 
 async function activeWorkspaceMemberships(userId: string) {
@@ -2591,6 +2609,123 @@ export async function getItem(ownerId: string, id: string) {
     .where(and(eq(items.ownerId, ownerId), eq(items.id, id)))
     .limit(1);
   return item ?? null;
+}
+
+export async function createOkrPlan(ownerId: string, userId: string, input: OkrPlanInput) {
+  await ensureWorkspace(ownerId);
+  const cycleId = input.cycleId.trim();
+  if (!cycleId) throw new Error("cycleId is required");
+  const [cycle] = await getDb().select({ id: okrCycles.id }).from(okrCycles).where(and(eq(okrCycles.ownerId, ownerId), eq(okrCycles.id, cycleId))).limit(1);
+  if (!cycle) throw new Error("OKR cycle not found");
+
+  const objectiveTitle = cleanPlanTitle(input.objective);
+  const keyResultTitle = cleanPlanTitle(input.keyResult);
+  const initiativeTitle = cleanPlanTitle(input.initiative);
+  const projectTitle = cleanPlanTitle(input.project);
+  const targetKind = input.targetKind ?? null;
+  const targetId = input.targetId?.trim() || null;
+  const rules = await getWorkspaceRules(ownerId);
+  const createdAt = new Date().toISOString();
+  const specs: Array<{ id: string; kind: ItemKind; title: string; parentId: string | null; status: ItemStatus }> = [];
+
+  let parentId: string | null = null;
+  if (!targetId) {
+    if (targetKind) throw new Error("targetId is required when targetKind is provided");
+    if (!objectiveTitle || !keyResultTitle) throw new Error("Objective and Key Result are required");
+    const objectiveId = crypto.randomUUID();
+    specs.push({ id: objectiveId, kind: "objective", title: objectiveTitle, parentId: null, status: "in_progress" });
+    const keyResultId = crypto.randomUUID();
+    specs.push({ id: keyResultId, kind: "key_result", title: keyResultTitle, parentId: objectiveId, status: "todo" });
+    parentId = keyResultId;
+  } else {
+    if (!targetKind) throw new Error("targetKind is required when targetId is provided");
+    const target = await getItem(ownerId, targetId);
+    if (!target || target.archivedAt) throw new Error("Target item not found");
+    if (target.kind !== targetKind) throw new Error("Target item kind does not match");
+    if (target.cycleId !== cycleId) throw new Error("Target item must belong to the selected OKR cycle");
+    parentId = target.id;
+    if (targetKind === "objective") {
+      if (!keyResultTitle) throw new Error("Key Result is required");
+      const keyResultId = crypto.randomUUID();
+      specs.push({ id: keyResultId, kind: "key_result", title: keyResultTitle, parentId, status: "todo" });
+      parentId = keyResultId;
+    }
+  }
+
+  const deepestKind = specs.at(-1)?.kind ?? targetKind;
+  if (deepestKind === "key_result") {
+    if (projectTitle && !initiativeTitle) throw new Error("Project requires an Initiative");
+    if (initiativeTitle) {
+      const initiativeId = crypto.randomUUID();
+      specs.push({ id: initiativeId, kind: "initiative", title: initiativeTitle, parentId, status: "todo" });
+      parentId = initiativeId;
+    }
+  } else if (deepestKind === "initiative" && initiativeTitle) {
+    throw new Error("Initiative already exists for this target");
+  }
+
+  const nextKind = specs.at(-1)?.kind ?? targetKind;
+  if (projectTitle) {
+    if (nextKind !== "initiative") throw new Error("Project requires an Initiative target");
+    specs.push({ id: crypto.randomUUID(), kind: "project", title: projectTitle, parentId, status: "in_progress" });
+  }
+  if (!specs.length) throw new Error("No OKR plan content to create");
+
+  const projectSpec = specs.find((entry) => entry.kind === "project");
+  let driMemberId = input.driMemberId?.trim() || null;
+  if (projectSpec) {
+    if (!driMemberId) {
+      const [currentMember] = await getDb().select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(
+        eq(workspaceMembers.workspaceId, ownerId),
+        eq(workspaceMembers.userId, userId),
+        eq(workspaceMembers.status, "active"),
+      )).limit(1);
+      driMemberId = currentMember?.id ?? null;
+    } else {
+      const [member] = await getDb().select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(
+        eq(workspaceMembers.workspaceId, ownerId),
+        eq(workspaceMembers.id, driMemberId),
+        eq(workspaceMembers.status, "active"),
+      )).limit(1);
+      if (!member) throw new Error("Project DRI must be an active workspace member");
+    }
+  }
+
+  const d1 = (env as RuntimeEnv).DB;
+  const statements = specs.flatMap((spec) => [
+    d1.prepare(`INSERT INTO items
+      (id, owner_id, cycle_id, parent_id, kind, title, description, status, priority, cadence, progress, source, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, 0, 'web', ?, ?)`)
+      .bind(spec.id, ownerId, cycleId, spec.parentId, spec.kind, spec.title, spec.status, rules.defaultPriority, rules.defaultCadence, createdAt, createdAt),
+    d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
+      VALUES (?, ?, ?, 'created', 'web', ?, ?)`)
+      .bind(crypto.randomUUID(), ownerId, spec.id, JSON.stringify({ kind: spec.kind, status: spec.status, origin: "okr_assistant" }), createdAt),
+  ]);
+  if (projectSpec && driMemberId) {
+    statements.push(d1.prepare(`INSERT INTO item_assignments
+      (id, owner_id, item_id, member_id, role, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'project_dri', ?, ?)`)
+      .bind(crypto.randomUUID(), ownerId, projectSpec.id, driMemberId, createdAt, createdAt));
+  }
+  statements.push(d1.prepare("UPDATE workspace_rules SET configured = 1, updated_at = ? WHERE workspace_id = ?").bind(createdAt, ownerId));
+  await d1.batch(statements);
+
+  const rows = await getDb().select().from(items).where(and(eq(items.ownerId, ownerId), inArray(items.id, specs.map((entry) => entry.id))));
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const assignments = await getItemAssignmentMap(ownerId, specs.map((entry) => entry.id));
+  const createdItems = specs.map((spec) => serializeItem(byId.get(spec.id)!, {}, assignments[spec.id] ?? []));
+  return {
+    items: createdItems,
+    cycleId,
+    objectiveId: specs.find((entry) => entry.kind === "objective")?.id ?? (targetKind === "objective" ? targetId : null),
+    keyResultId: specs.find((entry) => entry.kind === "key_result")?.id ?? (targetKind === "key_result" ? targetId : null),
+    initiativeId: specs.find((entry) => entry.kind === "initiative")?.id ?? (targetKind === "initiative" ? targetId : null),
+    projectId: projectSpec?.id ?? null,
+  };
+}
+
+function cleanPlanTitle(value: string | undefined) {
+  return value?.trim().slice(0, 500) ?? "";
 }
 
 export async function createItem(

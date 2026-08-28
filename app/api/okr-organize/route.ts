@@ -30,7 +30,7 @@ type OrganizedOkr = {
   };
 };
 
-type ConversationMode = "okr" | "project";
+type ConversationMode = "okr" | "project" | "onboarding" | "coach";
 
 const maxOutputTokens = 1800;
 
@@ -85,11 +85,16 @@ export async function POST(request: Request) {
     const payload = (await request.json()) as Record<string, unknown>;
     const message = typeof payload.message === "string" ? payload.message.trim() : "";
     const currentPlan = typeof payload.plan === "object" && payload.plan ? payload.plan : {};
-    const mode: ConversationMode = payload.mode === "project" ? "project" : "okr";
+    const mode = asConversationMode(payload.mode);
+    const history = sanitizeHistory(payload.history);
+    const workspaceContext = sanitizeWorkspaceContext(payload.workspaceContext);
     const parentContext = payload.parentContext && typeof payload.parentContext === "object"
       ? payload.parentContext as Record<string, unknown>
       : {};
     const initiativeTitle = typeof parentContext.initiativeTitle === "string" ? parentContext.initiativeTitle.trim() : "";
+    const targetContext = parentContext.target && typeof parentContext.target === "object"
+      ? sanitizeTargetContext(parentContext.target as Record<string, unknown>)
+      : undefined;
     if (!message) return Response.json({ error: "message is required" }, { status: 400 });
     if (mode === "project" && !initiativeTitle) {
       return Response.json({ error: "initiative context is required for project mode" }, { status: 400 });
@@ -102,7 +107,7 @@ export async function POST(request: Request) {
     }
 
     const model = runtime.OKRPTR_OPENAI_MODEL || runtime.OPENAI_MODEL || "gpt-5.6-luna";
-    const inputChars = message.length + JSON.stringify(currentPlan).length;
+    const inputChars = message.length + JSON.stringify(currentPlan).length + JSON.stringify(history).length + JSON.stringify(workspaceContext).length;
     const limit = await checkAiUsageLimit(runtime, authorization.ownerId, authorization.userId, inputChars);
     if (limit) return limit;
 
@@ -118,9 +123,7 @@ export async function POST(request: Request) {
         input: [
           {
             role: "system",
-            content: mode === "project"
-              ? "You are the conversational assistant inside OKRPTR, helping plan the first execution after an existing Initiative. Always answer the user's actual message first in the user's language. Keep assistantMessage concise and plain text without Markdown markers. Project belongs below Initiative. Routine is an independent execution container and does not need an Initiative, but Task may belong to either Project or Routine. Only put a Project, explicitly stated Tasks, and explicitly stated Routine details into the plan. Set taskParent to project or routine according to the user's wording. Keep objective, keyResult, and initiative empty because the Initiative already exists. Do not invent Tasks or Routine details. Ask at most three concise questions when the execution plan is too vague to create."
-              : "You are the conversational assistant inside OKRPTR. Always respond to the user's actual message first, in the user's language, including greetings, product questions, general work questions, and ordinary factual questions. Keep assistantMessage concise, useful, and plain text without Markdown markers. When the message contains a real goal, work plan, recurring habit, or execution commitment, also organize only the supported details into the OKR plan. For greetings, casual conversation, product questions, or general questions, leave every plan field empty and usually leave questions empty so the UI shows only the answer. Infer planning intent semantically, not by keyword. Do not invent specific metrics. Ask at most concise follow-up questions when a requested OKR structure is missing essential information. Treat Initiative as the strategic execution direction under a Key Result. An Initiative may only exist under a Key Result, and Project belongs below Initiative. Routine is a Project-like execution container but remains independent from the OKR hierarchy and does not require an Initiative. Task may belong below either Project or Routine. Set taskParent to project or routine according to the user's wording. If only one container is present, use that one. Do not create a Project unless the user clearly describes a concrete project with owner, timing, or scope; leave project empty when it is ambiguous or overlaps with the Initiative. Do not invent Tasks; only include Tasks and Routine details explicitly stated by the user.",
+            content: systemInstruction(mode),
           },
           {
             role: "user",
@@ -128,7 +131,9 @@ export async function POST(request: Request) {
               message,
               currentPlan,
               mode,
-              parentContext: mode === "project" ? { initiativeTitle } : undefined,
+              recentConversation: history,
+              workspaceContext,
+              parentContext: mode === "project" ? { initiativeTitle } : targetContext,
               desiredHierarchy: "OKR: Objective > Key Result > Initiative > Project > Task; independent execution: Routine > Task",
               projectRule: "If Project and Initiative would be similar, keep the idea as Initiative and leave Project empty.",
               routineShape: "trigger point, where/tool, what/how steps",
@@ -172,6 +177,73 @@ export async function POST(request: Request) {
     const status = /required|not configured/i.test(message) ? 400 : 500;
     return Response.json({ error: message }, { status });
   }
+}
+
+function asConversationMode(value: unknown): ConversationMode {
+  return value === "project" || value === "onboarding" || value === "coach" ? value : "okr";
+}
+
+function sanitizeHistory(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(-10).flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const record = entry as Record<string, unknown>;
+    const role = record.role === "assistant" ? "assistant" : record.role === "user" ? "user" : null;
+    const content = typeof record.content === "string" ? record.content.trim().slice(0, 1200) : "";
+    return role && content ? [{ role, content }] : [];
+  });
+}
+
+function sanitizeWorkspaceContext(value: unknown) {
+  if (!value || typeof value !== "object") return {};
+  const record = value as Record<string, unknown>;
+  const items = Array.isArray(record.items) ? record.items.slice(0, 80).flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const item = entry as Record<string, unknown>;
+    return [{
+      id: cleanContextValue(item.id, 80),
+      parentId: cleanContextValue(item.parentId, 80),
+      kind: cleanContextValue(item.kind, 30),
+      title: cleanContextValue(item.title, 300),
+      status: cleanContextValue(item.status, 40),
+      progress: typeof item.progress === "number" ? Math.max(0, Math.min(100, item.progress)) : 0,
+      dri: cleanContextValue(item.dri, 120),
+    }];
+  }) : [];
+  return {
+    cycleId: cleanContextValue(record.cycleId, 80),
+    cycleName: cleanContextValue(record.cycleName, 160),
+    focusedItemId: cleanContextValue(record.focusedItemId, 80),
+    blockedTaskCount: typeof record.blockedTaskCount === "number" ? Math.max(0, Math.min(999, record.blockedTaskCount)) : 0,
+    items,
+  };
+}
+
+function cleanContextValue(value: unknown, max: number) {
+  return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function sanitizeTargetContext(value: Record<string, unknown>) {
+  return {
+    id: cleanContextValue(value.id, 80),
+    kind: cleanContextValue(value.kind, 30),
+    title: cleanContextValue(value.title, 300),
+  };
+}
+
+function systemInstruction(mode: ConversationMode) {
+  const hierarchy = "Objective > Key Result > Initiative > Project > Task. Routine is independent and may contain Task.";
+  const common = `You are the conversational assistant inside OKRPTR. Always answer in the user's language. Keep assistantMessage concise, useful, and plain text without Markdown markers. Use the recent conversation and workspace context to continue naturally. The hierarchy is ${hierarchy} Never invent specific metrics, commitments, owners, or Tasks. Ask at most three concise questions when essential information is missing.`;
+  if (mode === "project") {
+    return `${common} Help plan the first execution below an existing Initiative. Keep objective, keyResult, and initiative empty. Only put a concrete Project, explicitly stated Tasks, and explicitly stated Routine details into the plan. A Project needs a clear outcome and enough scope, timing, or ownership to distinguish it from the Initiative.`;
+  }
+  if (mode === "onboarding") {
+    return `${common} Teach OKR through a short guided conversation. Objective describes the desired change and Key Result is a measurable outcome. First organize an Objective and at least one Key Result. Do not allow a vague activity to masquerade as a Key Result; ask for baseline, target, or timeframe when needed. Initiative and the first Project are optional next steps. If the user is not ready, support skipping them without pressure. Only add Initiative or Project when the user provides enough detail.`;
+  }
+  if (mode === "coach") {
+    return `${common} Act as a context-aware OKR coach. Inspect the supplied hierarchy and focus item. Continue from the earliest useful gap: missing Key Result, missing Initiative, missing first Project, or an active blocker. When multiple parents are plausible, ask the user to choose instead of guessing. Keep existing hierarchy fields empty and only populate the missing descendant fields relevant to the selected target.`;
+  }
+  return `${common} Respond to greetings, product questions, general work questions, and factual questions directly. For casual or informational messages, leave every plan field empty and usually leave questions empty. When the user gives a real goal or execution commitment, organize only supported details. Initiative is the strategic execution direction under a Key Result. Project belongs below Initiative and should only be created when concrete scope, timing, outcome, or ownership is clear.`;
 }
 
 async function checkAiUsageLimit(runtime: RuntimeEnv, ownerId: string, userId: string, inputChars: number) {

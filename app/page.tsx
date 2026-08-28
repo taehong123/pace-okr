@@ -192,10 +192,36 @@ type OnboardingPlan = {
 };
 
 type OkrChatContext = {
+  key: string;
+  entry: "onboarding" | "coach" | "create";
   cycleId: string;
   cycleName: string;
   initialMessage: string;
-  sourceKind: ItemKind;
+  sourceKind?: ItemKind;
+  target?: OkrPlanTarget | null;
+  targetCandidates?: OkrPlanTarget[];
+};
+
+type OkrPlanTarget = {
+  id: string;
+  kind: "objective" | "key_result" | "initiative";
+  title: string;
+};
+
+type AssistantWorkspaceContext = {
+  cycleId: string | null;
+  cycleName: string;
+  focusedItemId: string | null;
+  blockedTaskCount: number;
+  items: Array<{
+    id: string;
+    parentId: string | null;
+    kind: ItemKind;
+    title: string;
+    status: ItemStatus;
+    progress: number;
+    dri: string;
+  }>;
 };
 
 type OrganizedOkr = {
@@ -217,7 +243,17 @@ type ProjectChatTarget = {
   initiativeTitle: string;
 };
 
-type ConversationMode = "okr" | "project";
+type OkrPlanApplyResult = {
+  items: OkrptrItem[];
+  cycleId: string;
+  objectiveId: string | null;
+  keyResultId: string | null;
+  initiativeId: string | null;
+  projectId: string | null;
+};
+
+type ChatMessage = { id: string; role: "user" | "assistant"; content: string };
+type ConversationMode = "okr" | "project" | "onboarding" | "coach";
 
 type OrganizeError = {
   code?: string;
@@ -516,7 +552,6 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "my_work", label: "내 업무", icon: Briefcase },
   { id: "work", label: "Project", icon: Table2 },
   { id: "inbox", label: "Task", icon: Inbox },
-  { id: "home", label: "AI 대화", icon: Bot },
   { id: "routines", label: "루틴", icon: Repeat2 },
   { id: "scrum", label: "데일리", icon: CalendarCheck },
   { id: "recommendations", label: "추천", icon: Lightbulb },
@@ -587,8 +622,10 @@ export default function Home() {
   const [introLanguage, setIntroLanguage] = useState<IntroLanguage>("ko");
   const [authState, setAuthState] = useState<AuthState>({ status: "loading", user: null, reason: null });
   const [workspaceDataState, setWorkspaceDataState] = useState<"loading" | "ready" | "error">("loading");
+  const [freshWorkspaceDataReady, setFreshWorkspaceDataReady] = useState(false);
   const [workspaceDataAttempt, setWorkspaceDataAttempt] = useState(0);
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
+  const assistantAutoHandledWorkspaceRef = useRef<string | null>(null);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -608,7 +645,7 @@ export default function Home() {
       ? preload.request
       : fetchBootstrapPayload(path);
 
-    const applyBootstrapData = (data: BootstrapData) => {
+    const applyBootstrapData = (data: BootstrapData, fresh = false) => {
       if (!active) return;
       setWorkspaces(data.workspaces);
       setWorkspaceRules(data.rules);
@@ -628,6 +665,7 @@ export default function Home() {
       }
       setAuthState({ status: "authenticated", user: data.user, reason: null });
       setWorkspaceDataState("ready");
+      if (fresh) setFreshWorkspaceDataReady(true);
     };
 
     const cachedData = workspaceDataAttempt === 0 ? readCachedBootstrap(path) : null;
@@ -638,7 +676,7 @@ export default function Home() {
         if (!result.ok || !result.data) throw new Error(result.status === 401 || result.status === 403 ? "unauthenticated" : "workspace data unavailable");
         const data = result.data;
         writeCachedBootstrap(path, data);
-        applyBootstrapData(data);
+        applyBootstrapData(data, true);
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -754,6 +792,60 @@ export default function Home() {
   const currentTeamMember = teamMembers.find((member) => member.isCurrent && member.status === "active");
   const accountDisplayName = currentTeamMember?.displayName || authState.user?.displayName || "내 계정";
   const accountInitial = accountDisplayName.slice(0, 1).toLocaleUpperCase() || "O";
+  const hasActiveObjective = activeItems.some((entry) => entry.kind === "objective");
+  const canWriteWorkspace = currentWorkspace?.role !== "viewer";
+  const assistantWorkspaceContext = useMemo(
+    () => buildAssistantWorkspaceContext(activeItems, selectedOkrCycle, selectedProject ?? null),
+    [activeItems, selectedOkrCycle, selectedProject],
+  );
+  const assistantTargeting = useMemo(
+    () => deriveAssistantTargeting(assistantWorkspaceContext),
+    [assistantWorkspaceContext],
+  );
+
+  useEffect(() => {
+    if (!freshWorkspaceDataReady || !currentWorkspace || currentWorkspace.role !== "owner" || hasActiveObjective) return;
+    if (assistantAutoHandledWorkspaceRef.current === currentWorkspace.id) return;
+    assistantAutoHandledWorkspaceRef.current = currentWorkspace.id;
+    const cycle = selectedOkrCycle;
+    if (!cycle) return;
+    const timeout = window.setTimeout(() => {
+      setOkrChatContext({
+        key: `${currentWorkspace.id}:onboarding`,
+        entry: "onboarding",
+        cycleId: cycle.id,
+        cycleName: cycle.name,
+        initialMessage: "",
+        target: null,
+        targetCandidates: [],
+      });
+      setSelectedProjectId(null);
+      setSelectedTaskId(null);
+      setActiveView("home");
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [currentWorkspace, freshWorkspaceDataReady, hasActiveObjective, selectedOkrCycle]);
+
+  function openAssistant() {
+    const cycle = selectedOkrCycle;
+    if (!cycle || !currentWorkspace) return;
+    const entry: OkrChatContext["entry"] = currentWorkspace.role === "owner" && !hasActiveObjective ? "onboarding" : "coach";
+    const key = `${currentWorkspace.id}:${entry}`;
+    const targeting = selectedProject ? { target: null, candidates: [] } : assistantTargeting;
+    setOkrChatContext((current) => current?.key === key ? current : {
+      key,
+      entry,
+      cycleId: cycle.id,
+      cycleName: cycle.name,
+      initialMessage: "",
+      target: targeting.target,
+      targetCandidates: targeting.candidates,
+    });
+    setSelectedProjectId(null);
+    setSelectedTaskId(null);
+    setMobileMenuOpen(false);
+    setActiveView("home");
+  }
 
   async function switchWorkspace(workspaceId: string) {
     if (workspaces.find((entry) => entry.id === workspaceId)?.scheduledDeletionAt) return;
@@ -966,7 +1058,16 @@ export default function Home() {
     setCreateItemOpen(false);
     setSelectedOkrCycleId(cycle.id);
     setVisibleOkrCycleIds((current) => current.includes(cycle.id) ? current : [cycle.id, ...current]);
-    setOkrChatContext({ cycleId: cycle.id, cycleName: cycle.name, initialMessage: initialMessage.trim(), sourceKind });
+    setOkrChatContext({
+      key: `${currentWorkspace?.id ?? "workspace"}:create:${cycle.id}:${sourceKind}:${Date.now()}`,
+      entry: "create",
+      cycleId: cycle.id,
+      cycleName: cycle.name,
+      initialMessage: initialMessage.trim(),
+      sourceKind,
+      target: null,
+      targetCandidates: [],
+    });
     setSelectedProjectId(null);
     setSelectedTaskId(null);
     setActiveView("home");
@@ -1236,6 +1337,39 @@ export default function Home() {
     }
   }
 
+  async function applyAssistantOkrPlan(plan: OnboardingPlan, cycleId: string, target: OkrPlanTarget | null, driMemberId: string | null) {
+    try {
+      const response = await fetch("/api/okr-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cycleId,
+          targetId: target?.id ?? null,
+          targetKind: target?.kind ?? null,
+          objective: plan.objective,
+          keyResult: plan.keyResult,
+          initiative: plan.initiative,
+          project: plan.project,
+          driMemberId: driMemberId ?? currentTeamMember?.id ?? null,
+        }),
+      });
+      const data = await response.json() as OkrPlanApplyResult & { error?: string };
+      if (!response.ok) throw new Error(data.error || "apply failed");
+      setItems((current) => {
+        const createdIds = new Set(data.items.map((entry) => entry.id));
+        return [...current.filter((entry) => !createdIds.has(entry.id)), ...data.items];
+      });
+      setWorkspaceRules((current) => current ? { ...current, configured: true } : current);
+      setSelectedOkrCycleId(data.cycleId);
+      setVisibleOkrCycleIds((current) => current.includes(data.cycleId) ? current : [data.cycleId, ...current]);
+      showNotice(data.projectId ? "첫 Project까지 만들었습니다." : data.initiativeId ? "Initiative를 만들었습니다." : "첫 OKR을 만들었습니다.");
+      return data;
+    } catch {
+      showNotice("OKR 구성을 만들지 못했습니다.");
+      return null;
+    }
+  }
+
   async function createProjectFromConversation(plan: OnboardingPlan, target: ProjectChatTarget) {
     const projectTitle = plan.project.trim();
     const routineTitle = plan.routineTitle.trim();
@@ -1418,7 +1552,7 @@ export default function Home() {
           {navItems.map((entry) => {
             const Icon = entry.icon;
             return (
-              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); if (entry.id === "home") setOkrChatContext(null); setActiveView(entry.id); }}>
+              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); setActiveView(entry.id); }}>
                 <Icon size={16} /><span>{entry.label}</span>
               </button>
             );
@@ -1428,14 +1562,16 @@ export default function Home() {
           {navItems.slice(0, 4).map((entry) => {
             const Icon = entry.icon;
             return (
-              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); if (entry.id === "home") setOkrChatContext(null); setActiveView(entry.id); }}>
+              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); setActiveView(entry.id); }}>
                 <Icon size={16} /><span>{entry.label}</span>
               </button>
             );
           })}
+          <button className={`nav-item assistant-mobile-tab ${activeView === "home" ? "active" : ""}`} onClick={openAssistant}><Bot size={16} /><span>도우미</span></button>
           <button className={`nav-item ${mobileMenuOpen ? "active" : ""}`} onClick={() => setMobileMenuOpen(true)}><Menu size={16} /><span>더보기</span></button>
         </nav>
         <div className="sidebar-bottom">
+          <button className={`nav-item assistant-sidebar-tab ${activeView === "home" ? "active" : ""}`} onClick={openAssistant}><Bot size={16} /><span>OKR 도우미</span></button>
           <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>ChatGPT 연동</span></button>
           <button className="nav-item" onClick={() => setAppIntegrationsOpen(true)}><Plug size={16} /><span>앱 연동</span></button>
           <button className="nav-item" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={16} /><span>팀 멤버</span></button>
@@ -1451,7 +1587,7 @@ export default function Home() {
           <aside className="mobile-menu-sheet">
             <header><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : "팀 워크스페이스"}</small></div><button className="icon-button" onClick={() => setMobileMenuOpen(false)} aria-label="닫기"><X size={17} /></button></header>
             <div className="mobile-menu-list">
-              {navItems.slice(4).map((entry) => { const Icon = entry.icon; return <button key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); if (entry.id === "home") setOkrChatContext(null); setActiveView(entry.id); setMobileMenuOpen(false); }}><Icon size={16} /><span>{entry.label}</span><ChevronRight size={14} /></button>; })}
+              {navItems.slice(4).map((entry) => { const Icon = entry.icon; return <button key={entry.id} onClick={() => { setSelectedProjectId(null); setSelectedTaskId(null); setActiveView(entry.id); setMobileMenuOpen(false); }}><Icon size={16} /><span>{entry.label}</span><ChevronRight size={14} /></button>; })}
               <button onClick={() => { setMobileMenuOpen(false); setIntegrationOpen(true); }}><Link2 size={16} /><span>ChatGPT 연동</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); setAppIntegrationsOpen(true); }}><Plug size={16} /><span>앱 연동</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={16} /><span>팀 멤버</span><ChevronRight size={14} /></button>
@@ -1465,7 +1601,7 @@ export default function Home() {
       <section className="workspace">
         <header className="workspace-topbar">
           <span>OKRPTR</span><ChevronRight size={13} /><b>{selectedProject ? "Project" : viewTitles[activeView]}</b>
-          <div><button aria-label="팀 멤버" title="팀 멤버" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={15} /></button><button aria-label="알림" title="알림"><Bell size={15} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
+          <div><button className="mobile-assistant-trigger" aria-label="AI 대화 열기" title="AI 대화 열기" onClick={openAssistant}><span aria-hidden="true">🤖</span></button><button aria-label="팀 멤버" title="팀 멤버" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={15} /></button><button aria-label="알림" title="알림"><Bell size={15} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
         </header>
         <div className="page-body">
           {activeView !== "home" && !selectedProject && <header className="page-header">
@@ -1498,6 +1634,22 @@ export default function Home() {
             </form>
           )}
 
+          <div className="assistant-view-shell" hidden={activeView !== "home" || Boolean(selectedProject)}>
+            <HomeView
+              key={okrChatContext?.key ?? `${currentWorkspace?.id ?? "workspace"}:default`}
+              onCreatePlan={createOnboardingPlan}
+              onCreateProject={createProjectFromConversation}
+              onApplyOkrPlan={applyAssistantOkrPlan}
+              onFinish={() => { setSelectedProjectId(null); setSelectedTaskId(null); setActiveView("okr"); }}
+              context={okrChatContext}
+              workspaceContext={assistantWorkspaceContext}
+              canWrite={canWriteWorkspace}
+              members={teamMembers.filter((member) => member.status === "active")}
+              defaultDriMemberId={currentTeamMember?.id ?? null}
+              defaultCycleId={selectedOkrCycle?.id ?? null}
+            />
+          </div>
+
           {selectedProject ? (
             <ProjectPageView
               project={selectedProject}
@@ -1515,7 +1667,6 @@ export default function Home() {
             />
           ) : (
             <>
-          {activeView === "home" && <HomeView onCreatePlan={createOnboardingPlan} onCreateProject={createProjectFromConversation} context={okrChatContext} defaultCycleId={selectedOkrCycle?.id ?? null} />}
           {activeView === "my_work" && <MyWorkView items={activeItems} routines={routines} currentMember={currentTeamMember ?? null} onOpenProject={openProjectPage} onOpenTask={setSelectedTaskId} onRoutinesChange={setRoutines} onNotice={showNotice} />}
           {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={setSelectedTaskId} onPatch={patchItem} />}
           {activeView === "work" && (
@@ -2775,23 +2926,35 @@ function RecommendationsView({ onNavigate }: { onNavigate: (view: View) => void 
   return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{row.itemIds.length}개 항목 · 우선순위 {row.score}</small></div><button aria-label={`${row.title} 확인`} title="관련 항목 확인" onClick={() => onNavigate(row.kind === "empty_project" ? "okr" : "work")}><ChevronRight size={15} /></button></article>)}</section>;
 }
 
-function HomeView({ onCreatePlan, onCreateProject, context, defaultCycleId }: {
+function HomeView({ onCreatePlan, onCreateProject, onApplyOkrPlan, onFinish, context, workspaceContext, canWrite, members, defaultDriMemberId, defaultCycleId }: {
   onCreatePlan: (plan: OnboardingPlan, cycleId: string | null) => Promise<PlanCreationResult | null>;
   onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget) => Promise<boolean>;
+  onApplyOkrPlan: (plan: OnboardingPlan, cycleId: string, target: OkrPlanTarget | null, driMemberId: string | null) => Promise<OkrPlanApplyResult | null>;
+  onFinish: () => void;
   context: OkrChatContext | null;
+  workspaceContext: AssistantWorkspaceContext;
+  canWrite: boolean;
+  members: TeamMember[];
+  defaultDriMemberId: string | null;
   defaultCycleId: string | null;
 }) {
   return (
     <div className="home-layout">
-      <HomeOkrChat onCreate={onCreatePlan} onCreateProject={onCreateProject} context={context} defaultCycleId={defaultCycleId} />
+      <HomeOkrChat onCreate={onCreatePlan} onCreateProject={onCreateProject} onApplyOkrPlan={onApplyOkrPlan} onFinish={onFinish} context={context} workspaceContext={workspaceContext} canWrite={canWrite} members={members} defaultDriMemberId={defaultDriMemberId} defaultCycleId={defaultCycleId} />
     </div>
   );
 }
 
-function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
+function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onFinish, context, workspaceContext, canWrite, members, defaultDriMemberId, defaultCycleId }: {
   onCreate: (plan: OnboardingPlan, cycleId: string | null) => Promise<PlanCreationResult | null>;
   onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget) => Promise<boolean>;
+  onApplyOkrPlan: (plan: OnboardingPlan, cycleId: string, target: OkrPlanTarget | null, driMemberId: string | null) => Promise<OkrPlanApplyResult | null>;
+  onFinish: () => void;
   context: OkrChatContext | null;
+  workspaceContext: AssistantWorkspaceContext;
+  canWrite: boolean;
+  members: TeamMember[];
+  defaultDriMemberId: string | null;
   defaultCycleId: string | null;
 }) {
   const emptyPlan: OnboardingPlan = {
@@ -2810,17 +2973,29 @@ function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
   const [plan, setPlan] = useState<OnboardingPlan>({
     ...emptyPlan,
   });
-  const [lastUserMessage, setLastUserMessage] = useState("");
-  const [assistantMessage, setAssistantMessage] = useState(context
-    ? `‘${context.cycleName}’에 ${kindLabel(context.sourceKind)}부터 같이 만들어볼게요. 이번 주기 끝에 어떤 상태가 달라져야 하는지 편하게 적어 주세요.`
-    : "업무나 OKR, 서비스 사용법부터 가벼운 질문까지 편하게 물어보세요. 실행으로 옮길 내용이 있으면 OKR 초안도 함께 정리해드립니다.");
-  const [guideQuestions, setGuideQuestions] = useState<string[]>(context ? ["달성하고 싶은 변화는 무엇인가요?", "성공 여부는 어떤 숫자나 상태로 확인할까요?"] : []);
+  const [guideQuestions, setGuideQuestions] = useState<string[]>(() => assistantOpeningGuides(context));
+  const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>(() => [{ id: "initial", role: "assistant", content: assistantOpeningMessage(context, workspaceContext) }]);
   const [visibleFields, setVisibleFields] = useState<Set<keyof OnboardingPlan>>(new Set());
-  const [mode, setMode] = useState<ConversationMode>("okr");
+  const [mode, setMode] = useState<ConversationMode>(context?.entry === "onboarding" ? "onboarding" : context?.entry === "coach" ? "coach" : "okr");
+  const [okrTarget, setOkrTarget] = useState<OkrPlanTarget | null>(context?.target ?? null);
+  const [targetCandidates, setTargetCandidates] = useState<OkrPlanTarget[]>(context?.targetCandidates ?? []);
   const [projectTarget, setProjectTarget] = useState<ProjectChatTarget | null>(null);
+  const [projectDriMemberId, setProjectDriMemberId] = useState(defaultDriMemberId ?? members[0]?.id ?? "");
   const [saving, setSaving] = useState(false);
-  const saveLabel = mode === "project" ? plan.project.trim() ? "Project 만들기" : plan.routineTitle.trim() ? "Routine 만들기" : "실행 항목 만들기" : !plan.objective.trim() && plan.routineTitle.trim() ? "Routine 만들기" : "OKR 만들기";
+  const assistantFlow = mode === "onboarding" || mode === "coach";
+  const saveLabel = assistantFlow
+    ? !okrTarget ? "첫 OKR 만들기" : okrTarget.kind === "objective" ? "Key Result 만들기" : okrTarget.kind === "key_result" ? "Initiative 만들기" : "첫 Project 만들기"
+    : mode === "project" ? plan.project.trim() ? "Project 만들기" : plan.routineTitle.trim() ? "Routine 만들기" : "실행 항목 만들기" : !plan.objective.trim() && plan.routineTitle.trim() ? "Routine 만들기" : "OKR 만들기";
   const hasDraft = hasPlanContent(plan);
+  const canApplyDraft = assistantFlow
+    ? !okrTarget ? Boolean(plan.objective.trim() && plan.keyResult.trim())
+      : okrTarget.kind === "objective" ? Boolean(plan.keyResult.trim())
+        : okrTarget.kind === "key_result" ? Boolean(plan.initiative.trim())
+          : Boolean(plan.project.trim())
+    : mode === "project" ? Boolean(plan.project.trim() || plan.routineTitle.trim()) : Boolean(plan.objective.trim() || plan.routineTitle.trim());
+  function setAssistantResponse(value: string) {
+    setConversationHistory((current) => [...current, { id: `assistant-${Date.now()}-${current.length}`, role: "assistant", content: value }]);
+  }
   function patch(field: keyof OnboardingPlan, value: string) {
     setVisibleFields((current) => new Set(current).add(field));
     setPlan((current) => ({ ...current, [field]: value }));
@@ -2840,29 +3015,39 @@ function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
       project: plan.project || lines[0] || text,
       tasks: plan.tasks || actionLines.slice(0, 5).join("\n"),
       taskParent: "project",
-    } : {
-      ...plan,
-      objective: plan.objective || lines[0] || text,
-      keyResult: plan.keyResult || metricLine || "",
-      initiative: plan.initiative || lines[1] || "",
-      tasks: plan.tasks || actionLines.slice(0, 5).join("\n"),
-    };
+    } : okrTarget?.kind === "initiative" ? { ...emptyPlan, project: lines[0] || text }
+      : okrTarget?.kind === "key_result" ? { ...emptyPlan, initiative: lines[0] || text }
+        : okrTarget?.kind === "objective" ? { ...emptyPlan, keyResult: metricLine || lines[0] || text }
+          : {
+            ...plan,
+            objective: plan.objective || lines[0] || text,
+            keyResult: plan.keyResult || metricLine || "",
+            initiative: plan.initiative || lines[1] || "",
+            tasks: plan.tasks || actionLines.slice(0, 5).join("\n"),
+          };
     setPlan(locallyOrganized);
     setVisibleFields((current) => new Set([...current, ...planFieldsWithValues(locallyOrganized)]));
-    setAssistantMessage(mode === "project" ? "말씀하신 내용을 첫 Project 초안으로 정리했습니다." : "말씀하신 내용을 기본 방식으로 OKR 초안으로 나눴습니다. OpenAI API 키가 설정되면 문맥을 더 깊게 읽어 정리합니다.");
+    setAssistantResponse(mode === "project" ? "말씀하신 내용을 첫 Project 초안으로 정리했습니다." : "말씀하신 내용을 기본 방식으로 OKR 초안으로 나눴습니다. OpenAI API 키가 설정되면 문맥을 더 깊게 읽어 정리합니다.");
     setGuideQuestions([]);
   }
   async function organizeMessage() {
     const text = message.trim();
     if (!text) return;
-    setLastUserMessage(text);
+    setConversationHistory((current) => [...current, { id: `user-${Date.now()}`, role: "user", content: text }]);
     setMessage("");
     setSaving(true);
     try {
       const response = await fetch("/api/okr-organize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, plan, mode, parentContext: projectTarget ? { initiativeTitle: projectTarget.initiativeTitle } : undefined }),
+        body: JSON.stringify({
+          message: text,
+          plan,
+          mode,
+          history: conversationHistory.slice(-10).map(({ role, content }) => ({ role, content })),
+          workspaceContext,
+          parentContext: { initiativeTitle: projectTarget?.initiativeTitle, target: okrTarget },
+        }),
       });
       const data = await response.json() as ({ organized: OrganizedOkr } & OrganizeError);
       if (!response.ok) {
@@ -2872,7 +3057,7 @@ function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
             setPlan({ ...emptyPlan });
             setVisibleFields(new Set());
           }
-          setAssistantMessage(aiLimitMessage(data));
+          setAssistantResponse(aiLimitMessage(data));
           setGuideQuestions(data.options?.length ? data.options : ["유료 플랜으로 서버 AI 정리 계속 사용", "개인 OpenAI API 키 연결", "ChatGPT에서 OKRPTR MCP로 연결해 직접 정리"]);
           return;
         }
@@ -2881,19 +3066,38 @@ function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
       const mergedPlan = mergePlan(plan, data.organized.plan);
       setPlan(mergedPlan);
       setVisibleFields((current) => new Set([...current, ...planFieldsWithValues(mergedPlan)]));
-      setAssistantMessage(data.organized.assistantMessage);
+      setAssistantResponse(data.organized.assistantMessage);
       setGuideQuestions(data.organized.questions);
     } catch {
       if (looksLikePlanningInput(text)) organizeLocally(text);
       else {
         setPlan({ ...emptyPlan });
         setVisibleFields(new Set());
-        setAssistantMessage("지금은 답변을 불러오지 못했습니다. 잠시 후 다시 보내 주세요.");
+        setAssistantResponse("지금은 답변을 불러오지 못했습니다. 잠시 후 다시 보내 주세요.");
         setGuideQuestions([]);
       }
     } finally {
       setSaving(false);
     }
+  }
+  function chooseTarget(target: OkrPlanTarget) {
+    setOkrTarget(target);
+    setTargetCandidates([]);
+    setPlan({ ...emptyPlan });
+    setVisibleFields(new Set());
+    setMode("coach");
+    setAssistantResponse(targetPrompt(target));
+    setGuideQuestions([]);
+  }
+  function chooseQuickReply(question: string) {
+    if (question.includes("나중에")) {
+      skipOptionalStep();
+      return;
+    }
+    const starter = question === "업무 목표를 말해볼게요" ? "이번 분기에 업무에서 이루고 싶은 목표는 "
+      : question === "개인 성장 목표를 말해볼게요" ? "이번 분기에 개인적으로 이루고 싶은 목표는 "
+        : question;
+    setMessage(starter);
   }
   function chooseGuide(kind: "team" | "personal" | "routine" | "free") {
     setPlan({ ...emptyPlan });
@@ -2901,26 +3105,58 @@ function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
     setMode("okr");
     setProjectTarget(null);
     setMessage("");
-    setLastUserMessage("");
     if (kind === "team") {
-      setAssistantMessage("팀 OKR로 시작하겠습니다. 팀이 이번 주기 끝에 달라져야 하는 상태부터 잡고, 공동 지표와 실행 책임을 나눕니다.");
+      setAssistantResponse("팀 OKR로 시작하겠습니다. 팀이 이번 주기 끝에 달라져야 하는 상태부터 잡고, 공동 지표와 실행 책임을 나눕니다.");
       setGuideQuestions(["팀이 달성해야 하는 결과는 무엇인가요?", "성공 여부를 숫자나 상태로 어떻게 확인할까요?", "어떤 프로젝트와 담당자가 먼저 움직여야 하나요?"]);
       return;
     }
     if (kind === "personal") {
-      setAssistantMessage("개인 OKR로 시작하겠습니다. 역할 안에서 만들고 싶은 변화, 측정 기준, 바로 실행할 일을 분리합니다.");
+      setAssistantResponse("개인 OKR로 시작하겠습니다. 역할 안에서 만들고 싶은 변화, 측정 기준, 바로 실행할 일을 분리합니다.");
       setGuideQuestions(["이번 주기 동안 본인이 만들고 싶은 변화는 무엇인가요?", "완료가 아니라 성과를 보여주는 기준은 무엇인가요?", "이번 주에 바로 시작할 일은 무엇인가요?"]);
       return;
     }
     if (kind === "routine") {
-      setAssistantMessage("루틴부터 정리하겠습니다. 반복할 시점, 장소나 도구, 실제 행동 순서를 먼저 잡고 필요하면 OKR에 연결합니다.");
+      setAssistantResponse("루틴부터 정리하겠습니다. 반복할 시점, 장소나 도구, 실제 행동 순서를 먼저 잡고 필요하면 OKR에 연결합니다.");
       setGuideQuestions(["언제 이 루틴이 시작돼야 하나요?", "어디서 또는 어떤 도구에서 실행하나요?", "무엇을 어떤 순서로 하면 되나요?"]);
       return;
     }
-    setAssistantMessage("좋습니다. 정해진 양식 없이 질문하거나 지금 생각나는 대로 적어 주세요. 실행 계획이 보이면 OKR 구조도 함께 제안합니다.");
+    setAssistantResponse("좋습니다. 정해진 양식 없이 질문하거나 지금 생각나는 대로 적어 주세요. 실행 계획이 보이면 OKR 구조도 함께 제안합니다.");
     setGuideQuestions([]);
   }
   async function save() {
+    if (assistantFlow) {
+      if (!canWrite || !canApplyDraft) return;
+      const cycleId = context?.cycleId ?? defaultCycleId;
+      if (!cycleId) return;
+      setSaving(true);
+      const result = await onApplyOkrPlan(plan, cycleId, okrTarget, plan.project.trim() ? projectDriMemberId || null : null);
+      setSaving(false);
+      if (!result) return;
+      setPlan({ ...emptyPlan });
+      setVisibleFields(new Set());
+      setGuideQuestions([]);
+      if (result.projectId) {
+        setAssistantResponse("좋아요. 첫 Project까지 연결했습니다. 이제 OKR 화면에서 전체 구조를 확인할 수 있어요.");
+        onFinish();
+        return;
+      }
+      if (result.initiativeId) {
+        const initiative = result.items.find((entry) => entry.id === result.initiativeId);
+        setOkrTarget({ id: result.initiativeId, kind: "initiative", title: initiative?.title ?? "새 Initiative" });
+        setMode("coach");
+        setAssistantResponse("Initiative를 만들었습니다. 이 방향을 실제로 움직일 첫 Project도 정해볼까요? 아직 생각나지 않았다면 지금은 건너뛰어도 됩니다.");
+        setGuideQuestions(["첫 Project를 정리할게요", "나중에 할게요"]);
+        return;
+      }
+      if (result.keyResultId) {
+        const keyResult = result.items.find((entry) => entry.id === result.keyResultId);
+        setOkrTarget({ id: result.keyResultId, kind: "key_result", title: keyResult?.title ?? "새 Key Result" });
+        setMode("coach");
+        setAssistantResponse("첫 OKR을 만들었습니다. 이제 이 Key Result를 움직일 실행 방향인 Initiative도 정해볼까요? 아직 생각나지 않았다면 건너뛰어도 됩니다.");
+        setGuideQuestions(["Initiative를 정리할게요", "나중에 할게요"]);
+      }
+      return;
+    }
     if (mode === "project") {
       if (!projectTarget || !plan.project.trim() && !plan.routineTitle.trim()) {
         await organizeMessage();
@@ -2945,18 +3181,24 @@ function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
     setSaving(false);
     if (created) {
       setMessage("");
-      setLastUserMessage("");
       setPlan({ ...emptyPlan });
       setGuideQuestions([]);
       setVisibleFields(new Set());
       if (created.initiativeId && !created.projectId) {
         setProjectTarget({ cycleId: created.cycleId, initiativeId: created.initiativeId, initiativeTitle: created.initiativeTitle });
-        setAssistantMessage("OKR 구조를 만들었습니다. 이 대화에서 첫 실행 Project도 이어서 정리할 수 있습니다.");
+        setAssistantResponse("OKR 구조를 만들었습니다. 이 대화에서 첫 실행 Project도 이어서 정리할 수 있습니다.");
       } else {
         setProjectTarget(null);
-        setAssistantMessage("OKR 구조를 만들었습니다. 다음 목표도 이어서 이야기할 수 있습니다.");
+        setAssistantResponse("OKR 구조를 만들었습니다. 다음 목표도 이어서 이야기할 수 있습니다.");
       }
     }
+  }
+  function skipOptionalStep() {
+    setAssistantResponse("좋아요. 지금은 여기까지 저장했습니다. Initiative나 Project가 떠오르면 언제든 OKR 도우미를 다시 불러 주세요.");
+    setPlan({ ...emptyPlan });
+    setVisibleFields(new Set());
+    setGuideQuestions([]);
+    onFinish();
   }
   function startProjectConversation() {
     if (!projectTarget) return;
@@ -2964,24 +3206,26 @@ function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
     setPlan({ ...emptyPlan });
     setVisibleFields(new Set());
     setMessage("");
-    setLastUserMessage("");
-    setAssistantMessage(`‘${projectTarget.initiativeTitle}’ 아래 첫 Project를 같이 정리해볼게요. 만들려는 결과와 범위를 편하게 말해 주세요.`);
+    setAssistantResponse(`‘${projectTarget.initiativeTitle}’ 아래 첫 Project를 같이 정리해볼게요. 만들려는 결과와 범위를 편하게 말해 주세요.`);
     setGuideQuestions(["이 Project가 끝났을 때 무엇이 달라져야 하나요?", "첫 Task로 바로 시작할 일은 무엇인가요?"]);
   }
   return (
     <section className="home-okr-chat" aria-labelledby="home-okr-chat-title">
       <header>
-        <div><Bot size={16} /><div><h2 id="home-okr-chat-title">OKRPTR 대화</h2><p>질문에는 바로 답하고, 실행할 내용은 목표와 업무 구조로 정리해드립니다.</p></div></div>
+        <div><Bot size={16} /><div><h2 id="home-okr-chat-title">OKR 도우미</h2><p>현재 OKR과 실행 상황을 읽고, 필요한 다음 질문부터 이어갑니다.</p></div></div>
+        {assistantFlow && okrTarget && <span className="assistant-stage">{kindLabel(okrTarget.kind)} 다음 단계</span>}
       </header>
       <div className="home-chat-surface">
         <div className="chat-thread">
-          {context && mode === "okr" && <div className="chat-okr-context"><Target size={14} /><span><b>{context.cycleName}</b>에 초안 저장</span></div>}
+          {context && <div className="chat-okr-context"><Target size={14} /><span><b>{context.cycleName}</b>{context.entry === "onboarding" ? " 첫 OKR 온보딩" : " 상황 기반 대화"}</span></div>}
           {mode === "project" && projectTarget && <div className="chat-okr-context"><Briefcase size={14} /><span><b>{projectTarget.initiativeTitle}</b> 아래 Project 작성</span></div>}
-          {lastUserMessage && <p className="user-message">{lastUserMessage}</p>}
-          <p className="assistant-message">{assistantMessage}</p>
-          {guideQuestions.length > 0 && <div className="assistant-followups">{guideQuestions.map((question) => <p className="assistant-message followup-message" key={question}>{question}</p>)}</div>}
-          <label className="chat-input"><span>메시지</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void organizeMessage(); }} rows={4} placeholder="질문, 고민, 목표, 해야 할 일을 편하게 적어 주세요." /></label>
-          {mode === "okr" && <div className="chat-presets">
+          {context?.entry === "onboarding" && <div className="assistant-example"><b>간단한 예시</b><span>Objective · 신규 사용자가 제품 가치를 더 빨리 경험하게 한다</span><span>Key Result · 가입 후 7일 내 핵심 기능 사용률을 35%에서 55%로 높인다</span></div>}
+          {conversationHistory.map((entry) => <p className={entry.role === "user" ? "user-message" : "assistant-message"} key={entry.id}>{entry.content}</p>)}
+          {targetCandidates.length > 1 && <div className="assistant-target-options" aria-label="대화 대상 선택">{targetCandidates.map((target) => <button key={target.id} onClick={() => chooseTarget(target)}><span>{kindLabel(target.kind)}</span>{target.title}</button>)}</div>}
+          {guideQuestions.length > 0 && <div className="assistant-followups">{guideQuestions.map((question) => <button className="followup-message" onClick={() => chooseQuickReply(question)} key={question}>{question}</button>)}</div>}
+          {!canWrite && <div className="assistant-readonly"><Eye size={14} /><span>Viewer는 대화와 분석을 이용할 수 있지만 항목을 생성할 수 없습니다.</span></div>}
+          <label className="chat-input"><span>메시지</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void organizeMessage(); }} rows={4} placeholder="지금 이루고 싶은 목표나 막힌 일을 편하게 적어 주세요" /></label>
+          {mode === "okr" && context?.entry !== "onboarding" && <div className="chat-presets">
             <button onClick={() => chooseGuide("team")}>팀 OKR</button>
             <button onClick={() => chooseGuide("personal")}>개인 OKR</button>
             <button onClick={() => chooseGuide("routine")}>루틴부터</button>
@@ -2989,15 +3233,17 @@ function HomeOkrChat({ onCreate, onCreateProject, context, defaultCycleId }: {
           </div>}
           <div className="chat-actions">
             <button className="chat-apply" onClick={() => void organizeMessage()} disabled={saving || !message.trim()}><TextCursorInput size={13} />{saving ? "답변 중" : "보내기"}</button>
-            {hasDraft && <button className="welcome-primary" onClick={() => void save()} disabled={saving || (mode === "project" ? !plan.project.trim() && !plan.routineTitle.trim() : !plan.objective.trim() && !plan.routineTitle.trim())}>{saving ? "생성 중" : saveLabel}<ChevronRight size={14} /></button>}
+            {hasDraft && canWrite && <button className="welcome-primary" onClick={() => void save()} disabled={saving || !canApplyDraft}>{saving ? "생성 중" : saveLabel}<ChevronRight size={14} /></button>}
           </div>
+          {assistantFlow && okrTarget && (okrTarget.kind === "key_result" || okrTarget.kind === "initiative") && <button className="assistant-skip" onClick={skipOptionalStep}>지금은 건너뛰기</button>}
           {mode === "okr" && projectTarget && <button className="project-nudge-button" onClick={startProjectConversation}><Briefcase size={14} />첫 Project를 만들어볼까요?<ChevronRight size={14} /></button>}
         </div>
         {visibleFields.size > 0 && <div className="okr-setup-fields home-draft-fields">
-          {visibleFields.has("objective") && <label><span>Objective</span><textarea value={plan.objective} onChange={(event) => patch("objective", event.target.value)} rows={3} placeholder="달성하고 싶은 결과" /></label>}
-          {visibleFields.has("keyResult") && <label><span>Key Result</span><textarea value={plan.keyResult} onChange={(event) => patch("keyResult", event.target.value)} rows={3} placeholder="성공을 확인할 수 있는 기준" /></label>}
-          {visibleFields.has("initiative") && <label><span>Initiative</span><input value={plan.initiative} onChange={(event) => patch("initiative", event.target.value)} placeholder="성과를 만들 큰 방향" /></label>}
-          {visibleFields.has("project") && <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="실제로 진행할 프로젝트" /></label>}
+          {visibleFields.has("objective") && <label><span>Objective</span><textarea value={plan.objective} onChange={(event) => patch("objective", event.target.value)} rows={3} placeholder="이루고 싶은 변화" /></label>}
+          {visibleFields.has("keyResult") && <label><span>Key Result</span><textarea value={plan.keyResult} onChange={(event) => patch("keyResult", event.target.value)} rows={3} placeholder="달성 여부를 확인할 측정 가능한 결과" /></label>}
+          {visibleFields.has("initiative") && <label><span>Initiative</span><input value={plan.initiative} onChange={(event) => patch("initiative", event.target.value)} placeholder="성과를 만들 실행 방향" /></label>}
+          {visibleFields.has("project") && <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="결과와 범위가 분명한 첫 Project" /></label>}
+          {assistantFlow && visibleFields.has("project") && members.length > 0 && <label><span>Project DRI</span><select value={projectDriMemberId} onChange={(event) => setProjectDriMemberId(event.target.value)}>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
           {visibleFields.has("tasks") && <label className="wide"><span>{plan.taskParent === "routine" || !plan.project.trim() && plan.routineTitle.trim() ? "첫 Task · Routine 아래" : plan.project.trim() ? "첫 Task · Project 아래" : "첫 Task · General"}</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder="한 줄에 하나씩 입력" /></label>}
           {visibleFields.has("tasks") && plan.project.trim() && plan.routineTitle.trim() && <label><span>Task 상위</span><select value={plan.taskParent || "project"} onChange={(event) => patch("taskParent", event.target.value)}><option value="project">Project</option><option value="routine">Routine</option></select></label>}
           {visibleFields.has("routineTitle") && <label><span>루틴 이름</span><input value={plan.routineTitle} onChange={(event) => patch("routineTitle", event.target.value)} placeholder="반복해서 할 일의 이름" /></label>}
@@ -3016,6 +3262,72 @@ function planFieldsWithValues(plan: OnboardingPlan) {
 
 function mergePlan(current: OnboardingPlan, organized: OnboardingPlan) {
   return Object.fromEntries((Object.keys(current) as (keyof OnboardingPlan)[]).map((field) => [field, organized[field] || current[field]])) as OnboardingPlan;
+}
+
+function buildAssistantWorkspaceContext(activeItems: OkrptrItem[], cycle: OkrCycle | null, focusedProject: OkrptrItem | null): AssistantWorkspaceContext {
+  const cycleItems = cycle ? activeItems.filter((entry) => entry.cycleId === cycle.id) : [];
+  const includedIds = new Set(cycleItems.map((entry) => entry.id));
+  const linkedTasks = activeItems.filter((entry) => entry.kind === "task" && entry.parentId && includedIds.has(entry.parentId));
+  const contextualItems = [...cycleItems, ...linkedTasks.filter((entry) => !includedIds.has(entry.id))];
+  return {
+    cycleId: cycle?.id ?? null,
+    cycleName: cycle?.name ?? "",
+    focusedItemId: focusedProject?.id ?? null,
+    blockedTaskCount: contextualItems.filter((entry) => entry.kind === "task" && entry.status === "blocked").length,
+    items: contextualItems.slice(0, 80).map((entry) => ({
+      id: entry.id,
+      parentId: entry.parentId,
+      kind: entry.kind,
+      title: entry.title,
+      status: entry.status,
+      progress: entry.progress,
+      dri: entry.assignments.find((assignment) => assignment.role === "project_dri")?.displayName ?? "",
+    })),
+  };
+}
+
+function deriveAssistantTargeting(context: AssistantWorkspaceContext) {
+  const childrenByParent = new Map<string, AssistantWorkspaceContext["items"]>();
+  for (const item of context.items) {
+    if (!item.parentId) continue;
+    childrenByParent.set(item.parentId, [...(childrenByParent.get(item.parentId) ?? []), item]);
+  }
+  const objectivesMissingKr = context.items.filter((item) => item.kind === "objective" && !(childrenByParent.get(item.id) ?? []).some((child) => child.kind === "key_result"));
+  const keyResultsMissingInitiative = context.items.filter((item) => item.kind === "key_result" && !(childrenByParent.get(item.id) ?? []).some((child) => child.kind === "initiative"));
+  const initiativesMissingProject = context.items.filter((item) => item.kind === "initiative" && !(childrenByParent.get(item.id) ?? []).some((child) => child.kind === "project"));
+  const source = objectivesMissingKr.length ? objectivesMissingKr : keyResultsMissingInitiative.length ? keyResultsMissingInitiative : initiativesMissingProject;
+  const candidates = source.map((item) => ({ id: item.id, kind: item.kind as OkrPlanTarget["kind"], title: item.title }));
+  return { target: candidates.length === 1 ? candidates[0] : null, candidates };
+}
+
+function assistantOpeningMessage(context: OkrChatContext | null, workspace: AssistantWorkspaceContext) {
+  if (context?.entry === "onboarding") {
+    return "OKR은 이루고 싶은 변화인 Objective와, 그 변화가 일어났는지 확인하는 측정 가능한 Key Result를 연결하는 방식이에요. 이번 주기에 달성하고 싶은 목표가 있나요? 편하게 말해 주세요.";
+  }
+  if (context?.entry === "create") {
+    return `‘${context.cycleName}’에 ${kindLabel(context.sourceKind ?? "objective")}부터 같이 만들어볼게요. 이번 주기 끝에 어떤 상태가 달라져야 하는지 편하게 적어 주세요.`;
+  }
+  if (context?.target) return targetPrompt(context.target);
+  if ((context?.targetCandidates?.length ?? 0) > 1) return "이어갈 수 있는 OKR이 여러 개 있습니다. 먼저 어느 항목을 다듬을지 선택해 주세요.";
+  const focused = workspace.items.find((item) => item.id === workspace.focusedItemId);
+  if (focused?.kind === "project") {
+    return `‘${focused.title}’ Project는 현재 ${statusLabel(focused.status)} 상태입니다. 지금 막힌 점이나 다음으로 정리할 일을 말씀해 주세요.`;
+  }
+  if (!workspace.items.some((item) => item.kind === "objective")) return "현재 워크스페이스에는 활성 Objective가 없습니다. 새 목표를 함께 정리할까요?";
+  if (workspace.blockedTaskCount > 0) return `현재 막힌 Task가 ${workspace.blockedTaskCount}개 있습니다. 가장 먼저 풀어야 할 병목부터 같이 보겠습니다.`;
+  return "현재 OKR 구조를 확인했습니다. 진행 상황, 막힌 점, 다음 우선순위 중 무엇부터 이야기할까요?";
+}
+
+function assistantOpeningGuides(context: OkrChatContext | null) {
+  if (context?.entry === "onboarding") return ["업무 목표를 말해볼게요", "개인 성장 목표를 말해볼게요", "아직 목표가 잘 떠오르지 않아요"];
+  if (context?.entry === "create") return ["달성하고 싶은 변화는 무엇인가요?", "성공 여부는 어떤 숫자나 상태로 확인할까요?"];
+  return [];
+}
+
+function targetPrompt(target: OkrPlanTarget) {
+  if (target.kind === "objective") return `‘${target.title}’ Objective의 달성 여부를 확인할 수 있는 측정 가능한 Key Result는 무엇인가요?`;
+  if (target.kind === "key_result") return `‘${target.title}’ Key Result를 움직일 실행 방향인 Initiative는 무엇인가요? 아직 생각나지 않았다면 건너뛸 수 있습니다.`;
+  return `‘${target.title}’ Initiative를 실제로 움직일 첫 Project는 무엇인가요? 결과, 범위, 시기 또는 DRI를 편하게 말해 주세요.`;
 }
 
 function aiLimitMessage(error: OrganizeError) {

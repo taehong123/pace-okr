@@ -63,7 +63,7 @@ test("server-renders the OKRPTR application loading shell", async () => {
 });
 
 test("ships product metadata and removes starter assets", async () => {
-  const [layout, page, bootstrapRoute, itemRoute, workspaceRoute, integrationRoute, okrOrganizeRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson] = await Promise.all([
+  const [layout, page, bootstrapRoute, itemRoute, workspaceRoute, integrationRoute, okrOrganizeRoute, okrPlanRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/bootstrap/route.ts", import.meta.url), "utf8"),
@@ -71,6 +71,7 @@ test("ships product metadata and removes starter assets", async () => {
     readFile(new URL("../app/api/workspaces/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/integration-tokens/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/okr-organize/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/okr-plan/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/auth/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/disconnect/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/automations/route.ts", import.meta.url), "utf8"),
@@ -89,8 +90,14 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /ChatGPT 연결 문구 복사/);
   assert.match(page, /앱 연동/);
   assert.match(page, /mobile-navigation/);
-  assert.match(page, /label: "AI 대화"/);
   assert.match(page, /home: "AI 대화"/);
+  assert.match(page, /assistant-sidebar-tab/);
+  assert.match(page, /OKR 도우미/);
+  assert.match(page, /aria-label="AI 대화 열기"/);
+  assert.match(page, /currentWorkspace\.role !== "owner"/);
+  assert.match(page, /freshWorkspaceDataReady/);
+  assert.match(page, /Project DRI/);
+  assert.match(page, /지금은 건너뛰기/);
   assert.match(page, /더보기/);
   assert.match(page, /개인 연결/);
   assert.match(page, /워크스페이스 연결/);
@@ -106,6 +113,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(workspaceRoute, /scheduleWorkspaceDeletionForUser/);
   assert.match(workspaceRoute, /restoreWorkspaceForUser/);
   assert.match(bootstrapRoute, /Cache-Control": "no-store"/);
+  assert.match(bootstrapRoute, /okrptr_workspace_id/);
   assert.doesNotMatch(page, /OAuth Redirect URL|Slash Command URL/);
   assert.match(page, /연결 관리/);
   assert.match(page, /연결됨/);
@@ -117,8 +125,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.doesNotMatch(page, /revoke-link/);
   assert.match(page, /\/api\/integration-tokens/);
   assert.match(page, /\/api\/okr-organize/);
-  assert.match(page, /OKRPTR 대화/);
-  assert.match(page, /가벼운 질문/);
+  assert.match(page, /현재 OKR과 실행 상황을 읽고/);
+  assert.match(page, /필요한 다음 질문부터 이어갑니다/);
   assert.match(page, /답변 중/);
   assert.match(page, /보내기/);
   assert.match(page, /OKR 만들기/);
@@ -137,9 +145,9 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /my_work: "내 업무"/);
   assert.match(page, /systemKey === "general"/);
   assert.doesNotMatch(page, /status: "inbox"|인박스에 저장|인박스에 추가/);
-  assert.match(okrOrganizeRoute, /payload\.mode === "project"/);
+  assert.match(okrOrganizeRoute, /"onboarding".*"coach"/);
   assert.match(okrOrganizeRoute, /initiative context is required for project mode/);
-  assert.match(okrOrganizeRoute, /Always respond to the user's actual message first/);
+  assert.match(okrOrganizeRoute, /Always answer in the user's language/);
   assert.match(okrOrganizeRoute, /leave every plan field empty/);
   assert.match(page, /팀 OKR/);
   assert.match(page, /개인 OKR/);
@@ -168,8 +176,12 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /Objective → Key Result → Initiative → Project → Task \/ Routine → Task/);
   assert.match(page, /taskParent/);
   assert.match(page, /routineId: taskUsesRoutine \? routineItem\?\.id : undefined/);
-  assert.match(okrOrganizeRoute, /Routine is a Project-like execution container but remains independent from the OKR hierarchy/);
+  assert.match(okrOrganizeRoute, /Routine is independent and may contain Task/);
   assert.match(okrOrganizeRoute, /independent execution: Routine > Task/);
+  assert.match(okrOrganizeRoute, /recentConversation/);
+  assert.match(okrOrganizeRoute, /workspaceContext/);
+  assert.match(okrPlanRoute, /createOkrPlan/);
+  assert.match(okrPlanRoute, /authorization\.userId/);
   assert.doesNotMatch(paceData, /validateRoutineInitiative|idx_routines_owner_initiative/);
   assert.match(page, /OKR이 오늘의 일로 이어지도록/);
   assert.match(page, /Connect your OKRs to today's work/);
@@ -217,6 +229,14 @@ test("ships product metadata and removes starter assets", async () => {
   assert.doesNotMatch(bootstrapRoute, /scope ===|scope !==/);
   assert.match(itemRoute, /payload\.cycleId === undefined \? undefined : asNullableString/);
   assert.match(paceData, /workspaceReady/);
+  assert.match(paceData, /activatedWorkspaceIds/);
+  assert.match(paceData, /createOkrPlan/);
+  assert.match(paceData, /await d1\.batch\(statements\)/);
+  assert.match(paceData, /Objective and Key Result are required/);
+  assert.ok(
+    paceData.indexOf("ALTER TABLE routines ADD COLUMN system_key") < paceData.indexOf("idx_routines_owner_system_key"),
+    "routine compatibility columns must be added before dependent indexes",
+  );
   assert.match(paceData, /schemaIsCurrent/);
   assert.match(paceData, /workspaceInitializationIsCurrent/);
   assert.match(paceData, /DELETE FROM google_oauth_states WHERE expires_at <=/);
