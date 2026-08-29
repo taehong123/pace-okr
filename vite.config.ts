@@ -15,7 +15,9 @@ const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
   assets: {
-    run_worker_first: ["/", "/_next/static/*", "/favicon.svg", "/sw.js"],
+    // Keep the prerendered shell and static assets on Cloudflare's asset path so
+    // an idle Worker does not add a cold start before the first paint.
+    run_worker_first: ["/_vinext/image"],
   },
   d1_databases: d1
     ? [
