@@ -248,6 +248,7 @@ test("연결할 Project·Routine이 없으면 직접 추가와 AI 추가 모두 
   const generalCard = page.getByRole("article").filter({ hasText: "General" });
   await expect(generalCard).toContainText("General");
   await expect(generalCard.getByText("기본", { exact: true })).toBeVisible();
+  await expect(generalCard).toContainText("Project·Routine에 연결하지 않은 Task가 모이는 기본 목록");
 });
 
 test("Project·Task·Routine 추가 진입과 AI 도우미를 같은 구조로 제공한다", async ({ page, isMobile }) => {

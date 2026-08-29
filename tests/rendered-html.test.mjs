@@ -478,6 +478,8 @@ test("defaults unlinked web Tasks to General and exposes direct bulk deletion", 
   assert.match(page, /연결 대상 · 선택 사항/);
   assert.match(page, /선택 안 함 — General에 저장/);
   assert.match(page, /연결할 Project·Routine이 없어 General\(기본\)에 저장됩니다/);
+  assert.match(page, /Project·Routine에 연결하지 않은 Task가 모이는 기본 목록/);
+  assert.doesNotMatch(page, /부모가 없는 Task/);
   assert.match(page, /연결 끊긴 Task \{orphanedIds\.length\}개 선택/);
   assert.match(page, /task-selection-delete/);
   assert.doesNotMatch(page, /할 일을 입력하면 미분류 Task에 저장됩니다/);
