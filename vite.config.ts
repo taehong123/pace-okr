@@ -14,6 +14,7 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
+  triggers: { crons: ["0 * * * *"] },
   assets: {
     // Keep the prerendered shell and static assets on Cloudflare's asset path so
     // an idle Worker does not add a cold start before the first paint.

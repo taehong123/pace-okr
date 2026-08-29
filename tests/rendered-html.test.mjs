@@ -552,3 +552,35 @@ test("limits Project and Task deletion to creators and accountable assignees", a
   assert.match(page, /entry\.canDelete && <button className="danger"/);
   assert.match(cleanupRoute, /authorization\.role !== "owner" && authorization\.role !== "admin"/);
 });
+
+test("measures only Key Results and configures scheduled KR API data", async () => {
+  const [page, view, route, syncRoute, paceData, syncEngine, schema, worker, viteConfig, migration] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/kr-data-view.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/kr-data-connections/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/kr-data-connections/sync/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/kr-data-sync.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0025_kr_data_connections.sql", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /id: "kr_data", label: "KR 데이터"/);
+  assert.match(page, /tracksProgress = item\.kind === "key_result"/);
+  assert.doesNotMatch(page, /objective\.progress\}%/);
+  assert.match(page, /entry\.kind === "key_result" \|\| entry\.kind === "project" \|\| entry\.kind === "task"/);
+  assert.match(view, /API URL/);
+  assert.match(view, /connectionMemoryCache\.get\(cacheKey\)/);
+  assert.match(view, /숫자 값 경로/);
+  assert.match(view, /자동 갱신 주기/);
+  assert.match(route, /createKrDataConnection/);
+  assert.match(syncRoute, /syncKrDataConnection/);
+  assert.match(paceData, /Private or local API addresses are not supported/);
+  assert.match(syncEngine, /AbortSignal\.timeout\(10_000\)/);
+  assert.match(syncEngine, /kind = 'key_result'/);
+  assert.match(schema, /kr_data_connections/);
+  assert.match(worker, /scheduled\(_controller/);
+  assert.match(viteConfig, /crons: \["0 \* \* \* \*"\]/);
+  assert.match(migration, /UPDATE `items` SET `progress` = 0 WHERE `kind` IN \('objective', 'initiative'\)/);
+});

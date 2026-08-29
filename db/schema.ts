@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const workspaces = sqliteTable(
   "workspaces",
@@ -201,6 +201,35 @@ export const itemAssignments = sqliteTable(
       .where(sql`${table.role} IN ('project_dri', 'task_assignee')`),
     index("idx_item_assignments_owner_item").on(table.ownerId, table.itemId),
     index("idx_item_assignments_member").on(table.memberId),
+  ],
+);
+
+export const krDataConnections = sqliteTable(
+  "kr_data_connections",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    krItemId: text("kr_item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    endpointUrl: text("endpoint_url").notNull(),
+    valuePath: text("value_path").notNull().default(""),
+    baselineValue: real("baseline_value").notNull().default(0),
+    targetValue: real("target_value").notNull(),
+    unit: text("unit").notNull().default(""),
+    cadence: text("cadence").notNull().default("daily"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    lastValue: real("last_value"),
+    lastSyncStatus: text("last_sync_status").notNull().default("never"),
+    lastError: text("last_error").notNull().default(""),
+    lastSyncedAt: text("last_synced_at"),
+    nextSyncAt: text("next_sync_at"),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_kr_data_connections_owner_kr").on(table.ownerId, table.krItemId),
+    index("idx_kr_data_connections_due").on(table.active, table.nextSyncAt),
   ],
 );
 
@@ -574,6 +603,7 @@ export const trashRecords = sqliteTable(
 export type PaceItem = typeof items.$inferSelect;
 export type NewPaceItem = typeof items.$inferInsert;
 export type ItemAssignment = typeof itemAssignments.$inferSelect;
+export type KrDataConnection = typeof krDataConnections.$inferSelect;
 export type PropertyDefinition = typeof propertyDefinitions.$inferSelect;
 export type ItemPropertyValue = typeof itemPropertyValues.$inferSelect;
 export type ProjectHiddenProperty = typeof projectHiddenProperties.$inferSelect;

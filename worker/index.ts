@@ -1,6 +1,7 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { syncDueKrDataConnectionsWithDb } from "@/lib/kr-data-sync";
 
 interface Env {
   ASSETS: Fetcher;
@@ -89,6 +90,9 @@ const worker = {
     const response = await handler.fetch(request, env, ctx);
     if (cacheableRequest && response.ok) return withCacheHeaders(request, response, url.pathname);
     return response;
+  },
+  scheduled(_controller: ScheduledController, _env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(syncDueKrDataConnectionsWithDb(_env.DB));
   },
 };
 
