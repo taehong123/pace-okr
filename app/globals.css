@@ -256,10 +256,10 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .page-header { min-height: 72px; display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
 .page-header h1 { margin: 0; font-size: 30px; line-height: 1.25; font-weight: 700; }
 .page-header p { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
-.task-page-actions { display: flex; align-items: center; gap: 7px; }
-.task-page-actions > button { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--raised); color: var(--ink); font-size: 10px; font-weight: 650; cursor: pointer; }
-.task-page-actions > button:hover { background: var(--surface-hover); }
-.task-page-actions > button.primary-action { border-color: var(--ink); background: var(--ink); color: var(--raised); }
+.page-create-actions { display: flex; align-items: center; gap: 7px; }
+.page-create-actions > button { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--raised); color: var(--ink); font-size: 10px; font-weight: 650; cursor: pointer; }
+.page-create-actions > button:hover { background: var(--surface-hover); }
+.page-create-actions > button.primary-action { border-color: var(--ink); background: var(--ink); color: var(--raised); }
 .primary-action { height: 31px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border: 0; border-radius: 4px; background: var(--ink); color: white; font-size: 11px; cursor: pointer; }
 .primary-action:disabled { opacity: .55; cursor: default; }
 .cadence-switch { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 5px; }
@@ -1308,17 +1308,16 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .custom-project-fields input[type="checkbox"] { width: 18px; justify-self: start; }
 
 .routine-section { border-top: 1px solid var(--line); }
-.routine-toolbar { min-height: 53px; display: grid; grid-template-columns: 168px minmax(0, 1fr); align-items: start; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.routine-toolbar { min-height: 53px; display: flex; align-items: center; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .routine-toolbar > label { height: 31px; display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.routine-toolbar > p { margin: 0; color: var(--muted); font-size: 11px; }
 .routine-toolbar input, .routine-toolbar select, .routine-toolbar textarea { padding: 0 7px; border: 1px solid var(--line); outline: 0; background: white; color: var(--ink); font-size: 11px; }
 .routine-toolbar input, .routine-toolbar select { height: 30px; }
 .routine-toolbar textarea { min-height: 30px; padding-top: 7px; resize: vertical; }
 .routine-toolbar > label input { border-radius: 4px; }
-.routine-create { display: grid; grid-template-columns: repeat(4, minmax(85px, 1fr)) 31px; align-items: stretch; gap: 5px; }
-.routine-create > * { min-width: 0; border-radius: 4px; }
-.routine-create textarea { grid-column: 3 / 5; }
-.routine-create button { width: 31px; min-height: 30px; display: grid; place-items: center; padding: 0; border: 0; background: var(--ink); color: white; cursor: pointer; }
-.routine-create button { grid-column: 5; grid-row: 1 / 3; }
+.routine-create { display: grid; gap: 13px; }
+.routine-create > * { min-width: 0; }
+.routine-create > button.primary-action { width: 100%; min-height: 40px; }
 .routine-create button:disabled { opacity: .45; }
 .routine-cards { display: grid; gap: 8px; padding: 10px 0 16px; }
 .routine-card { display: grid; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: white; }
@@ -1458,7 +1457,6 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .welcome-primary,
 .integration-modal footer button,
 .property-form > button,
-.routine-create button,
 .checklist-form button { border-radius: var(--radius-control); background: var(--ink); font-weight: 600; }
 .primary-action:hover:not(:disabled),
 .quick-capture button:hover:not(:disabled),
@@ -1688,10 +1686,7 @@ html[data-theme="dark"] .settings-danger-zone { background: color-mix(in srgb, v
   .okr-setup-fields { grid-template-columns: 1fr; }
   .database-actions button span { display: none; }
   .project-property-layout { grid-template-columns: 1fr 260px; }
-  .routine-toolbar { grid-template-columns: 1fr; }
-  .routine-create { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .routine-create textarea { grid-column: 1 / -1; }
-  .routine-create button { width: 100%; grid-column: auto; grid-row: auto; }
+  .routine-toolbar { flex-wrap: wrap; }
 }
 
 @media (max-width: 700px) {
@@ -1737,9 +1732,9 @@ html[data-theme="dark"] .settings-danger-zone { background: color-mix(in srgb, v
   .toast { bottom: calc(72px + env(safe-area-inset-bottom)); }
   .page-header { min-height: 58px; }
   .page-header h1 { font-size: 24px; }
-  .page-header:has(.task-page-actions) { align-items: stretch; flex-direction: column; gap: 12px; }
-  .task-page-actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .task-page-actions > button { min-height: 42px; }
+  .page-header:has(.page-create-actions) { align-items: stretch; flex-direction: column; gap: 12px; }
+  .page-create-actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .page-create-actions > button { min-height: 44px; }
   .okr-file-manager { width: 100vw; }
   .okr-document-header { grid-template-columns: 28px minmax(0, 1fr); }
   .okr-document-header > button { grid-column: 1 / -1; width: 100%; }
@@ -1768,8 +1763,7 @@ html[data-theme="dark"] .settings-danger-zone { background: color-mix(in srgb, v
   .cadence-switch { overflow-x: auto; max-width: 220px; }
   .quick-capture { margin-bottom: 20px; }
   .routine-toolbar { grid-template-columns: 1fr; gap: 7px; padding: 8px 0; }
-  .routine-create, .routine-guide-grid { grid-template-columns: 1fr; }
-  .routine-create button { width: 100%; }
+  .routine-guide-grid { grid-template-columns: 1fr; }
   .routine-card footer { align-items: stretch; flex-direction: column; }
   .routine-assignee { width: 100%; }
   .project-nudge-button { width: 100%; min-height: 44px; justify-content: center; }

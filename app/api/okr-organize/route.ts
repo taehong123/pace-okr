@@ -36,6 +36,7 @@ type OrganizedPlan = {
   routineTrigger: string;
   routinePlace: string;
   routineSteps: string;
+  routineCadence: "daily" | "weekly" | "monthly";
 };
 
 type OrganizedOkr = {
@@ -44,7 +45,7 @@ type OrganizedOkr = {
   plan: OrganizedPlan;
 };
 
-type ConversationMode = "okr" | "project" | "task" | "onboarding" | "coach";
+type ConversationMode = "okr" | "project" | "routine" | "task" | "onboarding" | "coach";
 
 const maxOutputTokens = 3200;
 
@@ -74,6 +75,7 @@ const okrSchema = {
         "routineTrigger",
         "routinePlace",
         "routineSteps",
+        "routineCadence",
       ],
       properties: {
         objectiveTitle: { type: "string" },
@@ -136,6 +138,7 @@ const okrSchema = {
         routineTrigger: { type: "string" },
         routinePlace: { type: "string" },
         routineSteps: { type: "string" },
+        routineCadence: { type: "string", enum: ["daily", "weekly", "monthly"] },
       },
     },
   },
@@ -161,10 +164,6 @@ export async function POST(request: Request) {
       : undefined;
     const currentPlan = sanitizeCurrentPlan(payload.plan, targetContext?.kind);
     if (!message) return Response.json({ error: "message is required" }, { status: 400 });
-    if (mode === "project" && !initiativeTitle) {
-      return Response.json({ error: "initiative context is required for project mode" }, { status: 400 });
-    }
-
     const runtime = env as RuntimeEnv;
     const apiKey = runtime.OPENAI_API_KEY;
     if (!apiKey) {
@@ -246,7 +245,7 @@ export async function POST(request: Request) {
 }
 
 function asConversationMode(value: unknown): ConversationMode {
-  return value === "project" || value === "task" || value === "onboarding" || value === "coach" ? value : "okr";
+  return value === "project" || value === "routine" || value === "task" || value === "onboarding" || value === "coach" ? value : "okr";
 }
 
 function sanitizeHistory(value: unknown) {
@@ -301,10 +300,13 @@ function systemInstruction(mode: ConversationMode) {
   const hierarchy = "Objective > Key Result > Initiative > Project > Task. Routine is independent and may contain Task.";
   const common = `You are the conversational assistant inside OKRPTR. Always answer in the user's language. Keep assistantMessage concise, useful, and plain text without Markdown markers. Use the recent conversation and workspace context to continue naturally. The hierarchy is ${hierarchy} Never invent specific metrics, commitments, owners, dates, or Tasks. Ask at most three concise questions when essential information is missing. Polish every supported title while preserving its meaning, numbers, dates, and proper nouns: an Objective is a concise desired change, a Key Result is a measurable outcome, and an Initiative is a concise strategic direction. Do not turn an activity into a Key Result. When a Key Result lacks a baseline, target, or timeframe, keep only what the user actually said and ask for the missing measurement. Never concatenate separate Key Results or Initiatives into one title.`;
   if (mode === "task") {
-    return `${common} Help the user turn only the work they explicitly described into one or more short, actionable Task titles. Put one Task per line in plan.tasks. Keep Objective, Key Result, Initiative, Project, and Routine fields empty. Do not invent work, dates, owners, Projects, or Routines. The UI will require the user to choose an existing Project or Routine before saving.`;
+    return `${common} Help the user turn only the work they explicitly described into one or more short, actionable Task titles. Put one Task per line in plan.tasks. Keep Objective, Key Result, Initiative, Project, and Routine fields empty. Do not invent work, dates, owners, Projects, or Routines. The user may choose an existing Project or Routine before saving; when they do not choose one, the server links the Task to General.`;
   }
   if (mode === "project") {
-    return `${common} Help plan the first execution below an existing Initiative. Keep objectiveTitle, keyResults, targetInitiatives, and unassignedInitiatives empty. Only put a concrete Project, explicitly stated Tasks, and explicitly stated Routine details into the plan. A Project needs a clear outcome and enough scope, timing, or ownership to distinguish it from the Initiative.`;
+    return `${common} Help the user define exactly one concrete Project. Keep Objective, Key Result, Initiative, and every Routine field empty. Only put a Project title and Tasks the user explicitly stated into the plan. Set taskParent to project when Tasks exist. A Project needs a clear outcome and enough scope, timing, or ownership to distinguish it from an Initiative. The UI will require the user to choose an existing Initiative before saving, so never invent or choose that parent.`;
+  }
+  if (mode === "routine") {
+    return `${common} Help the user define exactly one independent Routine. Keep Objective, Key Result, Initiative, and Project fields empty. Only put the Routine title, trigger point, place or tool, action steps, cadence, and Tasks the user explicitly stated into the plan. Set taskParent to routine when Tasks exist. Use daily when the user did not state a cadence. Never connect the Routine to an Initiative or Project.`;
   }
   if (mode === "onboarding") {
     return `${common} Teach OKR through a short guided conversation. Organize exactly one Objective with every distinct supported Key Result, and attach every Initiative only to the Key Result it clearly supports. If the user gives multiple Objective candidates, do not combine them: leave the OKR tree unchanged and ask which single Objective to use. Initiative is optional. Project is a later step and must stay empty until one Initiative is selected after this tree is saved.`;
@@ -312,7 +314,7 @@ function systemInstruction(mode: ConversationMode) {
   if (mode === "coach") {
     return `${common} Act as a context-aware OKR coach. Inspect the supplied hierarchy and focus item. Continue from the earliest useful gap: missing Key Result, missing Initiative, missing first Project, or an active blocker. For an Objective target, return every new Key Result in keyResults with its clearly attached Initiatives. For a Key Result target, return every new Initiative in targetInitiatives. For an Initiative target, only return Project details. When multiple parents are plausible, ask the user to choose instead of guessing.`;
   }
-  return `${common} Respond to greetings, product questions, general work questions, and factual questions directly. For casual or informational messages, leave every plan field empty and usually leave questions empty. When the user gives a real goal, organize exactly one Objective with every distinct Key Result and each Key Result's clearly related Initiatives. If an Initiative's parent is ambiguous, keep it in unassignedInitiatives rather than guessing. Project and Task are later steps after an Initiative is selected.`;
+  return `${common} Respond to greetings, product questions, general work questions, and factual questions directly. For casual or informational messages, leave every plan field empty and usually leave questions empty. When the user gives a real goal, organize exactly one Objective with every distinct Key Result and each Key Result's clearly related Initiatives. If an Initiative's parent is ambiguous, keep it in unassignedInitiatives rather than guessing. Project, Task, and Routine are separate later creation flows.`;
 }
 
 async function checkAiUsageLimit(runtime: RuntimeEnv, ownerId: string, userId: string, inputChars: number) {
@@ -431,12 +433,27 @@ function normalizeOrganized(value: OrganizedOkr, mode: ConversationMode, current
     routineTrigger: clean(proposed.routineTrigger) || current.routineTrigger,
     routinePlace: clean(proposed.routinePlace) || current.routinePlace,
     routineSteps: clean(proposed.routineSteps) || current.routineSteps,
+    routineCadence: asRoutineCadence(proposed.routineCadence) ?? current.routineCadence,
   };
   if (mode === "project") {
     plan.objectiveTitle = "";
     plan.keyResults = [];
     plan.targetInitiatives = [];
     plan.unassignedInitiatives = [];
+    plan.routineTitle = "";
+    plan.routineTrigger = "";
+    plan.routinePlace = "";
+    plan.routineSteps = "";
+    plan.routineCadence = "daily";
+    plan.taskParent = plan.tasks ? "project" : "";
+  }
+  if (mode === "routine") {
+    plan.objectiveTitle = "";
+    plan.keyResults = [];
+    plan.targetInitiatives = [];
+    plan.unassignedInitiatives = [];
+    plan.project = "";
+    plan.taskParent = plan.tasks ? "routine" : "";
   }
   if (mode === "task") {
     plan.objectiveTitle = "";
@@ -449,13 +466,34 @@ function normalizeOrganized(value: OrganizedOkr, mode: ConversationMode, current
     plan.routineTrigger = "";
     plan.routinePlace = "";
     plan.routineSteps = "";
+    plan.routineCadence = "daily";
+  }
+  if (mode === "okr" || mode === "onboarding") {
+    plan.project = "";
+    plan.tasks = "";
+    plan.taskParent = "";
+    plan.routineTitle = "";
+    plan.routineTrigger = "";
+    plan.routinePlace = "";
+    plan.routineSteps = "";
+    plan.routineCadence = "daily";
+  }
+  if (mode === "coach") {
+    plan.tasks = "";
+    plan.taskParent = "";
+    plan.routineTitle = "";
+    plan.routineTrigger = "";
+    plan.routinePlace = "";
+    plan.routineSteps = "";
+    plan.routineCadence = "daily";
+    if (targetKind !== "initiative") plan.project = "";
   }
   if (plan.taskParent !== "project" && plan.taskParent !== "routine") plan.taskParent = "";
   if (plan.taskParent === "project" && !plan.project) plan.taskParent = plan.routineTitle ? "routine" : "";
   if (plan.taskParent === "routine" && !plan.routineTitle) plan.taskParent = plan.project ? "project" : "";
   if (!plan.taskParent && plan.tasks) plan.taskParent = plan.routineTitle && !plan.project ? "routine" : plan.project ? "project" : "";
   return {
-    assistantMessage: clean(value.assistantMessage) || "말씀하신 내용을 OKR 초안으로 정리했습니다.",
+    assistantMessage: clean(value.assistantMessage) || (mode === "project" ? "말씀하신 내용을 Project 초안으로 정리했습니다." : mode === "routine" ? "말씀하신 내용을 Routine 초안으로 정리했습니다." : mode === "task" ? "말씀하신 내용을 Task 초안으로 정리했습니다." : "말씀하신 내용을 OKR 초안으로 정리했습니다."),
     questions: Array.isArray(value.questions) ? value.questions.map(clean).filter(Boolean).slice(0, 3) : [],
     plan,
   };
@@ -474,6 +512,7 @@ function emptyPlan(): OrganizedPlan {
     routineTrigger: "",
     routinePlace: "",
     routineSteps: "",
+    routineCadence: "daily",
   };
 }
 
@@ -492,6 +531,7 @@ function sanitizeCurrentPlan(value: unknown, targetKind?: string): OrganizedPlan
   plan.routineTrigger = clean(record.routineTrigger);
   plan.routinePlace = clean(record.routinePlace);
   plan.routineSteps = clean(record.routineSteps);
+  plan.routineCadence = asRoutineCadence(record.routineCadence) ?? "daily";
 
   const legacyKeyResult = clean(record.keyResult);
   const legacyInitiative = clean(record.initiative);
@@ -530,7 +570,7 @@ function sanitizeInitiatives(value: unknown) {
 }
 
 function mergeOkrTree(current: OrganizedPlan, proposed: OrganizedPlan, mode: ConversationMode, targetKind?: string) {
-  if (mode === "project" || mode === "task" || targetKind === "initiative") {
+  if (mode === "project" || mode === "routine" || mode === "task" || targetKind === "initiative") {
     return { objectiveTitle: "", keyResults: [], targetInitiatives: [], unassignedInitiatives: [] };
   }
 
@@ -674,4 +714,8 @@ function draftId(kind: "kr" | "initiative") {
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function asRoutineCadence(value: unknown): OrganizedPlan["routineCadence"] | null {
+  return value === "daily" || value === "weekly" || value === "monthly" ? value : null;
 }

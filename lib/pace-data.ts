@@ -3037,8 +3037,9 @@ export async function createLinkedTasks(
   if (titles.length > 50) throw new Error("At most 50 Tasks can be created at once");
 
   const projectId = input.projectId?.trim() || null;
-  const routineId = input.routineId?.trim() || null;
-  if (Boolean(projectId) === Boolean(routineId)) throw new Error("Tasks must be linked to exactly one Project or Routine");
+  let routineId = input.routineId?.trim() || null;
+  if (projectId && routineId) throw new Error("Tasks can be linked to only one Project or Routine");
+  if (!projectId && !routineId) routineId = (await ensureGeneralRoutine(ownerId)).id;
 
   let cycleId: string | null = null;
   if (projectId) {
@@ -3047,7 +3048,7 @@ export async function createLinkedTasks(
     cycleId = project.cycleId;
   } else if (routineId) {
     const routine = await getRoutine(ownerId, routineId);
-    if (!routine || !routine.active || routine.systemKey === GENERAL_ROUTINE_SYSTEM_KEY) throw new Error("Active Routine not found");
+    if (!routine || !routine.active) throw new Error("Active Routine not found");
   }
   await validateParent(ownerId, "task", projectId, routineId, cycleId);
 
@@ -3121,12 +3122,11 @@ export async function createItem(
   let routineId = input.routineId ?? null;
   const source = input.source ?? "web";
   if (kind === "task" && !parentId && !routineId) {
-    if (source === "web") throw new Error("Task must be linked to a Project or Routine");
     routineId = (await ensureGeneralRoutine(ownerId)).id;
   }
   if (kind === "task" && source === "web" && routineId) {
     const routine = await getRoutine(ownerId, routineId);
-    if (!routine || !routine.active || routine.systemKey === GENERAL_ROUTINE_SYSTEM_KEY) throw new Error("Web Tasks must use a Project or an active Routine");
+    if (!routine || !routine.active) throw new Error("Web Tasks must use an active Routine");
   }
   const defaultStatus = systemDefault("status");
   const status = input.status ?? (typeof defaultStatus === "string" && ITEM_STATUSES.includes(defaultStatus as ItemStatus) ? defaultStatus as ItemStatus : "todo");
@@ -3211,9 +3211,10 @@ export async function updateItem(
     if (normalizedPatch.parentId) normalizedPatch.routineId = null;
     if (normalizedPatch.routineId) normalizedPatch.parentId = null;
     const nextParentId = normalizedPatch.parentId === undefined ? current.parentId : normalizedPatch.parentId;
-    const nextRoutineId = normalizedPatch.routineId === undefined ? current.routineId : normalizedPatch.routineId;
+    let nextRoutineId = normalizedPatch.routineId === undefined ? current.routineId : normalizedPatch.routineId;
     if (!nextParentId && !nextRoutineId) {
-      throw new Error("Task must be linked to a Project or Routine");
+      nextRoutineId = (await ensureGeneralRoutine(ownerId)).id;
+      normalizedPatch.routineId = nextRoutineId;
     }
   }
 

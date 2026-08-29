@@ -104,6 +104,7 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean }
     if (url.pathname === "/api/project-templates") return json(route, { templates: [] });
     if (url.pathname === "/api/checklists") return json(route, { items: [] });
     if (url.pathname === "/api/recommendations") return json(route, { recommendations: [] });
+    if (url.pathname === "/api/routines" && request.method() === "GET") return json(route, { routines: [] });
     if (url.pathname === "/api/trash") return json(route, { items: [], cleanupRecords: [] });
     return json(route, {});
   });
@@ -133,7 +134,7 @@ test.describe("공통 오버레이", () => {
   });
 
   test("변경된 폼은 버리기 확인을 거친다", async ({ page }) => {
-    await page.getByRole("button", { name: "Project 추가" }).click();
+    await page.getByRole("button", { name: "직접 추가", exact: true }).click();
     const createDialog = page.getByRole("dialog", { name: "새 항목" });
     await createDialog.getByLabel("이름").fill("작성 중인 Project");
     await createDialog.getByRole("button", { name: "새 항목 닫기" }).click();
@@ -168,12 +169,48 @@ test("상세 URL과 뒤로가기가 UI 상태를 복원한다", async ({ page })
 test("저장 실패 시 가짜 Task나 허위 성공 메시지를 만들지 않는다", async ({ page }) => {
   await installApiMocks(page, { failItemCreate: true });
   await page.goto("/?view=inbox");
-  const capture = page.getByRole("textbox", { name: "미분류 Task에 할 일 추가" });
-  await capture.fill("서버에 저장되지 않은 Task");
-  await page.getByRole("button", { name: "추가" }).click();
-  await expect(page.getByRole("alert")).toContainText("저장하지 못했습니다");
-  await expect(capture).toHaveValue("서버에 저장되지 않은 Task");
+  await page.getByRole("button", { name: "직접 추가", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "새 항목" });
+  const title = dialog.getByLabel("이름");
+  await expect(dialog.getByLabel("연결 대상")).toHaveValue("");
+  await title.fill("서버에 저장되지 않은 Task");
+  await dialog.getByRole("button", { name: "만들기" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("서버 저장 실패");
+  await expect(title).toHaveValue("서버에 저장되지 않은 Task");
   await expect(page.getByRole("status")).toHaveCount(0);
+});
+
+test("Project·Task·Routine 추가 진입과 AI 도우미를 같은 구조로 제공한다", async ({ page, isMobile }) => {
+  await installApiMocks(page);
+  const flows = [
+    { view: "work", helper: "Project 도우미" },
+    { view: "inbox", helper: "Task 도우미" },
+    { view: "routines", helper: "Routine 도우미" },
+  ];
+
+  for (const flow of flows) {
+    await page.goto(`/?view=${flow.view}`);
+    const aiButton = page.getByRole("button", { name: "AI 대화로 추가", exact: true });
+    const directButton = page.getByRole("button", { name: "직접 추가", exact: true });
+    await expect(aiButton).toBeVisible();
+    await expect(directButton).toBeVisible();
+    if (isMobile) {
+      expect((await aiButton.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect((await directButton.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+    await aiButton.click();
+    await expect(page.getByRole("region", { name: flow.helper })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  }
+
+  await page.goto("/?view=routines");
+  await page.getByRole("button", { name: "직접 추가", exact: true }).click();
+  const routineDialog = page.getByRole("dialog", { name: "새 Routine" });
+  await expect(routineDialog.getByLabel("반복 주기")).toHaveValue("daily");
+  await expect(routineDialog.getByLabel("루틴 담당자")).toHaveValue("");
+  await expect(routineDialog.getByText("Initiative", { exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(routineDialog).toBeHidden();
 });
 
 test("모바일 Project 기본 보기는 카드이며 페이지가 가로로 넘치지 않는다", async ({ page, isMobile }) => {

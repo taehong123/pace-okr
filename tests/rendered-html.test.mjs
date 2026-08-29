@@ -195,12 +195,14 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /systemKey === "general"/);
   assert.doesNotMatch(page, /status: "inbox"|인박스에 저장|인박스에 추가/);
   assert.match(okrOrganizeRoute, /"onboarding".*"coach"/);
-  assert.match(okrOrganizeRoute, /initiative context is required for project mode/);
+  assert.doesNotMatch(okrOrganizeRoute, /initiative context is required for project mode/);
+  assert.match(okrOrganizeRoute, /UI will require the user to choose an existing Initiative before saving/);
   assert.match(okrOrganizeRoute, /Always answer in the user's language/);
   assert.match(okrOrganizeRoute, /leave every plan field empty/);
   assert.match(page, /팀 OKR/);
   assert.match(page, /개인 OKR/);
-  assert.match(page, /루틴부터/);
+  assert.doesNotMatch(page, /루틴부터/);
+  assert.match(page, /Routine 도우미/);
   assert.match(page, /브라우저 제어가 가능한 ChatGPT 대화/);
   assert.match(integrationRoute, /브라우저 컨트롤을 사용해 ChatGPT 설정 화면을 직접 열고/);
   assert.match(integrationRoute, /Authorization: Bearer <OKRPTR_ACCESS_TOKEN>/);
@@ -224,7 +226,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /연결 해제/);
   assert.match(page, /Objective → Key Result → Initiative → Project → Task \/ Routine → Task/);
   assert.match(page, /taskParent/);
-  assert.match(page, /routineId: taskUsesRoutine \? routineItem\?\.id : undefined/);
+  assert.match(page, /parentId: projectItem\.id/);
+  assert.match(page, /routineId: routine\.id/);
   assert.match(okrOrganizeRoute, /Routine is independent and may contain Task/);
   assert.match(okrOrganizeRoute, /Routine > Task is independent/);
   assert.match(okrOrganizeRoute, /Never concatenate separate Key Results or Initiatives/);
@@ -462,7 +465,7 @@ test("keeps the Task page as stable one-line rows with details in the side panel
   assert.match(styles, /\.task-detail-panel \{ width: min\(520px, 100vw\); \}/);
 });
 
-test("requires a Project or Routine for web Tasks and exposes direct bulk deletion", async () => {
+test("defaults unlinked web Tasks to General and exposes direct bulk deletion", async () => {
   const [page, styles, paceData, itemsRoute, organizeRoute] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -472,18 +475,40 @@ test("requires a Project or Routine for web Tasks and exposes direct bulk deleti
   ]);
 
   assert.match(page, /AI 대화로 추가/);
-  assert.match(page, /Project 또는 Routine 선택/);
+  assert.match(page, /미선택 시 General/);
   assert.match(page, /연결 끊긴 Task \{orphanedIds\.length\}개 선택/);
   assert.match(page, /task-selection-delete/);
   assert.doesNotMatch(page, /할 일을 입력하면 미분류 Task에 저장됩니다/);
   assert.match(styles, /\.task-selection-bar/);
-  assert.match(styles, /\.task-page-actions/);
-  assert.match(paceData, /Task must be linked to a Project or Routine/);
+  assert.match(styles, /\.page-create-actions/);
+  assert.match(paceData, /if \(!projectId && !routineId\) routineId = \(await ensureGeneralRoutine\(ownerId\)\)\.id/);
+  assert.match(paceData, /kind === "task" && !parentId && !routineId[\s\S]*?ensureGeneralRoutine\(ownerId\)/);
   assert.match(paceData, /export async function createLinkedTasks[\s\S]*?await d1\.batch/);
   assert.match(itemsRoute, /payload\.titles !== undefined/);
   assert.match(itemsRoute, /createLinkedTasks/);
   assert.match(organizeRoute, /mode === "task"/);
   assert.match(organizeRoute, /one or more short, actionable Task titles/);
+});
+
+test("uses distinct Project and Routine AI creation flows", async () => {
+  const [page, styles, organizeRoute] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/okr-organize/route.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.ok((page.match(/AI 대화로 추가/g) ?? []).length >= 3);
+  assert.match(page, /Project 도우미/);
+  assert.match(page, /Routine 도우미/);
+  assert.match(page, /상위 Initiative/);
+  assert.match(page, /Initiative 연결 없음/);
+  assert.match(page, /createOpen=\{routineCreateOpen\}/);
+  assert.match(styles, /\.page-create-actions > button[^}]*min-height: 36px/);
+  assert.match(styles, /\.page-create-actions > button \{ min-height: 44px/);
+  assert.match(organizeRoute, /"okr" \| "project" \| "routine" \| "task"/);
+  assert.match(organizeRoute, /if \(mode === "routine"\)/);
+  assert.match(organizeRoute, /Never connect the Routine to an Initiative or Project/);
+  assert.match(organizeRoute, /routineCadence/);
 });
 
 test("limits Project and Task deletion to creators and accountable assignees", async () => {

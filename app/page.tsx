@@ -238,13 +238,14 @@ type OnboardingPlan = {
   routineTrigger: string;
   routinePlace: string;
   routineSteps: string;
+  routineCadence: RoutineCadence;
 };
 
 type StringPlanField = "project" | "tasks" | "taskParent" | "routineTitle" | "routineTrigger" | "routinePlace" | "routineSteps";
 
 type OkrChatContext = {
   key: string;
-  entry: "onboarding" | "coach" | "create" | "task";
+  entry: "onboarding" | "coach" | "create" | "project" | "routine" | "task";
   cycleId: string;
   cycleName: string;
   initialMessage: string;
@@ -291,6 +292,7 @@ type PlanCreationResult = {
 
 type ProjectChatTarget = {
   cycleId: string | null;
+  cycleName: string;
   initiativeId: string;
   initiativeTitle: string;
 };
@@ -314,7 +316,7 @@ type OkrPlanApplyResult = {
 };
 
 type ChatMessage = { id: string; role: "user" | "assistant"; content: string };
-type ConversationMode = "okr" | "project" | "task" | "onboarding" | "coach";
+type ConversationMode = "okr" | "project" | "routine" | "task" | "onboarding" | "coach";
 
 type OrganizeError = {
   code?: string;
@@ -672,6 +674,7 @@ function WorkspaceApp() {
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [createItemOpen, setCreateItemOpen] = useState(false);
+  const [routineCreateOpen, setRoutineCreateOpen] = useState(false);
   const [createItemKind, setCreateItemKind] = useState<ItemKind>("task");
   const [createItemCycleId, setCreateItemCycleId] = useState<string | null>(null);
   const [okrChatContext, setOkrChatContext] = useState<OkrChatContext | null>(null);
@@ -860,6 +863,14 @@ function WorkspaceApp() {
   const createItemCycle = okrCycles.find((cycle) => cycle.id === createItemCycleId) ?? selectedOkrCycle;
   const visibleOkrCycles = okrCycles.filter((cycle) => visibleOkrCycleIds.includes(cycle.id));
   const displayedOkrCycles = visibleOkrCycles.length ? visibleOkrCycles : selectedOkrCycle ? [selectedOkrCycle] : [];
+  const projectChatTargets: ProjectChatTarget[] = activeItems
+    .filter((entry) => entry.kind === "initiative" && Boolean(entry.cycleId))
+    .map((entry) => ({
+      cycleId: entry.cycleId,
+      cycleName: okrCycles.find((cycle) => cycle.id === entry.cycleId)?.name ?? "OKR",
+      initiativeId: entry.id,
+      initiativeTitle: entry.title,
+    }));
   const okrViews = useMemo(() => {
     const views: Record<string, { items: OkrptrItem[]; objective?: OkrptrItem; depths: Record<string, number> }> = {};
     for (const cycle of okrCycles) {
@@ -1284,12 +1295,47 @@ function WorkspaceApp() {
     writeNavigation("home", null, null);
   }
 
+  function openProjectCreationChat(initialMessage = "") {
+    setCreateItemOpen(false);
+    setOkrChatContext({
+      key: `${currentWorkspace?.id ?? "workspace"}:project:${Date.now()}`,
+      entry: "project",
+      cycleId: selectedOkrCycle?.id ?? "",
+      cycleName: selectedOkrCycle?.name ?? "Project",
+      initialMessage: initialMessage.trim(),
+      sourceKind: "project",
+      target: null,
+      targetCandidates: [],
+    });
+    setSelectedProjectId(null);
+    setSelectedTaskId(null);
+    setActiveView("home");
+    writeNavigation("home", null, null);
+  }
+
+  function openRoutineCreationChat(initialMessage = "") {
+    setRoutineCreateOpen(false);
+    setOkrChatContext({
+      key: `${currentWorkspace?.id ?? "workspace"}:routine:${Date.now()}`,
+      entry: "routine",
+      cycleId: "",
+      cycleName: "Routine",
+      initialMessage: initialMessage.trim(),
+      target: null,
+      targetCandidates: [],
+    });
+    setSelectedProjectId(null);
+    setSelectedTaskId(null);
+    setActiveView("home");
+    writeNavigation("home", null, null);
+  }
+
   async function createTasksFromConversation(taskText: string, containerValue: string, assigneeMemberId: string | null) {
     const titles = taskText.split("\n").map((entry) => entry.trim()).filter(Boolean);
     const [containerKind, containerId] = containerValue.split(":", 2);
-    const container = taskContainerOptions.find((entry) => entry.kind === containerKind && entry.id === containerId);
+    const container = containerValue ? taskContainerOptions.find((entry) => entry.kind === containerKind && entry.id === containerId) : null;
     const project = containerKind === "project" ? executionItems.find((entry) => entry.id === containerId) : null;
-    if (!titles.length || !container || (containerKind !== "project" && containerKind !== "routine")) return false;
+    if (!titles.length || (containerValue && (!container || containerKind !== "project" && containerKind !== "routine"))) return false;
     try {
       const response = await fetch("/api/items", {
         method: "POST",
@@ -1297,9 +1343,9 @@ function WorkspaceApp() {
         body: JSON.stringify({
           titles,
           kind: "task",
-          cycleId: containerKind === "project" ? project?.cycleId ?? null : null,
-          parentId: containerKind === "project" ? containerId : null,
-          routineId: containerKind === "routine" ? containerId : null,
+          cycleId: container?.kind === "project" ? project?.cycleId ?? null : null,
+          parentId: container?.kind === "project" ? container.id : null,
+          routineId: container?.kind === "routine" ? container.id : null,
           source: "web",
           assigneeMemberId,
         }),
@@ -1310,7 +1356,7 @@ function WorkspaceApp() {
       setItems((current) => [...current, ...created]);
       setOkrChatContext(null);
       navigateView("inbox");
-      showNotice(`Task ${created.length}개를 연결해 만들었습니다.`);
+      showNotice(container ? `Task ${created.length}개를 연결해 만들었습니다.` : `Task ${created.length}개를 General에 만들었습니다.`);
       return true;
     } catch (error) {
       showNotice(error instanceof Error ? error.message : "Task를 만들지 못했습니다.", "error");
@@ -1455,16 +1501,15 @@ function WorkspaceApp() {
 
   async function createOnboardingPlan(plan: OnboardingPlan, targetCycleId: string | null = selectedOkrCycle?.id ?? null) {
     const objectiveTitle = plan.objectiveTitle.trim();
-    const routineTitle = plan.routineTitle.trim();
-    if (!objectiveTitle && !routineTitle) {
-      showNotice("Objective나 루틴 이름을 먼저 적어 주세요.");
+    if (!objectiveTitle) {
+      showNotice("Objective 이름을 먼저 적어 주세요.");
       return null;
     }
-    if (objectiveTitle && (!plan.keyResults.length || plan.keyResults.some((entry) => !entry.title.trim()))) {
+    if (!plan.keyResults.length || plan.keyResults.some((entry) => !entry.title.trim())) {
       showNotice("Objective에는 하나 이상의 Key Result가 필요합니다.");
       return null;
     }
-    if (objectiveTitle && !targetCycleId) {
+    if (!targetCycleId) {
       showNotice("OKR 주기를 먼저 선택해 주세요.");
       return null;
     }
@@ -1476,54 +1521,9 @@ function WorkspaceApp() {
       showNotice("KR 미지정 Initiative의 연결 대상을 먼저 선택해 주세요.");
       return null;
     }
-    const createdItems: OkrptrItem[] = [];
-    async function createPlannedItem(body: Record<string, unknown>) {
-      const response = await fetch("/api/items", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) throw new Error("item");
-      const data = await response.json() as { item: OkrptrItem };
-      createdItems.push(data.item);
-      return data.item;
-    }
-    async function createPlannedRoutine() {
-      if (!routineTitle) return null;
-      const response = await fetch("/api/routines", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: routineTitle,
-          triggerPoint: plan.routineTrigger,
-          actionPlace: plan.routinePlace,
-          actionSteps: plan.routineSteps,
-          cadence: "daily",
-          assigneeMemberId: currentTeamMember?.id ?? null,
-        }),
-      });
-      if (!response.ok) throw new Error("routine");
-      const data = await response.json() as { routine: Routine };
-      setRoutines((current) => [...current, data.routine]);
-      return data.routine;
-    }
     try {
-      const okrResult = objectiveTitle && targetCycleId
-        ? await applyAssistantOkrPlan(plan, targetCycleId, null, null)
-        : null;
-      if (objectiveTitle && !okrResult) return null;
-      const routineItem = await createPlannedRoutine();
-      const taskTitles = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean);
-      for (const taskTitle of taskTitles) {
-        await createPlannedItem({
-          title: taskTitle,
-          kind: "task",
-          cycleId: null,
-          routineId: routineItem?.id,
-          status: "todo",
-          assigneeMemberId: currentTeamMember?.id,
-        });
-      }
+      const okrResult = await applyAssistantOkrPlan(plan, targetCycleId, null, null);
+      if (!okrResult) return null;
       if (workspaceRules) {
         const response = await fetch("/api/workspace-rules", {
           method: "PUT",
@@ -1535,14 +1535,12 @@ function WorkspaceApp() {
           setWorkspaceRules(data.rules);
         }
       }
-      setItems((current) => [...current, ...createdItems]);
-      if (routineTitle) showNotice("루틴을 만들었습니다.");
       return {
         cycleId: targetCycleId,
-        items: [...(okrResult?.items ?? []), ...createdItems],
-        keyResultIds: okrResult?.keyResultIds ?? [],
-        initiativeIds: okrResult?.initiativeIds ?? [],
-        projectIds: okrResult?.projectIds ?? [],
+        items: okrResult.items,
+        keyResultIds: okrResult.keyResultIds,
+        initiativeIds: okrResult.initiativeIds,
+        projectIds: okrResult.projectIds,
       } satisfies PlanCreationResult;
     } catch {
       showNotice("OKR 구성을 만들지 못했습니다.");
@@ -1590,86 +1588,126 @@ function WorkspaceApp() {
     }
   }
 
-  async function createProjectFromConversation(plan: OnboardingPlan, target: ProjectChatTarget) {
+  async function createProjectFromConversation(plan: OnboardingPlan, target: ProjectChatTarget, driMemberId: string | null) {
     const projectTitle = plan.project.trim();
-    const routineTitle = plan.routineTitle.trim();
-    if (!projectTitle && !routineTitle) {
-      showNotice("Project 또는 Routine 이름을 먼저 정리해 주세요.");
+    if (!projectTitle) {
+      showNotice("Project 이름을 먼저 정리해 주세요.");
       return false;
     }
-    const createdItems: OkrptrItem[] = [];
     try {
-      let projectItem: OkrptrItem | null = null;
-      if (projectTitle) {
-        const projectResponse = await fetch("/api/items", {
+      const projectResponse = await fetch("/api/items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: projectTitle,
+          kind: "project",
+          cycleId: target.cycleId,
+          parentId: target.initiativeId,
+          status: "in_progress",
+          driMemberId: driMemberId || currentTeamMember?.id || null,
+        }),
+      });
+      const projectData = await projectResponse.json().catch(() => ({})) as { item?: OkrptrItem; error?: string };
+      if (!projectResponse.ok || !projectData.item) throw new Error(projectData.error ?? "Project를 만들지 못했습니다.");
+      const projectItem = projectData.item;
+      const taskTitles = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean);
+      let createdTasks: OkrptrItem[] = [];
+      if (taskTitles.length) {
+        const taskResponse = await fetch("/api/items", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            title: projectTitle,
-            kind: "project",
-            cycleId: target.cycleId,
-            parentId: target.initiativeId,
-            status: "in_progress",
-            driMemberId: currentTeamMember?.id,
-          }),
-        });
-        if (!projectResponse.ok) throw new Error("project");
-        const projectData = await projectResponse.json() as { item: OkrptrItem };
-        projectItem = projectData.item;
-        createdItems.push(projectItem);
-      }
-      let routineItem: Routine | null = null;
-      if (routineTitle) {
-        const response = await fetch("/api/routines", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: routineTitle,
-            triggerPoint: plan.routineTrigger,
-            actionPlace: plan.routinePlace,
-            actionSteps: plan.routineSteps,
-            cadence: "daily",
-            assigneeMemberId: currentTeamMember?.id ?? null,
-          }),
-        });
-        if (!response.ok) throw new Error("routine");
-        const data = await response.json() as { routine: Routine };
-        routineItem = data.routine;
-        setRoutines((current) => [...current, data.routine]);
-      }
-      const taskUsesRoutine = Boolean(routineItem) && (plan.taskParent === "routine" || !projectItem);
-      for (const title of plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
-        const response = await fetch("/api/items", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title,
+            titles: taskTitles,
             kind: "task",
-            cycleId: taskUsesRoutine ? null : target.cycleId,
-            parentId: taskUsesRoutine ? undefined : projectItem?.id,
-            routineId: taskUsesRoutine ? routineItem?.id : undefined,
-            status: "todo",
-            assigneeMemberId: currentTeamMember?.id,
+            parentId: projectItem.id,
           }),
         });
-        if (!response.ok) throw new Error("task");
-        const data = await response.json() as { item: OkrptrItem };
-        createdItems.push(data.item);
+        const taskData = await taskResponse.json().catch(() => ({})) as { items?: OkrptrItem[]; error?: string };
+        if (!taskResponse.ok || !taskData.items) {
+          setItems((current) => [...current, projectItem]);
+          setOkrChatContext(null);
+          setSelectedProjectId(null);
+          setSelectedTaskId(null);
+          if (target.cycleId) {
+            setSelectedOkrCycleId(target.cycleId);
+            setVisibleOkrCycleIds((current) => current.includes(target.cycleId!) ? current : [target.cycleId!, ...current]);
+          }
+          setProjectTab("list");
+          navigateView("work");
+          showNotice("Project는 만들었지만 하위 Task는 저장하지 못했습니다. Project에서 다시 추가해 주세요.", "error");
+          return true;
+        }
+        createdTasks = taskData.items;
       }
-      setItems((current) => [...current, ...createdItems]);
+      setItems((current) => [...current, projectItem, ...createdTasks]);
       setOkrChatContext(null);
       setSelectedProjectId(null);
       setSelectedTaskId(null);
-      if (projectItem) {
-        setProjectTab("list");
-        navigateView("work");
-      } else {
-        navigateView("routines");
+      if (target.cycleId) {
+        setSelectedOkrCycleId(target.cycleId);
+        setVisibleOkrCycleIds((current) => current.includes(target.cycleId!) ? current : [target.cycleId!, ...current]);
       }
-      showNotice(projectItem ? "첫 Project를 만들었습니다." : "첫 Routine을 만들었습니다.");
+      setProjectTab("list");
+      navigateView("work");
+      showNotice(createdTasks.length ? `Project와 하위 Task ${createdTasks.length}개를 만들었습니다.` : "Project를 만들었습니다.");
       return true;
-    } catch {
-      showNotice("실행 구성을 만들지 못했습니다.");
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "Project를 만들지 못했습니다.", "error");
+      return false;
+    }
+  }
+
+  async function createRoutineFromConversation(plan: OnboardingPlan, assigneeMemberId: string | null) {
+    const routineTitle = plan.routineTitle.trim();
+    if (!routineTitle) {
+      showNotice("Routine 이름을 먼저 정리해 주세요.");
+      return false;
+    }
+    try {
+      const response = await fetch("/api/routines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: routineTitle,
+          triggerPoint: plan.routineTrigger,
+          actionPlace: plan.routinePlace,
+          actionSteps: plan.routineSteps,
+          cadence: plan.routineCadence,
+          assigneeMemberId,
+        }),
+      });
+      const data = await response.json().catch(() => ({})) as { routine?: Routine; error?: string };
+      if (!response.ok || !data.routine) throw new Error(data.error ?? "Routine을 만들지 못했습니다.");
+      const routine = data.routine;
+      setRoutines((current) => [...current, routine]);
+      const taskTitles = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean);
+      let createdTasks: OkrptrItem[] = [];
+      if (taskTitles.length) {
+        const taskResponse = await fetch("/api/items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            titles: taskTitles,
+            kind: "task",
+            routineId: routine.id,
+          }),
+        });
+        const taskData = await taskResponse.json().catch(() => ({})) as { items?: OkrptrItem[]; error?: string };
+        if (!taskResponse.ok || !taskData.items) {
+          setOkrChatContext(null);
+          navigateView("routines");
+          showNotice("Routine은 만들었지만 하위 Task는 저장하지 못했습니다. Routine에서 다시 추가해 주세요.", "error");
+          return true;
+        }
+        createdTasks = taskData.items;
+        setItems((current) => [...current, ...createdTasks]);
+      }
+      setOkrChatContext(null);
+      navigateView("routines");
+      showNotice(createdTasks.length ? `Routine과 하위 Task ${createdTasks.length}개를 만들었습니다.` : "Routine을 만들었습니다.");
+      return true;
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "Routine을 만들지 못했습니다.", "error");
       return false;
     }
   }
@@ -1842,9 +1880,11 @@ function WorkspaceApp() {
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setOkrListOpen(true)}><Archive size={14} />목록보기</button>
             ) : activeView === "inbox" ? (
-              <div className="task-page-actions"><button onClick={() => openTaskCreationChat()}><Bot size={14} />AI 대화로 추가</button><button className="primary-action" onClick={() => openCreateItem("task", null)}><Plus size={14} />Task 추가</button></div>
+              <div className="page-create-actions"><button onClick={() => openTaskCreationChat()}><Bot size={14} />AI 대화로 추가</button><button className="primary-action" onClick={() => openCreateItem("task", null)}><Plus size={14} />직접 추가</button></div>
             ) : activeView === "work" && projectTab === "list" ? (
-              <button className="primary-action" onClick={() => openCreateItem("project")}><Plus size={14} />Project 추가</button>
+              <div className="page-create-actions"><button onClick={() => openProjectCreationChat()}><Bot size={14} />AI 대화로 추가</button><button className="primary-action" onClick={() => openCreateItem("project")}><Plus size={14} />직접 추가</button></div>
+            ) : activeView === "routines" ? (
+              <div className="page-create-actions"><button onClick={() => openRoutineCreationChat()}><Bot size={14} />AI 대화로 추가</button><button className="primary-action" onClick={() => setRoutineCreateOpen(true)}><Plus size={14} />직접 추가</button></div>
             ) : activeView === "reviews" ? (
               <CadenceSwitch value={cadence} onChange={setCadence} />
             ) : null}
@@ -1866,14 +1906,17 @@ function WorkspaceApp() {
               key={okrChatContext?.key ?? `${currentWorkspace?.id ?? "workspace"}:default`}
               onCreatePlan={createOnboardingPlan}
               onCreateProject={createProjectFromConversation}
+              onCreateRoutine={createRoutineFromConversation}
               onApplyOkrPlan={applyAssistantOkrPlan}
               onCreateTasks={createTasksFromConversation}
-              onFinish={() => { const destination = okrChatContext?.entry === "task" ? "inbox" : "okr"; setOkrChatContext(null); navigateView(destination); }}
+              onFinish={() => { const destination = okrChatContext?.entry === "task" ? "inbox" : okrChatContext?.entry === "project" ? "work" : okrChatContext?.entry === "routine" ? "routines" : "okr"; setOkrChatContext(null); navigateView(destination); }}
+              onNavigateToOkr={() => { setOkrChatContext(null); navigateView("okr"); }}
               context={okrChatContext}
               workspaceContext={assistantWorkspaceContext}
               canWrite={canWriteWorkspace}
               members={teamMembers.filter((member) => member.status === "active")}
               taskContainers={taskContainerOptions}
+              projectTargets={projectChatTargets}
               defaultDriMemberId={currentTeamMember?.id ?? null}
               defaultCycleId={selectedOkrCycle?.id ?? null}
             />
@@ -1940,7 +1983,7 @@ function WorkspaceApp() {
               {projectTab === "templates" && <ProjectTemplateManager readOnly={currentWorkspace?.role === "viewer"} onNotice={showNotice} />}
             </section>
           )}
-          {activeView === "routines" && <RoutineView teamMembers={teamMembers} onNotice={showNotice} onRoutinesChange={setRoutines} />}
+          {activeView === "routines" && <RoutineView teamMembers={teamMembers} onNotice={showNotice} onRoutinesChange={setRoutines} createOpen={routineCreateOpen} onCreateClose={() => setRoutineCreateOpen(false)} onCreateWithChat={openRoutineCreationChat} />}
           {activeView === "okr" && (
             <section className="okr-workbench">
               <section className="okr-document">
@@ -2062,7 +2105,7 @@ function WorkspaceApp() {
       )}
       {teamPanelOpen && <TeamPanel initialTeam={teamData} initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onMembersChange={(members) => setTeamData((current) => current ? { ...current, members } : current)} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
       {selectedOkrItem && <OkrItemEditPanel item={selectedOkrItem} items={activeItems} onClose={() => setSelectedOkrItemId(null)} onSave={(patch) => patchItem(selectedOkrItem.id, patch)} />}
-      {createItemOpen && <CreateItemPanel initialKind={createItemKind} cycleId={createItemCycle?.id ?? null} items={items} routines={routines} properties={properties} teamMembers={teamMembers} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} onCreateWithChat={activeView === "inbox" && createItemKind === "task" ? ({ title }) => openTaskCreationChat(title) : activeView === "okr" && createItemCycle ? ({ kind, title }) => openOkrCreationChat(createItemCycle, kind, title) : undefined} />}
+      {createItemOpen && <CreateItemPanel initialKind={createItemKind} cycleId={createItemCycle?.id ?? null} items={items} routines={routines} properties={properties} teamMembers={teamMembers} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} onCreateWithChat={activeView === "inbox" && createItemKind === "task" ? ({ title }) => openTaskCreationChat(title) : activeView === "work" && createItemKind === "project" ? ({ title }) => openProjectCreationChat(title) : activeView === "okr" && createItemCycle ? ({ kind, title }) => openOkrCreationChat(createItemCycle, kind, title) : undefined} />}
       {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setPropertyValues({}); setOkrCycles([cycle]); setVisibleOkrCycleIds([cycle.id]); setSelectedTaskId(null); navigateView("trash"); setCleanupOpen(false); showNotice("OKR 데이터를 휴지통에 보관하고 정리했습니다."); }} onNotice={showNotice} />}
       {selectedTask && (
         <TaskDetailPanel
@@ -2823,7 +2866,10 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
 
   function saveContainer(value: string) {
     const [kind, id] = value.split(":", 2);
-    if (!id) return;
+    if (!id) {
+      void onPatch({ parentId: null, routineId: null, cycleId: null });
+      return;
+    }
     if (kind === "project") {
       const nextProject = projects.find((entry) => entry.id === id);
       if (nextProject) void onPatch({ parentId: nextProject.id, routineId: null, cycleId: nextProject.cycleId });
@@ -2903,7 +2949,7 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
           <label><span>우선순위</span><select className={`priority-${task.priority}`} value={task.priority} onChange={(event) => void onPatch({ priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
           <label><span>기한</span><input type="date" value={task.dueDate ?? ""} onChange={(event) => void onPatch({ dueDate: event.target.value || null })} /></label>
           <label className="task-progress-field"><span>진행률</span><div><input type="range" min="0" max="100" step="5" value={task.progress} onChange={(event) => void onPatch({ progress: Number(event.target.value) })} /><b>{task.progress}%</b></div></label>
-          <label className="task-container-field"><span>연결 대상</span><select value={taskContainerValue} onChange={(event) => saveContainer(event.target.value)}><option value="" disabled>Project 또는 Routine 선택</option><optgroup label="Project">{projects.map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
+          <label className="task-container-field"><span>연결 대상</span><select value={taskContainerValue} onChange={(event) => saveContainer(event.target.value)}><option value="">General</option><optgroup label="Project">{projects.map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
         </section>
         {teamMembers.length > 0 && <section className="task-assignee-editor"><MemberMentionPicker label="담당자" members={teamMembers} selectedIds={assigneeIds} onChange={(ids) => void saveAssignee(ids)} placeholder="@실명으로 찾기" maxSelected={1} /></section>}
         <section className="task-lineage">
@@ -3191,7 +3237,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!title.trim() || saving || (kind === "task" ? !taskContainer : kind !== "objective" && !parentId)) return;
+    if (!title.trim() || saving || (kind !== "task" && kind !== "objective" && !parentId)) return;
     setSaving(true);
     setError("");
     const routineId = kind === "task" && taskContainer.startsWith("routine:") ? taskContainer.slice(8) : null;
@@ -3242,9 +3288,9 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
         <form className="property-form create-item-form" onSubmit={submit}>
           <label><span>유형</span><select value={kind} onChange={(event) => { setKind(event.target.value as ItemKind); setParentId(""); setTaskContainer(""); }} disabled={initialKind === "project"}>{(["objective", "key_result", "initiative", "project", "task"] as ItemKind[]).map((entry) => <option value={entry} key={entry}>{kindLabel(entry)}</option>)}</select></label>
           <label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-          {onCreateWithChat && <div className="create-chat-nudge"><div><Bot size={15} /><span><b>대화로 정리할까요?</b><small>{kind === "task" ? "할 일을 말하면 문구를 다듬고 연결 대상을 고릅니다." : "말로 설명하면 OKR 초안을 함께 정리해드려요."}</small></span></div><button type="button" onClick={() => onCreateWithChat({ kind, title })}>AI 대화로 추가<ChevronRight size={13} /></button></div>}
+          {onCreateWithChat && <div className="create-chat-nudge"><div><Bot size={15} /><span><b>대화로 정리할까요?</b><small>{kind === "task" ? "할 일을 다듬고, 연결 대상을 고르지 않으면 General에 저장합니다." : kind === "project" ? "결과와 범위를 말하면 Project 초안을 정리합니다." : "말로 설명하면 OKR 초안을 함께 정리해드려요."}</small></span></div><button type="button" onClick={() => onCreateWithChat({ kind, title })}>AI 대화로 추가<ChevronRight size={13} /></button></div>}
           {kind === "task" ? (
-            <label><span>연결 대상</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)} required><option value="">Project 또는 Routine 선택</option><optgroup label="Project">{items.filter((entry) => entry.kind === "project" && !entry.archivedAt).map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
+            <label><span>연결 대상</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">미선택 시 General</option><optgroup label="Project">{items.filter((entry) => entry.kind === "project" && !entry.archivedAt).map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
           ) : parentKind && (
             <label><span>상위 {kindLabel(parentKind)}</span><select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">선택</option>{parentOptions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>
           )}
@@ -3272,7 +3318,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
             <MemberMentionPicker label="담당자" members={teamMembers} selectedIds={taskAssigneeIds} onChange={setTaskAssigneeIds} placeholder="@실명으로 찾기" maxSelected={1} />
           )}
           {error && <p className="inline-error" role="alert">{error}</p>}
-          <button disabled={!title.trim() || saving || (kind === "task" && !taskContainer)}>{saving ? "저장 중" : "만들기"}</button>
+          <button disabled={!title.trim() || saving}>{saving ? "저장 중" : "만들기"}</button>
         </form>
       </aside>}
     </OverlayDialog>
@@ -3291,7 +3337,7 @@ function CreatePropertyField({ property, value, members, onChange }: { property:
   return <label><span>{property.name}</span><input type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => onChange(property, event.target.value)} /></label>;
 }
 
-function RoutineView({ teamMembers, onNotice, onRoutinesChange }: { teamMembers: TeamMember[]; onNotice: (message: string) => void; onRoutinesChange: (routines: Routine[]) => void }) {
+function RoutineView({ teamMembers, onNotice, onRoutinesChange, createOpen, onCreateClose, onCreateWithChat }: { teamMembers: TeamMember[]; onNotice: (message: string) => void; onRoutinesChange: (routines: Routine[]) => void; createOpen: boolean; onCreateClose: () => void; onCreateWithChat: (initialMessage?: string) => void }) {
   const confirmAction = useAppConfirm();
   const [date, setDate] = useState(localDate());
   const [rows, setRows] = useState<Routine[] | null>(null);
@@ -3311,7 +3357,7 @@ function RoutineView({ teamMembers, onNotice, onRoutinesChange }: { teamMembers:
     let active = true;
     fetch(`/api/routines?date=${date}`)
       .then(async (response) => response.ok ? response.json() as Promise<{ routines: Routine[] }> : Promise.reject())
-      .then((data) => { if (active) { setRows(data.routines.filter((routine) => routine.systemKey !== "general")); onRoutinesChange(data.routines); } })
+      .then((data) => { if (active) { setRows(data.routines); onRoutinesChange(data.routines); } })
       .catch(() => { if (active) setLoadError(true); });
     return () => { active = false; };
   }, [date, loadAttempt, onRoutinesChange]);
@@ -3339,6 +3385,8 @@ function RoutineView({ teamMembers, onNotice, onRoutinesChange }: { teamMembers:
       setActionPlace("");
       setActionSteps("");
       setAssigneeMemberId("");
+      setCadence("daily");
+      onCreateClose();
       onNotice("루틴을 추가했습니다.");
     } catch (createError) {
       onNotice(createError instanceof Error ? createError.message : "루틴을 추가하지 못했습니다.");
@@ -3477,20 +3525,13 @@ function RoutineView({ teamMembers, onNotice, onRoutinesChange }: { teamMembers:
     });
   }
 
-  return (
+  const createDirty = Boolean(title.trim() || description.trim() || triggerPoint.trim() || actionPlace.trim() || actionSteps.trim() || cadence !== "daily" || assigneeMemberId);
+
+  return (<>
     <section className="routine-section">
       <div className="routine-toolbar">
         <label><CalendarDays size={14} /><input type="date" value={date} onChange={(event) => { setRows(null); setLoadError(false); setDate(event.target.value); }} /></label>
-        <form className="routine-create" onSubmit={create}>
-          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="루틴 이름" aria-label="루틴 이름" />
-          <select value={cadence} onChange={(event) => setCadence(event.target.value as RoutineCadence)} aria-label="반복 주기"><option value="daily">매일</option><option value="weekly">매주</option><option value="monthly">매월</option></select>
-          <input value={triggerPoint} onChange={(event) => setTriggerPoint(event.target.value)} placeholder="트리거 포인트" aria-label="트리거 포인트" />
-          <input value={actionPlace} onChange={(event) => setActionPlace(event.target.value)} placeholder="어디서" aria-label="어디서 실행" />
-          <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="목적/메모" aria-label="루틴 목적" />
-          <select value={assigneeMemberId} onChange={(event) => setAssigneeMemberId(event.target.value)} aria-label="루틴 담당자"><option value="">담당자 없음</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select>
-          <textarea value={actionSteps} onChange={(event) => setActionSteps(event.target.value)} placeholder="무엇을 어떻게 할지" aria-label="실행 방법" rows={2} />
-          <button disabled={!title.trim() || saving} aria-label="루틴 추가" title="루틴 추가"><Plus size={14} /></button>
-        </form>
+        <p>반복 실행 날짜와 오늘의 완료 상태를 확인합니다.</p>
       </div>
       <div className="routine-cards">
         {loadError ? <AsyncState icon={AlertTriangle} title="루틴을 불러오지 못했습니다" detail="잠시 후 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => { setRows(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} /> : rows === null ? <AsyncState icon={LoaderCircle} title="루틴을 불러오는 중입니다" loading /> : rows.length ? rows.map((routine) => {
@@ -3518,7 +3559,23 @@ function RoutineView({ teamMembers, onNotice, onRoutinesChange }: { teamMembers:
         }) : <EmptyState icon={Repeat2} title="등록된 루틴이 없습니다" />}
       </div>
     </section>
-  );
+    {createOpen && <OverlayDialog title="새 Routine" variant="drawer" dirty={createDirty} initialFocus="input" onRequestClose={onCreateClose}>
+      {(requestClose) => <aside className="property-panel routine-create-panel">
+        <header><div><h2>새 Routine</h2><p>OKR과 독립된 반복 실행을 추가합니다.</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="새 Routine 닫기" title="새 Routine 닫기"><X size={17} /></button></header>
+        <form className="property-form routine-create" onSubmit={create}>
+          <label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 매일 고객 피드백 확인" aria-label="루틴 이름" /></label>
+          <div className="create-chat-nudge"><div><Bot size={15} /><span><b>대화로 정리할까요?</b><small>반복할 일을 말하면 트리거와 실행 방법을 정리합니다.</small></span></div><button type="button" onClick={() => onCreateWithChat(title)}>AI 대화로 추가<ChevronRight size={13} /></button></div>
+          <label><span>반복 주기</span><select value={cadence} onChange={(event) => setCadence(event.target.value as RoutineCadence)} aria-label="반복 주기"><option value="daily">매일</option><option value="weekly">매주</option><option value="monthly">매월</option></select></label>
+          <label><span>트리거 포인트</span><input value={triggerPoint} onChange={(event) => setTriggerPoint(event.target.value)} placeholder="예: 오전 9시" aria-label="트리거 포인트" /></label>
+          <label><span>어디서</span><input value={actionPlace} onChange={(event) => setActionPlace(event.target.value)} placeholder="장소 또는 도구" aria-label="어디서 실행" /></label>
+          <label><span>목적/메모</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="왜 반복하는지" aria-label="루틴 목적" /></label>
+          <label><span>담당자</span><select value={assigneeMemberId} onChange={(event) => setAssigneeMemberId(event.target.value)} aria-label="루틴 담당자"><option value="">담당자 없음</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>
+          <label><span>무엇을 어떻게</span><textarea value={actionSteps} onChange={(event) => setActionSteps(event.target.value)} placeholder="실행 순서와 완료 기준" aria-label="실행 방법" rows={5} /></label>
+          <button className="primary-action" disabled={!title.trim() || saving}>{saving ? "추가 중" : "Routine 추가"}</button>
+        </form>
+      </aside>}
+    </OverlayDialog>}
+  </>);
 }
 
 function MyWorkView({ items, routines, currentMember, onOpenProject, onOpenTask, onRoutinesChange, onNotice }: {
@@ -3656,38 +3713,44 @@ function RecommendationsView({ items, onOpenTask, onOpenProject, onNavigate }: {
   return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{row.itemIds.length}개 항목 · 우선순위 {row.score}</small></div><button aria-label={`${row.title} 관련 항목 열기`} title="관련 항목 열기" onClick={() => openRecommendation(row)}><ChevronRight size={15} /></button></article>)}</section>;
 }
 
-function HomeView({ onCreatePlan, onCreateProject, onApplyOkrPlan, onCreateTasks, onFinish, context, workspaceContext, canWrite, members, taskContainers, defaultDriMemberId, defaultCycleId }: {
+function HomeView({ onCreatePlan, onCreateProject, onCreateRoutine, onApplyOkrPlan, onCreateTasks, onFinish, onNavigateToOkr, context, workspaceContext, canWrite, members, taskContainers, projectTargets, defaultDriMemberId, defaultCycleId }: {
   onCreatePlan: (plan: OnboardingPlan, cycleId: string | null) => Promise<PlanCreationResult | null>;
-  onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget) => Promise<boolean>;
+  onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget, driMemberId: string | null) => Promise<boolean>;
+  onCreateRoutine: (plan: OnboardingPlan, assigneeMemberId: string | null) => Promise<boolean>;
   onApplyOkrPlan: (plan: OnboardingPlan, cycleId: string, target: OkrPlanTarget | null, driMemberId: string | null) => Promise<OkrPlanApplyResult | null>;
   onCreateTasks: (taskText: string, containerValue: string, assigneeMemberId: string | null) => Promise<boolean>;
   onFinish: () => void;
+  onNavigateToOkr: () => void;
   context: OkrChatContext | null;
   workspaceContext: AssistantWorkspaceContext;
   canWrite: boolean;
   members: TeamMember[];
   taskContainers: TaskContainerOption[];
+  projectTargets: ProjectChatTarget[];
   defaultDriMemberId: string | null;
   defaultCycleId: string | null;
 }) {
   return (
     <div className="home-layout">
-      <HomeOkrChat onCreate={onCreatePlan} onCreateProject={onCreateProject} onApplyOkrPlan={onApplyOkrPlan} onCreateTasks={onCreateTasks} onFinish={onFinish} context={context} workspaceContext={workspaceContext} canWrite={canWrite} members={members} taskContainers={taskContainers} defaultDriMemberId={defaultDriMemberId} defaultCycleId={defaultCycleId} />
+      <HomeOkrChat onCreate={onCreatePlan} onCreateProject={onCreateProject} onCreateRoutine={onCreateRoutine} onApplyOkrPlan={onApplyOkrPlan} onCreateTasks={onCreateTasks} onFinish={onFinish} onNavigateToOkr={onNavigateToOkr} context={context} workspaceContext={workspaceContext} canWrite={canWrite} members={members} taskContainers={taskContainers} projectTargets={projectTargets} defaultDriMemberId={defaultDriMemberId} defaultCycleId={defaultCycleId} />
     </div>
   );
 }
 
-function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onCreateTasks, onFinish, context, workspaceContext, canWrite, members, taskContainers, defaultDriMemberId, defaultCycleId }: {
+function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPlan, onCreateTasks, onFinish, onNavigateToOkr, context, workspaceContext, canWrite, members, taskContainers, projectTargets, defaultDriMemberId, defaultCycleId }: {
   onCreate: (plan: OnboardingPlan, cycleId: string | null) => Promise<PlanCreationResult | null>;
-  onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget) => Promise<boolean>;
+  onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget, driMemberId: string | null) => Promise<boolean>;
+  onCreateRoutine: (plan: OnboardingPlan, assigneeMemberId: string | null) => Promise<boolean>;
   onApplyOkrPlan: (plan: OnboardingPlan, cycleId: string, target: OkrPlanTarget | null, driMemberId: string | null) => Promise<OkrPlanApplyResult | null>;
   onCreateTasks: (taskText: string, containerValue: string, assigneeMemberId: string | null) => Promise<boolean>;
   onFinish: () => void;
+  onNavigateToOkr: () => void;
   context: OkrChatContext | null;
   workspaceContext: AssistantWorkspaceContext;
   canWrite: boolean;
   members: TeamMember[];
   taskContainers: TaskContainerOption[];
+  projectTargets: ProjectChatTarget[];
   defaultDriMemberId: string | null;
   defaultCycleId: string | null;
 }) {
@@ -3703,6 +3766,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onCreateTasks,
     routineTrigger: "",
     routinePlace: "",
     routineSteps: "",
+    routineCadence: "daily",
   };
   const [message, setMessage] = useState(context?.initialMessage ?? "");
   const [plan, setPlan] = useState<OnboardingPlan>({
@@ -3711,30 +3775,31 @@ function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onCreateTasks,
   const [guideQuestions, setGuideQuestions] = useState<string[]>(() => assistantOpeningGuides(context));
   const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>(() => [{ id: "initial", role: "assistant", content: assistantOpeningMessage(context, workspaceContext) }]);
   const [visibleFields, setVisibleFields] = useState<Set<StringPlanField>>(new Set());
-  const [mode, setMode] = useState<ConversationMode>(context?.entry === "onboarding" ? "onboarding" : context?.entry === "coach" ? "coach" : context?.entry === "task" ? "task" : "okr");
+  const [mode, setMode] = useState<ConversationMode>(context?.entry === "onboarding" ? "onboarding" : context?.entry === "coach" ? "coach" : context?.entry === "project" ? "project" : context?.entry === "routine" ? "routine" : context?.entry === "task" ? "task" : "okr");
   const [okrTarget, setOkrTarget] = useState<OkrPlanTarget | null>(context?.target ?? null);
   const [targetCandidates, setTargetCandidates] = useState<OkrPlanTarget[]>(context?.targetCandidates ?? []);
   const [projectTarget, setProjectTarget] = useState<ProjectChatTarget | null>(null);
   const [projectDriMemberId, setProjectDriMemberId] = useState(defaultDriMemberId ?? members[0]?.id ?? "");
+  const [routineAssigneeMemberId, setRoutineAssigneeMemberId] = useState("");
   const [taskContainer, setTaskContainer] = useState("");
-  const [taskAssigneeMemberId, setTaskAssigneeMemberId] = useState(defaultDriMemberId ?? members[0]?.id ?? "");
+  const [taskAssigneeMemberId, setTaskAssigneeMemberId] = useState("");
   const [saving, setSaving] = useState(false);
   const assistantFlow = mode === "onboarding" || mode === "coach";
   const draftCounts = countOkrDraft(plan);
   const taskDraftCount = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean).length;
   const treeReady = Boolean(plan.objectiveTitle.trim() && plan.keyResults.length && plan.keyResults.every((entry) => entry.title.trim() && entry.initiatives.every((initiative) => initiative.title.trim())) && !plan.unassignedInitiatives.length);
-  const saveLabel = mode === "task" ? `Task ${taskDraftCount}개 만들기` : assistantFlow
+  const saveLabel = mode === "task" ? `Task ${taskDraftCount}개 만들기` : mode === "routine" ? "Routine 만들기" : assistantFlow
     ? !okrTarget ? `Objective 1개 · KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`
       : okrTarget.kind === "objective" ? `KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`
         : okrTarget.kind === "key_result" ? `Initiative ${plan.targetInitiatives.length}개 만들기` : "첫 Project 만들기"
-    : mode === "project" ? plan.project.trim() ? "Project 만들기" : plan.routineTitle.trim() ? "Routine 만들기" : "실행 항목 만들기" : !plan.objectiveTitle.trim() && plan.routineTitle.trim() ? "Routine 만들기" : `Objective 1개 · KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`;
+    : mode === "project" ? "Project 만들기" : `Objective 1개 · KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`;
   const hasDraft = hasPlanContent(plan);
-  const canApplyDraft = mode === "task" ? Boolean(taskDraftCount && taskContainer) : assistantFlow
+  const canApplyDraft = mode === "task" ? Boolean(taskDraftCount) : assistantFlow
     ? !okrTarget ? treeReady
       : okrTarget.kind === "objective" ? Boolean(plan.keyResults.length && plan.keyResults.every((entry) => entry.title.trim() && entry.initiatives.every((initiative) => initiative.title.trim())) && !plan.unassignedInitiatives.length)
         : okrTarget.kind === "key_result" ? Boolean(plan.targetInitiatives.length && plan.targetInitiatives.every((entry) => entry.title.trim()))
           : Boolean(plan.project.trim())
-    : mode === "project" ? Boolean(plan.project.trim() || plan.routineTitle.trim()) : Boolean(treeReady || plan.routineTitle.trim());
+    : mode === "project" ? Boolean(plan.project.trim() && projectTarget) : mode === "routine" ? Boolean(plan.routineTitle.trim()) : treeReady;
   function setAssistantResponse(value: string) {
     setConversationHistory((current) => [...current, { id: `assistant-${Date.now()}-${current.length}`, role: "assistant", content: value }]);
   }
@@ -3864,7 +3929,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onCreateTasks,
         : question;
     setMessage(starter);
   }
-  function chooseGuide(kind: "team" | "personal" | "routine" | "free") {
+  function chooseGuide(kind: "team" | "personal" | "free") {
     setPlan({ ...emptyPlan });
     setVisibleFields(new Set());
     setMode("okr");
@@ -3878,11 +3943,6 @@ function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onCreateTasks,
     if (kind === "personal") {
       setAssistantResponse("개인 OKR로 시작하겠습니다. 역할 안에서 만들고 싶은 변화, 측정 기준, 바로 실행할 일을 분리합니다.");
       setGuideQuestions(["이번 주기 동안 본인이 만들고 싶은 변화는 무엇인가요?", "완료가 아니라 성과를 보여주는 기준은 무엇인가요?", "이번 주에 바로 시작할 일은 무엇인가요?"]);
-      return;
-    }
-    if (kind === "routine") {
-      setAssistantResponse("루틴부터 정리하겠습니다. 반복할 시점, 장소나 도구, 실제 행동 순서를 먼저 잡고 필요하면 OKR에 연결합니다.");
-      setGuideQuestions(["언제 이 루틴이 시작돼야 하나요?", "어디서 또는 어떤 도구에서 실행하나요?", "무엇을 어떤 순서로 하면 되나요?"]);
       return;
     }
     setAssistantResponse("좋습니다. 정해진 양식 없이 질문하거나 지금 생각나는 대로 적어 주세요. 실행 계획이 보이면 OKR 구조도 함께 제안합니다.");
@@ -3954,12 +4014,13 @@ function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onCreateTasks,
       return;
     }
     if (mode === "project") {
-      if (!projectTarget || !plan.project.trim() && !plan.routineTitle.trim()) {
+      if (!plan.project.trim()) {
         await organizeMessage();
         return;
       }
+      if (!projectTarget) return;
       setSaving(true);
-      const created = await onCreateProject(plan, projectTarget);
+      const created = await onCreateProject(plan, projectTarget, projectDriMemberId || null);
       setSaving(false);
       if (created) {
         setPlan({ ...emptyPlan });
@@ -3968,7 +4029,21 @@ function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onCreateTasks,
       }
       return;
     }
-    if (!plan.objectiveTitle.trim() && !plan.routineTitle.trim()) {
+    if (mode === "routine") {
+      if (!plan.routineTitle.trim()) {
+        await organizeMessage();
+        return;
+      }
+      setSaving(true);
+      const created = await onCreateRoutine(plan, routineAssigneeMemberId || null);
+      setSaving(false);
+      if (created) {
+        setPlan({ ...emptyPlan });
+        setVisibleFields(new Set());
+      }
+      return;
+    }
+    if (!plan.objectiveTitle.trim()) {
       await organizeMessage();
       return;
     }
@@ -3984,7 +4059,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onCreateTasks,
       const createdInitiatives = created.items.filter((entry) => created.initiativeIds.includes(entry.id));
       if (createdInitiatives.length === 1 && !created.projectIds.length) {
         const initiative = createdInitiatives[0];
-        setProjectTarget({ cycleId: created.cycleId, initiativeId: initiative.id, initiativeTitle: initiative.title });
+        setProjectTarget({ cycleId: created.cycleId, cycleName: context?.cycleName ?? "OKR", initiativeId: initiative.id, initiativeTitle: initiative.title });
         setAssistantResponse("OKR 구조를 만들었습니다. 이 대화에서 첫 실행 Project도 이어서 정리할 수 있습니다.");
       } else if (createdInitiatives.length > 1) {
         setProjectTarget(null);
@@ -4015,24 +4090,24 @@ function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onCreateTasks,
   return (
     <section className="home-okr-chat" aria-labelledby="home-okr-chat-title">
       <header>
-        <div><Bot size={16} /><div><h2 id="home-okr-chat-title">{mode === "task" ? "Task 도우미" : "OKR 도우미"}</h2><p>{mode === "task" ? "할 일을 짧고 명확하게 다듬은 뒤 Project 또는 Routine에 연결합니다." : "현재 OKR과 실행 상황을 읽고, 필요한 다음 질문부터 이어갑니다."}</p></div></div>
+        <div><Bot size={16} /><div><h2 id="home-okr-chat-title">{mode === "task" ? "Task 도우미" : mode === "project" ? "Project 도우미" : mode === "routine" ? "Routine 도우미" : "OKR 도우미"}</h2><p>{mode === "task" ? "할 일을 짧고 명확하게 다듬고, 미선택 시 General에 저장합니다." : mode === "project" ? "결과와 범위를 정리한 뒤 저장 전에 상위 Initiative를 선택합니다." : mode === "routine" ? "반복할 시점과 실행 방법을 독립된 Routine으로 정리합니다." : "현재 OKR과 실행 상황을 읽고, 필요한 다음 질문부터 이어갑니다."}</p></div></div>
         {assistantFlow && okrTarget && <span className="assistant-stage">{kindLabel(okrTarget.kind)} 다음 단계</span>}
       </header>
       <div className="home-chat-surface">
         <div className="chat-thread">
-          {context && mode !== "task" && <div className="chat-okr-context"><Target size={14} /><span><b>{context.cycleName}</b>{context.entry === "onboarding" ? " 첫 OKR 온보딩" : " 상황 기반 대화"}</span></div>}
-          {mode === "task" && <div className="chat-okr-context"><ListChecks size={14} /><span><b>Task 추가</b> Project 또는 Routine 연결 필수</span></div>}
-          {mode === "project" && projectTarget && <div className="chat-okr-context"><Briefcase size={14} /><span><b>{projectTarget.initiativeTitle}</b> 아래 Project 작성</span></div>}
+          {context && mode !== "task" && mode !== "project" && mode !== "routine" && <div className="chat-okr-context"><Target size={14} /><span><b>{context.cycleName}</b>{context.entry === "onboarding" ? " 첫 OKR 온보딩" : " 상황 기반 대화"}</span></div>}
+          {mode === "task" && <div className="chat-okr-context"><ListChecks size={14} /><span><b>Task 추가</b> Project·Routine 미선택 시 General</span></div>}
+          {mode === "project" && <div className="chat-okr-context"><Briefcase size={14} /><span><b>{projectTarget?.initiativeTitle ?? "상위 Initiative 미선택"}</b> · 저장 전에 선택</span></div>}
+          {mode === "routine" && <div className="chat-okr-context"><Repeat2 size={14} /><span><b>독립 Routine</b> · Initiative 연결 없음</span></div>}
           {context?.entry === "onboarding" && <div className="assistant-example"><b>간단한 예시</b><span>Objective · 신규 사용자가 제품 가치를 더 빨리 경험하게 한다</span><span>Key Result · 가입 후 7일 내 핵심 기능 사용률을 35%에서 55%로 높인다</span></div>}
           {conversationHistory.map((entry) => <p className={entry.role === "user" ? "user-message" : "assistant-message"} key={entry.id}>{entry.content}</p>)}
           {targetCandidates.length > 1 && <div className="assistant-target-options" aria-label="대화 대상 선택">{targetCandidates.map((target) => <button key={target.id} onClick={() => chooseTarget(target)}><span>{kindLabel(target.kind)}</span>{target.title}</button>)}</div>}
           {guideQuestions.length > 0 && <div className="assistant-followups">{guideQuestions.map((question) => <button className="followup-message" onClick={() => chooseQuickReply(question)} key={question}>{question}</button>)}</div>}
           {!canWrite && <div className="assistant-readonly"><Eye size={14} /><span>Viewer는 대화와 분석을 이용할 수 있지만 항목을 생성할 수 없습니다.</span></div>}
-          <div className="chat-input"><label htmlFor="assistant-message">메시지</label><div className="chat-composer"><textarea id="assistant-message" value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void organizeMessage(); }} rows={4} placeholder={mode === "task" ? "해야 할 일을 편하게 설명해 주세요" : "지금 이루고 싶은 목표나 막힌 일을 편하게 적어 주세요"} /><button type="button" className="chat-send-button" onClick={() => void organizeMessage()} disabled={saving || !message.trim()} aria-label={saving ? "답변 생성 중" : "메시지 보내기"}>{saving ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}<span>{saving ? "답변 중" : "보내기"}</span></button></div></div>
+          <div className="chat-input"><label htmlFor="assistant-message">메시지</label><div className="chat-composer"><textarea id="assistant-message" value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void organizeMessage(); }} rows={4} placeholder={mode === "task" ? "해야 할 일을 편하게 설명해 주세요" : mode === "project" ? "만들 Project의 결과와 범위를 설명해 주세요" : mode === "routine" ? "언제 무엇을 반복할지 설명해 주세요" : "지금 이루고 싶은 목표나 막힌 일을 편하게 적어 주세요"} /><button type="button" className="chat-send-button" onClick={() => void organizeMessage()} disabled={saving || !message.trim()} aria-label={saving ? "답변 생성 중" : "메시지 보내기"}>{saving ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}<span>{saving ? "답변 중" : "보내기"}</span></button></div></div>
           {mode === "okr" && context?.entry !== "onboarding" && <div className="chat-presets">
             <button onClick={() => chooseGuide("team")}>팀 OKR</button>
             <button onClick={() => chooseGuide("personal")}>개인 OKR</button>
-            <button onClick={() => chooseGuide("routine")}>루틴부터</button>
             <button onClick={() => chooseGuide("free")}>그냥 말하기</button>
           </div>}
           <div className="chat-actions">
@@ -4055,16 +4130,20 @@ function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onCreateTasks,
         />}
         {visibleFields.size > 0 && <div className="okr-setup-fields home-draft-fields">
           {visibleFields.has("project") && <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="결과와 범위가 분명한 첫 Project" /></label>}
-          {assistantFlow && visibleFields.has("project") && members.length > 0 && <label><span>Project DRI</span><select value={projectDriMemberId} onChange={(event) => setProjectDriMemberId(event.target.value)}>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
+          {mode === "project" && visibleFields.has("project") && <label><span>상위 Initiative</span><select value={projectTarget?.initiativeId ?? ""} onChange={(event) => setProjectTarget(projectTargets.find((entry) => entry.initiativeId === event.target.value) ?? null)}><option value="">저장 전에 선택</option>{projectTargets.map((entry) => <option value={entry.initiativeId} key={entry.initiativeId}>{entry.cycleName} · {entry.initiativeTitle}</option>)}</select></label>}
+          {(assistantFlow || mode === "project") && visibleFields.has("project") && members.length > 0 && <label><span>Project DRI</span><select value={projectDriMemberId} onChange={(event) => setProjectDriMemberId(event.target.value)}>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
           {visibleFields.has("tasks") && <label className="wide"><span>{mode === "task" ? "Task 초안" : plan.taskParent === "routine" || !plan.project.trim() && plan.routineTitle.trim() ? "첫 Task · Routine 아래" : plan.project.trim() ? "첫 Task · Project 아래" : "첫 Task"}</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder="한 줄에 하나씩 입력" /></label>}
-          {mode === "task" && visibleFields.has("tasks") && <label><span>연결 대상</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">Project 또는 Routine 선택</option><optgroup label="Project">{taskContainers.filter((entry) => entry.kind === "project").map((entry) => <option key={entry.id} value={`project:${entry.id}`}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{taskContainers.filter((entry) => entry.kind === "routine").map((entry) => <option key={entry.id} value={`routine:${entry.id}`}>{entry.title}</option>)}</optgroup></select></label>}
+          {mode === "task" && visibleFields.has("tasks") && <label><span>연결 대상</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">미선택 시 General</option><optgroup label="Project">{taskContainers.filter((entry) => entry.kind === "project").map((entry) => <option key={entry.id} value={`project:${entry.id}`}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{taskContainers.filter((entry) => entry.kind === "routine").map((entry) => <option key={entry.id} value={`routine:${entry.id}`}>{entry.title}</option>)}</optgroup></select></label>}
           {mode === "task" && visibleFields.has("tasks") && members.length > 0 && <label><span>담당자</span><select value={taskAssigneeMemberId} onChange={(event) => setTaskAssigneeMemberId(event.target.value)}><option value="">미지정</option>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
-          {mode === "task" && visibleFields.has("tasks") && taskContainers.length === 0 && <p className="task-container-empty">Task를 만들려면 먼저 Project 또는 Routine이 필요합니다.</p>}
+          {mode === "task" && visibleFields.has("tasks") && taskContainers.length === 0 && <p className="task-container-empty">연결할 항목이 없어 이 Task는 General에 저장됩니다.</p>}
           {visibleFields.has("tasks") && plan.project.trim() && plan.routineTitle.trim() && <label><span>Task 상위</span><select value={plan.taskParent || "project"} onChange={(event) => patch("taskParent", event.target.value)}><option value="project">Project</option><option value="routine">Routine</option></select></label>}
           {visibleFields.has("routineTitle") && <label><span>루틴 이름</span><input value={plan.routineTitle} onChange={(event) => patch("routineTitle", event.target.value)} placeholder="반복해서 할 일의 이름" /></label>}
           {visibleFields.has("routineTrigger") && <label><span>루틴 트리거</span><input value={plan.routineTrigger} onChange={(event) => patch("routineTrigger", event.target.value)} placeholder="루틴이 시작되는 시점" /></label>}
           {visibleFields.has("routinePlace") && <label><span>어디서</span><input value={plan.routinePlace} onChange={(event) => patch("routinePlace", event.target.value)} placeholder="실행할 장소나 도구" /></label>}
           {visibleFields.has("routineSteps") && <label className="wide"><span>무엇을 어떻게</span><textarea value={plan.routineSteps} onChange={(event) => patch("routineSteps", event.target.value)} rows={3} placeholder="루틴 실행 방법" /></label>}
+          {mode === "routine" && visibleFields.has("routineTitle") && <label><span>반복 주기</span><select value={plan.routineCadence} onChange={(event) => setPlan((current) => ({ ...current, routineCadence: event.target.value as RoutineCadence }))}><option value="daily">매일</option><option value="weekly">매주</option><option value="monthly">매월</option></select></label>}
+          {mode === "routine" && visibleFields.has("routineTitle") && members.length > 0 && <label><span>담당자</span><select value={routineAssigneeMemberId} onChange={(event) => setRoutineAssigneeMemberId(event.target.value)}><option value="">담당자 없음</option>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
+          {mode === "project" && visibleFields.has("project") && projectTargets.length === 0 && <div className="task-container-empty"><span>연결할 Initiative가 없습니다.</span><button type="button" onClick={onNavigateToOkr}>먼저 Initiative 만들기</button></div>}
         </div>}
       </div>
     </section>
@@ -4215,7 +4294,13 @@ function deriveAssistantTargeting(context: AssistantWorkspaceContext) {
 
 function assistantOpeningMessage(context: OkrChatContext | null, workspace: AssistantWorkspaceContext) {
   if (context?.entry === "task") {
-    return "추가할 Task를 편하게 설명해 주세요. 문구를 실행 가능한 단위로 다듬고, 저장 전에 연결할 Project 또는 Routine을 선택하게 하겠습니다.";
+    return "추가할 Task를 편하게 설명해 주세요. 문구를 실행 가능한 단위로 다듬고, Project나 Routine을 고르지 않으면 General에 저장하겠습니다.";
+  }
+  if (context?.entry === "project") {
+    return "만들 Project의 결과와 범위를 편하게 설명해 주세요. Task까지 말씀하시면 함께 정리하고, 저장 전에 상위 Initiative를 선택하게 하겠습니다.";
+  }
+  if (context?.entry === "routine") {
+    return "반복할 일과 시작 시점, 장소나 도구, 실행 순서를 편하게 설명해 주세요. Routine은 Initiative와 연결하지 않고 독립적으로 만듭니다.";
   }
   if (context?.entry === "onboarding") {
     return "OKR은 이루고 싶은 변화인 Objective와, 그 변화가 일어났는지 확인하는 측정 가능한 Key Result를 연결하는 방식이에요. 이번 주기에 달성하고 싶은 목표가 있나요? 편하게 말해 주세요.";
@@ -4236,6 +4321,8 @@ function assistantOpeningMessage(context: OkrChatContext | null, workspace: Assi
 
 function assistantOpeningGuides(context: OkrChatContext | null) {
   if (context?.entry === "task") return ["해야 할 일을 한 문장으로 말할게요", "여러 Task를 한꺼번에 정리할게요"];
+  if (context?.entry === "project") return ["Project가 끝났을 때 달라질 결과를 말할게요", "첫 Task까지 함께 정리할게요"];
+  if (context?.entry === "routine") return ["언제 무엇을 반복할지 말할게요", "실행 순서까지 함께 정리할게요"];
   if (context?.entry === "onboarding") return ["업무 목표를 말해볼게요", "개인 성장 목표를 말해볼게요", "아직 목표가 잘 떠오르지 않아요"];
   if (context?.entry === "create") return ["달성하고 싶은 변화는 무엇인가요?", "성공 여부는 어떤 숫자나 상태로 확인할까요?"];
   return [];
