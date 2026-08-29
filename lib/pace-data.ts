@@ -120,6 +120,11 @@ export type OkrPlanInput = {
   cycleId: string;
   targetId?: string | null;
   targetKind?: "objective" | "key_result" | "initiative" | null;
+  tree?: {
+    objectiveTitle?: string;
+    keyResults?: Array<{ title: string; initiatives?: Array<{ title: string }> }>;
+    targetInitiatives?: Array<{ title: string }>;
+  };
   objective?: string;
   keyResult?: string;
   initiative?: string;
@@ -2742,56 +2747,59 @@ export async function createOkrPlan(ownerId: string, userId: string, input: OkrP
   const [cycle] = await getDb().select({ id: okrCycles.id }).from(okrCycles).where(and(eq(okrCycles.ownerId, ownerId), eq(okrCycles.id, cycleId))).limit(1);
   if (!cycle) throw new Error("OKR cycle not found");
 
-  const objectiveTitle = cleanPlanTitle(input.objective);
-  const keyResultTitle = cleanPlanTitle(input.keyResult);
-  const initiativeTitle = cleanPlanTitle(input.initiative);
+  const tree = normalizeOkrPlanTree(input);
   const projectTitle = cleanPlanTitle(input.project);
   const targetKind = input.targetKind ?? null;
   const targetId = input.targetId?.trim() || null;
   const rules = await getWorkspaceRules(ownerId);
   const createdAt = new Date().toISOString();
-  const specs: Array<{ id: string; kind: ItemKind; title: string; parentId: string | null; status: ItemStatus }> = [];
+  const specs: Array<{ id: string; kind: ItemKind; title: string; parentId: string | null; status: ItemStatus; sortOrder: number }> = [];
+  let objectiveId: string | null = null;
+  let target: PaceItem | null = null;
 
-  let parentId: string | null = null;
+  const addSpec = (kind: ItemKind, title: string, parentId: string | null, status: ItemStatus, sortOrder: number) => {
+    const id = crypto.randomUUID();
+    specs.push({ id, kind, title, parentId, status, sortOrder });
+    return id;
+  };
+  const addKeyResults = (parentId: string, keyResults: typeof tree.keyResults) => {
+    for (const [keyResultIndex, keyResult] of keyResults.entries()) {
+      const keyResultId = addSpec("key_result", keyResult.title, parentId, "todo", (keyResultIndex + 1) * 10);
+      for (const [initiativeIndex, initiative] of keyResult.initiatives.entries()) {
+        addSpec("initiative", initiative.title, keyResultId, "todo", (initiativeIndex + 1) * 10);
+      }
+    }
+  };
+
   if (!targetId) {
     if (targetKind) throw new Error("targetId is required when targetKind is provided");
-    if (!objectiveTitle || !keyResultTitle) throw new Error("Objective and Key Result are required");
-    const objectiveId = crypto.randomUUID();
-    specs.push({ id: objectiveId, kind: "objective", title: objectiveTitle, parentId: null, status: "in_progress" });
-    const keyResultId = crypto.randomUUID();
-    specs.push({ id: keyResultId, kind: "key_result", title: keyResultTitle, parentId: objectiveId, status: "todo" });
-    parentId = keyResultId;
+    if (!tree.objectiveTitle || !tree.keyResults.length) throw new Error("Objective and at least one Key Result are required");
+    objectiveId = addSpec("objective", tree.objectiveTitle, null, "in_progress", 0);
+    addKeyResults(objectiveId, tree.keyResults);
   } else {
     if (!targetKind) throw new Error("targetKind is required when targetId is provided");
-    const target = await getItem(ownerId, targetId);
+    target = await getItem(ownerId, targetId);
     if (!target || target.archivedAt) throw new Error("Target item not found");
     if (target.kind !== targetKind) throw new Error("Target item kind does not match");
     if (target.cycleId !== cycleId) throw new Error("Target item must belong to the selected OKR cycle");
-    parentId = target.id;
     if (targetKind === "objective") {
-      if (!keyResultTitle) throw new Error("Key Result is required");
-      const keyResultId = crypto.randomUUID();
-      specs.push({ id: keyResultId, kind: "key_result", title: keyResultTitle, parentId, status: "todo" });
-      parentId = keyResultId;
+      if (!tree.keyResults.length) throw new Error("At least one Key Result is required");
+      objectiveId = target.id;
+      addKeyResults(target.id, tree.keyResults);
+    } else if (targetKind === "key_result") {
+      if (!tree.targetInitiatives.length) throw new Error("At least one Initiative is required");
+      for (const [index, initiative] of tree.targetInitiatives.entries()) {
+        addSpec("initiative", initiative.title, target.id, "todo", (index + 1) * 10);
+      }
     }
   }
 
-  const deepestKind = specs.at(-1)?.kind ?? targetKind;
-  if (deepestKind === "key_result") {
-    if (projectTitle && !initiativeTitle) throw new Error("Project requires an Initiative");
-    if (initiativeTitle) {
-      const initiativeId = crypto.randomUUID();
-      specs.push({ id: initiativeId, kind: "initiative", title: initiativeTitle, parentId, status: "todo" });
-      parentId = initiativeId;
-    }
-  } else if (deepestKind === "initiative" && initiativeTitle) {
-    throw new Error("Initiative already exists for this target");
-  }
-
-  const nextKind = specs.at(-1)?.kind ?? targetKind;
   if (projectTitle) {
-    if (nextKind !== "initiative") throw new Error("Project requires an Initiative target");
-    specs.push({ id: crypto.randomUUID(), kind: "project", title: projectTitle, parentId, status: "in_progress" });
+    const initiativeParents = targetKind === "initiative" && target ? [target.id] : specs.filter((entry) => entry.kind === "initiative").map((entry) => entry.id);
+    if (initiativeParents.length !== 1) throw new Error("Project requires one selected Initiative");
+    addSpec("project", projectTitle, initiativeParents[0], "in_progress", 10);
+  } else if (targetKind === "initiative" && !specs.length) {
+    throw new Error("Project is required for an Initiative target");
   }
   if (!specs.length) throw new Error("No OKR plan content to create");
 
@@ -2818,9 +2826,9 @@ export async function createOkrPlan(ownerId: string, userId: string, input: OkrP
   const d1 = (env as RuntimeEnv).DB;
   const statements = specs.flatMap((spec) => [
     d1.prepare(`INSERT INTO items
-      (id, owner_id, cycle_id, parent_id, kind, title, description, status, priority, cadence, progress, source, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, 0, 'web', ?, ?)`)
-      .bind(spec.id, ownerId, cycleId, spec.parentId, spec.kind, spec.title, spec.status, rules.defaultPriority, rules.defaultCadence, createdAt, createdAt),
+      (id, owner_id, cycle_id, parent_id, kind, title, description, status, priority, cadence, progress, sort_order, source, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, 0, ?, 'web', ?, ?)`)
+      .bind(spec.id, ownerId, cycleId, spec.parentId, spec.kind, spec.title, spec.status, rules.defaultPriority, rules.defaultCadence, spec.sortOrder, createdAt, createdAt),
     d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
       VALUES (?, ?, ?, 'created', 'web', ?, ?)`)
       .bind(crypto.randomUUID(), ownerId, spec.id, JSON.stringify({ kind: spec.kind, status: spec.status, origin: "okr_assistant" }), createdAt),
@@ -2838,14 +2846,57 @@ export async function createOkrPlan(ownerId: string, userId: string, input: OkrP
   const byId = new Map(rows.map((row) => [row.id, row]));
   const assignments = await getItemAssignmentMap(ownerId, specs.map((entry) => entry.id));
   const createdItems = specs.map((spec) => serializeItem(byId.get(spec.id)!, {}, assignments[spec.id] ?? []));
+  const keyResultIds = specs.filter((entry) => entry.kind === "key_result").map((entry) => entry.id);
+  const initiativeIds = specs.filter((entry) => entry.kind === "initiative").map((entry) => entry.id);
+  const projectIds = specs.filter((entry) => entry.kind === "project").map((entry) => entry.id);
   return {
     items: createdItems,
     cycleId,
-    objectiveId: specs.find((entry) => entry.kind === "objective")?.id ?? (targetKind === "objective" ? targetId : null),
-    keyResultId: specs.find((entry) => entry.kind === "key_result")?.id ?? (targetKind === "key_result" ? targetId : null),
-    initiativeId: specs.find((entry) => entry.kind === "initiative")?.id ?? (targetKind === "initiative" ? targetId : null),
-    projectId: projectSpec?.id ?? null,
+    objectiveId,
+    keyResultIds,
+    initiativeIds,
+    projectIds,
+    keyResultId: keyResultIds[0] ?? (targetKind === "key_result" ? targetId : null),
+    initiativeId: initiativeIds[0] ?? (targetKind === "initiative" ? targetId : null),
+    projectId: projectIds[0] ?? null,
   };
+}
+
+function normalizeOkrPlanTree(input: OkrPlanInput) {
+  const explicitTree = input.tree;
+  const objectiveTitle = cleanPlanTitle(explicitTree?.objectiveTitle) || cleanPlanTitle(input.objective);
+  const rawKeyResults = explicitTree?.keyResults ?? (cleanPlanTitle(input.keyResult) ? [{
+    title: cleanPlanTitle(input.keyResult),
+    initiatives: cleanPlanTitle(input.initiative) ? [{ title: cleanPlanTitle(input.initiative) }] : [],
+  }] : []);
+  const rawTargetInitiatives = explicitTree?.targetInitiatives ?? (input.targetKind === "key_result" && cleanPlanTitle(input.initiative)
+    ? [{ title: cleanPlanTitle(input.initiative) }]
+    : []);
+  if (rawKeyResults.length > 20) throw new Error("A plan supports at most 20 Key Results");
+  if (rawTargetInitiatives.length > 30) throw new Error("A Key Result supports at most 30 Initiatives per plan");
+
+  const keyResults = rawKeyResults.map((entry) => {
+    const title = cleanPlanTitle(entry.title);
+    if (!title) throw new Error("Key Result title is required");
+    const rawInitiatives = entry.initiatives ?? [];
+    if (rawInitiatives.length > 30) throw new Error("A Key Result supports at most 30 Initiatives per plan");
+    return {
+      title,
+      initiatives: rawInitiatives.map((initiative) => {
+        const initiativeTitle = cleanPlanTitle(initiative.title);
+        if (!initiativeTitle) throw new Error("Initiative title is required");
+        return { title: initiativeTitle };
+      }),
+    };
+  });
+  const targetInitiatives = rawTargetInitiatives.map((initiative) => {
+    const title = cleanPlanTitle(initiative.title);
+    if (!title) throw new Error("Initiative title is required");
+    return { title };
+  });
+  if (input.targetKind === "key_result" && keyResults.length) throw new Error("A Key Result target only accepts Initiatives");
+  if (input.targetKind !== "key_result" && targetInitiatives.length) throw new Error("Target Initiatives require a Key Result target");
+  return { objectiveTitle, keyResults, targetInitiatives };
 }
 
 function cleanPlanTitle(value: string | undefined) {

@@ -25,6 +25,7 @@ export async function POST(request: Request) {
       cycleId,
       targetId: asString(payload.targetId) || null,
       targetKind: (targetKind || null) as OkrPlanInput["targetKind"],
+      tree: asTree(payload.tree),
       objective: asString(payload.objective),
       keyResult: asString(payload.keyResult),
       initiative: asString(payload.initiative),
@@ -34,11 +35,38 @@ export async function POST(request: Request) {
     return Response.json(result, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
-    const status = /required|not found|must belong|does not match|already exists|active workspace member/i.test(message) ? 400 : 500;
+    const status = /required|not found|must belong|does not match|already exists|active workspace member|at most|only accepts|supports|selected Initiative/i.test(message) ? 400 : 500;
     return Response.json({ error: message }, { status });
   }
 }
 
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function asTree(value: unknown): OkrPlanInput["tree"] {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const keyResults = Array.isArray(record.keyResults) ? record.keyResults.slice(0, 20).flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const keyResult = entry as Record<string, unknown>;
+    const title = asString(keyResult.title);
+    if (!title) return [];
+    const initiatives = Array.isArray(keyResult.initiatives) ? keyResult.initiatives.slice(0, 30).flatMap((initiative) => {
+      if (!initiative || typeof initiative !== "object") return [];
+      const initiativeTitle = asString((initiative as Record<string, unknown>).title);
+      return initiativeTitle ? [{ title: initiativeTitle }] : [];
+    }) : [];
+    return [{ title, initiatives }];
+  }) : [];
+  const targetInitiatives = Array.isArray(record.targetInitiatives) ? record.targetInitiatives.slice(0, 30).flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const title = asString((entry as Record<string, unknown>).title);
+    return title ? [{ title }] : [];
+  }) : [];
+  return {
+    objectiveTitle: asString(record.objectiveTitle),
+    keyResults,
+    targetInitiatives,
+  };
 }

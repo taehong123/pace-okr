@@ -13,26 +13,40 @@ type RuntimeEnv = typeof env & {
   OKRPTR_AI_OUTPUT_WON_PER_1K_TOKENS?: string;
 };
 
+type DraftInitiative = {
+  clientId: string;
+  title: string;
+};
+
+type DraftKeyResult = {
+  clientId: string;
+  title: string;
+  initiatives: DraftInitiative[];
+};
+
+type OrganizedPlan = {
+  objectiveTitle: string;
+  keyResults: DraftKeyResult[];
+  targetInitiatives: DraftInitiative[];
+  unassignedInitiatives: DraftInitiative[];
+  project: string;
+  tasks: string;
+  taskParent: string;
+  routineTitle: string;
+  routineTrigger: string;
+  routinePlace: string;
+  routineSteps: string;
+};
+
 type OrganizedOkr = {
   assistantMessage: string;
   questions: string[];
-  plan: {
-    objective: string;
-    keyResult: string;
-    initiative: string;
-    project: string;
-    tasks: string;
-    taskParent: string;
-    routineTitle: string;
-    routineTrigger: string;
-    routinePlace: string;
-    routineSteps: string;
-  };
+  plan: OrganizedPlan;
 };
 
 type ConversationMode = "okr" | "project" | "onboarding" | "coach";
 
-const maxOutputTokens = 1800;
+const maxOutputTokens = 3200;
 
 const okrSchema = {
   type: "object",
@@ -49,9 +63,10 @@ const okrSchema = {
       type: "object",
       additionalProperties: false,
       required: [
-        "objective",
-        "keyResult",
-        "initiative",
+        "objectiveTitle",
+        "keyResults",
+        "targetInitiatives",
+        "unassignedInitiatives",
         "project",
         "tasks",
         "taskParent",
@@ -61,9 +76,59 @@ const okrSchema = {
         "routineSteps",
       ],
       properties: {
-        objective: { type: "string" },
-        keyResult: { type: "string" },
-        initiative: { type: "string" },
+        objectiveTitle: { type: "string" },
+        keyResults: {
+          type: "array",
+          maxItems: 20,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["clientId", "title", "initiatives"],
+            properties: {
+              clientId: { type: "string" },
+              title: { type: "string" },
+              initiatives: {
+                type: "array",
+                maxItems: 30,
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["clientId", "title"],
+                  properties: {
+                    clientId: { type: "string" },
+                    title: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        targetInitiatives: {
+          type: "array",
+          maxItems: 30,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["clientId", "title"],
+            properties: {
+              clientId: { type: "string" },
+              title: { type: "string" },
+            },
+          },
+        },
+        unassignedInitiatives: {
+          type: "array",
+          maxItems: 30,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["clientId", "title"],
+            properties: {
+              clientId: { type: "string" },
+              title: { type: "string" },
+            },
+          },
+        },
         project: { type: "string" },
         tasks: { type: "string" },
         taskParent: { type: "string", enum: ["", "project", "routine"] },
@@ -84,7 +149,6 @@ export async function POST(request: Request) {
     await ensureWorkspace(authorization.ownerId);
     const payload = (await request.json()) as Record<string, unknown>;
     const message = typeof payload.message === "string" ? payload.message.trim() : "";
-    const currentPlan = typeof payload.plan === "object" && payload.plan ? payload.plan : {};
     const mode = asConversationMode(payload.mode);
     const history = sanitizeHistory(payload.history);
     const workspaceContext = sanitizeWorkspaceContext(payload.workspaceContext);
@@ -95,6 +159,7 @@ export async function POST(request: Request) {
     const targetContext = parentContext.target && typeof parentContext.target === "object"
       ? sanitizeTargetContext(parentContext.target as Record<string, unknown>)
       : undefined;
+    const currentPlan = sanitizeCurrentPlan(payload.plan, targetContext?.kind);
     if (!message) return Response.json({ error: "message is required" }, { status: 400 });
     if (mode === "project" && !initiativeTitle) {
       return Response.json({ error: "initiative context is required for project mode" }, { status: 400 });
@@ -134,7 +199,8 @@ export async function POST(request: Request) {
               recentConversation: history,
               workspaceContext,
               parentContext: mode === "project" ? { initiativeTitle } : targetContext,
-              desiredHierarchy: "OKR: Objective > Key Result > Initiative > Project > Task; independent execution: Routine > Task",
+              desiredHierarchy: "One Objective > multiple Key Results > multiple Initiatives attached to each Key Result. Project and Task are created later from one selected Initiative. Routine > Task is independent.",
+              draftRule: "Return the complete revised draft. Preserve every existing clientId exactly. Use an empty clientId for a new node. Never merge separate Key Results or Initiatives into one string. Put an Initiative in unassignedInitiatives when its Key Result is unclear.",
               projectRule: "If Project and Initiative would be similar, keep the idea as Initiative and leave Project empty.",
               routineShape: "trigger point, where/tool, what/how steps",
             }),
@@ -171,7 +237,7 @@ export async function POST(request: Request) {
     const text = extractOutputText(data);
     if (!text) return Response.json({ error: "OpenAI response was empty", code: "empty_openai_response" }, { status: 502 });
 
-    return Response.json({ organized: normalizeOrganized(JSON.parse(text) as OrganizedOkr, mode) });
+    return Response.json({ organized: normalizeOrganized(JSON.parse(text) as OrganizedOkr, mode, currentPlan, targetContext?.kind) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     const status = /required|not configured/i.test(message) ? 400 : 500;
@@ -233,17 +299,17 @@ function sanitizeTargetContext(value: Record<string, unknown>) {
 
 function systemInstruction(mode: ConversationMode) {
   const hierarchy = "Objective > Key Result > Initiative > Project > Task. Routine is independent and may contain Task.";
-  const common = `You are the conversational assistant inside OKRPTR. Always answer in the user's language. Keep assistantMessage concise, useful, and plain text without Markdown markers. Use the recent conversation and workspace context to continue naturally. The hierarchy is ${hierarchy} Never invent specific metrics, commitments, owners, or Tasks. Ask at most three concise questions when essential information is missing.`;
+  const common = `You are the conversational assistant inside OKRPTR. Always answer in the user's language. Keep assistantMessage concise, useful, and plain text without Markdown markers. Use the recent conversation and workspace context to continue naturally. The hierarchy is ${hierarchy} Never invent specific metrics, commitments, owners, dates, or Tasks. Ask at most three concise questions when essential information is missing. Polish every supported title while preserving its meaning, numbers, dates, and proper nouns: an Objective is a concise desired change, a Key Result is a measurable outcome, and an Initiative is a concise strategic direction. Do not turn an activity into a Key Result. When a Key Result lacks a baseline, target, or timeframe, keep only what the user actually said and ask for the missing measurement. Never concatenate separate Key Results or Initiatives into one title.`;
   if (mode === "project") {
-    return `${common} Help plan the first execution below an existing Initiative. Keep objective, keyResult, and initiative empty. Only put a concrete Project, explicitly stated Tasks, and explicitly stated Routine details into the plan. A Project needs a clear outcome and enough scope, timing, or ownership to distinguish it from the Initiative.`;
+    return `${common} Help plan the first execution below an existing Initiative. Keep objectiveTitle, keyResults, targetInitiatives, and unassignedInitiatives empty. Only put a concrete Project, explicitly stated Tasks, and explicitly stated Routine details into the plan. A Project needs a clear outcome and enough scope, timing, or ownership to distinguish it from the Initiative.`;
   }
   if (mode === "onboarding") {
-    return `${common} Teach OKR through a short guided conversation. Objective describes the desired change and Key Result is a measurable outcome. First organize an Objective and at least one Key Result. Do not allow a vague activity to masquerade as a Key Result; ask for baseline, target, or timeframe when needed. Initiative and the first Project are optional next steps. If the user is not ready, support skipping them without pressure. Only add Initiative or Project when the user provides enough detail.`;
+    return `${common} Teach OKR through a short guided conversation. Organize exactly one Objective with every distinct supported Key Result, and attach every Initiative only to the Key Result it clearly supports. If the user gives multiple Objective candidates, do not combine them: leave the OKR tree unchanged and ask which single Objective to use. Initiative is optional. Project is a later step and must stay empty until one Initiative is selected after this tree is saved.`;
   }
   if (mode === "coach") {
-    return `${common} Act as a context-aware OKR coach. Inspect the supplied hierarchy and focus item. Continue from the earliest useful gap: missing Key Result, missing Initiative, missing first Project, or an active blocker. When multiple parents are plausible, ask the user to choose instead of guessing. Keep existing hierarchy fields empty and only populate the missing descendant fields relevant to the selected target.`;
+    return `${common} Act as a context-aware OKR coach. Inspect the supplied hierarchy and focus item. Continue from the earliest useful gap: missing Key Result, missing Initiative, missing first Project, or an active blocker. For an Objective target, return every new Key Result in keyResults with its clearly attached Initiatives. For a Key Result target, return every new Initiative in targetInitiatives. For an Initiative target, only return Project details. When multiple parents are plausible, ask the user to choose instead of guessing.`;
   }
-  return `${common} Respond to greetings, product questions, general work questions, and factual questions directly. For casual or informational messages, leave every plan field empty and usually leave questions empty. When the user gives a real goal or execution commitment, organize only supported details. Initiative is the strategic execution direction under a Key Result. Project belongs below Initiative and should only be created when concrete scope, timing, outcome, or ownership is clear.`;
+  return `${common} Respond to greetings, product questions, general work questions, and factual questions directly. For casual or informational messages, leave every plan field empty and usually leave questions empty. When the user gives a real goal, organize exactly one Objective with every distinct Key Result and each Key Result's clearly related Initiatives. If an Initiative's parent is ambiguous, keep it in unassignedInitiatives rather than guessing. Project and Task are later steps after an Initiative is selected.`;
 }
 
 async function checkAiUsageLimit(runtime: RuntimeEnv, ownerId: string, userId: string, inputChars: number) {
@@ -350,23 +416,24 @@ function extractOutputText(data: Record<string, unknown>) {
     .join("\n");
 }
 
-function normalizeOrganized(value: OrganizedOkr, mode: ConversationMode): OrganizedOkr {
-  const plan = {
-    objective: clean(value.plan?.objective),
-    keyResult: clean(value.plan?.keyResult),
-    initiative: clean(value.plan?.initiative),
-    project: clean(value.plan?.project),
-    tasks: clean(value.plan?.tasks),
-    taskParent: clean(value.plan?.taskParent),
-    routineTitle: clean(value.plan?.routineTitle),
-    routineTrigger: clean(value.plan?.routineTrigger),
-    routinePlace: clean(value.plan?.routinePlace),
-    routineSteps: clean(value.plan?.routineSteps),
+function normalizeOrganized(value: OrganizedOkr, mode: ConversationMode, current: OrganizedPlan, targetKind?: string): OrganizedOkr {
+  const proposed = value.plan ?? emptyPlan();
+  const tree = mergeOkrTree(current, proposed, mode, targetKind);
+  const plan: OrganizedPlan = {
+    ...tree,
+    project: clean(proposed.project) || current.project,
+    tasks: clean(proposed.tasks) || current.tasks,
+    taskParent: clean(proposed.taskParent) || current.taskParent,
+    routineTitle: clean(proposed.routineTitle) || current.routineTitle,
+    routineTrigger: clean(proposed.routineTrigger) || current.routineTrigger,
+    routinePlace: clean(proposed.routinePlace) || current.routinePlace,
+    routineSteps: clean(proposed.routineSteps) || current.routineSteps,
   };
   if (mode === "project") {
-    plan.objective = "";
-    plan.keyResult = "";
-    plan.initiative = "";
+    plan.objectiveTitle = "";
+    plan.keyResults = [];
+    plan.targetInitiatives = [];
+    plan.unassignedInitiatives = [];
   }
   if (plan.taskParent !== "project" && plan.taskParent !== "routine") plan.taskParent = "";
   if (plan.taskParent === "project" && !plan.project) plan.taskParent = plan.routineTitle ? "routine" : "";
@@ -377,6 +444,165 @@ function normalizeOrganized(value: OrganizedOkr, mode: ConversationMode): Organi
     questions: Array.isArray(value.questions) ? value.questions.map(clean).filter(Boolean).slice(0, 3) : [],
     plan,
   };
+}
+
+function emptyPlan(): OrganizedPlan {
+  return {
+    objectiveTitle: "",
+    keyResults: [],
+    targetInitiatives: [],
+    unassignedInitiatives: [],
+    project: "",
+    tasks: "",
+    taskParent: "",
+    routineTitle: "",
+    routineTrigger: "",
+    routinePlace: "",
+    routineSteps: "",
+  };
+}
+
+function sanitizeCurrentPlan(value: unknown, targetKind?: string): OrganizedPlan {
+  if (!value || typeof value !== "object") return emptyPlan();
+  const record = value as Record<string, unknown>;
+  const plan = emptyPlan();
+  plan.objectiveTitle = clean(record.objectiveTitle) || clean(record.objective);
+  plan.keyResults = sanitizeKeyResults(record.keyResults);
+  plan.targetInitiatives = sanitizeInitiatives(record.targetInitiatives);
+  plan.unassignedInitiatives = sanitizeInitiatives(record.unassignedInitiatives);
+  plan.project = clean(record.project);
+  plan.tasks = clean(record.tasks);
+  plan.taskParent = clean(record.taskParent);
+  plan.routineTitle = clean(record.routineTitle);
+  plan.routineTrigger = clean(record.routineTrigger);
+  plan.routinePlace = clean(record.routinePlace);
+  plan.routineSteps = clean(record.routineSteps);
+
+  const legacyKeyResult = clean(record.keyResult);
+  const legacyInitiative = clean(record.initiative);
+  if (!plan.keyResults.length && legacyKeyResult && targetKind !== "key_result") {
+    plan.keyResults = [{ clientId: draftId("kr"), title: legacyKeyResult, initiatives: legacyInitiative ? [{ clientId: draftId("initiative"), title: legacyInitiative }] : [] }];
+  } else if (!plan.targetInitiatives.length && legacyInitiative && targetKind === "key_result") {
+    plan.targetInitiatives = [{ clientId: draftId("initiative"), title: legacyInitiative }];
+  }
+  return plan;
+}
+
+function sanitizeKeyResults(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 20).flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const record = entry as Record<string, unknown>;
+    const title = clean(record.title).slice(0, 500);
+    if (!title) return [];
+    return [{
+      clientId: clean(record.clientId).slice(0, 100) || draftId("kr"),
+      title,
+      initiatives: sanitizeInitiatives(record.initiatives),
+    }];
+  });
+}
+
+function sanitizeInitiatives(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 30).flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const record = entry as Record<string, unknown>;
+    const title = clean(record.title).slice(0, 500);
+    if (!title) return [];
+    return [{ clientId: clean(record.clientId).slice(0, 100) || draftId("initiative"), title }];
+  });
+}
+
+function mergeOkrTree(current: OrganizedPlan, proposed: OrganizedPlan, mode: ConversationMode, targetKind?: string) {
+  if (mode === "project" || targetKind === "initiative") {
+    return { objectiveTitle: "", keyResults: [], targetInitiatives: [], unassignedInitiatives: [] };
+  }
+
+  const currentKeyResults = sanitizeKeyResults(current.keyResults);
+  const currentTargetInitiatives = sanitizeInitiatives(current.targetInitiatives);
+  const currentUnassigned = sanitizeInitiatives(current.unassignedInitiatives);
+  const knownKeyResults = new Map(currentKeyResults.map((entry) => [entry.clientId, entry]));
+  const knownInitiatives = new Map([
+    ...currentKeyResults.flatMap((entry) => entry.initiatives),
+    ...currentTargetInitiatives,
+    ...currentUnassigned,
+  ].map((entry) => [entry.clientId, entry]));
+  const rawKeyResults = Array.isArray(proposed.keyResults) ? proposed.keyResults : [];
+  const rawTargetInitiatives = Array.isArray(proposed.targetInitiatives) ? proposed.targetInitiatives : [];
+  const rawUnassigned = Array.isArray(proposed.unassignedInitiatives) ? proposed.unassignedInitiatives : [];
+  const proposedInitiativeIds = new Set<string>();
+  for (const entry of [...rawKeyResults.flatMap((keyResult) => Array.isArray(keyResult?.initiatives) ? keyResult.initiatives : []), ...rawTargetInitiatives, ...rawUnassigned]) {
+    const id = clean(entry?.clientId);
+    if (knownInitiatives.has(id)) proposedInitiativeIds.add(id);
+  }
+  const usedIds = new Set<string>();
+
+  const normalizeInitiative = (entry: DraftInitiative) => {
+    const requestedId = clean(entry?.clientId);
+    const known = knownInitiatives.get(requestedId);
+    const clientId = known && !usedIds.has(requestedId) ? requestedId : draftId("initiative");
+    usedIds.add(clientId);
+    return { clientId, title: clean(entry?.title).slice(0, 500) || known?.title || "" };
+  };
+
+  const keyResults = rawKeyResults.slice(0, 20).flatMap((entry) => {
+    const requestedId = clean(entry?.clientId);
+    const known = knownKeyResults.get(requestedId);
+    const clientId = known && !usedIds.has(requestedId) ? requestedId : draftId("kr");
+    usedIds.add(clientId);
+    const proposedInitiatives = (Array.isArray(entry?.initiatives) ? entry.initiatives : []).slice(0, 30).map(normalizeInitiative).filter((initiative) => initiative.title);
+    const retainedInitiatives = (known?.initiatives ?? []).filter((initiative) => !proposedInitiativeIds.has(initiative.clientId) && !usedIds.has(initiative.clientId));
+    retainedInitiatives.forEach((initiative) => usedIds.add(initiative.clientId));
+    const title = clean(entry?.title).slice(0, 500) || known?.title || "";
+    return title ? [{ clientId, title, initiatives: dedupeInitiatives([...proposedInitiatives, ...retainedInitiatives]) }] : [];
+  });
+  for (const existing of currentKeyResults) {
+    if (keyResults.some((entry) => entry.clientId === existing.clientId)) continue;
+    keyResults.push({
+      ...existing,
+      initiatives: existing.initiatives.filter((initiative) => !proposedInitiativeIds.has(initiative.clientId)),
+    });
+  }
+
+  const targetInitiatives = mergeInitiativeList(rawTargetInitiatives, currentTargetInitiatives, proposedInitiativeIds, usedIds, normalizeInitiative);
+  const unassignedInitiatives = mergeInitiativeList(rawUnassigned, currentUnassigned, proposedInitiativeIds, usedIds, normalizeInitiative);
+  return {
+    objectiveTitle: targetKind ? "" : clean(proposed.objectiveTitle).slice(0, 500) || current.objectiveTitle,
+    keyResults: targetKind === "key_result" ? [] : keyResults,
+    targetInitiatives: targetKind === "key_result" ? targetInitiatives : [],
+    unassignedInitiatives: targetKind === "key_result" ? [] : unassignedInitiatives,
+  };
+}
+
+function mergeInitiativeList(
+  proposed: DraftInitiative[],
+  current: DraftInitiative[],
+  proposedIds: Set<string>,
+  usedIds: Set<string>,
+  normalize: (entry: DraftInitiative) => DraftInitiative,
+) {
+  const merged = proposed.slice(0, 30).map(normalize).filter((entry) => entry.title);
+  for (const existing of current) {
+    if (proposedIds.has(existing.clientId) || usedIds.has(existing.clientId)) continue;
+    usedIds.add(existing.clientId);
+    merged.push(existing);
+  }
+  return dedupeInitiatives(merged);
+}
+
+function dedupeInitiatives(value: DraftInitiative[]) {
+  const seen = new Set<string>();
+  return value.filter((entry) => {
+    const key = entry.title.trim().toLocaleLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function draftId(kind: "kr" | "initiative") {
+  return `draft-${kind}-${crypto.randomUUID()}`;
 }
 
 function clean(value: unknown) {

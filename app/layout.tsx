@@ -10,13 +10,12 @@ const geistSans = Geist({
 const bootstrapScript = `(() => {
   try {
     const savedTheme = window.localStorage.getItem("okrptr.theme");
-    const preference = savedTheme === "dark" || savedTheme === "system" ? savedTheme : "light";
-    const resolved = preference === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : preference === "dark" ? "dark" : "light";
-    document.documentElement.dataset.themePreference = preference;
-    document.documentElement.dataset.theme = resolved;
+    const theme = savedTheme === "gray" || savedTheme === "dark" || savedTheme === "beige" ? savedTheme : "beige";
+    document.documentElement.dataset.themePreference = theme;
+    document.documentElement.dataset.theme = theme;
   } catch {
-    document.documentElement.dataset.themePreference = "light";
-    document.documentElement.dataset.theme = "light";
+    document.documentElement.dataset.themePreference = "beige";
+    document.documentElement.dataset.theme = "beige";
   }
   const now = new Date();
   const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");

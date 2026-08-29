@@ -10,6 +10,7 @@
     "build": "vinext build && node scripts/publish-prerender.mjs",
     "start": "vinext start",
     "test": "npm run build && node --test tests/rendered-html.test.mjs tests/migration.test.mjs",
+    "test:e2e": "playwright test",
     "test:mcp": "node scripts/mcp-smoke.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
@@ -29,11 +30,13 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
     "@cloudflare/vite-plugin": "1.52.1",
     "@cloudflare/workers-types": "5.20260814.1",
     "@eslint/js": "9.39.4",
     "@next/eslint-plugin-next": "16.2.6",
     "@openai/sites-vite-plugin": "0.1.0",
+    "@playwright/test": "^1.55.0",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",

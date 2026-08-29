@@ -137,8 +137,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /필요한 다음 질문부터 이어갑니다/);
   assert.match(page, /답변 중/);
   assert.match(page, /보내기/);
-  assert.match(page, /OKR 만들기/);
-  assert.match(page, /useState<View>\("okr"\)/);
+  assert.match(page, /Objective 1개.*KR/);
+  assert.match(page, /useState<View>\(\(\) => navigationFromLocation\(\)\.view\)/);
   assert.match(page, /Objective 직접 만들기/);
   assert.match(page, /AI 대화로 같이 만들기/);
   assert.match(page, /createItemCycleId/);
@@ -146,16 +146,23 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /cycleId: targetCycleId/);
   assert.match(page, /context\?\.cycleId \?\? defaultCycleId/);
   assert.doesNotMatch(page, /첫 핵심 결과 정의|첫 실행 방향 정리/);
-  assert.match(page, /planFieldsWithValues\(mergedPlan\)/);
+  assert.match(page, /planStringFieldsWithValues\(data\.organized\.plan\)/);
+  assert.match(page, /OKR 트리 초안/);
+  assert.match(page, /KR 미지정 Initiative/);
+  assert.match(page, /onMoveInitiative/);
+  assert.doesNotMatch(page, /organizeLocally/);
   assert.match(page, /visibleFields\.has\("project"\)/);
   assert.match(page, /첫 Project를 만들어볼까요\?/);
   assert.match(page, /mode === "project"/);
   assert.match(page, /my_work: "내 업무"/);
   assert.match(layout, /okrptr\.theme/);
-  assert.match(page, /type ThemeMode = "light" \| "dark" \| "system"/);
-  assert.match(page, /밝게.*어둡게.*시스템/s);
+  assert.match(page, /type ThemeMode = "beige" \| "gray" \| "dark"/);
+  assert.match(page, /베이지.*그레이.*다크/s);
   assert.match(page, /theme-picker/);
-  assert.match(globals, /--paper: #f3eee7/);
+  assert.match(page, /chat-send-button/);
+  assert.match(page, /메시지 보내기/);
+  assert.match(globals, /--paper: #f3f2ee/);
+  assert.match(globals, /html\[data-theme="gray"\]/);
   assert.match(globals, /html\[data-theme="dark"\]/);
   const myWorkView = page.match(/function MyWorkView[\s\S]*?function MyWorkSection/)?.[0] ?? "";
   assert.ok(
@@ -197,10 +204,14 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /taskParent/);
   assert.match(page, /routineId: taskUsesRoutine \? routineItem\?\.id : undefined/);
   assert.match(okrOrganizeRoute, /Routine is independent and may contain Task/);
-  assert.match(okrOrganizeRoute, /independent execution: Routine > Task/);
+  assert.match(okrOrganizeRoute, /Routine > Task is independent/);
+  assert.match(okrOrganizeRoute, /Never concatenate separate Key Results or Initiatives/);
+  assert.match(okrOrganizeRoute, /Polish every supported title while preserving its meaning, numbers, dates, and proper nouns/);
+  assert.match(okrOrganizeRoute, /unassignedInitiatives/);
   assert.match(okrOrganizeRoute, /recentConversation/);
   assert.match(okrOrganizeRoute, /workspaceContext/);
   assert.match(okrPlanRoute, /createOkrPlan/);
+  assert.match(okrPlanRoute, /asTree\(payload\.tree\)/);
   assert.match(okrPlanRoute, /authorization\.userId/);
   assert.doesNotMatch(paceData, /validateRoutineInitiative|idx_routines_owner_initiative/);
   assert.match(page, /OKR이 오늘의 일로 이어지도록/);
@@ -222,8 +233,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /워크스페이스 데이터를 불러오지 못했습니다/);
   assert.match(page, /visibleCount.*20/);
   assert.match(page, /더 보기/);
-  assert.match(page, /aria-label="Project 필터" title="Project 필터"/);
-  assert.match(page, /aria-label="Project 정렬" title="Project 정렬"/);
+  assert.match(page, /aria-label="Project 필터"/);
+  assert.match(page, /aria-label="Project 정렬"/);
   assert.match(page, /aria-label="Project 속성 관리" title="Project 속성 관리"/);
   assert.match(page, /aria-label="내 설정 닫기" title="내 설정 닫기"/);
   assert.match(page, /workspaceNameCounts/);
@@ -253,7 +264,9 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(paceData, /activatedWorkspaceIds/);
   assert.match(paceData, /createOkrPlan/);
   assert.match(paceData, /await d1\.batch\(statements\)/);
-  assert.match(paceData, /Objective and Key Result are required/);
+  assert.match(paceData, /Objective and at least one Key Result are required/);
+  assert.match(paceData, /keyResultIds/);
+  assert.match(paceData, /initiativeIds/);
   assert.ok(
     paceData.indexOf("ALTER TABLE routines ADD COLUMN system_key") < paceData.indexOf("idx_routines_owner_system_key"),
     "routine compatibility columns must be added before dependent indexes",
@@ -364,10 +377,10 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.match(page, /DeleteSelectCheckbox/);
   assert.match(page, /삭제한 Project·Task와 전체 데이터 정리 기록/);
   assert.match(page, /전체 OKR 클린업 기록/);
-  assert.match(page, /confirmationText !== "영구 삭제"/);
+  assert.match(page, /confirmationText: "영구 삭제"/);
   assert.match(page, /연결된 Task/);
   assert.match(page, /템플릿 불러오기/);
-  assert.match(page, /window\.prompt/);
+  assert.doesNotMatch(page, /window\.(prompt|confirm)/);
   assert.match(page, /저장 중.*저장됨.*저장 실패/s);
   assert.match(page, /expectedVersion/);
   assert.match(editor, /BlockNoteSchema\.create/);
