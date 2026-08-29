@@ -102,7 +102,7 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean } = {}) {
+async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean } = {}) {
   const bootstrapResponse = options.withoutTaskContainers
     ? { ...bootstrap, items: bootstrap.items.filter((entry) => entry.kind !== "project" && entry.kind !== "task") }
     : bootstrap;
@@ -145,7 +145,10 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
     if (url.pathname === "/api/project-templates") return json(route, { templates: [] });
     if (url.pathname === "/api/checklists") return json(route, { items: [] });
     if (url.pathname === "/api/recommendations") return json(route, { recommendations: [] });
-    if (url.pathname === "/api/routines" && request.method() === "GET") return json(route, { routines: bootstrapResponse.routines });
+    if (url.pathname === "/api/routines" && request.method() === "GET") {
+      if (options.slowRoutineRefresh) await new Promise((resolve) => setTimeout(resolve, 800));
+      return json(route, { routines: bootstrapResponse.routines });
+    }
     if (url.pathname === "/api/trash") return json(route, { items: [], cleanupRecords: [] });
     return json(route, {});
   });
@@ -224,7 +227,7 @@ test("저장 실패 시 가짜 Task나 허위 성공 메시지를 만들지 않�
 });
 
 test("연결할 Project·Routine이 없으면 직접 추가와 AI 추가 모두 General 안내를 표시한다", async ({ page }) => {
-  await installApiMocks(page, { withoutTaskContainers: true });
+  await installApiMocks(page, { withoutTaskContainers: true, slowRoutineRefresh: true });
   await page.goto("/?view=inbox");
 
   await page.getByRole("button", { name: "직접 추가", exact: true }).click();
@@ -245,6 +248,7 @@ test("연결할 Project·Routine이 없으면 직접 추가와 AI 추가 모두 
   await expect(page.getByRole("button", { name: "Task 1개 만들기" })).toBeEnabled();
 
   await page.goto("/?view=routines");
+  await expect(page.getByText("루틴을 불러오는 중입니다", { exact: true })).toHaveCount(0);
   const generalCard = page.getByRole("article").filter({ hasText: "General" });
   await expect(generalCard).toContainText("General");
   await expect(generalCard.getByText("기본", { exact: true })).toBeVisible();

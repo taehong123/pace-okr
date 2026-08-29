@@ -512,6 +512,14 @@ type TrashRecord = {
   archivedAt: string;
 };
 
+const dailyScrumMemoryCache = new Map<string, Scrum>();
+const recommendationMemoryCache = new Map<string, Recommendation[]>();
+let trashMemoryCache: { records: TrashRecord[]; items: TrashedItem[] } | null = null;
+
+function scrumNotesSnapshot(scrum: Scrum) {
+  return JSON.stringify([scrum.yesterdayNote, scrum.todayNote, scrum.blockersNote]);
+}
+
 type IntroLanguage = "ko" | "en" | "ja" | "zh" | "es";
 
 type IntroCopy = {
@@ -1983,7 +1991,7 @@ function WorkspaceApp() {
               {projectTab === "templates" && <ProjectTemplateManager readOnly={currentWorkspace?.role === "viewer"} onNotice={showNotice} />}
             </section>
           )}
-          {activeView === "routines" && <RoutineView teamMembers={teamMembers} onNotice={showNotice} onRoutinesChange={setRoutines} createOpen={routineCreateOpen} onCreateClose={() => setRoutineCreateOpen(false)} onCreateWithChat={openRoutineCreationChat} />}
+          {activeView === "routines" && <RoutineView initialRoutines={routines} teamMembers={teamMembers} onNotice={showNotice} onRoutinesChange={setRoutines} createOpen={routineCreateOpen} onCreateClose={() => setRoutineCreateOpen(false)} onCreateWithChat={openRoutineCreationChat} />}
           {activeView === "okr" && (
             <section className="okr-workbench">
               <section className="okr-document">
@@ -3342,10 +3350,10 @@ function CreatePropertyField({ property, value, members, onChange }: { property:
   return <label><span>{property.name}</span><input type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => onChange(property, event.target.value)} /></label>;
 }
 
-function RoutineView({ teamMembers, onNotice, onRoutinesChange, createOpen, onCreateClose, onCreateWithChat }: { teamMembers: TeamMember[]; onNotice: (message: string) => void; onRoutinesChange: (routines: Routine[]) => void; createOpen: boolean; onCreateClose: () => void; onCreateWithChat: (initialMessage?: string) => void }) {
+function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange, createOpen, onCreateClose, onCreateWithChat }: { initialRoutines: Routine[]; teamMembers: TeamMember[]; onNotice: (message: string) => void; onRoutinesChange: (routines: Routine[]) => void; createOpen: boolean; onCreateClose: () => void; onCreateWithChat: (initialMessage?: string) => void }) {
   const confirmAction = useAppConfirm();
   const [date, setDate] = useState(localDate());
-  const [rows, setRows] = useState<Routine[] | null>(null);
+  const [rows, setRows] = useState<Routine[] | null>(() => initialRoutines);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [triggerPoint, setTriggerPoint] = useState("");
@@ -3357,13 +3365,16 @@ function RoutineView({ teamMembers, onNotice, onRoutinesChange, createOpen, onCr
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const rowsRef = useRef(rows);
+
+  useEffect(() => { rowsRef.current = rows; }, [rows]);
 
   useEffect(() => {
     let active = true;
     fetch(`/api/routines?date=${date}`)
       .then(async (response) => response.ok ? response.json() as Promise<{ routines: Routine[] }> : Promise.reject())
-      .then((data) => { if (active) { setRows(data.routines); onRoutinesChange(data.routines); } })
-      .catch(() => { if (active) setLoadError(true); });
+      .then((data) => { if (active) { setLoadError(false); setRows(data.routines); onRoutinesChange(data.routines); } })
+      .catch(() => { if (active && rowsRef.current === null) setLoadError(true); });
     return () => { active = false; };
   }, [date, loadAttempt, onRoutinesChange]);
 
@@ -3539,7 +3550,7 @@ function RoutineView({ teamMembers, onNotice, onRoutinesChange, createOpen, onCr
         <p>반복 실행 날짜와 오늘의 완료 상태를 확인합니다.</p>
       </div>
       <div className="routine-cards">
-        {loadError ? <AsyncState icon={AlertTriangle} title="루틴을 불러오지 못했습니다" detail="잠시 후 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => { setRows(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} /> : rows === null ? <AsyncState icon={LoaderCircle} title="루틴을 불러오는 중입니다" loading /> : rows.length ? rows.map((routine) => {
+        {loadError && rows === null ? <AsyncState icon={AlertTriangle} title="루틴을 불러오지 못했습니다" detail="잠시 후 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => { setRows(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} /> : rows === null ? <AsyncState icon={LoaderCircle} title="루틴을 불러오는 중입니다" loading /> : rows.length ? rows.map((routine) => {
           const draft = routineDraft(routine);
           return (
             <article className={`routine-card ${routine.active ? "" : "inactive"} ${routine.systemKey === "general" ? "general-routine" : ""}`} key={routine.id}>
@@ -3649,21 +3660,24 @@ function MyWorkSection({ title, count, children }: { title: string; count: numbe
 }
 
 function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => void; onNotice: (message: string) => void }) {
-  const [date, setDate] = useState(localDate());
-  const [scrum, setScrum] = useState<Scrum | null>(null);
+  const initialDate = localDate();
+  const initialScrum = dailyScrumMemoryCache.get(initialDate) ?? null;
+  const [date, setDate] = useState(initialDate);
+  const [scrum, setScrum] = useState<Scrum | null>(initialScrum);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
-  const [savedNotes, setSavedNotes] = useState("");
+  const [savedNotes, setSavedNotes] = useState(initialScrum ? scrumNotesSnapshot(initialScrum) : "");
   useEffect(() => {
     let active = true;
+    const cachedScrum = dailyScrumMemoryCache.get(date) ?? null;
     fetch(`/api/daily-scrum?date=${date}`)
       .then(async (response) => response.ok ? response.json() as Promise<{ scrum: Scrum }> : Promise.reject())
-      .then((data) => { if (active) { setScrum(data.scrum); setSavedNotes(JSON.stringify([data.scrum.yesterdayNote, data.scrum.todayNote, data.scrum.blockersNote])); } })
-      .catch(() => { if (active) setLoadError(true); });
+      .then((data) => { if (active) { dailyScrumMemoryCache.set(date, data.scrum); setLoadError(false); setScrum(data.scrum); setSavedNotes(scrumNotesSnapshot(data.scrum)); } })
+      .catch(() => { if (active && !cachedScrum) setLoadError(true); });
     return () => { active = false; };
   }, [date, loadAttempt]);
-  const notesDirty = Boolean(scrum) && savedNotes !== JSON.stringify([scrum?.yesterdayNote, scrum?.todayNote, scrum?.blockersNote]);
+  const notesDirty = Boolean(scrum) && savedNotes !== scrumNotesSnapshot(scrum!);
   useEffect(() => {
     if (!notesDirty) return;
     function warnBeforeUnload(event: BeforeUnloadEvent) { event.preventDefault(); event.returnValue = ""; }
@@ -3678,7 +3692,8 @@ function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => 
     try {
       const response = await fetch("/api/daily-scrum", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(currentScrum) });
       if (!response.ok) throw new Error("데일리 스크럼을 저장하지 못했습니다.");
-      setSavedNotes(JSON.stringify([currentScrum.yesterdayNote, currentScrum.todayNote, currentScrum.blockersNote]));
+      dailyScrumMemoryCache.set(date, currentScrum);
+      setSavedNotes(scrumNotesSnapshot(currentScrum));
       onNotice("데일리 스크럼을 저장했습니다.");
     } catch (saveError) {
       onNotice(saveError instanceof Error ? saveError.message : "데일리 스크럼을 저장하지 못했습니다.");
@@ -3691,21 +3706,23 @@ function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => 
     { key: "todayNote", title: "오늘 집중", tasks: scrum.todayTasks, icon: Target },
     { key: "blockersNote", title: "막힘", tasks: scrum.blockers, icon: CircleHelp },
   ];
-  return <section className="scrum-section"><div className="scrum-toolbar"><label><CalendarDays size={14} /><input aria-label="데일리 스크럼 날짜" type="date" value={date} onChange={(event) => { setScrum(null); setLoadError(false); setDate(event.target.value); }} /></label><button className="primary-action" onClick={() => void save()} disabled={saving || !notesDirty}><Check size={14} />{saving ? "저장 중" : notesDirty ? "저장" : "저장됨"}</button></div><div className="scrum-grid">{sections.map((section) => { const Icon = section.icon; return <section className="scrum-column" key={section.key}><header><Icon size={15} /><b>{section.title}</b><span>{section.tasks.length}</span></header><div className="scrum-task-list">{section.tasks.map((task) => <button key={task.id} onClick={() => onOpenTask(task.id)}><span className={`status-dot status-${task.status}`} /><b>{task.title}</b><small>{dueLabel(task.dueDate)}</small></button>)}{!section.tasks.length && <span className="empty-column">자동으로 모인 Task가 없습니다</span>}</div><textarea value={scrum[section.key]} onChange={(event) => setScrum({ ...scrum, [section.key]: event.target.value })} placeholder={`${section.title} 메모`} aria-label={`${section.title} 메모`} /></section>; })}</div></section>;
+  return <section className="scrum-section"><div className="scrum-toolbar"><label><CalendarDays size={14} /><input aria-label="데일리 스크럼 날짜" type="date" value={date} onChange={(event) => { const nextDate = event.target.value; const cached = dailyScrumMemoryCache.get(nextDate) ?? null; setScrum(cached); setSavedNotes(cached ? scrumNotesSnapshot(cached) : ""); setLoadError(false); setDate(nextDate); }} /></label><button className="primary-action" onClick={() => void save()} disabled={saving || !notesDirty}><Check size={14} />{saving ? "저장 중" : notesDirty ? "저장" : "저장됨"}</button></div><div className="scrum-grid">{sections.map((section) => { const Icon = section.icon; return <section className="scrum-column" key={section.key}><header><Icon size={15} /><b>{section.title}</b><span>{section.tasks.length}</span></header><div className="scrum-task-list">{section.tasks.map((task) => <button key={task.id} onClick={() => onOpenTask(task.id)}><span className={`status-dot status-${task.status}`} /><b>{task.title}</b><small>{dueLabel(task.dueDate)}</small></button>)}{!section.tasks.length && <span className="empty-column">자동으로 모인 Task가 없습니다</span>}</div><textarea value={scrum[section.key]} onChange={(event) => setScrum({ ...scrum, [section.key]: event.target.value })} placeholder={`${section.title} 메모`} aria-label={`${section.title} 메모`} /></section>; })}</div></section>;
 }
 
 function RecommendationsView({ items, onOpenTask, onOpenProject, onNavigate }: { items: OkrptrItem[]; onOpenTask: (id: string) => void; onOpenProject: (id: string) => void; onNavigate: (view: View) => void }) {
-  const [rows, setRows] = useState<Recommendation[] | null>(null);
+  const date = localDate();
+  const [rows, setRows] = useState<Recommendation[] | null>(() => recommendationMemoryCache.get(date) ?? null);
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   useEffect(() => {
     let active = true;
-    fetch(`/api/recommendations?date=${localDate()}`)
+    const cachedRows = recommendationMemoryCache.get(date) ?? null;
+    fetch(`/api/recommendations?date=${date}`)
       .then(async (response) => response.ok ? response.json() as Promise<{ recommendations: Recommendation[] }> : Promise.reject())
-      .then((data) => { if (active) setRows(data.recommendations); })
-      .catch(() => { if (active) setLoadError(true); });
+      .then((data) => { if (active) { recommendationMemoryCache.set(date, data.recommendations); setLoadError(false); setRows(data.recommendations); } })
+      .catch(() => { if (active && !cachedRows) setLoadError(true); });
     return () => { active = false; };
-  }, [loadAttempt]);
+  }, [date, loadAttempt]);
   if (loadError) return <AsyncState icon={AlertTriangle} title="추천을 계산하지 못했습니다" detail="워크스페이스 데이터를 다시 확인해 주세요." actionLabel="다시 시도" onAction={() => { setRows(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} />;
   if (!rows) return <AsyncState icon={LoaderCircle} title="추천을 계산하는 중입니다" loading />;
   if (!rows.length) return <EmptyState icon={CheckCircle2} title="지금 바로 정리할 항목이 없습니다" />;
@@ -4664,12 +4681,13 @@ function AsyncState({ icon: Icon, title, detail, actionLabel, onAction, loading 
 
 function TrashView({ onNotice, canDeleteRecords, canRestore }: { onNotice: (message: string) => void; canDeleteRecords: boolean; canRestore: boolean }) {
   const confirmAction = useAppConfirm();
-  const [records, setRecords] = useState<TrashRecord[] | null>(null);
-  const [trashedItems, setTrashedItems] = useState<TrashedItem[] | null>(null);
+  const [records, setRecords] = useState<TrashRecord[] | null>(() => trashMemoryCache?.records ?? null);
+  const [trashedItems, setTrashedItems] = useState<TrashedItem[] | null>(() => trashMemoryCache?.items ?? null);
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   useEffect(() => {
     let active = true;
+    const cached = trashMemoryCache;
     Promise.all([fetch("/api/item-trash"), fetch("/api/trash")])
       .then(async ([itemResponse, recordResponse]) => {
         if (!itemResponse.ok || !recordResponse.ok) throw new Error("trash-load-failed");
@@ -4679,12 +4697,18 @@ function TrashView({ onNotice, canDeleteRecords, canRestore }: { onNotice: (mess
       })
       .then((data) => {
         if (!active) return;
+        trashMemoryCache = { records: data.records, items: data.items };
+        setLoadError(false);
         setTrashedItems(data.items);
         setRecords(data.records);
       })
-      .catch(() => { if (active) setLoadError(true); });
+      .catch(() => { if (active && !cached) setLoadError(true); });
     return () => { active = false; };
   }, [loadAttempt]);
+
+  useEffect(() => {
+    if (records !== null && trashedItems !== null) trashMemoryCache = { records, items: trashedItems };
+  }, [records, trashedItems]);
 
   async function permanentlyDeleteRecord(record: TrashRecord) {
     if (!await confirmAction({ title: "휴지통 기록 영구 삭제", message: `'${record.title}' 기록은 복구할 수 없게 됩니다.`, confirmationText: "영구 삭제", confirmLabel: "영구 삭제", danger: true })) return;

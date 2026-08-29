@@ -19,13 +19,16 @@ import {
 } from "@/lib/pace-data";
 
 export async function GET(request: Request) {
+  const requestStartedAt = Date.now();
   const authorization = await authorizeRequest(request, { allowViewerWrite: true });
   if (authorization instanceof Response) return authorization;
+  const authorizedAt = Date.now();
 
   try {
     const url = new URL(request.url);
     const date = url.searchParams.get("date") ?? new Date().toISOString().slice(0, 10);
     await ensureWorkspace(authorization.ownerId);
+    const workspaceReadyAt = Date.now();
     const hostname = url.hostname;
     const provider = hostname === "localhost" || hostname === "127.0.0.1"
       ? "local"
@@ -86,8 +89,15 @@ export async function GET(request: Request) {
     };
 
     const payload = Object.assign({}, ...await Promise.all([loadShell(), loadData()]));
+    const payloadReadyAt = Date.now();
 
     const headers = new Headers({ "Cache-Control": "no-store" });
+    headers.set("Server-Timing", [
+      `auth;dur=${authorizedAt - requestStartedAt}`,
+      `workspace;dur=${workspaceReadyAt - authorizedAt}`,
+      `data;dur=${payloadReadyAt - workspaceReadyAt}`,
+      `total;dur=${payloadReadyAt - requestStartedAt}`,
+    ].join(", "));
     const secure = url.protocol === "https:" ? "; Secure" : "";
     headers.append(
       "Set-Cookie",

@@ -635,23 +635,26 @@ async function ensureSchema() {
 
 async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
   try {
-    // The latest migration is a sufficient sentinel because migrations run in order.
+    // Validate every runtime compatibility sentinel in one D1 round trip.
     await d1.prepare(`SELECT
-      deletion_requested_at,
-      scheduled_deletion_at,
-      deletion_requested_by_user_id,
-      avatar_key,
-      avatar_updated_at
-    FROM workspaces
+      workspace.deletion_requested_at,
+      workspace.scheduled_deletion_at,
+      workspace.deletion_requested_by_user_id,
+      workspace.avatar_key,
+      workspace.avatar_updated_at,
+      routine.system_key,
+      routine.assignee_member_id,
+      property.default_value,
+      property.system_key,
+      property.active,
+      item.created_by_user_id,
+      project_document.version
+    FROM workspaces AS workspace
+    LEFT JOIN routines AS routine ON 1 = 0
+    LEFT JOIN property_definitions AS property ON 1 = 0
+    LEFT JOIN items AS item ON 1 = 0
+    LEFT JOIN project_documents AS project_document ON 1 = 0
     LIMIT 0`).first();
-    await d1.prepare(`SELECT
-      system_key,
-      assignee_member_id
-    FROM routines
-    LIMIT 0`).first();
-    await d1.prepare(`SELECT default_value, system_key, active FROM property_definitions LIMIT 0`).first();
-    await d1.prepare(`SELECT created_by_user_id FROM items LIMIT 0`).first();
-    await d1.prepare(`SELECT version FROM project_documents LIMIT 0`).first();
     return true;
   } catch {
     return false;
@@ -765,27 +768,19 @@ async function migratePersonalWorkspaceAssignments(ownerId: string) {
 }
 
 async function workspaceInitializationIsCurrent(ownerId: string) {
-  const [rows, generalRows, seedItems, seedRoutines, legacyHierarchy] = await Promise.all([
-    getDb()
-      .select({ name: propertyDefinitions.name })
-      .from(propertyDefinitions)
-      .where(and(
-        eq(propertyDefinitions.ownerId, ownerId),
-        inArray(propertyDefinitions.name, DEFAULT_PROJECT_EXECUTION_PROPERTIES.map((property) => property.name)),
-      )),
-    getDb().select({ id: routines.id }).from(routines).where(and(
-      eq(routines.ownerId, ownerId),
-      eq(routines.systemKey, GENERAL_ROUTINE_SYSTEM_KEY),
-    )).limit(1),
-    getDb().select({ id: items.id }).from(items).where(and(
-      eq(items.ownerId, ownerId),
-      inArray(items.title, LEGACY_SEED_ITEM_TITLES),
-    )).limit(1),
-    getDb().select({ id: routines.id }).from(routines).where(and(
-      eq(routines.ownerId, ownerId),
-      inArray(routines.title, LEGACY_SEED_ROUTINE_TITLES),
-    )).limit(1),
-    (env as RuntimeEnv).DB.prepare(`SELECT 1 AS pending
+  // Keep the cold-path initialization audit to one D1 round trip.
+  const executionPropertyNames = DEFAULT_PROJECT_EXECUTION_PROPERTIES.map((property) => property.name);
+  const placeholders = (values: readonly unknown[]) => values.map(() => "?").join(", ");
+  const row = await (env as RuntimeEnv).DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM property_definitions
+        WHERE owner_id = ? AND name IN (${placeholders(executionPropertyNames)})) AS property_count,
+      EXISTS(SELECT 1 FROM routines
+        WHERE owner_id = ? AND system_key = ?) AS general_exists,
+      EXISTS(SELECT 1 FROM items
+        WHERE owner_id = ? AND title IN (${placeholders(LEGACY_SEED_ITEM_TITLES)})) AS seed_item_exists,
+      EXISTS(SELECT 1 FROM routines
+        WHERE owner_id = ? AND title IN (${placeholders(LEGACY_SEED_ROUTINE_TITLES)})) AS seed_routine_exists,
+      EXISTS(SELECT 1
       FROM items AS current_item
       WHERE current_item.owner_id = ? AND (
         current_item.kind = 'action'
@@ -796,14 +791,28 @@ async function workspaceInitializationIsCurrent(ownerId: string) {
           WHERE parent_item.owner_id = current_item.owner_id AND parent_item.kind = 'initiative'
         ))
       )
-      LIMIT 1`).bind(ownerId).first(),
-  ]);
-  const names = new Set(rows.map((row) => row.name));
-  return DEFAULT_PROJECT_EXECUTION_PROPERTIES.every((property) => names.has(property.name))
-    && generalRows.length > 0
-    && seedItems.length === 0
-    && seedRoutines.length === 0
-    && !legacyHierarchy;
+      LIMIT 1) AS legacy_hierarchy_exists`).bind(
+    ownerId,
+    ...executionPropertyNames,
+    ownerId,
+    GENERAL_ROUTINE_SYSTEM_KEY,
+    ownerId,
+    ...LEGACY_SEED_ITEM_TITLES,
+    ownerId,
+    ...LEGACY_SEED_ROUTINE_TITLES,
+    ownerId,
+  ).first<{
+    property_count: number;
+    general_exists: number;
+    seed_item_exists: number;
+    seed_routine_exists: number;
+    legacy_hierarchy_exists: number;
+  }>();
+  return Number(row?.property_count ?? 0) === executionPropertyNames.length
+    && Boolean(row?.general_exists)
+    && !row?.seed_item_exists
+    && !row?.seed_routine_exists
+    && !row?.legacy_hierarchy_exists;
 }
 
 export async function listOkrCycles(ownerId: string) {

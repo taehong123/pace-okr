@@ -282,6 +282,10 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(bootstrapRoute, /Object\.assign\(\{\}, \.\.\.await Promise\.all/);
   assert.match(bootstrapRoute, /getTeam/);
   assert.match(bootstrapRoute, /listItems/);
+  assert.match(bootstrapRoute, /Server-Timing/);
+  assert.match(bootstrapRoute, /auth;dur=/);
+  assert.match(bootstrapRoute, /workspace;dur=/);
+  assert.match(bootstrapRoute, /data;dur=/);
   assert.match(paceData, /createdAt: workspace\.createdAt/);
   assert.match(paceData, /restoreTrashRecord/);
   assert.match(paceData, /itemAssignments: itemAssignmentRows/);
@@ -301,7 +305,11 @@ test("ships product metadata and removes starter assets", async () => {
     "routine compatibility columns must be added before dependent indexes",
   );
   assert.match(paceData, /schemaIsCurrent/);
+  assert.match(paceData, /Validate every runtime compatibility sentinel in one D1 round trip/);
+  assert.match(paceData, /LEFT JOIN project_documents AS project_document ON 1 = 0/);
   assert.match(paceData, /workspaceInitializationIsCurrent/);
+  assert.match(paceData, /Keep the cold-path initialization audit to one D1 round trip/);
+  assert.match(paceData, /AS legacy_hierarchy_exists/);
   assert.match(paceData, /DELETE FROM google_oauth_states WHERE expires_at <=/);
   assert.match(paceData, /delete\(googleOAuthStates\).*returning/);
   assert.match(page, /Google 계정 로그아웃/);
@@ -480,6 +488,10 @@ test("defaults unlinked web Tasks to General and exposes direct bulk deletion", 
   assert.match(page, /연결할 Project·Routine이 없어 General\(기본\)에 저장됩니다/);
   assert.match(page, /Project·Routine에 연결하지 않은 Task가 모이는 기본 목록/);
   assert.doesNotMatch(page, /부모가 없는 Task/);
+  assert.match(page, /initialRoutines=\{routines\}/);
+  assert.match(page, /dailyScrumMemoryCache/);
+  assert.match(page, /recommendationMemoryCache/);
+  assert.match(page, /trashMemoryCache/);
   assert.match(page, /연결 끊긴 Task \{orphanedIds\.length\}개 선택/);
   assert.match(page, /task-selection-delete/);
   assert.doesNotMatch(page, /할 일을 입력하면 미분류 Task에 저장됩니다/);
