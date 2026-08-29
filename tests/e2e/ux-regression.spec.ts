@@ -20,6 +20,22 @@ const baseItem = {
   updatedAt: now,
 };
 
+const generalRoutine = {
+  id: "routine-general",
+  title: "General",
+  description: "",
+  cadence: "daily",
+  triggerPoint: "",
+  actionPlace: "",
+  actionSteps: "",
+  systemKey: "general",
+  assigneeMemberId: null,
+  active: true,
+  completed: false,
+  createdAt: now,
+  updatedAt: now,
+};
+
 const bootstrap = {
   user: { id: "user-1", email: "owner@example.com", displayName: "테스트 사용자", provider: "local" },
   workspaces: [{
@@ -79,14 +95,17 @@ const bootstrap = {
   propertyValues: {},
   hiddenByProject: {},
   archivedProjects: [],
-  routines: [],
+  routines: [generalRoutine],
 };
 
 async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-async function installApiMocks(page: Page, options: { failItemCreate?: boolean } = {}) {
+async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean } = {}) {
+  const bootstrapResponse = options.withoutTaskContainers
+    ? { ...bootstrap, items: bootstrap.items.filter((entry) => entry.kind !== "project" && entry.kind !== "task") }
+    : bootstrap;
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem("okrptr.intro-language", "ko");
@@ -94,7 +113,29 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean }
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname === "/api/bootstrap") return json(route, bootstrap);
+    if (url.pathname === "/api/bootstrap") return json(route, bootstrapResponse);
+    if (url.pathname === "/api/okr-organize" && request.method() === "POST") {
+      return json(route, {
+        organized: {
+          assistantMessage: "말씀하신 Task를 정리했습니다.",
+          questions: [],
+          plan: {
+            objectiveTitle: "",
+            keyResults: [],
+            targetInitiatives: [],
+            unassignedInitiatives: [],
+            project: "",
+            tasks: "AI로 정리된 Task",
+            taskParent: "",
+            routineTitle: "",
+            routineTrigger: "",
+            routinePlace: "",
+            routineSteps: "",
+            routineCadence: "daily",
+          },
+        },
+      });
+    }
     if (url.pathname === "/api/items" && request.method() === "POST" && options.failItemCreate) {
       return json(route, { error: "서버 저장 실패" }, 500);
     }
@@ -104,7 +145,7 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean }
     if (url.pathname === "/api/project-templates") return json(route, { templates: [] });
     if (url.pathname === "/api/checklists") return json(route, { items: [] });
     if (url.pathname === "/api/recommendations") return json(route, { recommendations: [] });
-    if (url.pathname === "/api/routines" && request.method() === "GET") return json(route, { routines: [] });
+    if (url.pathname === "/api/routines" && request.method() === "GET") return json(route, { routines: bootstrapResponse.routines });
     if (url.pathname === "/api/trash") return json(route, { items: [], cleanupRecords: [] });
     return json(route, {});
   });
@@ -172,12 +213,41 @@ test("저장 실패 시 가짜 Task나 허위 성공 메시지를 만들지 않�
   await page.getByRole("button", { name: "직접 추가", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "새 항목" });
   const title = dialog.getByLabel("이름");
-  await expect(dialog.getByLabel("연결 대상")).toHaveValue("");
+  const container = dialog.getByLabel("연결 대상 · 선택 사항");
+  await expect(container).toHaveValue("");
+  await expect(container.locator("option:checked")).toHaveText("선택 안 함 — General에 저장");
   await title.fill("서버에 저장되지 않은 Task");
   await dialog.getByRole("button", { name: "만들기" }).click();
   await expect(dialog.getByRole("alert")).toContainText("서버 저장 실패");
   await expect(title).toHaveValue("서버에 저장되지 않은 Task");
   await expect(page.getByRole("status")).toHaveCount(0);
+});
+
+test("연결할 Project·Routine이 없으면 직접 추가와 AI 추가 모두 General 안내를 표시한다", async ({ page }) => {
+  await installApiMocks(page, { withoutTaskContainers: true });
+  await page.goto("/?view=inbox");
+
+  await page.getByRole("button", { name: "직접 추가", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "새 항목" });
+  await expect(dialog.getByLabel("연결 대상 · 선택 사항")).toHaveCount(0);
+  await expect(dialog.getByText("연결할 Project·Routine이 없어 General(기본)에 저장됩니다.", { exact: true })).toBeVisible();
+  await dialog.getByLabel("이름").fill("General 저장 확인");
+  await expect(dialog.getByRole("button", { name: "만들기" })).toBeEnabled();
+  await dialog.getByRole("button", { name: "새 항목 닫기" }).click();
+  await page.getByRole("alertdialog", { name: "변경사항을 버릴까요?" }).getByRole("button", { name: "변경사항 버리기" }).click();
+
+  await page.getByRole("button", { name: "AI 대화로 추가", exact: true }).click();
+  await page.getByRole("textbox", { name: "메시지" }).fill("AI로 Task를 정리해 주세요");
+  await page.getByRole("button", { name: "메시지 보내기" }).click();
+  await expect(page.getByLabel("Task 초안")).toHaveValue("AI로 정리된 Task");
+  await expect(page.getByLabel("연결 대상 · 선택 사항")).toHaveCount(0);
+  await expect(page.getByText("연결할 Project·Routine이 없어 General(기본)에 저장됩니다.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Task 1개 만들기" })).toBeEnabled();
+
+  await page.goto("/?view=routines");
+  const generalCard = page.getByRole("article").filter({ hasText: "General" });
+  await expect(generalCard).toContainText("General");
+  await expect(generalCard.getByText("기본", { exact: true })).toBeVisible();
 });
 
 test("Project·Task·Routine 추가 진입과 AI 도우미를 같은 구조로 제공한다", async ({ page, isMobile }) => {

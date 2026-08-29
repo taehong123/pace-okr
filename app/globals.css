@@ -1179,6 +1179,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .task-detail-fields > label > span { color: var(--muted); font-size: 9px; }
 .task-detail-fields select, .task-detail-fields input[type="date"] { width: 100%; min-width: 0; height: 32px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; outline: 0; background: white; color: var(--ink); font-size: 10px; }
 .task-container-empty { grid-column: 1 / -1; margin: 0; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--red) 28%, var(--line)); border-radius: var(--radius-control); background: color-mix(in srgb, var(--red) 7%, var(--raised)); color: var(--red); font-size: 10px; line-height: 1.5; }
+.task-container-general { border-color: color-mix(in srgb, var(--blue) 28%, var(--line)); background: color-mix(in srgb, var(--blue) 7%, var(--raised)); color: var(--ink); }
 .task-progress-field > div { min-width: 0; height: 32px; display: grid; grid-template-columns: minmax(0, 1fr) 34px; align-items: center; gap: 8px; }
 .task-progress-field input { width: 100%; accent-color: var(--blue); }
 .task-progress-field b { color: var(--muted); font-size: 10px; text-align: right; }
