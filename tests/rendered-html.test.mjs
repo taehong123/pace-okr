@@ -208,6 +208,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(okrOrganizeRoute, /Never concatenate separate Key Results or Initiatives/);
   assert.match(okrOrganizeRoute, /Polish every supported title while preserving its meaning, numbers, dates, and proper nouns/);
   assert.match(okrOrganizeRoute, /unassignedInitiatives/);
+  assert.match(okrOrganizeRoute, /uniqueTitleMatch/);
+  assert.match(okrOrganizeRoute, /if \(known && usedIds\.has\(known\.clientId\)\) return \[\]/);
   assert.match(okrOrganizeRoute, /recentConversation/);
   assert.match(okrOrganizeRoute, /workspaceContext/);
   assert.match(okrPlanRoute, /createOkrPlan/);

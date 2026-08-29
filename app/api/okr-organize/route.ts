@@ -528,35 +528,68 @@ function mergeOkrTree(current: OrganizedPlan, proposed: OrganizedPlan, mode: Con
     ...currentTargetInitiatives,
     ...currentUnassigned,
   ].map((entry) => [entry.clientId, entry]));
+  const knownKeyResultsByTitle = indexByTitle(currentKeyResults);
+  const knownInitiativesByTitle = indexByTitle([...knownInitiatives.values()]);
+  const initiativeParentIds = new Map(
+    currentKeyResults.flatMap((keyResult) => keyResult.initiatives.map((initiative) => [initiative.clientId, keyResult.clientId] as const)),
+  );
   const rawKeyResults = Array.isArray(proposed.keyResults) ? proposed.keyResults : [];
   const rawTargetInitiatives = Array.isArray(proposed.targetInitiatives) ? proposed.targetInitiatives : [];
   const rawUnassigned = Array.isArray(proposed.unassignedInitiatives) ? proposed.unassignedInitiatives : [];
+  const resolveKnownInitiative = (entry: DraftInitiative) => {
+    const requestedId = clean(entry?.clientId);
+    if (knownInitiatives.has(requestedId)) return knownInitiatives.get(requestedId);
+    return uniqueTitleMatch(knownInitiativesByTitle, entry?.title);
+  };
+  const resolveKnownKeyResult = (entry: DraftKeyResult) => {
+    const requestedId = clean(entry?.clientId);
+    if (knownKeyResults.has(requestedId)) return knownKeyResults.get(requestedId);
+
+    const titleMatch = uniqueTitleMatch(knownKeyResultsByTitle, entry?.title);
+    if (titleMatch) return titleMatch;
+
+    const parentIds = new Set(
+      (Array.isArray(entry?.initiatives) ? entry.initiatives : [])
+        .map(resolveKnownInitiative)
+        .map((initiative) => initiative ? initiativeParentIds.get(initiative.clientId) : undefined)
+        .filter((parentId): parentId is string => Boolean(parentId)),
+    );
+    return parentIds.size === 1 ? knownKeyResults.get([...parentIds][0]) : undefined;
+  };
   const proposedInitiativeIds = new Set<string>();
   for (const entry of [...rawKeyResults.flatMap((keyResult) => Array.isArray(keyResult?.initiatives) ? keyResult.initiatives : []), ...rawTargetInitiatives, ...rawUnassigned]) {
-    const id = clean(entry?.clientId);
-    if (knownInitiatives.has(id)) proposedInitiativeIds.add(id);
+    const known = resolveKnownInitiative(entry);
+    if (known) proposedInitiativeIds.add(known.clientId);
   }
   const usedIds = new Set<string>();
 
   const normalizeInitiative = (entry: DraftInitiative) => {
-    const requestedId = clean(entry?.clientId);
-    const known = knownInitiatives.get(requestedId);
-    const clientId = known && !usedIds.has(requestedId) ? requestedId : draftId("initiative");
+    const known = resolveKnownInitiative(entry);
+    if (known && usedIds.has(known.clientId)) return [];
+    const clientId = known?.clientId ?? draftId("initiative");
     usedIds.add(clientId);
-    return { clientId, title: clean(entry?.title).slice(0, 500) || known?.title || "" };
+    const title = clean(entry?.title).slice(0, 500) || known?.title || "";
+    return title ? [{ clientId, title }] : [];
   };
 
-  const keyResults = rawKeyResults.slice(0, 20).flatMap((entry) => {
-    const requestedId = clean(entry?.clientId);
-    const known = knownKeyResults.get(requestedId);
-    const clientId = known && !usedIds.has(requestedId) ? requestedId : draftId("kr");
+  const keyResults: DraftKeyResult[] = [];
+  for (const entry of rawKeyResults.slice(0, 20)) {
+    const known = resolveKnownKeyResult(entry);
+    if (known && usedIds.has(known.clientId)) continue;
+    const clientId = known?.clientId ?? draftId("kr");
     usedIds.add(clientId);
-    const proposedInitiatives = (Array.isArray(entry?.initiatives) ? entry.initiatives : []).slice(0, 30).map(normalizeInitiative).filter((initiative) => initiative.title);
+    const proposedInitiatives = (Array.isArray(entry?.initiatives) ? entry.initiatives : []).slice(0, 30).flatMap(normalizeInitiative);
     const retainedInitiatives = (known?.initiatives ?? []).filter((initiative) => !proposedInitiativeIds.has(initiative.clientId) && !usedIds.has(initiative.clientId));
     retainedInitiatives.forEach((initiative) => usedIds.add(initiative.clientId));
     const title = clean(entry?.title).slice(0, 500) || known?.title || "";
-    return title ? [{ clientId, title, initiatives: dedupeInitiatives([...proposedInitiatives, ...retainedInitiatives]) }] : [];
-  });
+    if (!title) continue;
+    const duplicate = keyResults.find((candidate) => !known && titleKey(candidate.title) === titleKey(title));
+    if (duplicate) {
+      duplicate.initiatives = dedupeInitiatives([...duplicate.initiatives, ...proposedInitiatives, ...retainedInitiatives]);
+      continue;
+    }
+    keyResults.push({ clientId, title, initiatives: dedupeInitiatives([...proposedInitiatives, ...retainedInitiatives]) });
+  }
   for (const existing of currentKeyResults) {
     if (keyResults.some((entry) => entry.clientId === existing.clientId)) continue;
     keyResults.push({
@@ -580,9 +613,9 @@ function mergeInitiativeList(
   current: DraftInitiative[],
   proposedIds: Set<string>,
   usedIds: Set<string>,
-  normalize: (entry: DraftInitiative) => DraftInitiative,
+  normalize: (entry: DraftInitiative) => DraftInitiative[],
 ) {
-  const merged = proposed.slice(0, 30).map(normalize).filter((entry) => entry.title);
+  const merged = proposed.slice(0, 30).flatMap(normalize);
   for (const existing of current) {
     if (proposedIds.has(existing.clientId) || usedIds.has(existing.clientId)) continue;
     usedIds.add(existing.clientId);
@@ -594,11 +627,30 @@ function mergeInitiativeList(
 function dedupeInitiatives(value: DraftInitiative[]) {
   const seen = new Set<string>();
   return value.filter((entry) => {
-    const key = entry.title.trim().toLocaleLowerCase();
+    const key = titleKey(entry.title);
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+}
+
+function indexByTitle<T extends { title: string }>(entries: T[]) {
+  const index = new Map<string, T[]>();
+  for (const entry of entries) {
+    const key = titleKey(entry.title);
+    if (!key) continue;
+    index.set(key, [...(index.get(key) ?? []), entry]);
+  }
+  return index;
+}
+
+function uniqueTitleMatch<T extends { title: string }>(index: Map<string, T[]>, value: unknown) {
+  const matches = index.get(titleKey(clean(value))) ?? [];
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+function titleKey(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
 
 function draftId(kind: "kr" | "initiative") {
