@@ -37,6 +37,7 @@ export async function POST(request: Request) {
     kind: "task",
     source: "slack",
     sourceRef: `${teamId}:${body.get("channel_id") ?? ""}:${body.get("user_id") ?? ""}`,
+    createdByUserId: connection.userId,
   });
 
   return Response.json({

@@ -44,7 +44,7 @@ type OrganizedOkr = {
   plan: OrganizedPlan;
 };
 
-type ConversationMode = "okr" | "project" | "onboarding" | "coach";
+type ConversationMode = "okr" | "project" | "task" | "onboarding" | "coach";
 
 const maxOutputTokens = 3200;
 
@@ -246,7 +246,7 @@ export async function POST(request: Request) {
 }
 
 function asConversationMode(value: unknown): ConversationMode {
-  return value === "project" || value === "onboarding" || value === "coach" ? value : "okr";
+  return value === "project" || value === "task" || value === "onboarding" || value === "coach" ? value : "okr";
 }
 
 function sanitizeHistory(value: unknown) {
@@ -300,6 +300,9 @@ function sanitizeTargetContext(value: Record<string, unknown>) {
 function systemInstruction(mode: ConversationMode) {
   const hierarchy = "Objective > Key Result > Initiative > Project > Task. Routine is independent and may contain Task.";
   const common = `You are the conversational assistant inside OKRPTR. Always answer in the user's language. Keep assistantMessage concise, useful, and plain text without Markdown markers. Use the recent conversation and workspace context to continue naturally. The hierarchy is ${hierarchy} Never invent specific metrics, commitments, owners, dates, or Tasks. Ask at most three concise questions when essential information is missing. Polish every supported title while preserving its meaning, numbers, dates, and proper nouns: an Objective is a concise desired change, a Key Result is a measurable outcome, and an Initiative is a concise strategic direction. Do not turn an activity into a Key Result. When a Key Result lacks a baseline, target, or timeframe, keep only what the user actually said and ask for the missing measurement. Never concatenate separate Key Results or Initiatives into one title.`;
+  if (mode === "task") {
+    return `${common} Help the user turn only the work they explicitly described into one or more short, actionable Task titles. Put one Task per line in plan.tasks. Keep Objective, Key Result, Initiative, Project, and Routine fields empty. Do not invent work, dates, owners, Projects, or Routines. The UI will require the user to choose an existing Project or Routine before saving.`;
+  }
   if (mode === "project") {
     return `${common} Help plan the first execution below an existing Initiative. Keep objectiveTitle, keyResults, targetInitiatives, and unassignedInitiatives empty. Only put a concrete Project, explicitly stated Tasks, and explicitly stated Routine details into the plan. A Project needs a clear outcome and enough scope, timing, or ownership to distinguish it from the Initiative.`;
   }
@@ -435,6 +438,18 @@ function normalizeOrganized(value: OrganizedOkr, mode: ConversationMode, current
     plan.targetInitiatives = [];
     plan.unassignedInitiatives = [];
   }
+  if (mode === "task") {
+    plan.objectiveTitle = "";
+    plan.keyResults = [];
+    plan.targetInitiatives = [];
+    plan.unassignedInitiatives = [];
+    plan.project = "";
+    plan.taskParent = "";
+    plan.routineTitle = "";
+    plan.routineTrigger = "";
+    plan.routinePlace = "";
+    plan.routineSteps = "";
+  }
   if (plan.taskParent !== "project" && plan.taskParent !== "routine") plan.taskParent = "";
   if (plan.taskParent === "project" && !plan.project) plan.taskParent = plan.routineTitle ? "routine" : "";
   if (plan.taskParent === "routine" && !plan.routineTitle) plan.taskParent = plan.project ? "project" : "";
@@ -515,7 +530,7 @@ function sanitizeInitiatives(value: unknown) {
 }
 
 function mergeOkrTree(current: OrganizedPlan, proposed: OrganizedPlan, mode: ConversationMode, targetKind?: string) {
-  if (mode === "project" || targetKind === "initiative") {
+  if (mode === "project" || mode === "task" || targetKind === "initiative") {
     return { objectiveTitle: "", keyResults: [], targetInitiatives: [], unassignedInitiatives: [] };
   }
 

@@ -22,6 +22,7 @@ export async function POST(request: Request) {
       kind: "task",
       source: capture.source,
       sourceRef: capture.sourceRef,
+      createdByUserId: authorization.userId,
     });
 
     return Response.json({ ok: true, item: serializeItem(item) }, { status: 201 });

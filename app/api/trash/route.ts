@@ -15,6 +15,9 @@ export async function GET(request: Request) {
 export async function DELETE(request: Request) {
   const authorization = await authorizeRequest(request, { allowViewerWrite: false });
   if (authorization instanceof Response) return authorization;
+  if (authorization.role !== "owner" && authorization.role !== "admin") {
+    return Response.json({ error: "Owner or Admin access is required" }, { status: 403 });
+  }
 
   try {
     await ensureWorkspace(authorization.ownerId);
@@ -29,6 +32,9 @@ export async function DELETE(request: Request) {
 export async function PATCH(request: Request) {
   const authorization = await authorizeRequest(request, { allowViewerWrite: false });
   if (authorization instanceof Response) return authorization;
+  if (authorization.role !== "owner" && authorization.role !== "admin") {
+    return Response.json({ error: "Owner or Admin access is required" }, { status: 403 });
+  }
 
   try {
     await ensureWorkspace(authorization.ownerId);

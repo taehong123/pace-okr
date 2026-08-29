@@ -302,6 +302,7 @@ async function ensureSchema() {
           due_date TEXT,
           source TEXT NOT NULL DEFAULT 'web',
           source_ref TEXT,
+          created_by_user_id TEXT,
           sort_order INTEGER NOT NULL DEFAULT 0,
           archived_at TEXT,
           archived_from_status TEXT,
@@ -583,6 +584,7 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN archived_at TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN archived_from_status TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN archive_root_id TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN created_by_user_id TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE integration_tokens ADD COLUMN last_used_at TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN deletion_requested_at TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN scheduled_deletion_at TEXT");
@@ -594,6 +596,18 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE property_definitions ADD COLUMN active INTEGER NOT NULL DEFAULT 1");
       await addColumnIfMissing(d1, "ALTER TABLE item_property_values ADD COLUMN legacy_value TEXT");
       await d1.batch([
+        d1.prepare(`UPDATE items
+          SET created_by_user_id = (
+            SELECT owner_user_id FROM workspaces
+            WHERE workspaces.id = items.owner_id
+              AND workspaces.id = workspaces.owner_user_id
+          )
+          WHERE created_by_user_id IS NULL
+            AND EXISTS (
+              SELECT 1 FROM workspaces
+              WHERE workspaces.id = items.owner_id
+                AND workspaces.id = workspaces.owner_user_id
+            )`),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_routines_owner_system_key ON routines(owner_id, system_key) WHERE system_key IS NOT NULL"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_routines_assignee ON routines(assignee_member_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspaces_scheduled_deletion ON workspaces(scheduled_deletion_at)"),
@@ -636,6 +650,7 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
     FROM routines
     LIMIT 0`).first();
     await d1.prepare(`SELECT default_value, system_key, active FROM property_definitions LIMIT 0`).first();
+    await d1.prepare(`SELECT created_by_user_id FROM items LIMIT 0`).first();
     await d1.prepare(`SELECT version FROM project_documents LIMIT 0`).first();
     return true;
   } catch {
@@ -2929,9 +2944,9 @@ export async function createOkrPlan(ownerId: string, userId: string, input: OkrP
   const d1 = (env as RuntimeEnv).DB;
   const statements = specs.flatMap((spec) => [
     d1.prepare(`INSERT INTO items
-      (id, owner_id, cycle_id, parent_id, kind, title, description, status, priority, cadence, progress, sort_order, source, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, 0, ?, 'web', ?, ?)`)
-      .bind(spec.id, ownerId, cycleId, spec.parentId, spec.kind, spec.title, spec.status, rules.defaultPriority, rules.defaultCadence, spec.sortOrder, createdAt, createdAt),
+      (id, owner_id, cycle_id, parent_id, kind, title, description, status, priority, cadence, progress, sort_order, source, created_by_user_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, 0, ?, 'web', ?, ?, ?)`)
+      .bind(spec.id, ownerId, cycleId, spec.parentId, spec.kind, spec.title, spec.status, rules.defaultPriority, rules.defaultCadence, spec.sortOrder, userId, createdAt, createdAt),
     d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
       VALUES (?, ?, ?, 'created', 'web', ?, ?)`)
       .bind(crypto.randomUUID(), ownerId, spec.id, JSON.stringify({ kind: spec.kind, status: spec.status, origin: "okr_assistant" }), createdAt),
@@ -3006,6 +3021,77 @@ function cleanPlanTitle(value: string | undefined) {
   return value?.trim().slice(0, 500) ?? "";
 }
 
+export async function createLinkedTasks(
+  ownerId: string,
+  input: {
+    titles: string[];
+    projectId?: string | null;
+    routineId?: string | null;
+    assigneeMemberId?: string | null;
+    createdByUserId: string;
+  },
+) {
+  await ensureWorkspace(ownerId);
+  const titles = [...new Set(input.titles.map((title) => title.trim().slice(0, 500)).filter(Boolean))];
+  if (!titles.length) throw new Error("At least one Task title is required");
+  if (titles.length > 50) throw new Error("At most 50 Tasks can be created at once");
+
+  const projectId = input.projectId?.trim() || null;
+  const routineId = input.routineId?.trim() || null;
+  if (Boolean(projectId) === Boolean(routineId)) throw new Error("Tasks must be linked to exactly one Project or Routine");
+
+  let cycleId: string | null = null;
+  if (projectId) {
+    const project = await getItem(ownerId, projectId);
+    if (!project || project.kind !== "project" || project.archivedAt) throw new Error("Active Project not found");
+    cycleId = project.cycleId;
+  } else if (routineId) {
+    const routine = await getRoutine(ownerId, routineId);
+    if (!routine || !routine.active || routine.systemKey === GENERAL_ROUTINE_SYSTEM_KEY) throw new Error("Active Routine not found");
+  }
+  await validateParent(ownerId, "task", projectId, routineId, cycleId);
+
+  const assigneeMemberId = input.assigneeMemberId?.trim() || null;
+  if (assigneeMemberId) {
+    const [member] = await getDb().select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(
+      eq(workspaceMembers.workspaceId, ownerId),
+      eq(workspaceMembers.id, assigneeMemberId),
+      eq(workspaceMembers.status, "active"),
+    )).limit(1);
+    if (!member) throw new Error("Task assignee must be an active workspace member");
+  }
+
+  const rules = await getWorkspaceRules(ownerId);
+  const now = new Date().toISOString();
+  const d1 = (env as RuntimeEnv).DB;
+  const taskRows = titles.map((title) => ({ id: crypto.randomUUID(), title }));
+  await d1.batch(taskRows.flatMap((task) => [
+    d1.prepare(`INSERT INTO items
+      (id, owner_id, cycle_id, parent_id, routine_id, kind, title, description, status, priority, cadence, progress, source, created_by_user_id, sort_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'task', ?, '', 'todo', ?, ?, 0, 'web', ?, 0, ?, ?)`)
+      .bind(task.id, ownerId, cycleId, projectId, routineId, task.title, rules.defaultPriority, rules.defaultCadence, input.createdByUserId, now, now),
+    d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
+      VALUES (?, ?, ?, 'created', 'web', ?, ?)`)
+      .bind(crypto.randomUUID(), ownerId, task.id, JSON.stringify({ kind: "task", status: "todo" }), now),
+    ...(assigneeMemberId ? [d1.prepare(`INSERT INTO item_assignments
+      (id, owner_id, item_id, member_id, role, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'task_assignee', ?, ?)`)
+      .bind(crypto.randomUUID(), ownerId, task.id, assigneeMemberId, now, now)] : []),
+  ]));
+
+  const createdRows = await getDb().select().from(items).where(and(
+    eq(items.ownerId, ownerId),
+    inArray(items.id, taskRows.map((task) => task.id)),
+  ));
+  const createdById = new Map(createdRows.map((item) => [item.id, item]));
+  const created = taskRows.flatMap((task) => {
+    const item = createdById.get(task.id);
+    return item ? [item] : [];
+  });
+  for (const item of created) await dispatchSlackAutomationEvent(ownerId, { triggerType: "task_created", item });
+  return created;
+}
+
 export async function createItem(
   ownerId: string,
   input: {
@@ -3033,7 +3119,15 @@ export async function createItem(
   const defaultParentId = systemDefault("parent_id");
   const parentId = input.parentId ?? (typeof defaultParentId === "string" ? defaultParentId : null);
   let routineId = input.routineId ?? null;
-  if (kind === "task" && !parentId && !routineId) routineId = (await ensureGeneralRoutine(ownerId)).id;
+  const source = input.source ?? "web";
+  if (kind === "task" && !parentId && !routineId) {
+    if (source === "web") throw new Error("Task must be linked to a Project or Routine");
+    routineId = (await ensureGeneralRoutine(ownerId)).id;
+  }
+  if (kind === "task" && source === "web" && routineId) {
+    const routine = await getRoutine(ownerId, routineId);
+    if (!routine || !routine.active || routine.systemKey === GENERAL_ROUTINE_SYSTEM_KEY) throw new Error("Web Tasks must use a Project or an active Routine");
+  }
   const defaultStatus = systemDefault("status");
   const status = input.status ?? (typeof defaultStatus === "string" && ITEM_STATUSES.includes(defaultStatus as ItemStatus) ? defaultStatus as ItemStatus : "todo");
   const cycleId = input.cycleId === undefined ? await defaultCycleIdForKind(ownerId, kind) : input.cycleId;
@@ -3065,8 +3159,9 @@ export async function createItem(
       cadence: input.cadence ?? (typeof defaultCadence === "string" && ITEM_CADENCES.includes(defaultCadence as ItemCadence) ? defaultCadence as ItemCadence : rules.defaultCadence),
       progress: clampProgress(input.progress ?? 0),
       dueDate: input.dueDate ?? (typeof defaultDueDate === "string" ? defaultDueDate : null),
-      source: input.source ?? "web",
+      source,
       sourceRef: input.sourceRef ?? null,
+      createdByUserId: input.createdByUserId ?? null,
     })
     .returning();
 
@@ -3116,10 +3211,9 @@ export async function updateItem(
     if (normalizedPatch.parentId) normalizedPatch.routineId = null;
     if (normalizedPatch.routineId) normalizedPatch.parentId = null;
     const nextParentId = normalizedPatch.parentId === undefined ? current.parentId : normalizedPatch.parentId;
-    let nextRoutineId = normalizedPatch.routineId === undefined ? current.routineId : normalizedPatch.routineId;
+    const nextRoutineId = normalizedPatch.routineId === undefined ? current.routineId : normalizedPatch.routineId;
     if (!nextParentId && !nextRoutineId) {
-      nextRoutineId = (await ensureGeneralRoutine(ownerId)).id;
-      normalizedPatch.routineId = nextRoutineId;
+      throw new Error("Task must be linked to a Project or Routine");
     }
   }
 
@@ -3166,6 +3260,47 @@ export type ItemAssignmentSummary = {
   email: string;
   role: ItemAssignmentRole;
 };
+
+export class ItemDeletePermissionError extends Error {
+  constructor() {
+    super("Project는 생성자 또는 주 DRI만, Task는 생성자 또는 담당자만 삭제할 수 있습니다.");
+    this.name = "ItemDeletePermissionError";
+  }
+}
+
+export async function getItemDeletePermissionMap(ownerId: string, userId: string, itemRows: PaceItem[]) {
+  const result: Record<string, boolean> = Object.fromEntries(itemRows.map((item) => [item.id, item.createdByUserId === userId]));
+  const unresolved = itemRows.filter((item) => !result[item.id] && (item.kind === "project" || item.kind === "task"));
+  if (!unresolved.length) return result;
+
+  const [member] = await getDb().select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(
+    eq(workspaceMembers.workspaceId, ownerId),
+    eq(workspaceMembers.userId, userId),
+    eq(workspaceMembers.status, "active"),
+  )).limit(1);
+  if (!member) return result;
+
+  const unresolvedById = new Map(unresolved.map((item) => [item.id, item]));
+  const assignments = await getDb().select({
+    itemId: itemAssignments.itemId,
+    role: itemAssignments.role,
+  }).from(itemAssignments).where(and(
+    eq(itemAssignments.ownerId, ownerId),
+    eq(itemAssignments.memberId, member.id),
+    inArray(itemAssignments.itemId, unresolved.map((item) => item.id)),
+  ));
+  for (const assignment of assignments) {
+    const item = unresolvedById.get(assignment.itemId);
+    if (item?.kind === "project" && assignment.role === "project_dri") result[item.id] = true;
+    if (item?.kind === "task" && assignment.role === "task_assignee") result[item.id] = true;
+  }
+  return result;
+}
+
+async function assertItemDeletePermission(ownerId: string, userId: string, itemRows: PaceItem[]) {
+  const permissions = await getItemDeletePermissionMap(ownerId, userId, itemRows);
+  if (itemRows.some((item) => !permissions[item.id])) throw new ItemDeletePermissionError();
+}
 
 export async function getItemAssignmentMap(ownerId: string, itemIds?: string[]) {
   if (itemIds && itemIds.length === 0) return {} as Record<string, ItemAssignmentSummary[]>;
@@ -3278,6 +3413,7 @@ export async function listArchivedProjects(ownerId: string) {
 
 export async function trashItems(
   ownerId: string,
+  userId: string,
   input: { itemIds?: string[]; scope?: "all_project_task" },
 ) {
   const requestedIds = [...new Set((input.itemIds ?? []).map((id) => id.trim()).filter(Boolean))];
@@ -3298,6 +3434,11 @@ export async function trashItems(
 
   const projectIds = new Set(candidates.filter((item) => item.kind === "project").map((item) => item.id));
   const candidateTasks = candidates.filter((item) => item.kind === "task");
+  const deletionRoots = [
+    ...candidates.filter((item) => item.kind === "project"),
+    ...candidateTasks.filter((item) => !item.parentId || !projectIds.has(item.parentId)),
+  ];
+  await assertItemDeletePermission(ownerId, userId, deletionRoots);
   const unselectedParentIds = [...new Set(candidateTasks
     .map((item) => item.parentId)
     .filter((parentId): parentId is string => typeof parentId === "string" && !projectIds.has(parentId)))];
@@ -3444,7 +3585,7 @@ export async function restoreTrashedItems(ownerId: string, itemIds: string[]) {
   return { restored: true, restoredRootIds: roots.map((root) => root.id), restoredCount };
 }
 
-export async function permanentlyDeleteTrashedItems(ownerId: string, itemIds: string[], confirmationText: string) {
+export async function permanentlyDeleteTrashedItems(ownerId: string, userId: string, itemIds: string[], confirmationText: string) {
   if (confirmationText !== "영구 삭제") throw new Error("Permanent deletion confirmation does not match");
   const requestedIds = [...new Set(itemIds.map((id) => id.trim()).filter(Boolean))];
   if (!requestedIds.length) throw new Error("itemIds are required");
@@ -3455,6 +3596,7 @@ export async function permanentlyDeleteTrashedItems(ownerId: string, itemIds: st
     sql`${items.archivedAt} IS NOT NULL`,
   ));
   if (roots.length !== requestedIds.length) throw new Error("One or more trashed items were not found");
+  await assertItemDeletePermission(ownerId, userId, roots);
   const projectIds = new Set(roots.filter((root) => root.kind === "project").map((root) => root.id));
   const standaloneTaskIds = roots.filter((root) => root.kind === "task" && (!root.parentId || !projectIds.has(root.parentId))).map((root) => root.id);
   const affectedRows = await getDb().select({ id: items.id, kind: items.kind }).from(items).where(and(
@@ -3494,11 +3636,11 @@ function selectedIdCondition(column: typeof items.id | typeof items.parentId | t
   return ids.length ? inArray(column, ids) : sql`0 = 1`;
 }
 
-export async function archiveProject(ownerId: string, projectId: string) {
+export async function archiveProject(ownerId: string, userId: string, projectId: string) {
   const project = await getItem(ownerId, projectId);
   if (!project || project.kind !== "project") throw new Error("Project not found");
   if (project.archivedAt) throw new Error("Project is already archived");
-  const result = await trashItems(ownerId, { itemIds: [projectId] });
+  const result = await trashItems(ownerId, userId, { itemIds: [projectId] });
   return { project: (await getItem(ownerId, projectId))!, affectedCount: result.affectedItemCount };
 }
 
@@ -3510,12 +3652,12 @@ export async function restoreProject(ownerId: string, projectId: string) {
   return { project: (await getItem(ownerId, projectId))!, affectedCount: result.restoredCount };
 }
 
-export async function permanentlyDeleteArchivedProject(ownerId: string, projectId: string, confirmationTitle: string) {
+export async function permanentlyDeleteArchivedProject(ownerId: string, userId: string, projectId: string, confirmationTitle: string) {
   const project = await getItem(ownerId, projectId);
   if (!project || project.kind !== "project") throw new Error("Project not found");
   if (!project.archivedAt) throw new Error("Archive the Project before deleting it permanently");
   if (confirmationTitle.trim() !== project.title) throw new Error("Project title confirmation does not match");
-  const result = await permanentlyDeleteTrashedItems(ownerId, [projectId], "영구 삭제");
+  const result = await permanentlyDeleteTrashedItems(ownerId, userId, [projectId], "영구 삭제");
   return {
     deleted: true,
     projectId,
@@ -4867,6 +5009,7 @@ export function serializeItem(
     progress: item.progress,
     dueDate: item.dueDate,
     source: item.source,
+    createdByUserId: item.createdByUserId,
     archivedAt: item.archivedAt,
     archivedFromStatus: item.archivedFromStatus,
     archiveRootId: item.archiveRootId,

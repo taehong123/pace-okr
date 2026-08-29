@@ -124,6 +124,7 @@ type OkrptrItem = {
   progress: number;
   dueDate: string | null;
   source: string;
+  createdByUserId: string | null;
   archivedAt: string | null;
   archivedFromStatus: ItemStatus | null;
   archiveRootId: string | null;
@@ -164,7 +165,7 @@ type ProjectBlockEditorChange = { content: string; plainText: string };
 type PropertyValueMap = Record<string, Record<string, PropertyValue>>;
 type ProjectHiddenPropertyMap = Record<string, string[]>;
 type ArchivedProject = OkrptrItem & { archivedTaskCount: number };
-type TrashedItem = OkrptrItem & { trashedTaskCount: number };
+type TrashedItem = OkrptrItem & { trashedTaskCount: number; canDelete: boolean };
 type ChecklistItem = { id: string; taskId: string; title: string; completed: boolean; sortOrder: number };
 type Scrum = {
   date: string;
@@ -243,7 +244,7 @@ type StringPlanField = "project" | "tasks" | "taskParent" | "routineTitle" | "ro
 
 type OkrChatContext = {
   key: string;
-  entry: "onboarding" | "coach" | "create";
+  entry: "onboarding" | "coach" | "create" | "task";
   cycleId: string;
   cycleName: string;
   initialMessage: string;
@@ -294,6 +295,12 @@ type ProjectChatTarget = {
   initiativeTitle: string;
 };
 
+type TaskContainerOption = {
+  id: string;
+  kind: "project" | "routine";
+  title: string;
+};
+
 type OkrPlanApplyResult = {
   items: OkrptrItem[];
   cycleId: string;
@@ -307,7 +314,7 @@ type OkrPlanApplyResult = {
 };
 
 type ChatMessage = { id: string; role: "user" | "assistant"; content: string };
-type ConversationMode = "okr" | "project" | "onboarding" | "coach";
+type ConversationMode = "okr" | "project" | "task" | "onboarding" | "coach";
 
 type OrganizeError = {
   code?: string;
@@ -648,8 +655,6 @@ function WorkspaceApp() {
   const [activeView, setActiveView] = useState<View>(() => navigationFromLocation().view);
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [taskDisplay, setTaskDisplay] = useState<"cards" | "table" | "board">("table");
-  const [capture, setCapture] = useState("");
-  const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<AppNotice | null>(null);
   const [integrationOpen, setIntegrationOpen] = useState(false);
   const [appIntegrationsOpen, setAppIntegrationsOpen] = useState(false);
@@ -845,6 +850,10 @@ function WorkspaceApp() {
   const activeItems = items.filter((entry) => !entry.archivedAt && entry.status !== "archived");
   const taskItems = activeItems.filter((entry) => entry.kind === "task");
   const executionItems = activeItems.filter((entry) => entry.kind === "project");
+  const taskContainerOptions: TaskContainerOption[] = [
+    ...executionItems.map((entry) => ({ id: entry.id, kind: "project" as const, title: entry.title })),
+    ...routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => ({ id: entry.id, kind: "routine" as const, title: entry.title })),
+  ];
   const structuredItems = activeItems;
   const defaultOkrCycle = okrCycles.find((cycle) => cycle.status === "active") ?? okrCycles[0] ?? null;
   const selectedOkrCycle = okrCycles.find((cycle) => cycle.id === selectedOkrCycleId) ?? defaultOkrCycle;
@@ -883,13 +892,16 @@ function WorkspaceApp() {
     return counts;
   }, new Map<string, number>());
   const currentWorkspace = activeWorkspaces.find((entry) => entry.current) ?? activeWorkspaces[0];
-  const canDeleteItems = Boolean(currentWorkspace && currentWorkspace.role !== "viewer");
+  const currentTeamMember = teamMembers.find((member) => member.isCurrent && member.status === "active");
+  const deletableItemIds = new Set(activeItems
+    .filter((item) => canUserDeleteItem(item, currentTeamMember, authState.user?.id ?? null))
+    .map((item) => item.id));
+  const canDeleteRecords = currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin";
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setSelectedDeleteItemIds(new Set()), 0);
     return () => window.clearTimeout(timeout);
   }, [activeView, currentWorkspace?.id, projectTab, selectedProjectId, selectedTaskId]);
-  const currentTeamMember = teamMembers.find((member) => member.isCurrent && member.status === "active");
   const accountDisplayName = currentTeamMember?.displayName || authState.user?.displayName || "내 계정";
   const accountInitial = accountDisplayName.slice(0, 1).toLocaleUpperCase() || "O";
   const hasActiveObjective = activeItems.some((entry) => entry.kind === "objective");
@@ -1087,29 +1099,6 @@ function WorkspaceApp() {
     }
   }
 
-  async function submitCapture(event: FormEvent) {
-    event.preventDefault();
-    const title = capture.trim();
-    if (!title || saving) return;
-    setSaving(true);
-    try {
-      const response = await fetch("/api/items", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, kind: "task", source: "web", assigneeMemberId: currentTeamMember?.id }),
-      });
-      if (!response.ok) throw new Error("save failed");
-      const data = (await response.json()) as { item: OkrptrItem };
-      setItems((current) => [...current, data.item]);
-      setCapture("");
-      showNotice("미분류 Task에 추가했습니다.", "success");
-    } catch {
-      showNotice("Task를 저장하지 못했습니다. 입력 내용은 그대로 유지했습니다.", "error");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function patchItem(id: string, patch: Partial<OkrptrItem>) {
     const previous = items;
     setItems((current) => current.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)));
@@ -1169,6 +1158,7 @@ function WorkspaceApp() {
   }
 
   function toggleDeleteSelection(itemId: string) {
+    if (!deletableItemIds.has(itemId)) return;
     setSelectedDeleteItemIds((current) => {
       const next = new Set(current);
       if (next.has(itemId)) next.delete(itemId); else next.add(itemId);
@@ -1177,12 +1167,17 @@ function WorkspaceApp() {
   }
 
   function addDeleteItems(itemIds: string[]) {
-    setSelectedDeleteItemIds((current) => new Set([...current, ...itemIds]));
+    setSelectedDeleteItemIds((current) => new Set([...current, ...itemIds.filter((id) => deletableItemIds.has(id))]));
+  }
+
+  function removeDeleteItems(itemIds: string[]) {
+    const removing = new Set(itemIds);
+    setSelectedDeleteItemIds((current) => new Set([...current].filter((id) => !removing.has(id))));
   }
 
   async function moveSelectedItemsToTrash() {
     if (!selectedDeleteItemIds.size || trashingItems) return;
-    const selected = activeItems.filter((item) => selectedDeleteItemIds.has(item.id) && (item.kind === "project" || item.kind === "task"));
+    const selected = activeItems.filter((item) => selectedDeleteItemIds.has(item.id) && deletableItemIds.has(item.id) && (item.kind === "project" || item.kind === "task"));
     const projectIds = new Set(selected.filter((item) => item.kind === "project").map((item) => item.id));
     const selectedStandaloneTaskIds = new Set(selected.filter((item) => item.kind === "task" && (!item.parentId || !projectIds.has(item.parentId))).map((item) => item.id));
     const childTaskIds = new Set(activeItems.filter((item) => item.kind === "task" && item.parentId && projectIds.has(item.parentId)).map((item) => item.id));
@@ -1223,6 +1218,10 @@ function WorkspaceApp() {
   }
 
   async function archiveProjectItem(project: OkrptrItem) {
+    if (!deletableItemIds.has(project.id)) {
+      showNotice("Project는 생성자 또는 주 DRI만 삭제할 수 있습니다.", "error");
+      return;
+    }
     const taskCount = activeItems.filter((item) => item.kind === "task" && item.parentId === project.id).length;
     if (!await confirmAction({ title: "Project를 휴지통으로 이동", message: `'${project.title}' Project와 하위 Task ${taskCount}개를 휴지통으로 이동합니다.\n휴지통에서 다시 복구할 수 있습니다.`, confirmLabel: "휴지통으로 이동", danger: true })) return;
     const response = await fetch("/api/project-archives", {
@@ -1265,6 +1264,58 @@ function WorkspaceApp() {
     setSelectedTaskId(null);
     setActiveView("home");
     writeNavigation("home", null, null);
+  }
+
+  function openTaskCreationChat(initialMessage = "") {
+    setCreateItemOpen(false);
+    setOkrChatContext({
+      key: `${currentWorkspace?.id ?? "workspace"}:task:${Date.now()}`,
+      entry: "task",
+      cycleId: selectedOkrCycle?.id ?? "",
+      cycleName: "Task",
+      initialMessage: initialMessage.trim(),
+      sourceKind: "task",
+      target: null,
+      targetCandidates: [],
+    });
+    setSelectedProjectId(null);
+    setSelectedTaskId(null);
+    setActiveView("home");
+    writeNavigation("home", null, null);
+  }
+
+  async function createTasksFromConversation(taskText: string, containerValue: string, assigneeMemberId: string | null) {
+    const titles = taskText.split("\n").map((entry) => entry.trim()).filter(Boolean);
+    const [containerKind, containerId] = containerValue.split(":", 2);
+    const container = taskContainerOptions.find((entry) => entry.kind === containerKind && entry.id === containerId);
+    const project = containerKind === "project" ? executionItems.find((entry) => entry.id === containerId) : null;
+    if (!titles.length || !container || (containerKind !== "project" && containerKind !== "routine")) return false;
+    try {
+      const response = await fetch("/api/items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          titles,
+          kind: "task",
+          cycleId: containerKind === "project" ? project?.cycleId ?? null : null,
+          parentId: containerKind === "project" ? containerId : null,
+          routineId: containerKind === "routine" ? containerId : null,
+          source: "web",
+          assigneeMemberId,
+        }),
+      });
+      const data = await response.json().catch(() => ({})) as { items?: OkrptrItem[]; error?: string };
+      if (!response.ok || !data.items) throw new Error(data.error ?? "Task를 만들지 못했습니다.");
+      const created = data.items;
+      setItems((current) => [...current, ...created]);
+      setOkrChatContext(null);
+      navigateView("inbox");
+      showNotice(`Task ${created.length}개를 연결해 만들었습니다.`);
+      return true;
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "Task를 만들지 못했습니다.", "error");
+      return false;
+    }
   }
 
   function openProjectPage(id: string) {
@@ -1790,6 +1841,8 @@ function WorkspaceApp() {
             <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setOkrListOpen(true)}><Archive size={14} />목록보기</button>
+            ) : activeView === "inbox" ? (
+              <div className="task-page-actions"><button onClick={() => openTaskCreationChat()}><Bot size={14} />AI 대화로 추가</button><button className="primary-action" onClick={() => openCreateItem("task", null)}><Plus size={14} />Task 추가</button></div>
             ) : activeView === "work" && projectTab === "list" ? (
               <button className="primary-action" onClick={() => openCreateItem("project")}><Plus size={14} />Project 추가</button>
             ) : activeView === "reviews" ? (
@@ -1808,25 +1861,19 @@ function WorkspaceApp() {
           ) : workspaceDataState === "loading" ? (
             <AsyncState icon={LoaderCircle} title={`${viewTitles[activeView]} 데이터를 불러오는 중입니다`} loading />
           ) : <>
-          {activeView === "inbox" && (
-            <form className="quick-capture" onSubmit={submitCapture}>
-              <Plus size={15} />
-              <input value={capture} onChange={(event) => setCapture(event.target.value)} placeholder="할 일을 입력하면 미분류 Task에 저장됩니다" aria-label="미분류 Task에 할 일 추가" />
-              <button disabled={!capture.trim() || saving}>{saving ? "저장 중" : "추가"}</button>
-            </form>
-          )}
-
           <div className="assistant-view-shell" hidden={activeView !== "home" || Boolean(selectedProject)}>
             <HomeView
               key={okrChatContext?.key ?? `${currentWorkspace?.id ?? "workspace"}:default`}
               onCreatePlan={createOnboardingPlan}
               onCreateProject={createProjectFromConversation}
               onApplyOkrPlan={applyAssistantOkrPlan}
-              onFinish={() => navigateView("okr")}
+              onCreateTasks={createTasksFromConversation}
+              onFinish={() => { const destination = okrChatContext?.entry === "task" ? "inbox" : "okr"; setOkrChatContext(null); navigateView(destination); }}
               context={okrChatContext}
               workspaceContext={assistantWorkspaceContext}
               canWrite={canWriteWorkspace}
               members={teamMembers.filter((member) => member.status === "active")}
+              taskContainers={taskContainerOptions}
               defaultDriMemberId={currentTeamMember?.id ?? null}
               defaultCycleId={selectedOkrCycle?.id ?? null}
             />
@@ -1850,13 +1897,14 @@ function WorkspaceApp() {
               readOnly={currentWorkspace?.role === "viewer"}
               onNotice={showNotice}
               onArchive={() => void archiveProjectItem(selectedProject)}
+              canDeleteItem={(item) => deletableItemIds.has(item.id)}
               selectedItemIds={selectedDeleteItemIds}
               onToggleSelect={toggleDeleteSelection}
             />
           ) : (
             <>
           {activeView === "my_work" && <MyWorkView items={activeItems} routines={routines} currentMember={currentTeamMember ?? null} onOpenProject={openProjectPage} onOpenTask={openTaskDetail} onRoutinesChange={setRoutines} onNotice={showNotice} />}
-          {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={openTaskDetail} onPatch={patchItem} canDelete={canDeleteItems} selectedItemIds={selectedDeleteItemIds} onToggleSelect={toggleDeleteSelection} onSelectItems={addDeleteItems} />}
+          {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={openTaskDetail} onPatch={patchItem} canDeleteItem={(item) => deletableItemIds.has(item.id)} selectedItemIds={selectedDeleteItemIds} onToggleSelect={toggleDeleteSelection} onSelectItems={addDeleteItems} onClearItems={removeDeleteItems} onTrashSelected={() => void moveSelectedItemsToTrash()} trashing={trashingItems} />}
           {activeView === "work" && (
             <section className="project-workspace">
               <div className="project-tabs" role="tablist" aria-label="Project 보기">
@@ -1877,7 +1925,7 @@ function WorkspaceApp() {
                 onOpenProperties={() => setProjectTab("properties")}
                 onOpenTask={openTaskDetail}
                 onOpenProject={openProjectPage}
-                canDelete={canDeleteItems}
+                canDeleteItem={(item) => deletableItemIds.has(item.id)}
                 selectedItemIds={selectedDeleteItemIds}
                 onToggleSelect={toggleDeleteSelection}
                 onSelectItems={addDeleteItems}
@@ -1912,14 +1960,14 @@ function WorkspaceApp() {
           {activeView === "scrum" && <DailyScrumView onOpenTask={openTaskDetail} onNotice={showNotice} />}
           {activeView === "recommendations" && <RecommendationsView items={activeItems} onOpenTask={openTaskDetail} onOpenProject={openProjectPage} onNavigate={navigateView} />}
           {activeView === "reviews" && <ReviewView items={periodItems} cadence={cadence} completed={completed} blocked={blocked} averageProgress={averageProgress} onOpenTask={openTaskDetail} onOpenProject={openProjectPage} />}
-          {activeView === "trash" && <TrashView onNotice={showNotice} canDelete={canDeleteItems} />}
+          {activeView === "trash" && <TrashView onNotice={showNotice} canDeleteRecords={canDeleteRecords} canRestore={Boolean(currentWorkspace && currentWorkspace.role !== "viewer")} />}
             </>
           )}
           </>}
         </div>
       </section>
 
-      {canDeleteItems && selectedDeleteItemIds.size > 0 && (
+      {activeView !== "inbox" && selectedDeleteItemIds.size > 0 && (
         <div className="bulk-delete-bar" role="region" aria-label="선택 항목 작업">
           <b>{selectedDeleteItemIds.size}개 선택</b>
           <button onClick={() => setSelectedDeleteItemIds(new Set())}>선택 해제</button>
@@ -2014,7 +2062,7 @@ function WorkspaceApp() {
       )}
       {teamPanelOpen && <TeamPanel initialTeam={teamData} initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onMembersChange={(members) => setTeamData((current) => current ? { ...current, members } : current)} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
       {selectedOkrItem && <OkrItemEditPanel item={selectedOkrItem} items={activeItems} onClose={() => setSelectedOkrItemId(null)} onSave={(patch) => patchItem(selectedOkrItem.id, patch)} />}
-      {createItemOpen && <CreateItemPanel initialKind={createItemKind} cycleId={createItemCycle?.id ?? null} items={items} routines={routines} properties={properties} teamMembers={teamMembers} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} onCreateWithChat={activeView === "okr" && createItemCycle ? ({ kind, title }) => openOkrCreationChat(createItemCycle, kind, title) : undefined} />}
+      {createItemOpen && <CreateItemPanel initialKind={createItemKind} cycleId={createItemCycle?.id ?? null} items={items} routines={routines} properties={properties} teamMembers={teamMembers} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} onCreateWithChat={activeView === "inbox" && createItemKind === "task" ? ({ title }) => openTaskCreationChat(title) : activeView === "okr" && createItemCycle ? ({ kind, title }) => openOkrCreationChat(createItemCycle, kind, title) : undefined} />}
       {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setPropertyValues({}); setOkrCycles([cycle]); setVisibleOkrCycleIds([cycle.id]); setSelectedTaskId(null); navigateView("trash"); setCleanupOpen(false); showNotice("OKR 데이터를 휴지통에 보관하고 정리했습니다."); }} onNotice={showNotice} />}
       {selectedTask && (
         <TaskDetailPanel
@@ -2027,7 +2075,7 @@ function WorkspaceApp() {
           onProgress={(progress) => setItems((current) => current.map((entry) => entry.id === selectedTask.id ? { ...entry, progress } : entry))}
           onAssignmentsChange={(assignments) => updateItemAssignments(selectedTask.id, assignments)}
           onNotice={showNotice}
-          canDelete={canDeleteItems}
+          canDelete={deletableItemIds.has(selectedTask.id)}
           selected={selectedDeleteItemIds.has(selectedTask.id)}
           onToggleSelect={() => toggleDeleteSelection(selectedTask.id)}
         />
@@ -2261,7 +2309,7 @@ function CadenceSwitch({ value, onChange }: { value: Cadence; onChange: (value: 
   return <div className="cadence-switch">{(Object.keys(cadenceLabels) as Cadence[]).map((entry) => <button className={value === entry ? "selected" : ""} key={entry} onClick={() => onChange(entry)}>{cadenceLabels[entry]}</button>)}</div>;
 }
 
-function TaskDatabase({ items, allItems, properties, values, hiddenProperties, display, onDisplayChange, onPatch, onPropertyChange, onOpenProperties, onOpenTask, onOpenProject, canDelete, selectedItemIds, onToggleSelect, onSelectItems }: {
+function TaskDatabase({ items, allItems, properties, values, hiddenProperties, display, onDisplayChange, onPatch, onPropertyChange, onOpenProperties, onOpenTask, onOpenProject, canDeleteItem, selectedItemIds, onToggleSelect, onSelectItems }: {
   items: OkrptrItem[];
   allItems: OkrptrItem[];
   properties: PropertyDefinition[];
@@ -2274,7 +2322,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
   onOpenProperties: () => void;
   onOpenTask: (id: string) => void;
   onOpenProject: (id: string) => void;
-  canDelete: boolean;
+  canDeleteItem: (item: OkrptrItem) => boolean;
   selectedItemIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onSelectItems: (ids: string[]) => void;
@@ -2309,6 +2357,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
       : sort === "priority" ? priorityRank[right.priority] - priorityRank[left.priority]
       : sort === "name" ? left.title.localeCompare(right.title, "ko")
       : items.indexOf(left) - items.indexOf(right));
+  const deletableVisible = visible.filter(canDeleteItem);
 
   useEffect(() => {
     if (!filterOpen && !sortOpen) return;
@@ -2350,7 +2399,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
           <button role="tab" aria-selected={display === "board"} className={display === "board" ? "active" : ""} onClick={() => onDisplayChange("board")}><Columns3 size={13} />보드</button>
         </div>
         <div className="database-actions" ref={actionsRef}>
-          {canDelete && visible.length > 0 && <button onClick={() => onSelectItems(visible.map((item) => item.id))}><ListChecks size={13} /><span>현재 목록 선택</span></button>}
+          {deletableVisible.length > 0 && <button onClick={() => onSelectItems(deletableVisible.map((item) => item.id))}><ListChecks size={13} /><span>삭제 가능 항목 선택</span></button>}
           <label className="table-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Project 검색" aria-label="Project 검색" /></label>
           <div className="toolbar-popover-wrap">
             <button aria-label="Project 필터" title="Project 필터" aria-haspopup="dialog" aria-expanded={filterOpen} onClick={() => { setFilterOpen((open) => !open); setSortOpen(false); }}><Filter size={13} /><span>필터</span>{activeFilterCount > 0 && <b>{activeFilterCount}</b>}</button>
@@ -2375,7 +2424,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
       {display === "cards" ? <div className="project-card-list" role="list" aria-label="Project 카드 목록">{visible.map((entry) => {
         const previews = propertyPreview(entry);
         return <article className="project-card" role="listitem" key={entry.id}>
-          {canDelete && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}
+          {canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}
           <button className="project-card-open" onClick={() => onOpenProject(entry.id)}>
             <header><span className="type-icon type-project">P</span><b>{entry.title}</b><ChevronRight size={15} /></header>
             <div className="project-card-meta"><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span><span className={`priority-${entry.priority}`}>{priorityLabels[entry.priority]}</span><span><CalendarDays size={12} />{dueLabel(entry.dueDate)}</span><span><Users size={12} />{assignmentLabel(entry, "project_dri")}</span></div>
@@ -2385,7 +2434,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
           </button>
         </article>;
       })}{!visible.length && <div className="table-empty">{activeFilterCount || query ? <><span>조건에 맞는 Project가 없습니다.</span><button onClick={() => { resetFilters(); setQuery(""); }}>검색·필터 초기화</button></> : "표시할 Project가 없습니다."}</div>}</div>
-      : display === "board" ? <BoardView items={visible} onOpenItem={(entry) => entry.kind === "project" ? onOpenProject(entry.id) : onOpenTask(entry.id)} canDelete={canDelete} selectedItemIds={selectedItemIds} onToggleSelect={onToggleSelect} /> : (
+      : display === "board" ? <BoardView items={visible} onOpenItem={(entry) => entry.kind === "project" ? onOpenProject(entry.id) : onOpenTask(entry.id)} canDeleteItem={canDeleteItem} selectedItemIds={selectedItemIds} onToggleSelect={onToggleSelect} /> : (
         <div className="database-scroll">
           <div className="task-table" role="table" aria-label="Project 표" style={{ "--custom-columns": customProperties.length } as CSSProperties}>
             <div className="task-table-row task-table-head" role="row">
@@ -2395,7 +2444,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
             </div>
             {visible.map((entry) => (
               <div className="task-table-row" role="row" key={entry.id}>
-                <div className="name-cell">{canDelete && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><button className={`task-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })}><Check size={12} /></button>{entry.kind === "project" ? <button className="name-open-button" onClick={() => onOpenProject(entry.id)}>{entry.title}</button> : <input defaultValue={entry.title} onBlur={(event) => event.target.value.trim() !== entry.title && void onPatch(entry.id, { title: event.target.value })} />}</div>
+                <div className="name-cell">{canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><button className={`task-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })}><Check size={12} /></button>{entry.kind === "project" ? <button className="name-open-button" onClick={() => onOpenProject(entry.id)}>{entry.title}</button> : <input defaultValue={entry.title} onBlur={(event) => event.target.value.trim() !== entry.title && void onPatch(entry.id, { title: event.target.value })} />}</div>
                 <select aria-label={`${entry.title} 상태`} className={`status-select status-${entry.status}`} value={entry.status} onChange={(event) => void onPatch(entry.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <select aria-label={`${entry.title} 우선순위`} className={`priority-${entry.priority}`} value={entry.priority} onChange={(event) => void onPatch(entry.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <input aria-label={`${entry.title} 기한`} className="date-cell" type="date" value={entry.dueDate ?? ""} onChange={(event) => void onPatch(entry.id, { dueDate: event.target.value || null })} />
@@ -2422,7 +2471,7 @@ function PropertyCell({ itemId, property, value, onChange }: { itemId: string; p
   return <input className="property-input" type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => { const raw = event.target.value; void onChange(itemId, property.id, property.type === "number" ? (raw ? Number(raw) : null) : raw || null); }} />;
 }
 
-function ProjectPageView({ project, allItems, properties, propertyValues, hiddenPropertyIds, teamMembers, onClose, onPatch, onPropertyChange, onPropertyVisibility, onAssignmentsChange, onTaskCreated, onOpenTask, readOnly, onNotice, onArchive, selectedItemIds, onToggleSelect }: {
+function ProjectPageView({ project, allItems, properties, propertyValues, hiddenPropertyIds, teamMembers, onClose, onPatch, onPropertyChange, onPropertyVisibility, onAssignmentsChange, onTaskCreated, onOpenTask, readOnly, onNotice, onArchive, canDeleteItem, selectedItemIds, onToggleSelect }: {
   project: OkrptrItem;
   allItems: OkrptrItem[];
   properties: PropertyDefinition[];
@@ -2439,6 +2488,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
   readOnly: boolean;
   onNotice: (message: string) => void;
   onArchive: () => void;
+  canDeleteItem: (item: OkrptrItem) => boolean;
   selectedItemIds: Set<string>;
   onToggleSelect: (id: string) => void;
 }) {
@@ -2455,6 +2505,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
   const hiddenPropertyDefinitions = activeProperties.filter((property) => hiddenPropertyIds.includes(property.id));
   const systemProperties = new Map(properties.filter((property) => property.systemKey).map((property) => [property.systemKey!, property]));
   const linkedTasks = allItems.filter((entry) => entry.kind === "task" && entry.parentId === project.id && !entry.archivedAt);
+  const deletableLinkedTasks = linkedTasks.filter(canDeleteItem);
   const driIds = project.assignments.filter((entry) => entry.role === "project_dri").map((entry) => entry.memberId);
   const workerIds = project.assignments.filter((entry) => entry.role === "project_worker").map((entry) => entry.memberId);
 
@@ -2522,8 +2573,8 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
             />
           </div>
           <div className="project-page-actions">
-            {!readOnly && <DeleteSelectCheckbox item={project} selected={selectedItemIds.has(project.id)} onToggle={onToggleSelect} />}
-            {!readOnly && <button type="button" className="danger" onClick={onArchive}><Trash2 size={13} />휴지통으로 이동</button>}
+            {canDeleteItem(project) && <DeleteSelectCheckbox item={project} selected={selectedItemIds.has(project.id)} onToggle={onToggleSelect} />}
+            {canDeleteItem(project) && <button type="button" className="danger" onClick={onArchive}><Trash2 size={13} />휴지통으로 이동</button>}
             <button className="icon-button" onClick={() => requestClose("close-button")} aria-label="닫기"><X size={17} /></button>
           </div>
         </header>
@@ -2550,7 +2601,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
           <LineageRow label="Initiative" value={initiative?.title ?? "미연결"} />
         </section>
         <section className="project-linked-tasks">
-          <header><div><b>연결된 Task</b><span>{linkedTasks.length}개</span></div>{!readOnly && linkedTasks.length > 0 && <button onClick={() => linkedTasks.forEach((task) => { if (!selectedItemIds.has(task.id)) onToggleSelect(task.id); })}><ListChecks size={13} />전체 선택</button>}</header>
+          <header><div><b>연결된 Task</b><span>{linkedTasks.length}개</span></div>{deletableLinkedTasks.length > 0 && <button onClick={() => deletableLinkedTasks.forEach((task) => { if (!selectedItemIds.has(task.id)) onToggleSelect(task.id); })}><ListChecks size={13} />삭제 가능 Task 선택</button>}</header>
           <form className="project-task-quick-add" onSubmit={createLinkedTask}>
             <input value={quickTaskTitle} onChange={(event) => setQuickTaskTitle(event.target.value)} placeholder="새 Task 빠른 추가" disabled={readOnly || creatingTask} />
             <button disabled={readOnly || creatingTask || !quickTaskTitle.trim()} aria-label="Task 추가" title="Task 추가"><Plus size={15} /></button>
@@ -2560,7 +2611,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
             {linkedTasks.map((task) => {
               const assignee = task.assignments.find((assignment) => assignment.role === "task_assignee")?.memberId ?? "";
               return <div className="project-task-row" key={task.id}>
-                <div className="project-task-title-cell">{!readOnly && <DeleteSelectCheckbox item={task} selected={selectedItemIds.has(task.id)} onToggle={onToggleSelect} />}<button className="project-task-title" onClick={() => onOpenTask(task.id)}>{task.title}</button></div>
+                <div className="project-task-title-cell">{canDeleteItem(task) && <DeleteSelectCheckbox item={task} selected={selectedItemIds.has(task.id)} onToggle={onToggleSelect} />}<button className="project-task-title" onClick={() => onOpenTask(task.id)}>{task.title}</button></div>
                 <select disabled={readOnly} className={`status-${task.status}`} value={task.status} onChange={(event) => void onPatch(task.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <select disabled={readOnly} value={assignee} onChange={(event) => void saveTaskAssignee(task, event.target.value)}><option value="">미지정</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select>
                 <input disabled={readOnly} type="date" value={task.dueDate ?? ""} onChange={(event) => void onPatch(task.id, { dueDate: event.target.value || null })} />
@@ -2735,14 +2786,16 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
   const [checklistLoadError, setChecklistLoadError] = useState(false);
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
   const project = task.parentId ? byId.get(task.parentId) : undefined;
+  const projects = allItems.filter((entry) => entry.kind === "project" && !entry.archivedAt);
   const initiative = project?.parentId ? byId.get(project.parentId) : undefined;
   const keyResult = initiative?.parentId ? byId.get(initiative.parentId) : undefined;
   const objective = keyResult?.parentId ? byId.get(keyResult.parentId) : undefined;
   const routineMatch = task.routineId ? routines.find((entry) => entry.id === task.routineId) : undefined;
-  const routine = routineMatch?.systemKey === "general" ? undefined : routineMatch;
+  const routine = routineMatch?.active && routineMatch.systemKey !== "general" ? routineMatch : undefined;
   const projectDri = project ? assignmentLabel(project, "project_dri") : "미지정";
   const assigneeIds = task.assignments.filter((entry) => entry.role === "task_assignee").map((entry) => entry.memberId);
-  const lineageTitle = routine ? `Routine · ${routine.title}` : project ? `Project · ${project.title}` : "미분류 Task";
+  const taskContainerValue = project?.kind === "project" ? `project:${project.id}` : routine ? `routine:${routine.id}` : "";
+  const lineageTitle = routine ? `Routine · ${routine.title}` : project?.kind === "project" ? `Project · ${project.title}` : routineMatch?.systemKey === "general" ? "General 수집함" : "연결 끊김";
   useEffect(() => {
     fetch(`/api/checklists?taskId=${encodeURIComponent(task.id)}`)
       .then(async (response) => response.ok ? response.json() as Promise<{ items: ChecklistItem[] }> : Promise.reject())
@@ -2766,6 +2819,17 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
     }
     const data = await response.json() as { assignments: ItemAssignment[] };
     onAssignmentsChange(data.assignments);
+  }
+
+  function saveContainer(value: string) {
+    const [kind, id] = value.split(":", 2);
+    if (!id) return;
+    if (kind === "project") {
+      const nextProject = projects.find((entry) => entry.id === id);
+      if (nextProject) void onPatch({ parentId: nextProject.id, routineId: null, cycleId: nextProject.cycleId });
+    } else if (kind === "routine" && routines.some((entry) => entry.id === id && entry.active && entry.systemKey !== "general")) {
+      void onPatch({ parentId: null, routineId: id, cycleId: null });
+    }
   }
 
   async function addRow(event: FormEvent) {
@@ -2839,6 +2903,7 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
           <label><span>우선순위</span><select className={`priority-${task.priority}`} value={task.priority} onChange={(event) => void onPatch({ priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
           <label><span>기한</span><input type="date" value={task.dueDate ?? ""} onChange={(event) => void onPatch({ dueDate: event.target.value || null })} /></label>
           <label className="task-progress-field"><span>진행률</span><div><input type="range" min="0" max="100" step="5" value={task.progress} onChange={(event) => void onPatch({ progress: Number(event.target.value) })} /><b>{task.progress}%</b></div></label>
+          <label className="task-container-field"><span>연결 대상</span><select value={taskContainerValue} onChange={(event) => saveContainer(event.target.value)}><option value="" disabled>Project 또는 Routine 선택</option><optgroup label="Project">{projects.map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
         </section>
         {teamMembers.length > 0 && <section className="task-assignee-editor"><MemberMentionPicker label="담당자" members={teamMembers} selectedIds={assigneeIds} onChange={(ids) => void saveAssignee(ids)} placeholder="@실명으로 찾기" maxSelected={1} /></section>}
         <section className="task-lineage">
@@ -2900,6 +2965,17 @@ function pickMembers(members: TeamMember[], ids: string[]) {
 function assignmentLabel(item: OkrptrItem, role: ItemAssignmentRole) {
   const names = item.assignments.filter((entry) => entry.role === role).map((entry) => `@${entry.displayName}`);
   return names.length ? names.join(", ") : "미지정";
+}
+
+function canUserDeleteItem(item: OkrptrItem, currentMember: TeamMember | undefined, userId: string | null) {
+  if (userId && item.createdByUserId === userId) return true;
+  if (!currentMember) return false;
+  const accountableRole: ItemAssignmentRole | null = item.kind === "project"
+    ? "project_dri"
+    : item.kind === "task" ? "task_assignee" : null;
+  return Boolean(accountableRole && item.assignments.some((assignment) =>
+    assignment.memberId === currentMember.id && assignment.role === accountableRole,
+  ));
 }
 
 function MemberMentionPicker({
@@ -3115,7 +3191,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!title.trim() || saving || (kind !== "objective" && kind !== "task" && !parentId)) return;
+    if (!title.trim() || saving || (kind === "task" ? !taskContainer : kind !== "objective" && !parentId)) return;
     setSaving(true);
     setError("");
     const routineId = kind === "task" && taskContainer.startsWith("routine:") ? taskContainer.slice(8) : null;
@@ -3166,9 +3242,9 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
         <form className="property-form create-item-form" onSubmit={submit}>
           <label><span>유형</span><select value={kind} onChange={(event) => { setKind(event.target.value as ItemKind); setParentId(""); setTaskContainer(""); }} disabled={initialKind === "project"}>{(["objective", "key_result", "initiative", "project", "task"] as ItemKind[]).map((entry) => <option value={entry} key={entry}>{kindLabel(entry)}</option>)}</select></label>
           <label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
-          {onCreateWithChat && <div className="create-chat-nudge"><div><Bot size={15} /><span><b>직접 작성이 어렵나요?</b><small>말로 설명하면 OKR 초안을 함께 정리해드려요.</small></span></div><button type="button" onClick={() => onCreateWithChat({ kind, title })}>AI 대화로 같이 만들기<ChevronRight size={13} /></button></div>}
+          {onCreateWithChat && <div className="create-chat-nudge"><div><Bot size={15} /><span><b>대화로 정리할까요?</b><small>{kind === "task" ? "할 일을 말하면 문구를 다듬고 연결 대상을 고릅니다." : "말로 설명하면 OKR 초안을 함께 정리해드려요."}</small></span></div><button type="button" onClick={() => onCreateWithChat({ kind, title })}>AI 대화로 추가<ChevronRight size={13} /></button></div>}
           {kind === "task" ? (
-            <label><span>상위 연결</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">미분류 Task에 저장</option><optgroup label="Project">{items.filter((entry) => entry.kind === "project").map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{routines.filter((entry) => entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
+            <label><span>연결 대상</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)} required><option value="">Project 또는 Routine 선택</option><optgroup label="Project">{items.filter((entry) => entry.kind === "project" && !entry.archivedAt).map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
           ) : parentKind && (
             <label><span>상위 {kindLabel(parentKind)}</span><select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">선택</option>{parentOptions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>
           )}
@@ -3196,7 +3272,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
             <MemberMentionPicker label="담당자" members={teamMembers} selectedIds={taskAssigneeIds} onChange={setTaskAssigneeIds} placeholder="@실명으로 찾기" maxSelected={1} />
           )}
           {error && <p className="inline-error" role="alert">{error}</p>}
-          <button disabled={!title.trim() || saving}>{saving ? "저장 중" : "만들기"}</button>
+          <button disabled={!title.trim() || saving || (kind === "task" && !taskContainer)}>{saving ? "저장 중" : "만들기"}</button>
         </form>
       </aside>}
     </OverlayDialog>
@@ -3580,34 +3656,38 @@ function RecommendationsView({ items, onOpenTask, onOpenProject, onNavigate }: {
   return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{row.itemIds.length}개 항목 · 우선순위 {row.score}</small></div><button aria-label={`${row.title} 관련 항목 열기`} title="관련 항목 열기" onClick={() => openRecommendation(row)}><ChevronRight size={15} /></button></article>)}</section>;
 }
 
-function HomeView({ onCreatePlan, onCreateProject, onApplyOkrPlan, onFinish, context, workspaceContext, canWrite, members, defaultDriMemberId, defaultCycleId }: {
+function HomeView({ onCreatePlan, onCreateProject, onApplyOkrPlan, onCreateTasks, onFinish, context, workspaceContext, canWrite, members, taskContainers, defaultDriMemberId, defaultCycleId }: {
   onCreatePlan: (plan: OnboardingPlan, cycleId: string | null) => Promise<PlanCreationResult | null>;
   onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget) => Promise<boolean>;
   onApplyOkrPlan: (plan: OnboardingPlan, cycleId: string, target: OkrPlanTarget | null, driMemberId: string | null) => Promise<OkrPlanApplyResult | null>;
+  onCreateTasks: (taskText: string, containerValue: string, assigneeMemberId: string | null) => Promise<boolean>;
   onFinish: () => void;
   context: OkrChatContext | null;
   workspaceContext: AssistantWorkspaceContext;
   canWrite: boolean;
   members: TeamMember[];
+  taskContainers: TaskContainerOption[];
   defaultDriMemberId: string | null;
   defaultCycleId: string | null;
 }) {
   return (
     <div className="home-layout">
-      <HomeOkrChat onCreate={onCreatePlan} onCreateProject={onCreateProject} onApplyOkrPlan={onApplyOkrPlan} onFinish={onFinish} context={context} workspaceContext={workspaceContext} canWrite={canWrite} members={members} defaultDriMemberId={defaultDriMemberId} defaultCycleId={defaultCycleId} />
+      <HomeOkrChat onCreate={onCreatePlan} onCreateProject={onCreateProject} onApplyOkrPlan={onApplyOkrPlan} onCreateTasks={onCreateTasks} onFinish={onFinish} context={context} workspaceContext={workspaceContext} canWrite={canWrite} members={members} taskContainers={taskContainers} defaultDriMemberId={defaultDriMemberId} defaultCycleId={defaultCycleId} />
     </div>
   );
 }
 
-function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onFinish, context, workspaceContext, canWrite, members, defaultDriMemberId, defaultCycleId }: {
+function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onCreateTasks, onFinish, context, workspaceContext, canWrite, members, taskContainers, defaultDriMemberId, defaultCycleId }: {
   onCreate: (plan: OnboardingPlan, cycleId: string | null) => Promise<PlanCreationResult | null>;
   onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget) => Promise<boolean>;
   onApplyOkrPlan: (plan: OnboardingPlan, cycleId: string, target: OkrPlanTarget | null, driMemberId: string | null) => Promise<OkrPlanApplyResult | null>;
+  onCreateTasks: (taskText: string, containerValue: string, assigneeMemberId: string | null) => Promise<boolean>;
   onFinish: () => void;
   context: OkrChatContext | null;
   workspaceContext: AssistantWorkspaceContext;
   canWrite: boolean;
   members: TeamMember[];
+  taskContainers: TaskContainerOption[];
   defaultDriMemberId: string | null;
   defaultCycleId: string | null;
 }) {
@@ -3631,22 +3711,25 @@ function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onFinish, cont
   const [guideQuestions, setGuideQuestions] = useState<string[]>(() => assistantOpeningGuides(context));
   const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>(() => [{ id: "initial", role: "assistant", content: assistantOpeningMessage(context, workspaceContext) }]);
   const [visibleFields, setVisibleFields] = useState<Set<StringPlanField>>(new Set());
-  const [mode, setMode] = useState<ConversationMode>(context?.entry === "onboarding" ? "onboarding" : context?.entry === "coach" ? "coach" : "okr");
+  const [mode, setMode] = useState<ConversationMode>(context?.entry === "onboarding" ? "onboarding" : context?.entry === "coach" ? "coach" : context?.entry === "task" ? "task" : "okr");
   const [okrTarget, setOkrTarget] = useState<OkrPlanTarget | null>(context?.target ?? null);
   const [targetCandidates, setTargetCandidates] = useState<OkrPlanTarget[]>(context?.targetCandidates ?? []);
   const [projectTarget, setProjectTarget] = useState<ProjectChatTarget | null>(null);
   const [projectDriMemberId, setProjectDriMemberId] = useState(defaultDriMemberId ?? members[0]?.id ?? "");
+  const [taskContainer, setTaskContainer] = useState("");
+  const [taskAssigneeMemberId, setTaskAssigneeMemberId] = useState(defaultDriMemberId ?? members[0]?.id ?? "");
   const [saving, setSaving] = useState(false);
   const assistantFlow = mode === "onboarding" || mode === "coach";
   const draftCounts = countOkrDraft(plan);
+  const taskDraftCount = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean).length;
   const treeReady = Boolean(plan.objectiveTitle.trim() && plan.keyResults.length && plan.keyResults.every((entry) => entry.title.trim() && entry.initiatives.every((initiative) => initiative.title.trim())) && !plan.unassignedInitiatives.length);
-  const saveLabel = assistantFlow
+  const saveLabel = mode === "task" ? `Task ${taskDraftCount}개 만들기` : assistantFlow
     ? !okrTarget ? `Objective 1개 · KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`
       : okrTarget.kind === "objective" ? `KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`
         : okrTarget.kind === "key_result" ? `Initiative ${plan.targetInitiatives.length}개 만들기` : "첫 Project 만들기"
     : mode === "project" ? plan.project.trim() ? "Project 만들기" : plan.routineTitle.trim() ? "Routine 만들기" : "실행 항목 만들기" : !plan.objectiveTitle.trim() && plan.routineTitle.trim() ? "Routine 만들기" : `Objective 1개 · KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`;
   const hasDraft = hasPlanContent(plan);
-  const canApplyDraft = assistantFlow
+  const canApplyDraft = mode === "task" ? Boolean(taskDraftCount && taskContainer) : assistantFlow
     ? !okrTarget ? treeReady
       : okrTarget.kind === "objective" ? Boolean(plan.keyResults.length && plan.keyResults.every((entry) => entry.title.trim() && entry.initiatives.every((initiative) => initiative.title.trim())) && !plan.unassignedInitiatives.length)
         : okrTarget.kind === "key_result" ? Boolean(plan.targetInitiatives.length && plan.targetInitiatives.every((entry) => entry.title.trim()))
@@ -3806,6 +3889,18 @@ function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onFinish, cont
     setGuideQuestions([]);
   }
   async function save() {
+    if (mode === "task") {
+      if (!canWrite || !canApplyDraft) return;
+      setSaving(true);
+      const created = await onCreateTasks(plan.tasks, taskContainer, taskAssigneeMemberId || null);
+      setSaving(false);
+      if (created) {
+        setPlan({ ...emptyPlan });
+        setVisibleFields(new Set());
+        onFinish();
+      }
+      return;
+    }
     if (assistantFlow) {
       if (!canWrite || !canApplyDraft) return;
       const cycleId = context?.cycleId ?? defaultCycleId;
@@ -3920,19 +4015,20 @@ function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onFinish, cont
   return (
     <section className="home-okr-chat" aria-labelledby="home-okr-chat-title">
       <header>
-        <div><Bot size={16} /><div><h2 id="home-okr-chat-title">OKR 도우미</h2><p>현재 OKR과 실행 상황을 읽고, 필요한 다음 질문부터 이어갑니다.</p></div></div>
+        <div><Bot size={16} /><div><h2 id="home-okr-chat-title">{mode === "task" ? "Task 도우미" : "OKR 도우미"}</h2><p>{mode === "task" ? "할 일을 짧고 명확하게 다듬은 뒤 Project 또는 Routine에 연결합니다." : "현재 OKR과 실행 상황을 읽고, 필요한 다음 질문부터 이어갑니다."}</p></div></div>
         {assistantFlow && okrTarget && <span className="assistant-stage">{kindLabel(okrTarget.kind)} 다음 단계</span>}
       </header>
       <div className="home-chat-surface">
         <div className="chat-thread">
-          {context && <div className="chat-okr-context"><Target size={14} /><span><b>{context.cycleName}</b>{context.entry === "onboarding" ? " 첫 OKR 온보딩" : " 상황 기반 대화"}</span></div>}
+          {context && mode !== "task" && <div className="chat-okr-context"><Target size={14} /><span><b>{context.cycleName}</b>{context.entry === "onboarding" ? " 첫 OKR 온보딩" : " 상황 기반 대화"}</span></div>}
+          {mode === "task" && <div className="chat-okr-context"><ListChecks size={14} /><span><b>Task 추가</b> Project 또는 Routine 연결 필수</span></div>}
           {mode === "project" && projectTarget && <div className="chat-okr-context"><Briefcase size={14} /><span><b>{projectTarget.initiativeTitle}</b> 아래 Project 작성</span></div>}
           {context?.entry === "onboarding" && <div className="assistant-example"><b>간단한 예시</b><span>Objective · 신규 사용자가 제품 가치를 더 빨리 경험하게 한다</span><span>Key Result · 가입 후 7일 내 핵심 기능 사용률을 35%에서 55%로 높인다</span></div>}
           {conversationHistory.map((entry) => <p className={entry.role === "user" ? "user-message" : "assistant-message"} key={entry.id}>{entry.content}</p>)}
           {targetCandidates.length > 1 && <div className="assistant-target-options" aria-label="대화 대상 선택">{targetCandidates.map((target) => <button key={target.id} onClick={() => chooseTarget(target)}><span>{kindLabel(target.kind)}</span>{target.title}</button>)}</div>}
           {guideQuestions.length > 0 && <div className="assistant-followups">{guideQuestions.map((question) => <button className="followup-message" onClick={() => chooseQuickReply(question)} key={question}>{question}</button>)}</div>}
           {!canWrite && <div className="assistant-readonly"><Eye size={14} /><span>Viewer는 대화와 분석을 이용할 수 있지만 항목을 생성할 수 없습니다.</span></div>}
-          <div className="chat-input"><label htmlFor="assistant-message">메시지</label><div className="chat-composer"><textarea id="assistant-message" value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void organizeMessage(); }} rows={4} placeholder="지금 이루고 싶은 목표나 막힌 일을 편하게 적어 주세요" /><button type="button" className="chat-send-button" onClick={() => void organizeMessage()} disabled={saving || !message.trim()} aria-label={saving ? "답변 생성 중" : "메시지 보내기"}>{saving ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}<span>{saving ? "답변 중" : "보내기"}</span></button></div></div>
+          <div className="chat-input"><label htmlFor="assistant-message">메시지</label><div className="chat-composer"><textarea id="assistant-message" value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void organizeMessage(); }} rows={4} placeholder={mode === "task" ? "해야 할 일을 편하게 설명해 주세요" : "지금 이루고 싶은 목표나 막힌 일을 편하게 적어 주세요"} /><button type="button" className="chat-send-button" onClick={() => void organizeMessage()} disabled={saving || !message.trim()} aria-label={saving ? "답변 생성 중" : "메시지 보내기"}>{saving ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}<span>{saving ? "답변 중" : "보내기"}</span></button></div></div>
           {mode === "okr" && context?.entry !== "onboarding" && <div className="chat-presets">
             <button onClick={() => chooseGuide("team")}>팀 OKR</button>
             <button onClick={() => chooseGuide("personal")}>개인 OKR</button>
@@ -3945,7 +4041,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onFinish, cont
           {assistantFlow && okrTarget && (okrTarget.kind === "key_result" || okrTarget.kind === "initiative") && <button className="assistant-skip" onClick={skipOptionalStep}>지금은 건너뛰기</button>}
           {mode === "okr" && projectTarget && <button className="project-nudge-button" onClick={startProjectConversation}><Briefcase size={14} />첫 Project를 만들어볼까요?<ChevronRight size={14} /></button>}
         </div>
-        {hasOkrDraft(plan) && <OkrDraftTree
+        {mode !== "task" && hasOkrDraft(plan) && <OkrDraftTree
           plan={plan}
           target={okrTarget}
           onPatchObjective={patchObjective}
@@ -3960,7 +4056,10 @@ function HomeOkrChat({ onCreate, onCreateProject, onApplyOkrPlan, onFinish, cont
         {visibleFields.size > 0 && <div className="okr-setup-fields home-draft-fields">
           {visibleFields.has("project") && <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="결과와 범위가 분명한 첫 Project" /></label>}
           {assistantFlow && visibleFields.has("project") && members.length > 0 && <label><span>Project DRI</span><select value={projectDriMemberId} onChange={(event) => setProjectDriMemberId(event.target.value)}>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
-          {visibleFields.has("tasks") && <label className="wide"><span>{plan.taskParent === "routine" || !plan.project.trim() && plan.routineTitle.trim() ? "첫 Task · Routine 아래" : plan.project.trim() ? "첫 Task · Project 아래" : "첫 Task · 미분류"}</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder="한 줄에 하나씩 입력" /></label>}
+          {visibleFields.has("tasks") && <label className="wide"><span>{mode === "task" ? "Task 초안" : plan.taskParent === "routine" || !plan.project.trim() && plan.routineTitle.trim() ? "첫 Task · Routine 아래" : plan.project.trim() ? "첫 Task · Project 아래" : "첫 Task"}</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder="한 줄에 하나씩 입력" /></label>}
+          {mode === "task" && visibleFields.has("tasks") && <label><span>연결 대상</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">Project 또는 Routine 선택</option><optgroup label="Project">{taskContainers.filter((entry) => entry.kind === "project").map((entry) => <option key={entry.id} value={`project:${entry.id}`}>{entry.title}</option>)}</optgroup><optgroup label="Routine">{taskContainers.filter((entry) => entry.kind === "routine").map((entry) => <option key={entry.id} value={`routine:${entry.id}`}>{entry.title}</option>)}</optgroup></select></label>}
+          {mode === "task" && visibleFields.has("tasks") && members.length > 0 && <label><span>담당자</span><select value={taskAssigneeMemberId} onChange={(event) => setTaskAssigneeMemberId(event.target.value)}><option value="">미지정</option>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
+          {mode === "task" && visibleFields.has("tasks") && taskContainers.length === 0 && <p className="task-container-empty">Task를 만들려면 먼저 Project 또는 Routine이 필요합니다.</p>}
           {visibleFields.has("tasks") && plan.project.trim() && plan.routineTitle.trim() && <label><span>Task 상위</span><select value={plan.taskParent || "project"} onChange={(event) => patch("taskParent", event.target.value)}><option value="project">Project</option><option value="routine">Routine</option></select></label>}
           {visibleFields.has("routineTitle") && <label><span>루틴 이름</span><input value={plan.routineTitle} onChange={(event) => patch("routineTitle", event.target.value)} placeholder="반복해서 할 일의 이름" /></label>}
           {visibleFields.has("routineTrigger") && <label><span>루틴 트리거</span><input value={plan.routineTrigger} onChange={(event) => patch("routineTrigger", event.target.value)} placeholder="루틴이 시작되는 시점" /></label>}
@@ -4115,6 +4214,9 @@ function deriveAssistantTargeting(context: AssistantWorkspaceContext) {
 }
 
 function assistantOpeningMessage(context: OkrChatContext | null, workspace: AssistantWorkspaceContext) {
+  if (context?.entry === "task") {
+    return "추가할 Task를 편하게 설명해 주세요. 문구를 실행 가능한 단위로 다듬고, 저장 전에 연결할 Project 또는 Routine을 선택하게 하겠습니다.";
+  }
   if (context?.entry === "onboarding") {
     return "OKR은 이루고 싶은 변화인 Objective와, 그 변화가 일어났는지 확인하는 측정 가능한 Key Result를 연결하는 방식이에요. 이번 주기에 달성하고 싶은 목표가 있나요? 편하게 말해 주세요.";
   }
@@ -4133,6 +4235,7 @@ function assistantOpeningMessage(context: OkrChatContext | null, workspace: Assi
 }
 
 function assistantOpeningGuides(context: OkrChatContext | null) {
+  if (context?.entry === "task") return ["해야 할 일을 한 문장으로 말할게요", "여러 Task를 한꺼번에 정리할게요"];
   if (context?.entry === "onboarding") return ["업무 목표를 말해볼게요", "개인 성장 목표를 말해볼게요", "아직 목표가 잘 떠오르지 않아요"];
   if (context?.entry === "create") return ["달성하고 싶은 변화는 무엇인가요?", "성공 여부는 어떤 숫자나 상태로 확인할까요?"];
   return [];
@@ -4404,7 +4507,7 @@ function DeleteSelectCheckbox({ item, selected, onToggle }: { item: Pick<OkrptrI
   );
 }
 
-function BoardView({ items, onOpenItem, canDelete, selectedItemIds, onToggleSelect }: { items: OkrptrItem[]; onOpenItem: (item: OkrptrItem) => void; canDelete: boolean; selectedItemIds: Set<string>; onToggleSelect: (id: string) => void }) {
+function BoardView({ items, onOpenItem, canDeleteItem, selectedItemIds, onToggleSelect }: { items: OkrptrItem[]; onOpenItem: (item: OkrptrItem) => void; canDeleteItem: (item: OkrptrItem) => boolean; selectedItemIds: Set<string>; onToggleSelect: (id: string) => void }) {
   const columns: { status: ItemStatus; label: string }[] = [
     { status: "backlog", label: "백로그" },
     { status: "todo", label: "할 일" },
@@ -4414,24 +4517,36 @@ function BoardView({ items, onOpenItem, canDelete, selectedItemIds, onToggleSele
     { status: "development_done", label: "개발 완료" },
     { status: "blocked", label: "막힘" },
   ];
-  return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <article className="board-selectable-item" key={entry.id}>{canDelete && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<button className="board-item" onClick={() => onOpenItem(entry)}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button></article>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
+  return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <article className="board-selectable-item" key={entry.id}>{canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<button className="board-item" onClick={() => onOpenItem(entry)}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button></article>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
 }
 
-function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDelete, selectedItemIds, onToggleSelect, onSelectItems }: { items: OkrptrItem[]; allItems: OkrptrItem[]; routines: Routine[]; onOpenTask: (id: string) => void; onPatch: (id: string, patch: Partial<OkrptrItem>) => Promise<unknown>; canDelete: boolean; selectedItemIds: Set<string>; onToggleSelect: (id: string) => void; onSelectItems: (ids: string[]) => void }) {
-  const [visibleCount, setVisibleCount] = useState(20);
+function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDeleteItem, selectedItemIds, onToggleSelect, onSelectItems, onClearItems, onTrashSelected, trashing }: { items: OkrptrItem[]; allItems: OkrptrItem[]; routines: Routine[]; onOpenTask: (id: string) => void; onPatch: (id: string, patch: Partial<OkrptrItem>) => Promise<unknown>; canDeleteItem: (item: OkrptrItem) => boolean; selectedItemIds: Set<string>; onToggleSelect: (id: string) => void; onSelectItems: (ids: string[]) => void; onClearItems: (ids: string[]) => void; onTrashSelected: () => void; trashing: boolean }) {
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
+  const routineIds = new Set(routines.map((entry) => entry.id));
+  const deletableItems = items.filter(canDeleteItem);
+  const taskIds = deletableItems.map((entry) => entry.id);
+  const selectedTaskCount = taskIds.filter((id) => selectedItemIds.has(id)).length;
+  const allSelected = deletableItems.length > 0 && selectedTaskCount === deletableItems.length;
+  const orphanedIds = deletableItems.filter((entry) => entry.parentId
+    ? byId.get(entry.parentId)?.kind !== "project"
+    : entry.routineId ? !routineIds.has(entry.routineId) : true).map((entry) => entry.id);
   if (!items.length) return <EmptyState icon={Inbox} title="Task가 없습니다" />;
   return (
     <section className="task-list" aria-label="Task 목록">
-      {canDelete && <div className="list-selection-toolbar"><button onClick={() => onSelectItems(items.slice(0, visibleCount).map((item) => item.id))}><ListChecks size={13} />현재 목록 선택</button></div>}
-      {items.slice(0, visibleCount).map((entry) => {
+      {deletableItems.length > 0 && <div className="task-selection-bar">
+        <label><input type="checkbox" checked={allSelected} onChange={() => allSelected ? onClearItems(taskIds) : onSelectItems(taskIds)} /><span>{allSelected ? "전체 선택 해제" : "전체 선택"}</span></label>
+        <b>{selectedTaskCount ? `${selectedTaskCount}개 선택` : `삭제 가능 ${deletableItems.length}개`}</b>
+        {orphanedIds.length > 0 && <button className="orphan-task-select" onClick={() => onSelectItems(orphanedIds)}><AlertTriangle size={13} />연결 끊긴 Task {orphanedIds.length}개 선택</button>}
+        <button className="task-selection-delete" disabled={!selectedTaskCount || trashing} onClick={onTrashSelected}><Trash2 size={13} />{trashing ? "이동 중" : "선택 삭제"}</button>
+      </div>}
+      {items.map((entry) => {
         const project = entry.parentId ? byId.get(entry.parentId) : undefined;
         const routine = entry.routineId ? routines.find((row) => row.id === entry.routineId) : undefined;
-        const relation = routine?.systemKey === "general" ? "미분류 Task" : routine ? `Routine · ${routine.title}` : project ? `Project · ${project.title}` : "미분류 Task";
+        const relation = routine?.systemKey === "general" ? "General 수집함" : routine ? `Routine · ${routine.title}` : project?.kind === "project" ? `Project · ${project.title}` : "연결 끊김";
         const assignee = assignmentLabel(entry, "task_assignee");
         return (
-          <article className={`task-list-row ${canDelete ? "deletion-selectable" : ""} ${isCompletedStatus(entry.status) ? "completed" : ""}`} key={entry.id}>
-            {canDelete && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}
+          <article className={`task-list-row ${canDeleteItem(entry) ? "deletion-selectable" : ""} ${isCompletedStatus(entry.status) ? "completed" : ""}`} key={entry.id}>
+            {canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}
             <button className={`task-list-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })} aria-label={`${entry.title} ${isCompletedStatus(entry.status) ? "완료 취소" : "완료"}`}><Check size={13} /></button>
             <button className="task-list-open" onClick={() => onOpenTask(entry.id)}>
               <b>{entry.title}</b>
@@ -4441,7 +4556,6 @@ function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDelet
           </article>
         );
       })}
-      {items.length > visibleCount && <button className="task-list-more" onClick={() => setVisibleCount((count) => count + 20)}>더 보기 <span>{Math.min(visibleCount, items.length)} / {items.length}</span></button>}
     </section>
   );
 }
@@ -4456,7 +4570,7 @@ function AsyncState({ icon: Icon, title, detail, actionLabel, onAction, loading 
   );
 }
 
-function TrashView({ onNotice, canDelete }: { onNotice: (message: string) => void; canDelete: boolean }) {
+function TrashView({ onNotice, canDeleteRecords, canRestore }: { onNotice: (message: string) => void; canDeleteRecords: boolean; canRestore: boolean }) {
   const confirmAction = useAppConfirm();
   const [records, setRecords] = useState<TrashRecord[] | null>(null);
   const [trashedItems, setTrashedItems] = useState<TrashedItem[] | null>(null);
@@ -4554,7 +4668,7 @@ function TrashView({ onNotice, canDelete }: { onNotice: (message: string) => voi
               <p>{entry.kind === "project" ? `Project · 하위 Task ${entry.trashedTaskCount}개` : "독립 삭제한 Task"}</p>
               <small>{entry.archivedAt ? formatDateTime(entry.archivedAt) : "삭제됨"}</small>
             </div>
-            {canDelete && <div className="trash-actions"><button onClick={() => void restoreItem(entry)}><RotateCcw size={13} />복구</button><button className="danger" onClick={() => void permanentlyDeleteItem(entry)}><Trash2 size={13} />영구 삭제</button></div>}
+            {(canRestore || entry.canDelete) && <div className="trash-actions">{canRestore && <button onClick={() => void restoreItem(entry)}><RotateCcw size={13} />복구</button>}{entry.canDelete && <button className="danger" onClick={() => void permanentlyDeleteItem(entry)}><Trash2 size={13} />영구 삭제</button>}</div>}
           </article>
         ))}
       </section>}
@@ -4568,7 +4682,7 @@ function TrashView({ onNotice, canDelete }: { onNotice: (message: string) => voi
               <p>{trashSummary(record)}</p>
               <small>{formatDateTime(record.archivedAt)}</small>
             </div>
-            {canDelete && <div className="trash-actions"><button onClick={() => void restoreRecord(record)}><RotateCcw size={13} />복구</button><button className="danger" onClick={() => void permanentlyDeleteRecord(record)}><Trash2 size={13} />영구 삭제</button></div>}
+            {canDeleteRecords && <div className="trash-actions"><button onClick={() => void restoreRecord(record)}><RotateCcw size={13} />복구</button><button className="danger" onClick={() => void permanentlyDeleteRecord(record)}><Trash2 size={13} />영구 삭제</button></div>}
           </article>
         ))}
       </section>}
@@ -4929,7 +5043,8 @@ function PropertyPanel({ currentWorkspace, workspaceCount, themeMode, onThemeMod
     { mode: "dark", label: "다크" },
   ];
   const canChangeAvatar = Boolean(currentWorkspace && !currentWorkspace.personal && (currentWorkspace.role === "owner" || currentWorkspace.role === "admin"));
-  return <OverlayDialog title="내 설정" variant="drawer" onRequestClose={() => onClose()}>{(requestClose) => <aside className="property-panel"><header><div><h2>내 설정</h2><p>화면, 워크스페이스와 팀 설정</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section appearance-settings"><h3>테마</h3><div className="theme-picker" role="group" aria-label="색상 테마">{themes.map(({ mode, label }) => <button className={themeMode === mode ? "active" : ""} aria-pressed={themeMode === mode} onClick={() => onThemeModeChange(mode)} key={mode}><i className={`theme-swatch theme-swatch-${mode}`} aria-hidden="true" /><span>{label}</span></button>)}</div><p>선택한 테마는 이 브라우저에 저장됩니다.</p></section><section className="settings-section"><h3>워크스페이스</h3><div className="settings-workspace-card"><WorkspaceAvatar workspace={currentWorkspace} /><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : `${teamRoleLabel(currentWorkspace?.role ?? "member")} · 전체 ${workspaceCount}개`}</small></div></div><div className="settings-action-grid">{canChangeAvatar && <button onClick={onOpenWorkspaceAvatar}><ImageIcon size={13} />워크스페이스 이미지</button>}<button onClick={onOpenWorkspaceMenu}><Columns3 size={13} />워크스페이스 관리</button><button onClick={onOpenTeamMembers}><Users size={13} />멤버 관리</button><button onClick={onOpenGroups}><AtSign size={13} />그룹 관리</button></div></section><section className="settings-hint"><Settings2 size={15} /><div><b>Project 속성</b><p>Project 화면의 속성 관리 탭에서 추가하거나 삭제할 수 있습니다.</p></div></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section><section className="settings-danger-zone"><div><b>OKR 데이터 정리</b><p>워크스페이스와 그룹은 남기고 OKR 실행 데이터를 휴지통으로 보냅니다.</p></div><button onClick={onCleanup}><Trash2 size={13} />클린업 열기</button></section></aside>}</OverlayDialog>;
+  const canCleanup = currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin";
+  return <OverlayDialog title="내 설정" variant="drawer" onRequestClose={() => onClose()}>{(requestClose) => <aside className="property-panel"><header><div><h2>내 설정</h2><p>화면, 워크스페이스와 팀 설정</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section appearance-settings"><h3>테마</h3><div className="theme-picker" role="group" aria-label="색상 테마">{themes.map(({ mode, label }) => <button className={themeMode === mode ? "active" : ""} aria-pressed={themeMode === mode} onClick={() => onThemeModeChange(mode)} key={mode}><i className={`theme-swatch theme-swatch-${mode}`} aria-hidden="true" /><span>{label}</span></button>)}</div><p>선택한 테마는 이 브라우저에 저장됩니다.</p></section><section className="settings-section"><h3>워크스페이스</h3><div className="settings-workspace-card"><WorkspaceAvatar workspace={currentWorkspace} /><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : `${teamRoleLabel(currentWorkspace?.role ?? "member")} · 전체 ${workspaceCount}개`}</small></div></div><div className="settings-action-grid">{canChangeAvatar && <button onClick={onOpenWorkspaceAvatar}><ImageIcon size={13} />워크스페이스 이미지</button>}<button onClick={onOpenWorkspaceMenu}><Columns3 size={13} />워크스페이스 관리</button><button onClick={onOpenTeamMembers}><Users size={13} />멤버 관리</button><button onClick={onOpenGroups}><AtSign size={13} />그룹 관리</button></div></section><section className="settings-hint"><Settings2 size={15} /><div><b>Project 속성</b><p>Project 화면의 속성 관리 탭에서 추가하거나 삭제할 수 있습니다.</p></div></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section>{canCleanup && <section className="settings-danger-zone"><div><b>OKR 데이터 정리</b><p>워크스페이스와 그룹은 남기고 OKR 실행 데이터를 휴지통으로 보냅니다.</p></div><button onClick={onCleanup}><Trash2 size={13} />클린업 열기</button></section>}</aside>}</OverlayDialog>;
 }
 
 function TeamPanel({ initialTeam, initialTab, initialGroupHandle, onMembersChange, onClose, onNotice }: { initialTeam: TeamData | null; initialTab: "members" | "groups"; initialGroupHandle: string | null; onMembersChange: (members: TeamMember[]) => void; onClose: () => void; onNotice: (message: string) => void }) {

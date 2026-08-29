@@ -496,7 +496,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
     async ({ id }) => {
-      const result = await archiveProject(ownerId, id);
+      const result = await archiveProject(ownerId, authorization.userId, id);
       const project = (await serializeItemsForMcp(ownerId, [result.project]))[0];
       const archivedTaskCount = Math.max(0, result.affectedCount - 1);
       return {
@@ -535,7 +535,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
     async ({ id, confirmation_title }) => {
-      const result = await permanentlyDeleteArchivedProject(ownerId, id, confirmation_title);
+      const result = await permanentlyDeleteArchivedProject(ownerId, authorization.userId, id, confirmation_title);
       return {
         structuredContent: result,
         content: [{ type: "text", text: `Permanently deleted "${result.title}" and ${result.deletedTaskCount} Tasks.` }],

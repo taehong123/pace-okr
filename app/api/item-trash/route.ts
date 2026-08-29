@@ -1,7 +1,9 @@
 import {
   authorizeRequest,
   ensureWorkspace,
+  getItemDeletePermissionMap,
   getItemAssignmentMap,
+  ItemDeletePermissionError,
   listTrashedItems,
   permanentlyDeleteTrashedItems,
   restoreTrashedItems,
@@ -16,10 +18,12 @@ export async function GET(request: Request) {
     await ensureWorkspace(authorization.ownerId);
     const rows = await listTrashedItems(authorization.ownerId);
     const assignments = await getItemAssignmentMap(authorization.ownerId, rows.map((entry) => entry.item.id));
+    const deletePermissions = await getItemDeletePermissionMap(authorization.ownerId, authorization.userId, rows.map((entry) => entry.item));
     return Response.json({
       items: rows.map((entry) => ({
         ...serializeItem(entry.item, {}, assignments[entry.item.id] ?? []),
         trashedTaskCount: entry.taskCount,
+        canDelete: deletePermissions[entry.item.id] ?? false,
       })),
     });
   } catch (error) {
@@ -35,7 +39,7 @@ export async function POST(request: Request) {
     const payload = await request.json().catch(() => ({})) as Record<string, unknown>;
     const scope = payload.scope === "all_project_task" ? "all_project_task" : undefined;
     const itemIds = asItemIds(payload.itemIds);
-    return Response.json(await trashItems(authorization.ownerId, { itemIds, scope }));
+    return Response.json(await trashItems(authorization.ownerId, authorization.userId, { itemIds, scope }));
   } catch (error) {
     return routeError(error);
   }
@@ -63,6 +67,7 @@ export async function DELETE(request: Request) {
     const confirmationText = typeof payload.confirmationText === "string" ? payload.confirmationText : "";
     return Response.json(await permanentlyDeleteTrashedItems(
       authorization.ownerId,
+      authorization.userId,
       asItemIds(payload.itemIds),
       confirmationText,
     ));
@@ -79,6 +84,7 @@ function asItemIds(value: unknown) {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
+  if (error instanceof ItemDeletePermissionError) return Response.json({ error: message }, { status: 403 });
   const status = /required|not found|confirmation|Project|Task|restore|trashed/i.test(message) ? 400 : 500;
   return Response.json({ error: message }, { status });
 }

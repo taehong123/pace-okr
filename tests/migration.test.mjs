@@ -167,6 +167,32 @@ test("adds optional workspace avatar metadata without changing existing workspac
   db.close();
 });
 
+test("records item creators and only backfills unambiguous personal workspaces", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE workspaces (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_user_id TEXT NOT NULL
+    );
+    CREATE TABLE items (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL
+    );
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES
+      ('personal-user', 'Personal', 'personal-user'),
+      ('team-workspace', 'Team', 'team-owner');
+    INSERT INTO items (id, owner_id, kind, title) VALUES
+      ('personal-project', 'personal-user', 'project', 'Personal Project'),
+      ('team-project', 'team-workspace', 'project', 'Team Project');
+  `);
+  const migration = await readFile(new URL("../drizzle/0024_item_delete_ownership.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+
+  assert.equal(db.prepare("SELECT created_by_user_id FROM items WHERE id = 'personal-project'").get().created_by_user_id, "personal-user");
+  assert.equal(db.prepare("SELECT created_by_user_id FROM items WHERE id = 'team-project'").get().created_by_user_id, null);
+  db.exec("UPDATE items SET created_by_user_id = 'team-member' WHERE id = 'team-project'");
+  assert.equal(db.prepare("SELECT created_by_user_id FROM items WHERE id = 'team-project'").get().created_by_user_id, "team-member");
+  db.close();
+});
+
 test("creates one General per workspace and migrates parentless Tasks and personal assignments", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`

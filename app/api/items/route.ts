@@ -5,6 +5,7 @@ import {
   ITEM_STATUSES,
   authorizeRequest,
   createItem,
+  createLinkedTasks,
   ensureWorkspace,
   getItemAssignmentMap,
   getPeriodReview,
@@ -58,6 +59,22 @@ export async function POST(request: Request) {
   try {
     await ensureWorkspace(authorization.ownerId);
     const payload = (await request.json()) as Record<string, unknown>;
+    if (payload.titles !== undefined) {
+      const titles = Array.isArray(payload.titles)
+        ? payload.titles.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.trim()).filter(Boolean)
+        : [];
+      if (!titles.length) return Response.json({ error: "titles are required" }, { status: 400 });
+      if (payload.kind !== undefined && payload.kind !== "task") return Response.json({ error: "bulk creation only supports Task" }, { status: 400 });
+      const created = await createLinkedTasks(authorization.ownerId, {
+        titles,
+        projectId: asNullableString(payload.parentId),
+        routineId: asNullableString(payload.routineId),
+        assigneeMemberId: asMemberIds(payload.assigneeMemberId, 1)[0] ?? null,
+        createdByUserId: authorization.userId,
+      });
+      const assignments = await getItemAssignmentMap(authorization.ownerId, created.map((item) => item.id));
+      return Response.json({ items: created.map((item) => serializeItem(item, {}, assignments[item.id] ?? [])) }, { status: 201 });
+    }
     const title = typeof payload.title === "string" ? payload.title.trim() : "";
     if (!title) return Response.json({ error: "title is required" }, { status: 400 });
     if (payload.status !== undefined && !asValue(payload.status, ITEM_STATUSES)) {

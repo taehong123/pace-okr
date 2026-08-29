@@ -164,6 +164,7 @@ export const items = sqliteTable(
     dueDate: text("due_date"),
     source: text("source").notNull().default("web"),
     sourceRef: text("source_ref"),
+    createdByUserId: text("created_by_user_id"),
     sortOrder: integer("sort_order").notNull().default(0),
     archivedAt: text("archived_at"),
     archivedFromStatus: text("archived_from_status"),

@@ -3,6 +3,7 @@ import {
   authorizeRequest,
   ensureWorkspace,
   getItemAssignmentMap,
+  ItemDeletePermissionError,
   listArchivedProjects,
   restoreProject,
   serializeItem,
@@ -34,7 +35,7 @@ export async function POST(request: Request) {
     const payload = await request.json() as Record<string, unknown>;
     const projectId = typeof payload.projectId === "string" ? payload.projectId.trim() : "";
     if (!projectId) return Response.json({ error: "projectId is required" }, { status: 400 });
-    const result = await archiveProject(authorization.ownerId, projectId);
+    const result = await archiveProject(authorization.ownerId, authorization.userId, projectId);
     const assignments = await getItemAssignmentMap(authorization.ownerId, [projectId]);
     return Response.json({
       project: serializeItem(result.project, {}, assignments[projectId] ?? []),
@@ -61,6 +62,7 @@ export async function DELETE(request: Request) {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
+  if (error instanceof ItemDeletePermissionError) return Response.json({ error: message }, { status: 403 });
   const status = /required|not found|already archived|not archived/i.test(message) ? 400 : 500;
   return Response.json({ error: message }, { status });
 }

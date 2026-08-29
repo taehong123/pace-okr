@@ -255,8 +255,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.doesNotMatch(page, /scope=shell|scope=data/);
   assert.match(page, /workspaceDataState/);
   assert.match(page, /워크스페이스 데이터를 불러오지 못했습니다/);
-  assert.match(page, /visibleCount.*20/);
-  assert.match(page, /더 보기/);
+  assert.doesNotMatch(page, /visibleCount.*20/);
+  assert.doesNotMatch(page, /더 보기/);
   assert.match(page, /aria-label="Project 필터"/);
   assert.match(page, /aria-label="Project 정렬"/);
   assert.match(page, /aria-label="Project 속성 관리" title="Project 속성 관리"/);
@@ -398,7 +398,8 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.doesNotMatch(myWorkView, /DeleteSelectCheckbox|onSelectItems|selectedItemIds/);
   assert.match(page, /items=\{executionItems\}/);
   assert.match(page, /<TaskListView items=\{taskItems\}/);
-  assert.match(page, /현재 목록 선택/);
+  assert.match(page, /전체 선택/);
+  assert.match(page, /연결 끊긴 Task/);
   assert.match(page, /bulk-delete-bar/);
   assert.match(page, /DeleteSelectCheckbox/);
   assert.match(page, /삭제한 Project·Task와 전체 데이터 정리 기록/);
@@ -459,4 +460,52 @@ test("keeps the Task page as stable one-line rows with details in the side panel
   assert.match(styles, /\.task-list-open[^}]*grid-template-columns:[^}]*minmax\(260px, \.85fr\)/s);
   assert.match(styles, /\.task-list-open b, \.task-list-inline-meta[^}]*white-space: nowrap/s);
   assert.match(styles, /\.task-detail-panel \{ width: min\(520px, 100vw\); \}/);
+});
+
+test("requires a Project or Routine for web Tasks and exposes direct bulk deletion", async () => {
+  const [page, styles, paceData, itemsRoute, organizeRoute] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/items/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/okr-organize/route.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /AI 대화로 추가/);
+  assert.match(page, /Project 또는 Routine 선택/);
+  assert.match(page, /연결 끊긴 Task \{orphanedIds\.length\}개 선택/);
+  assert.match(page, /task-selection-delete/);
+  assert.doesNotMatch(page, /할 일을 입력하면 미분류 Task에 저장됩니다/);
+  assert.match(styles, /\.task-selection-bar/);
+  assert.match(styles, /\.task-page-actions/);
+  assert.match(paceData, /Task must be linked to a Project or Routine/);
+  assert.match(paceData, /export async function createLinkedTasks[\s\S]*?await d1\.batch/);
+  assert.match(itemsRoute, /payload\.titles !== undefined/);
+  assert.match(itemsRoute, /createLinkedTasks/);
+  assert.match(organizeRoute, /mode === "task"/);
+  assert.match(organizeRoute, /one or more short, actionable Task titles/);
+});
+
+test("limits Project and Task deletion to creators and accountable assignees", async () => {
+  const [page, paceData, itemTrashRoute, projectArchiveRoute, cleanupRoute] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/item-trash/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/project-archives/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/workspace-cleanup/route.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(paceData, /class ItemDeletePermissionError/);
+  assert.match(paceData, /item\?\.kind === "project" && assignment\.role === "project_dri"/);
+  assert.match(paceData, /item\?\.kind === "task" && assignment\.role === "task_assignee"/);
+  assert.match(paceData, /createdByUserId: input\.createdByUserId/);
+  assert.match(paceData, /await assertItemDeletePermission\(ownerId, userId, deletionRoots\)/);
+  assert.match(paceData, /await assertItemDeletePermission\(ownerId, userId, roots\)/);
+  assert.match(itemTrashRoute, /status: 403/);
+  assert.match(itemTrashRoute, /canDelete: deletePermissions/);
+  assert.match(projectArchiveRoute, /authorization\.userId, projectId/);
+  assert.match(page, /function canUserDeleteItem/);
+  assert.match(page, /삭제 가능 항목 선택/);
+  assert.match(page, /entry\.canDelete && <button className="danger"/);
+  assert.match(cleanupRoute, /authorization\.role !== "owner" && authorization\.role !== "admin"/);
 });
