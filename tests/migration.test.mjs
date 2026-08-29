@@ -803,3 +803,49 @@ test("adds lossless Project properties, documents, and body templates", async ()
   `), /UNIQUE constraint failed/);
   db.close();
 });
+
+test("creates one scheduled API data connection per Key Result", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON;");
+  const [baseMigration, workspaceMigration, cycleMigration, krDataMigration] = await Promise.all([
+    readFile(new URL("../drizzle/0000_eminent_mandroid.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0005_wet_roland_deschain.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0013_calm_james_howlett.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0025_kr_data_connections.sql", import.meta.url), "utf8"),
+  ]);
+  db.exec(baseMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(workspaceMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(cycleMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
+    INSERT INTO okr_cycles (id, owner_id, name, version, start_date, end_date, status)
+      VALUES ('cycle', 'workspace', '2026 Q3', 1, '2026-07-01', '2026-09-30', 'active');
+    INSERT INTO items (id, owner_id, cycle_id, kind, title, progress)
+      VALUES ('objective', 'workspace', 'cycle', 'objective', 'Grow', 60),
+             ('kr', 'workspace', 'cycle', 'key_result', 'Revenue', 25),
+             ('initiative', 'workspace', 'cycle', 'initiative', 'Pricing', 40);
+  `);
+  db.exec(krDataMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO kr_data_connections
+      (id, owner_id, kr_item_id, name, endpoint_url, value_path, baseline_value, target_value, cadence, active, next_sync_at)
+      VALUES ('connection', 'workspace', 'kr', 'Revenue API', 'https://api.example.com/revenue', 'data.value', 0, 1000, 'daily', 1, '2026-08-30T00:00:00.000Z');
+  `);
+
+  assert.deepEqual({ ...db.prepare("SELECT cadence, active, target_value, last_sync_status FROM kr_data_connections WHERE id = 'connection'").get() }, {
+    cadence: "daily",
+    active: 1,
+    target_value: 1000,
+    last_sync_status: "never",
+  });
+  assert.equal(db.prepare("SELECT progress FROM items WHERE id = 'objective'").get().progress, 0);
+  assert.equal(db.prepare("SELECT progress FROM items WHERE id = 'initiative'").get().progress, 0);
+  assert.equal(db.prepare("SELECT progress FROM items WHERE id = 'kr'").get().progress, 25);
+  assert.throws(() => db.exec(`
+    INSERT INTO kr_data_connections (id, owner_id, kr_item_id, name, endpoint_url, target_value)
+      VALUES ('duplicate', 'workspace', 'kr', 'Other', 'https://api.example.com/other', 2000);
+  `), /UNIQUE/i);
+  db.exec("DELETE FROM items WHERE id = 'kr'");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM kr_data_connections").get().count, 0);
+  db.close();
+});

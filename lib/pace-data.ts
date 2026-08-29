@@ -14,6 +14,7 @@ import {
   itemPropertyValues,
   items,
   integrationTokens,
+  krDataConnections,
   okrCycles,
   propertyDefinitions,
   projectDocuments,
@@ -41,6 +42,7 @@ import {
   type WorkspaceMember,
   type WorkspaceRule,
   type IntegrationToken,
+  type KrDataConnection,
   type OkrCycle,
   type GoogleConnection,
   type SlackConnection,
@@ -49,6 +51,7 @@ import {
   type TrashRecord,
 } from "@/db/schema";
 import { decryptSlackSecret } from "@/lib/slack-oauth";
+import { syncDueKrDataConnectionsWithDb, syncKrDataConnectionWithDb } from "@/lib/kr-data-sync";
 import {
   defaultSlackAutomationTemplate,
   isSlackAutomationTrigger,
@@ -68,6 +71,7 @@ export const OKR_CYCLE_STATUSES = ["planned", "active", "closed"] as const;
 export const PROPERTY_TYPES = ["text", "number", "select", "date", "checkbox", "member", "members"] as const;
 export const ITEM_ASSIGNMENT_ROLES = ["project_dri", "project_worker", "task_assignee"] as const;
 export const ROUTINE_CADENCES = ["daily", "weekly", "monthly"] as const;
+export const KR_DATA_CADENCES = ["hourly", "daily", "weekly", "manual"] as const;
 export const GENERAL_ROUTINE_SYSTEM_KEY = "general";
 const LEGACY_SEED_OBJECTIVE_TITLE = "셀프 서브 도입으로 팀의 성장 속도를 높인다";
 const LEGACY_SEED_ITEM_TITLES = [
@@ -97,6 +101,7 @@ export type PropertyType = (typeof PROPERTY_TYPES)[number];
 export type PropertyValue = string | number | boolean | string[] | null;
 export type ItemAssignmentRole = (typeof ITEM_ASSIGNMENT_ROLES)[number];
 export type RoutineCadence = (typeof ROUTINE_CADENCES)[number];
+export type KrDataCadence = (typeof KR_DATA_CADENCES)[number];
 export type WorkspaceRuleInput = Partial<{
   captureInstruction: string;
   structureInstruction: string;
@@ -313,6 +318,29 @@ async function ensureSchema() {
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_status ON items(owner_id, status)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_parent ON items(owner_id, parent_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_cadence ON items(owner_id, cadence)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS kr_data_connections (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          kr_item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          endpoint_url TEXT NOT NULL,
+          value_path TEXT NOT NULL DEFAULT '',
+          baseline_value REAL NOT NULL DEFAULT 0,
+          target_value REAL NOT NULL,
+          unit TEXT NOT NULL DEFAULT '',
+          cadence TEXT NOT NULL DEFAULT 'daily',
+          active INTEGER NOT NULL DEFAULT 1,
+          last_value REAL,
+          last_sync_status TEXT NOT NULL DEFAULT 'never',
+          last_error TEXT NOT NULL DEFAULT '',
+          last_synced_at TEXT,
+          next_sync_at TEXT,
+          created_by_user_id TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_kr_data_connections_owner_kr ON kr_data_connections(owner_id, kr_item_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_kr_data_connections_due ON kr_data_connections(active, next_sync_at)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS item_assignments (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL,
@@ -622,6 +650,7 @@ async function ensureSchema() {
               archived_from_status = CASE kind WHEN 'project' THEN 'backlog' ELSE 'todo' END,
               archive_root_id = CASE kind WHEN 'project' THEN id ELSE parent_id END
           WHERE status = 'archived' AND archived_at IS NULL`),
+        d1.prepare("UPDATE items SET progress = 0 WHERE kind IN ('objective', 'initiative') AND progress <> 0"),
       ]);
     })()
       .catch((error: unknown) => {
@@ -648,12 +677,14 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       property.system_key,
       property.active,
       item.created_by_user_id,
-      project_document.version
+      project_document.version,
+      kr_data_connection.target_value
     FROM workspaces AS workspace
     LEFT JOIN routines AS routine ON 1 = 0
     LEFT JOIN property_definitions AS property ON 1 = 0
     LEFT JOIN items AS item ON 1 = 0
     LEFT JOIN project_documents AS project_document ON 1 = 0
+    LEFT JOIN kr_data_connections AS kr_data_connection ON 1 = 0
     LIMIT 0`).first();
     return true;
   } catch {
@@ -3166,7 +3197,7 @@ export async function createItem(
       status,
       priority: input.priority ?? (typeof defaultPriority === "string" && ITEM_PRIORITIES.includes(defaultPriority as ItemPriority) ? defaultPriority as ItemPriority : rules.defaultPriority),
       cadence: input.cadence ?? (typeof defaultCadence === "string" && ITEM_CADENCES.includes(defaultCadence as ItemCadence) ? defaultCadence as ItemCadence : rules.defaultCadence),
-      progress: clampProgress(input.progress ?? 0),
+      progress: kind === "objective" || kind === "initiative" ? 0 : clampProgress(input.progress ?? 0),
       dueDate: input.dueDate ?? (typeof defaultDueDate === "string" ? defaultDueDate : null),
       source,
       sourceRef: input.sourceRef ?? null,
@@ -3238,11 +3269,15 @@ export async function updateItem(
   }
 
   const nextStatus = normalizedPatch.status ?? (current.status as ItemStatus);
+  const supportsProgress = current.kind === "key_result" || current.kind === "project" || current.kind === "task";
+  if (!supportsProgress) delete normalizedPatch.progress;
   const values = {
     ...normalizedPatch,
     title: normalizedPatch.title?.trim(),
     description: normalizedPatch.description?.trim(),
-    progress: completedStatuses.has(nextStatus) ? 100 : normalizedPatch.progress === undefined ? undefined : clampProgress(normalizedPatch.progress),
+    progress: supportsProgress
+      ? completedStatuses.has(nextStatus) ? 100 : normalizedPatch.progress === undefined ? undefined : clampProgress(normalizedPatch.progress)
+      : undefined,
     updatedAt: new Date().toISOString(),
   };
 
@@ -4705,6 +4740,153 @@ export async function getRecommendations(ownerId: string, requestedDate?: string
   }
 
   return recommendations.sort((a, b) => b.score - a.score);
+}
+
+export type KrDataConnectionSummary = Omit<KrDataConnection, "ownerId">;
+export type KrDataConnectionInput = Partial<{
+  krItemId: string;
+  name: string;
+  endpointUrl: string;
+  valuePath: string;
+  baselineValue: number;
+  targetValue: number;
+  unit: string;
+  cadence: KrDataCadence;
+  active: boolean;
+}>;
+
+export async function listKrDataConnections(ownerId: string): Promise<KrDataConnectionSummary[]> {
+  await ensureWorkspace(ownerId);
+  const rows = await getDb()
+    .select()
+    .from(krDataConnections)
+    .where(eq(krDataConnections.ownerId, ownerId))
+    .orderBy(asc(krDataConnections.createdAt));
+  return rows.map(serializeKrDataConnection);
+}
+
+export async function createKrDataConnection(ownerId: string, userId: string, input: KrDataConnectionInput) {
+  await ensureWorkspace(ownerId);
+  const krItemId = input.krItemId?.trim() ?? "";
+  const name = input.name?.trim() ?? "";
+  const endpointUrl = normalizeKrDataEndpoint(input.endpointUrl ?? "");
+  const cadence = normalizeKrDataCadence(input.cadence ?? "daily");
+  const baselineValue = finiteMetric(input.baselineValue, "baselineValue");
+  const targetValue = finiteMetric(input.targetValue, "targetValue");
+  if (!krItemId) throw new Error("KR is required");
+  if (!name) throw new Error("Data source name is required");
+  if (baselineValue === targetValue) throw new Error("Baseline and target values must be different");
+  await requireKeyResult(ownerId, krItemId);
+  const now = new Date().toISOString();
+  const active = input.active ?? true;
+  const [created] = await getDb().insert(krDataConnections).values({
+    id: crypto.randomUUID(), ownerId, krItemId, name, endpointUrl,
+    valuePath: input.valuePath?.trim() ?? "",
+    baselineValue, targetValue, unit: input.unit?.trim() ?? "", cadence, active,
+    nextSyncAt: active && cadence !== "manual" ? now : null,
+    createdByUserId: userId, createdAt: now, updatedAt: now,
+  }).returning();
+  return serializeKrDataConnection(created);
+}
+
+export async function updateKrDataConnection(ownerId: string, id: string, input: KrDataConnectionInput) {
+  await ensureWorkspace(ownerId);
+  const current = await getKrDataConnection(ownerId, id);
+  if (!current) throw new Error("KR data connection not found");
+  const krItemId = input.krItemId?.trim() ?? current.krItemId;
+  const name = input.name === undefined ? current.name : input.name.trim();
+  const endpointUrl = input.endpointUrl === undefined ? current.endpointUrl : normalizeKrDataEndpoint(input.endpointUrl);
+  const cadence = input.cadence === undefined ? current.cadence as KrDataCadence : normalizeKrDataCadence(input.cadence);
+  const baselineValue = input.baselineValue === undefined ? current.baselineValue : finiteMetric(input.baselineValue, "baselineValue");
+  const targetValue = input.targetValue === undefined ? current.targetValue : finiteMetric(input.targetValue, "targetValue");
+  const active = input.active ?? current.active;
+  if (!name) throw new Error("Data source name is required");
+  if (baselineValue === targetValue) throw new Error("Baseline and target values must be different");
+  if (krItemId !== current.krItemId) await requireKeyResult(ownerId, krItemId);
+  const now = new Date().toISOString();
+  const [updated] = await getDb().update(krDataConnections).set({
+    krItemId, name, endpointUrl,
+    valuePath: input.valuePath === undefined ? current.valuePath : input.valuePath.trim(),
+    baselineValue, targetValue,
+    unit: input.unit === undefined ? current.unit : input.unit.trim(),
+    cadence, active,
+    nextSyncAt: active && cadence !== "manual" ? now : null,
+    updatedAt: now,
+  }).where(and(eq(krDataConnections.ownerId, ownerId), eq(krDataConnections.id, id))).returning();
+  if (!updated) throw new Error("KR data connection not found");
+  return serializeKrDataConnection(updated);
+}
+
+export async function deleteKrDataConnection(ownerId: string, id: string) {
+  await ensureWorkspace(ownerId);
+  const deleted = await getDb().delete(krDataConnections)
+    .where(and(eq(krDataConnections.ownerId, ownerId), eq(krDataConnections.id, id)))
+    .returning({ id: krDataConnections.id });
+  if (!deleted.length) throw new Error("KR data connection not found");
+  return { deleted: true, id };
+}
+
+export async function syncKrDataConnection(ownerId: string, id: string) {
+  await ensureWorkspace(ownerId);
+  return syncKrDataConnectionWithDb((env as RuntimeEnv).DB, ownerId, id);
+}
+
+export async function syncDueKrDataConnections() {
+  await ensureSchema();
+  return syncDueKrDataConnectionsWithDb((env as RuntimeEnv).DB);
+}
+
+async function getKrDataConnection(ownerId: string, id: string) {
+  const [connection] = await getDb().select().from(krDataConnections).where(and(
+    eq(krDataConnections.ownerId, ownerId), eq(krDataConnections.id, id),
+  )).limit(1);
+  return connection ?? null;
+}
+
+async function requireKeyResult(ownerId: string, id: string) {
+  const [kr] = await getDb().select().from(items).where(and(
+    eq(items.ownerId, ownerId), eq(items.id, id), eq(items.kind, "key_result"), isNull(items.archivedAt),
+  )).limit(1);
+  if (!kr) throw new Error("Key Result not found");
+  return kr;
+}
+
+function serializeKrDataConnection(connection: KrDataConnection): KrDataConnectionSummary {
+  const { ownerId, ...summary } = connection;
+  void ownerId;
+  return summary;
+}
+
+function normalizeKrDataCadence(value: string): KrDataCadence {
+  if (!KR_DATA_CADENCES.includes(value as KrDataCadence)) throw new Error("Unsupported KR data cadence");
+  return value as KrDataCadence;
+}
+
+function finiteMetric(value: unknown, field: string) {
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${field} must be a number`);
+  return value;
+}
+
+function normalizeKrDataEndpoint(value: string) {
+  let url: URL;
+  try { url = new URL(value.trim()); } catch { throw new Error("A valid API URL is required"); }
+  if (url.protocol !== "https:") throw new Error("KR data APIs must use HTTPS");
+  if (url.username || url.password) throw new Error("API credentials cannot be embedded in the URL");
+  const hostname = url.hostname.toLocaleLowerCase().replace(/^\[|\]$/g, "");
+  if (isPrivateHostname(hostname)) throw new Error("Private or local API addresses are not supported");
+  url.hash = "";
+  return url.toString();
+}
+
+function isPrivateHostname(hostname: string) {
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal")) return true;
+  if (hostname === "::1" || hostname.startsWith("fc") || hostname.startsWith("fd") || hostname.startsWith("fe80:")) return true;
+  const parts = hostname.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  return parts[0] === 0 || parts[0] === 10 || parts[0] === 127 || parts[0] >= 224
+    || (parts[0] === 169 && parts[1] === 254)
+    || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
+    || (parts[0] === 192 && parts[1] === 168);
 }
 
 async function requireTask(ownerId: string, taskId: string) {

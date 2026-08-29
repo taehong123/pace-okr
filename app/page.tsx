@@ -19,6 +19,7 @@ import {
   CircleHelp,
   Columns3,
   Copy,
+  Database,
   Eye,
   EyeOff,
   Filter,
@@ -60,8 +61,8 @@ import {
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { ConfirmationProvider, OverlayDialog, useAppConfirm } from "./overlay-dialog";
 
-type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "scrum" | "recommendations" | "reviews" | "trash";
-const urlViews = new Set<View>(["my_work", "inbox", "work", "routines", "okr", "scrum", "recommendations", "reviews", "trash"]);
+type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "kr_data" | "scrum" | "recommendations" | "reviews" | "trash";
+const urlViews = new Set<View>(["my_work", "inbox", "work", "routines", "okr", "kr_data", "scrum", "recommendations", "reviews", "trash"]);
 type NoticeTone = "success" | "error" | "info";
 type AppNotice = { id: number; message: string; tone: NoticeTone };
 
@@ -144,6 +145,15 @@ type OkrCycle = {
   status: "planned" | "active" | "closed";
   createdAt: string;
   updatedAt: string;
+};
+
+type KrDataViewProps = {
+  cacheKey: string;
+  keyResults: Pick<OkrptrItem, "id" | "cycleId" | "parentId" | "title" | "progress">[];
+  cycles: Pick<OkrCycle, "id" | "name">[];
+  readOnly: boolean;
+  onProgressChange: (id: string, progress: number) => void;
+  onNotice: (message: string) => void;
 };
 
 type PropertyDefinition = {
@@ -626,6 +636,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "work", label: "Project", icon: Table2 },
   { id: "inbox", label: "Task", icon: Inbox },
   { id: "routines", label: "루틴", icon: Repeat2 },
+  { id: "kr_data", label: "KR 데이터", icon: Database },
   { id: "scrum", label: "데일리", icon: CalendarCheck },
   { id: "recommendations", label: "추천", icon: Lightbulb },
   { id: "reviews", label: "리뷰", icon: Activity },
@@ -640,6 +651,7 @@ const viewTitles: Record<View, string> = {
   work: "Project",
   routines: "루틴",
   okr: "OKR",
+  kr_data: "KR 데이터",
   scrum: "데일리 스크럼",
   recommendations: "추천",
   reviews: "리뷰",
@@ -648,6 +660,16 @@ const viewTitles: Record<View, string> = {
 
 export default function Home() {
   return <ConfirmationProvider><WorkspaceApp /></ConfirmationProvider>;
+}
+
+function ClientKrDataView(props: KrDataViewProps) {
+  const [ViewComponent, setViewComponent] = useState<ComponentType<KrDataViewProps> | null>(null);
+  useEffect(() => {
+    let active = true;
+    void import("@/app/kr-data-view").then((module) => { if (active) setViewComponent(() => module.default); });
+    return () => { active = false; };
+  }, []);
+  return ViewComponent ? <ViewComponent {...props} /> : <AsyncState icon={LoaderCircle} title="KR 데이터 화면을 준비하는 중입니다" loading />;
 }
 
 function WorkspaceApp() {
@@ -897,8 +919,9 @@ function WorkspaceApp() {
   );
   const completed = periodItems.filter((entry) => isCompletedStatus(entry.status)).length;
   const blocked = periodItems.filter((entry) => entry.status === "blocked").length;
-  const averageProgress = periodItems.length
-    ? Math.round(periodItems.reduce((sum, entry) => sum + entry.progress, 0) / periodItems.length)
+  const measurablePeriodItems = periodItems.filter((entry) => entry.kind !== "objective" && entry.kind !== "initiative");
+  const averageProgress = measurablePeriodItems.length
+    ? Math.round(measurablePeriodItems.reduce((sum, entry) => sum + entry.progress, 0) / measurablePeriodItems.length)
     : 0;
   const selectedTask = activeItems.find((entry) => entry.id === selectedTaskId && entry.kind === "task");
   const selectedProject = activeItems.find((entry) => entry.id === selectedProjectId && entry.kind === "project");
@@ -1992,6 +2015,7 @@ function WorkspaceApp() {
             </section>
           )}
           {activeView === "routines" && <RoutineView initialRoutines={routines} teamMembers={teamMembers} onNotice={showNotice} onRoutinesChange={setRoutines} createOpen={routineCreateOpen} onCreateClose={() => setRoutineCreateOpen(false)} onCreateWithChat={openRoutineCreationChat} />}
+          {activeView === "kr_data" && <ClientKrDataView key={currentWorkspace?.id ?? ""} cacheKey={currentWorkspace?.id ?? ""} keyResults={activeItems.filter((entry) => entry.kind === "key_result")} cycles={okrCycles} readOnly={currentWorkspace?.role === "viewer"} onProgressChange={(id, progress) => setItems((current) => current.map((entry) => entry.id === id ? { ...entry, progress } : entry))} onNotice={showNotice} />}
           {activeView === "okr" && (
             <section className="okr-workbench">
               <section className="okr-document">
@@ -2001,7 +2025,7 @@ function WorkspaceApp() {
                   return (
                     <article className="okr-document-card" key={cycle.id}>
                       <OkrCurrentFile key={`${cycle.id}-${cycle.name}-${cycle.department}`} cycle={cycle} addItemKind={firstItemKind} onRename={(id, name) => void renameOkrFile(id, name)} onDepartmentChange={(id, department) => void setOkrFileDepartment(id, department)} onAddItem={() => openCreateItem(firstItemKind, cycle.id)} />
-                      <TreeView objective={view.objective} items={view.items} depths={view.depths} canEdit={canWriteWorkspace} onEditOkrItem={setSelectedOkrItemId} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} onOpenProject={openProjectPage} onOpenTask={openTaskDetail} onCreateObjective={() => openCreateItem("objective", cycle.id)} onCreateWithChat={() => openOkrCreationChat(cycle, "objective")} />
+                      <TreeView objective={view.objective} items={view.items} depths={view.depths} canEdit={canWriteWorkspace} onEditOkrItem={setSelectedOkrItemId} onComplete={(id) => void patchItem(id, { status: "done" })} onOpenProject={openProjectPage} onOpenTask={openTaskDetail} onCreateObjective={() => openCreateItem("objective", cycle.id)} onCreateWithChat={() => openOkrCreationChat(cycle, "objective")} />
                     </article>
                   );
                 }) : <EmptyState icon={Archive} title="OKR 파일이 없습니다" />}
@@ -3159,7 +3183,8 @@ function OkrItemEditPanel({ item, items, onClose, onSave }: {
   const parentOptions = parentKind
     ? items.filter((entry) => entry.kind === parentKind && entry.cycleId === item.cycleId && !entry.archivedAt)
     : [];
-  const dirty = title.trim() !== item.title || parentId !== (item.parentId ?? "") || status !== item.status || progress !== item.progress;
+  const tracksProgress = item.kind === "key_result";
+  const dirty = title.trim() !== item.title || parentId !== (item.parentId ?? "") || status !== item.status || (tracksProgress && progress !== item.progress);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -3169,7 +3194,7 @@ function OkrItemEditPanel({ item, items, onClose, onSave }: {
       title: title.trim(),
       parentId: parentKind ? parentId : null,
       status,
-      progress,
+      ...(tracksProgress ? { progress } : {}),
     });
     setSaving(false);
     if (saved) onClose();
@@ -3184,7 +3209,7 @@ function OkrItemEditPanel({ item, items, onClose, onSave }: {
           <label><span>이름</span><textarea rows={4} value={title} onChange={(event) => setTitle(event.target.value)} aria-label={`${kindLabel(item.kind)} 이름`} /></label>
           {parentKind && <label><span>상위 {kindLabel(parentKind)}</span><select value={parentId} onChange={(event) => setParentId(event.target.value)} aria-label={`상위 ${kindLabel(parentKind)}`}><option value="">선택</option>{parentOptions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>}
           <label><span>상태</span><select value={status} onChange={(event) => setStatus(event.target.value as ItemStatus)}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-          <label className="okr-item-progress-field"><span>진행률</span><div><input type="range" min="0" max="100" step="5" value={progress} onChange={(event) => setProgress(Number(event.target.value))} /><b>{progress}%</b></div></label>
+          {tracksProgress && <label className="okr-item-progress-field"><span>KR 진행률</span><div><input type="range" min="0" max="100" step="5" value={progress} onChange={(event) => setProgress(Number(event.target.value))} /><b>{progress}%</b></div></label>}
           <button disabled={!dirty || !title.trim() || saving || Boolean(parentKind && !parentId)}>{saving ? "저장 중" : "변경 저장"}</button>
         </form>
       </aside>}
@@ -4594,12 +4619,13 @@ function OkrCurrentFile({ cycle, addItemKind, onRename, onDepartmentChange, onAd
 function TreeView({ objective, items, depths, canEdit, onEditOkrItem, onComplete, onOpenProject, onOpenTask, onCreateObjective, onCreateWithChat }: { objective?: OkrptrItem; items: OkrptrItem[]; depths: Record<string, number>; canEdit: boolean; onEditOkrItem: (id: string) => void; onComplete: (id: string) => void; onOpenProject: (id: string) => void; onOpenTask: (id: string) => void; onCreateObjective: () => void; onCreateWithChat: () => void }) {
   if (!objective) return <OkrEmptyState onCreateObjective={onCreateObjective} onCreateWithChat={onCreateWithChat} />;
   const byId = new Map(items.map((entry) => [entry.id, entry]));
-  return <section className="outline-section"><div className="objective-row"><Target size={18} /><div><span>Objective</span><h2>{objective.title}</h2></div><b>{objective.progress}%</b>{canEdit ? <button className="icon-button okr-node-edit" onClick={() => onEditOkrItem(objective.id)} aria-label={`${objective.title} 수정`} title="Objective 수정"><Pencil size={13} /></button> : <span aria-hidden="true" />}</div><div className="hierarchy">{items.filter((entry) => entry.id !== objective.id).map((entry) => {
+  return <section className="outline-section"><div className="objective-row"><Target size={18} /><div><span>Objective</span><h2>{objective.title}</h2></div><span className={`status-tag status-${objective.status}`}>{statusLabel(objective.status)}</span>{canEdit ? <button className="icon-button okr-node-edit" onClick={() => onEditOkrItem(objective.id)} aria-label={`${objective.title} 수정`} title="Objective 수정"><Pencil size={13} /></button> : <span aria-hidden="true" />}</div><div className="hierarchy">{items.filter((entry) => entry.id !== objective.id).map((entry) => {
     const canOpen = entry.kind === "project" || entry.kind === "task";
     const canEditNode = canEdit && (entry.kind === "key_result" || entry.kind === "initiative");
     const parent = entry.parentId ? byId.get(entry.parentId) : undefined;
     const open = () => entry.kind === "project" ? onOpenProject(entry.id) : entry.kind === "task" ? onOpenTask(entry.id) : undefined;
-    return <div className={`hierarchy-row ${canOpen ? "interactive" : ""}`} role={canOpen ? "button" : undefined} tabIndex={canOpen ? 0 : undefined} aria-label={canOpen ? `${entry.title} 상세 열기` : undefined} onClick={canOpen ? open : undefined} onKeyDown={canOpen ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } } : undefined} key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as CSSProperties}><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><span className="hierarchy-copy"><small title={parent?.title}>{kindLabel(entry.kind)}{entry.kind === "initiative" && parent ? ` · 상위 KR: ${parent.title}` : ""}</small><b>{entry.title}</b></span><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span><em>{entry.progress}%</em>{canEditNode ? <button className="row-action okr-node-edit" aria-label={`${entry.title} 수정`} title={`${kindLabel(entry.kind)} 수정`} onClick={(event) => { event.stopPropagation(); onEditOkrItem(entry.id); }}><Pencil size={12} /></button> : canOpen && !isCompletedStatus(entry.status) ? <button className="row-action" aria-label={`${entry.title} 완료 처리`} title="완료 처리" onClick={(event) => { event.stopPropagation(); onComplete(entry.id); }}><Check size={13} /></button> : canOpen ? <ChevronRight className="row-chevron" size={15} /> : <span aria-hidden="true" />}</div>;
+    const tracksProgress = entry.kind === "key_result" || entry.kind === "project" || entry.kind === "task";
+    return <div className={`hierarchy-row ${canOpen ? "interactive" : ""}`} role={canOpen ? "button" : undefined} tabIndex={canOpen ? 0 : undefined} aria-label={canOpen ? `${entry.title} 상세 열기` : undefined} onClick={canOpen ? open : undefined} onKeyDown={canOpen ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } } : undefined} key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as CSSProperties}><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><span className="hierarchy-copy"><small title={parent?.title}>{kindLabel(entry.kind)}{entry.kind === "initiative" && parent ? ` · 상위 KR: ${parent.title}` : ""}</small><b>{entry.title}</b></span><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span>{tracksProgress ? <em>{entry.progress}%</em> : <span aria-hidden="true" />}{canEditNode ? <button className="row-action okr-node-edit" aria-label={`${entry.title} 수정`} title={`${kindLabel(entry.kind)} 수정`} onClick={(event) => { event.stopPropagation(); onEditOkrItem(entry.id); }}><Pencil size={12} /></button> : canOpen && !isCompletedStatus(entry.status) ? <button className="row-action" aria-label={`${entry.title} 완료 처리`} title="완료 처리" onClick={(event) => { event.stopPropagation(); onComplete(entry.id); }}><Check size={13} /></button> : canOpen ? <ChevronRight className="row-chevron" size={15} /> : <span aria-hidden="true" />}</div>;
   })}</div></section>;
 }
 
@@ -4807,7 +4833,7 @@ function TrashView({ onNotice, canDeleteRecords, canRestore }: { onNotice: (mess
 }
 
 function ReviewView({ items, cadence, completed, blocked, averageProgress, onOpenTask, onOpenProject }: { items: OkrptrItem[]; cadence: Cadence; completed: number; blocked: number; averageProgress: number; onOpenTask: (id: string) => void; onOpenProject: (id: string) => void }) {
-  return <section className="review-content"><div className="metrics-row"><div><span>완료</span><strong>{completed}<small> / {items.length}</small></strong></div><div><span>평균 진행</span><strong>{averageProgress}<small>%</small></strong></div><div><span>막힘</span><strong>{blocked}</strong></div></div><div className="review-progress"><div><b>{cadenceLabels[cadence]} 진행률</b><span>{averageProgress}%</span></div><span><i style={{ width: `${averageProgress}%` }} /></span></div><div className="review-list"><span>검토할 항목</span>{items.slice(0, 7).map((entry) => entry.kind === "task" || entry.kind === "project" ? <button key={entry.id} onClick={() => entry.kind === "task" ? onOpenTask(entry.id) : onOpenProject(entry.id)}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b><em>{entry.progress}%</em><ChevronRight size={14} /></button> : <div key={entry.id}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b><em>{entry.progress}%</em></div>)}{!items.length && <p className="my-work-empty">이 기간에 검토할 항목이 없습니다.</p>}</div></section>;
+  return <section className="review-content"><div className="metrics-row"><div><span>완료</span><strong>{completed}<small> / {items.length}</small></strong></div><div><span>평균 진행</span><strong>{averageProgress}<small>%</small></strong></div><div><span>막힘</span><strong>{blocked}</strong></div></div><div className="review-progress"><div><b>{cadenceLabels[cadence]} 측정 항목 진행률</b><span>{averageProgress}%</span></div><span><i style={{ width: `${averageProgress}%` }} /></span></div><div className="review-list"><span>검토할 항목</span>{items.slice(0, 7).map((entry) => { const tracksProgress = entry.kind !== "objective" && entry.kind !== "initiative"; return entry.kind === "task" || entry.kind === "project" ? <button key={entry.id} onClick={() => entry.kind === "task" ? onOpenTask(entry.id) : onOpenProject(entry.id)}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b>{tracksProgress && <em>{entry.progress}%</em>}<ChevronRight size={14} /></button> : <div key={entry.id}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b>{tracksProgress && <em>{entry.progress}%</em>}</div>; })}{!items.length && <p className="my-work-empty">이 기간에 검토할 항목이 없습니다.</p>}</div></section>;
 }
 
 function ProjectPropertyManager({ properties, teamMembers, readOnly, onChanged, onNotice }: { properties: PropertyDefinition[]; teamMembers: TeamMember[]; readOnly: boolean; onChanged: (properties: PropertyDefinition[]) => void; onNotice: (message: string) => void }) {
@@ -5948,6 +5974,6 @@ function preferredIntroLanguage(): IntroLanguage {
   if (language.startsWith("es")) return "es";
   return "en";
 }
-function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "삭제한 Project·Task와 전체 데이터 정리 기록" }[view]; }
+function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", kr_data: "Key Result와 외부 API 값·목표·갱신 주기 연결", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "삭제한 Project·Task와 전체 데이터 정리 기록" }[view]; }
 function routineCadenceLabel(cadence: RoutineCadence) { return { daily: "매일", weekly: "매주", monthly: "매월" }[cadence]; }
 function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "due_soon") return "3"; return "P"; }
