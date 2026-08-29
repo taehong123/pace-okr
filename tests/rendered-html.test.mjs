@@ -155,6 +155,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /type ThemeMode = "beige" \| "gray" \| "dark"/);
   assert.match(page, /베이지.*그레이.*다크/s);
   assert.match(page, /theme-picker/);
+  assert.match(page, /chat-send-button/);
+  assert.match(page, /메시지 보내기/);
   assert.match(globals, /--paper: #f3f2ee/);
   assert.match(globals, /html\[data-theme="gray"\]/);
   assert.match(globals, /html\[data-theme="dark"\]/);

@@ -387,7 +387,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .home-okr-chat > header svg { color: var(--blue); }
 .assistant-stage { flex: 0 0 auto; padding: 4px 7px; border: 1px solid #c6dce7; border-radius: 4px; background: #edf6fa; color: #2c708e; font-size: 9px; font-weight: 700; }
 .home-chat-surface { display: grid; gap: 12px; }
-.chat-actions { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+.chat-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
 .chat-actions .welcome-primary { height: 29px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; border-radius: 4px; font-size: 11px; cursor: pointer; }
 .chat-actions .welcome-primary:disabled { opacity: .45; cursor: default; }
 .project-nudge-button { width: fit-content; min-height: 36px; display: inline-flex; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid #b8d8e6; border-radius: 6px; background: #f3fafc; color: #287397; font-size: 11px; font-weight: 600; cursor: pointer; }
@@ -421,8 +421,13 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .chat-presets { display: flex; flex-wrap: wrap; gap: 5px; }
 .chat-presets button, .chat-apply { height: 29px; padding: 0 9px; border: 0; border-radius: 4px; background: var(--hover); color: var(--ink); font-size: 11px; cursor: pointer; }
 .chat-input { display: grid; gap: 4px; }
-.chat-input span { color: var(--muted); font-size: 10px; font-weight: 600; }
-.chat-input textarea { width: 100%; min-height: 86px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; background: white; color: var(--ink); font-size: 12px; resize: vertical; }
+.chat-input > label { color: var(--muted); font-size: 10px; font-weight: 600; }
+.chat-composer { position: relative; }
+.chat-input textarea { width: 100%; min-height: 108px; padding: 10px 94px 46px 10px; border: 1px solid var(--line); border-radius: 7px; background: white; color: var(--ink); font-size: 12px; resize: vertical; }
+.chat-send-button { position: absolute; right: 8px; bottom: 8px; min-width: 76px; height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--accent-strong) 82%, var(--ink)); border-radius: 5px; background: var(--accent-strong); color: var(--raised); box-shadow: 0 2px 8px color-mix(in srgb, var(--accent-strong) 24%, transparent); font-size: 10px; font-weight: 700; cursor: pointer; }
+.chat-send-button:hover:not(:disabled) { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.chat-send-button:disabled { opacity: .42; box-shadow: none; cursor: default; }
+.chat-send-button svg { flex: 0 0 auto; }
 .chat-apply { display: inline-flex; align-items: center; justify-content: center; gap: 5px; justify-self: start; }
 .chat-apply:disabled { opacity: .45; cursor: default; }
 .okr-setup-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; align-content: start; }
