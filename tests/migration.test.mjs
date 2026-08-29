@@ -148,6 +148,25 @@ test("adds a 30-day workspace deletion grace period", async () => {
   db.close();
 });
 
+test("adds optional workspace avatar metadata without changing existing workspaces", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE workspaces (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('team', 'AllVibe', 'owner');
+  `);
+  const migration = await readFile(new URL("../drizzle/0023_workspace_avatars.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  const workspace = db.prepare("SELECT name, avatar_key, avatar_updated_at FROM workspaces WHERE id = 'team'").get();
+  assert.deepEqual({ ...workspace }, { name: "AllVibe", avatar_key: null, avatar_updated_at: null });
+  db.exec("UPDATE workspaces SET avatar_key = 'workspace-avatars/team/avatar.webp', avatar_updated_at = '2026-08-29T00:00:00.000Z' WHERE id = 'team'");
+  assert.equal(db.prepare("SELECT avatar_key FROM workspaces WHERE id = 'team'").get().avatar_key, "workspace-avatars/team/avatar.webp");
+  db.close();
+});
+
 test("creates one General per workspace and migrates parentless Tasks and personal assignments", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`

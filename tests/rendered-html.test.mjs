@@ -63,7 +63,7 @@ test("server-renders the OKRPTR application loading shell", async () => {
 });
 
 test("ships product metadata and removes starter assets", async () => {
-  const [layout, page, globals, bootstrapRoute, itemRoute, workspaceRoute, integrationRoute, okrOrganizeRoute, okrPlanRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson] = await Promise.all([
+  const [layout, page, globals, bootstrapRoute, itemRoute, workspaceRoute, integrationRoute, okrOrganizeRoute, okrPlanRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson, avatarRoute, schema, hosting] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -84,6 +84,9 @@ test("ships product metadata and removes starter assets", async () => {
     readFile(new URL("../app/api/google/callback/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/auth/logout/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/workspaces/avatar/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
   ]);
 
   assert.match(layout, /openGraph/);
@@ -112,6 +115,21 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /테스트 전송/);
   assert.match(page, /최근 전송 기록/);
   assert.match(page, /30일 동안 복구/);
+  assert.match(page, /function WorkspaceAvatarDialog/);
+  assert.match(page, /워크스페이스 이미지/);
+  assert.match(page, /AI로 만들기/);
+  assert.match(page, /생성하고 바로 적용/);
+  assert.match(page, /prepareWorkspaceAvatar/);
+  assert.match(page, /currentWorkspace\.role === "owner" \|\| currentWorkspace\.role === "admin"/);
+  assert.match(globals, /workspace-avatar-preview/);
+  assert.match(avatarRoute, /WORKSPACE_AVATARS\?: R2Bucket/);
+  assert.match(avatarRoute, /"gpt-image-2"/);
+  assert.match(avatarRoute, /quality: "low"/);
+  assert.match(avatarRoute, /output_format: "webp"/);
+  assert.match(avatarRoute, /verifiedImageType/);
+  assert.match(avatarRoute, /OKRPTR_AI_MAX_IMAGE_REQUESTS_PER_DAY/);
+  assert.match(schema, /avatarKey: text\("avatar_key"\)/);
+  assert.match(hosting, /"r2": "WORKSPACE_AVATARS"/);
   assert.match(page, /삭제 예정/);
   assert.match(page, /workspaceDeletionLabel/);
   assert.match(workspaceRoute, /scheduleWorkspaceDeletionForUser/);
@@ -150,6 +168,10 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /OKR 트리 초안/);
   assert.match(page, /KR 미지정 Initiative/);
   assert.match(page, /onMoveInitiative/);
+  assert.match(page, /function OkrItemEditPanel/);
+  assert.match(page, /상위 KR:/);
+  assert.match(page, /for \(const child of byParent\.get\(entry\.id\) \?\? \[\]\) visit\(child\)/);
+  assert.match(page, /cycleNodes\.filter\(\(entry\) => entry\.kind === "objective"\)\.forEach\(visit\)/);
   assert.doesNotMatch(page, /organizeLocally/);
   assert.match(page, /visibleFields\.has\("project"\)/);
   assert.match(page, /첫 Project를 만들어볼까요\?/);
@@ -269,6 +291,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(paceData, /Objective and at least one Key Result are required/);
   assert.match(paceData, /keyResultIds/);
   assert.match(paceData, /initiativeIds/);
+  assert.match(paceData, /sortOrder: item\.sortOrder/);
+  assert.match(paceData, /Parent and child must belong to the same OKR cycle/);
   assert.ok(
     paceData.indexOf("ALTER TABLE routines ADD COLUMN system_key") < paceData.indexOf("idx_routines_owner_system_key"),
     "routine compatibility columns must be added before dependent indexes",

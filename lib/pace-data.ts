@@ -162,6 +162,7 @@ type RuntimeEnv = typeof env & {
   PACE_API_TOKEN?: string;
   GOOGLE_TOKEN_ENCRYPTION_KEY?: string;
   SLACK_TOKEN_ENCRYPTION_KEY?: string;
+  WORKSPACE_AVATARS?: R2Bucket;
 };
 let schemaReady: Promise<void> | null = null;
 const workspaceReady = new Map<string, Promise<void>>();
@@ -190,6 +191,8 @@ async function ensureSchema() {
           deletion_requested_at TEXT,
           scheduled_deletion_at TEXT,
           deletion_requested_by_user_id TEXT,
+          avatar_key TEXT,
+          avatar_updated_at TEXT,
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
@@ -584,6 +587,8 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN deletion_requested_at TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN scheduled_deletion_at TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN deletion_requested_by_user_id TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN avatar_key TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN avatar_updated_at TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE property_definitions ADD COLUMN default_value TEXT NOT NULL DEFAULT 'null'");
       await addColumnIfMissing(d1, "ALTER TABLE property_definitions ADD COLUMN system_key TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE property_definitions ADD COLUMN active INTEGER NOT NULL DEFAULT 1");
@@ -620,7 +625,9 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
     await d1.prepare(`SELECT
       deletion_requested_at,
       scheduled_deletion_at,
-      deletion_requested_by_user_id
+      deletion_requested_by_user_id,
+      avatar_key,
+      avatar_updated_at
     FROM workspaces
     LIMIT 0`).first();
     await d1.prepare(`SELECT
@@ -2079,6 +2086,8 @@ export async function listUserWorkspaces(userId: string, currentWorkspaceId: str
     current: workspace.id === currentWorkspaceId && !workspace.scheduledDeletionAt,
     deletionRequestedAt: workspace.deletionRequestedAt,
     scheduledDeletionAt: workspace.scheduledDeletionAt,
+    avatarUrl: workspaceAvatarUrl(workspace.id, workspace.avatarKey, workspace.avatarUpdatedAt),
+    avatarUpdatedAt: workspace.avatarUpdatedAt,
   }));
 }
 
@@ -2100,6 +2109,8 @@ export async function createWorkspaceForUser(userId: string, email: string | nul
     current: true,
     deletionRequestedAt: null,
     scheduledDeletionAt: null,
+    avatarUrl: null,
+    avatarUpdatedAt: null,
   };
 }
 
@@ -2174,6 +2185,8 @@ export async function restoreWorkspaceForUser(userId: string, workspaceId: strin
       current: false,
       deletionRequestedAt: null,
       scheduledDeletionAt: null,
+      avatarUrl: workspaceAvatarUrl(row.workspace.id, row.workspace.avatarKey, row.workspace.avatarUpdatedAt),
+      avatarUpdatedAt: row.workspace.avatarUpdatedAt,
     },
   };
 }
@@ -2217,6 +2230,8 @@ export async function permanentlyDeleteWorkspaceForUser(userId: string, workspac
     current: true,
     deletionRequestedAt: null,
     scheduledDeletionAt: null,
+    avatarUrl: workspaceAvatarUrl(nextRow.workspace.id, nextRow.workspace.avatarKey, nextRow.workspace.avatarUpdatedAt),
+    avatarUpdatedAt: nextRow.workspace.avatarUpdatedAt,
   };
   await setActiveWorkspace(userId, nextWorkspace.id);
   return { deleted: true, id, nextWorkspaceId: nextWorkspace.id, nextWorkspace };
@@ -2232,6 +2247,11 @@ async function purgeExpiredWorkspaces() {
 }
 
 async function permanentlyDeleteWorkspace(id: string) {
+  const [workspace] = await getDb()
+    .select({ avatarKey: workspaces.avatarKey })
+    .from(workspaces)
+    .where(eq(workspaces.id, id))
+    .limit(1);
   const groupRows = await getDb().select({ id: workspaceGroups.id }).from(workspaceGroups).where(eq(workspaceGroups.workspaceId, id));
   if (groupRows.length) await getDb().delete(workspaceGroupMembers).where(inArray(workspaceGroupMembers.groupId, groupRows.map((group) => group.id)));
   await getDb().delete(googleCalendarEvents).where(eq(googleCalendarEvents.ownerId, id));
@@ -2262,6 +2282,13 @@ async function permanentlyDeleteWorkspace(id: string) {
   await getDb().delete(workspaceGroups).where(eq(workspaceGroups.workspaceId, id));
   await getDb().delete(workspaceMembers).where(eq(workspaceMembers.workspaceId, id));
   await getDb().delete(workspaces).where(eq(workspaces.id, id));
+  if (workspace?.avatarKey) {
+    try {
+      await (env as RuntimeEnv).WORKSPACE_AVATARS?.delete(workspace.avatarKey);
+    } catch {
+      // The workspace is already gone. A missed object is safe to clean up later.
+    }
+  }
 }
 
 export async function setActiveWorkspace(userId: string, workspaceId: string) {
@@ -2319,12 +2346,88 @@ export function canManageTeam(authorization: RequestAuthorization) {
   return authorization.role === "owner" || authorization.role === "admin" || authorization.apiToken;
 }
 
+function workspaceAvatarUrl(workspaceId: string, avatarKey: string | null, avatarUpdatedAt: string | null) {
+  if (!avatarKey) return null;
+  const version = encodeURIComponent(avatarUpdatedAt ?? avatarKey);
+  return `/api/workspaces/avatar?workspaceId=${encodeURIComponent(workspaceId)}&v=${version}`;
+}
+
+export async function getWorkspaceAvatarForUser(authorization: RequestAuthorization, workspaceIdInput: string) {
+  await ensureSchema();
+  const workspaceId = workspaceIdInput.trim();
+  if (!workspaceId) throw new Error("workspaceId is required");
+  if (authorization.apiToken && authorization.ownerId === workspaceId) {
+    const [workspace] = await getDb().select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+    if (!workspace) throw new Error("Workspace not found or access denied");
+    return workspace;
+  }
+  const [row] = await getDb()
+    .select({ workspace: workspaces })
+    .from(workspaceMembers)
+    .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
+    .where(and(
+      eq(workspaceMembers.workspaceId, workspaceId),
+      eq(workspaceMembers.userId, authorization.userId),
+      eq(workspaceMembers.status, "active"),
+    ))
+    .limit(1);
+  if (!row) throw new Error("Workspace not found or access denied");
+  return row.workspace;
+}
+
+export async function getManageableWorkspaceForAvatar(authorization: RequestAuthorization) {
+  await ensureSchema();
+  if (authorization.role !== "owner" && authorization.role !== "admin") throw new Error("Owner or Admin access is required");
+  const [workspace] = await getDb().select().from(workspaces).where(eq(workspaces.id, authorization.ownerId)).limit(1);
+  if (!workspace) throw new Error("Workspace not found or access denied");
+  if (workspace.id === workspace.ownerUserId) throw new Error("Personal workspace avatars are not supported");
+  if (workspace.scheduledDeletionAt) throw new Error("Workspace is scheduled for deletion");
+  return workspace;
+}
+
+export async function saveWorkspaceAvatar(authorization: RequestAuthorization, avatarKey: string) {
+  const workspace = await getManageableWorkspaceForAvatar(authorization);
+  const avatarUpdatedAt = new Date().toISOString();
+  await getDb().update(workspaces).set({ avatarKey, avatarUpdatedAt, updatedAt: avatarUpdatedAt }).where(eq(workspaces.id, workspace.id));
+  return {
+    avatarUrl: workspaceAvatarUrl(workspace.id, avatarKey, avatarUpdatedAt),
+    avatarUpdatedAt,
+    previousAvatarKey: workspace.avatarKey,
+  };
+}
+
+export async function clearWorkspaceAvatar(authorization: RequestAuthorization) {
+  const workspace = await getManageableWorkspaceForAvatar(authorization);
+  const avatarUpdatedAt = new Date().toISOString();
+  await getDb().update(workspaces).set({ avatarKey: null, avatarUpdatedAt, updatedAt: avatarUpdatedAt }).where(eq(workspaces.id, workspace.id));
+  return { avatarUrl: null, avatarUpdatedAt, previousAvatarKey: workspace.avatarKey };
+}
+
+export async function countAiUsageEvents(ownerId: string, userId: string, source: string, since: string) {
+  await ensureSchema();
+  const [row] = await getDb()
+    .select({ count: sql<number>`count(*)` })
+    .from(aiUsageEvents)
+    .where(and(
+      eq(aiUsageEvents.ownerId, ownerId),
+      eq(aiUsageEvents.userId, userId),
+      eq(aiUsageEvents.source, source),
+      sql`${aiUsageEvents.createdAt} >= ${since}`,
+    ));
+  return Number(row?.count ?? 0);
+}
+
 export async function getTeam(ownerId: string, currentUserId: string) {
   const [workspace] = await getDb().select().from(workspaces).where(eq(workspaces.id, ownerId)).limit(1);
   if (!workspace) throw new Error("Workspace not found");
   const members = await getDb().select().from(workspaceMembers).where(eq(workspaceMembers.workspaceId, ownerId)).orderBy(asc(workspaceMembers.createdAt));
   return {
-    workspace: { id: workspace.id, name: workspace.name },
+    workspace: {
+      id: workspace.id,
+      name: workspace.name,
+      avatarUrl: workspaceAvatarUrl(workspace.id, workspace.avatarKey, workspace.avatarUpdatedAt),
+      avatarUpdatedAt: workspace.avatarUpdatedAt,
+    },
     members: members.map((member) => serializeTeamMember(member, currentUserId)),
   };
 }
@@ -2933,9 +3036,9 @@ export async function createItem(
   if (kind === "task" && !parentId && !routineId) routineId = (await ensureGeneralRoutine(ownerId)).id;
   const defaultStatus = systemDefault("status");
   const status = input.status ?? (typeof defaultStatus === "string" && ITEM_STATUSES.includes(defaultStatus as ItemStatus) ? defaultStatus as ItemStatus : "todo");
-  await validateParent(ownerId, kind, parentId, routineId);
-  const rules = await getWorkspaceRules(ownerId);
   const cycleId = input.cycleId === undefined ? await defaultCycleIdForKind(ownerId, kind) : input.cycleId;
+  await validateParent(ownerId, kind, parentId, routineId, cycleId);
+  const rules = await getWorkspaceRules(ownerId);
   const defaultPriority = systemDefault("priority");
   const defaultCadence = systemDefault("cadence");
   const defaultDueDate = systemDefault("due_date");
@@ -3020,12 +3123,13 @@ export async function updateItem(
     }
   }
 
-  if (normalizedPatch.parentId !== undefined || normalizedPatch.status !== undefined || normalizedPatch.routineId !== undefined) {
+  if (normalizedPatch.parentId !== undefined || normalizedPatch.status !== undefined || normalizedPatch.routineId !== undefined || normalizedPatch.cycleId !== undefined) {
     await validateParent(
       ownerId,
       current.kind as ItemKind,
       normalizedPatch.parentId === undefined ? current.parentId : normalizedPatch.parentId,
       normalizedPatch.routineId === undefined ? current.routineId : normalizedPatch.routineId,
+      normalizedPatch.cycleId === undefined ? current.cycleId : normalizedPatch.cycleId,
     );
   }
 
@@ -4502,6 +4606,7 @@ async function validateParent(
   kind: ItemKind,
   parentId: string | null,
   routineId: string | null = null,
+  cycleId?: string | null,
 ) {
   if (routineId && kind !== "task") {
     throw new Error("Only Task can be linked under Routine");
@@ -4529,6 +4634,9 @@ async function validateParent(
   if (parent.archivedAt) throw new Error("Restore the parent item before linking work to it");
   if (parent.kind !== expected) {
     throw new Error(`${kind} must be linked under ${expected}`);
+  }
+  if (cycleId !== undefined && parent.cycleId !== cycleId) {
+    throw new Error("Parent and child must belong to the same OKR cycle");
   }
 }
 
@@ -4762,6 +4870,7 @@ export function serializeItem(
     archivedAt: item.archivedAt,
     archivedFromStatus: item.archivedFromStatus,
     archiveRootId: item.archiveRootId,
+    sortOrder: item.sortOrder,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
     properties,

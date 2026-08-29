@@ -10,6 +10,8 @@ export const workspaces = sqliteTable(
     deletionRequestedAt: text("deletion_requested_at"),
     scheduledDeletionAt: text("scheduled_deletion_at"),
     deletionRequestedByUserId: text("deletion_requested_by_user_id"),
+    avatarKey: text("avatar_key"),
+    avatarUpdatedAt: text("avatar_updated_at"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
