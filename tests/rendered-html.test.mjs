@@ -152,10 +152,11 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /mode === "project"/);
   assert.match(page, /my_work: "내 업무"/);
   assert.match(layout, /okrptr\.theme/);
-  assert.match(page, /type ThemeMode = "light" \| "dark" \| "system"/);
-  assert.match(page, /밝게.*어둡게.*시스템/s);
+  assert.match(page, /type ThemeMode = "beige" \| "gray" \| "dark"/);
+  assert.match(page, /베이지.*그레이.*다크/s);
   assert.match(page, /theme-picker/);
-  assert.match(globals, /--paper: #f3eee7/);
+  assert.match(globals, /--paper: #f3f2ee/);
+  assert.match(globals, /html\[data-theme="gray"\]/);
   assert.match(globals, /html\[data-theme="dark"\]/);
   const myWorkView = page.match(/function MyWorkView[\s\S]*?function MyWorkSection/)?.[0] ?? "";
   assert.ok(

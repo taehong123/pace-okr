@@ -34,9 +34,7 @@ import {
   LogIn,
   LogOut,
   Menu,
-  Monitor,
   MoreHorizontal,
-  Moon,
   Pencil,
   Plus,
   Plug,
@@ -45,7 +43,6 @@ import {
   Search,
   Send,
   Settings2,
-  Sun,
   Table2,
   Target,
   TextCursorInput,
@@ -73,7 +70,7 @@ type GroupVisibility = "open" | "private";
 type GroupRole = "lead" | "member";
 type ProjectTab = "list" | "properties" | "templates";
 type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
-type ThemeMode = "light" | "dark" | "system";
+type ThemeMode = "beige" | "gray" | "dark";
 type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "openai" | "local" };
 type AuthState = { status: "loading" | "authenticated" | "unauthenticated"; user: AuthUser | null; reason: string | null };
 
@@ -83,7 +80,7 @@ const GOOGLE_BROWSER_SIGN_IN_STATE_COOKIE_NAME = "__Host-okrptr_google_signin_br
 const THEME_STORAGE_KEY = "okrptr.theme";
 
 function isThemeMode(value: string | null | undefined): value is ThemeMode {
-  return value === "light" || value === "dark" || value === "system";
+  return value === "beige" || value === "gray" || value === "dark";
 }
 
 type ItemAssignment = {
@@ -645,9 +642,9 @@ export default function Home() {
   const [freshWorkspaceDataReady, setFreshWorkspaceDataReady] = useState(false);
   const [workspaceDataAttempt, setWorkspaceDataAttempt] = useState(0);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
-    if (typeof document === "undefined") return "light";
+    if (typeof document === "undefined") return "beige";
     const preference = document.documentElement.dataset.themePreference;
-    return isThemeMode(preference) ? preference : "light";
+    return isThemeMode(preference) ? preference : "beige";
   });
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
   const assistantAutoHandledWorkspaceRef = useRef<string | null>(null);
@@ -662,18 +659,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const applyTheme = () => {
-      const resolved = themeMode === "system" ? (media.matches ? "dark" : "light") : themeMode;
-      document.documentElement.dataset.themePreference = themeMode;
-      document.documentElement.dataset.theme = resolved;
-      document.documentElement.style.colorScheme = resolved;
-    };
     window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
-    applyTheme();
-    if (themeMode !== "system") return;
-    media.addEventListener("change", applyTheme);
-    return () => media.removeEventListener("change", applyTheme);
+    document.documentElement.dataset.themePreference = themeMode;
+    document.documentElement.dataset.theme = themeMode;
+    document.documentElement.style.colorScheme = themeMode === "dark" ? "dark" : "light";
   }, [themeMode]);
 
   useEffect(() => {
@@ -4291,12 +4280,12 @@ function ProjectTemplateManager({ readOnly, onNotice }: { readOnly: boolean; onN
 }
 
 function PropertyPanel({ currentWorkspace, workspaceCount, themeMode, onThemeModeChange, onClose, onCleanup, onOpenWorkspaceMenu, onOpenTeamMembers, onOpenGroups, onSignOut }: { currentWorkspace?: WorkspaceSummary; workspaceCount: number; themeMode: ThemeMode; onThemeModeChange: (mode: ThemeMode) => void; onClose: () => void; onCleanup: () => void; onOpenWorkspaceMenu: () => void; onOpenTeamMembers: () => void; onOpenGroups: () => void; onSignOut: () => void }) {
-  const themes: { mode: ThemeMode; label: string; icon: LucideIcon }[] = [
-    { mode: "light", label: "밝게", icon: Sun },
-    { mode: "dark", label: "어둡게", icon: Moon },
-    { mode: "system", label: "시스템", icon: Monitor },
+  const themes: { mode: ThemeMode; label: string }[] = [
+    { mode: "beige", label: "베이지" },
+    { mode: "gray", label: "그레이" },
+    { mode: "dark", label: "다크" },
   ];
-  return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>내 설정</h2><p>화면, 워크스페이스와 팀 설정</p></div><button className="icon-button" onClick={onClose} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section appearance-settings"><h3>화면</h3><div className="theme-picker" role="group" aria-label="화면 모드">{themes.map(({ mode, label, icon: Icon }) => <button className={themeMode === mode ? "active" : ""} aria-pressed={themeMode === mode} onClick={() => onThemeModeChange(mode)} key={mode}><Icon size={14} /><span>{label}</span></button>)}</div><p>밝은 모드는 따뜻한 베이지 배경을 사용합니다.</p></section><section className="settings-section"><h3>워크스페이스</h3><div className="settings-workspace-card"><span className="workspace-avatar">{currentWorkspace?.name.slice(0, 1).toLocaleUpperCase() || "O"}</span><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : `${teamRoleLabel(currentWorkspace?.role ?? "member")} · 전체 ${workspaceCount}개`}</small></div></div><div className="settings-action-grid"><button onClick={onOpenWorkspaceMenu}><Columns3 size={13} />워크스페이스 관리</button><button onClick={onOpenTeamMembers}><Users size={13} />멤버 관리</button><button onClick={onOpenGroups}><AtSign size={13} />그룹 관리</button></div></section><section className="settings-hint"><Settings2 size={15} /><div><b>Project 속성</b><p>Project 화면의 속성 관리 탭에서 추가하거나 삭제할 수 있습니다.</p></div></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section><section className="settings-danger-zone"><div><b>OKR 데이터 정리</b><p>워크스페이스와 그룹은 남기고 OKR 실행 데이터를 휴지통으로 보냅니다.</p></div><button onClick={onCleanup}><Trash2 size={13} />클린업 열기</button></section></aside></div>;
+  return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>내 설정</h2><p>화면, 워크스페이스와 팀 설정</p></div><button className="icon-button" onClick={onClose} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section appearance-settings"><h3>테마</h3><div className="theme-picker" role="group" aria-label="색상 테마">{themes.map(({ mode, label }) => <button className={themeMode === mode ? "active" : ""} aria-pressed={themeMode === mode} onClick={() => onThemeModeChange(mode)} key={mode}><i className={`theme-swatch theme-swatch-${mode}`} aria-hidden="true" /><span>{label}</span></button>)}</div><p>선택한 테마는 이 브라우저에 저장됩니다.</p></section><section className="settings-section"><h3>워크스페이스</h3><div className="settings-workspace-card"><span className="workspace-avatar">{currentWorkspace?.name.slice(0, 1).toLocaleUpperCase() || "O"}</span><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : `${teamRoleLabel(currentWorkspace?.role ?? "member")} · 전체 ${workspaceCount}개`}</small></div></div><div className="settings-action-grid"><button onClick={onOpenWorkspaceMenu}><Columns3 size={13} />워크스페이스 관리</button><button onClick={onOpenTeamMembers}><Users size={13} />멤버 관리</button><button onClick={onOpenGroups}><AtSign size={13} />그룹 관리</button></div></section><section className="settings-hint"><Settings2 size={15} /><div><b>Project 속성</b><p>Project 화면의 속성 관리 탭에서 추가하거나 삭제할 수 있습니다.</p></div></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section><section className="settings-danger-zone"><div><b>OKR 데이터 정리</b><p>워크스페이스와 그룹은 남기고 OKR 실행 데이터를 휴지통으로 보냅니다.</p></div><button onClick={onCleanup}><Trash2 size={13} />클린업 열기</button></section></aside></div>;
 }
 
 function TeamPanel({ initialTeam, initialTab, initialGroupHandle, onMembersChange, onClose, onNotice }: { initialTeam: TeamData | null; initialTab: "members" | "groups"; initialGroupHandle: string | null; onMembersChange: (members: TeamMember[]) => void; onClose: () => void; onNotice: (message: string) => void }) {

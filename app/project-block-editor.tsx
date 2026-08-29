@@ -5,7 +5,7 @@ import { ko } from "@blocknote/core/locales";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import { useCreateBlockNote } from "@blocknote/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const projectDocumentSchema = BlockNoteSchema.create({
   blockSpecs: {
@@ -33,6 +33,7 @@ export default function ProjectBlockEditor({ initialContent, editable = true, on
 }) {
   const initialBlocks = parseInitialContent(initialContent);
   const changeTimer = useRef<number | null>(null);
+  const [viewTheme, setViewTheme] = useState<"light" | "dark">(() => currentEditorTheme());
   const editor = useCreateBlockNote({
     schema: projectDocumentSchema,
     dictionary: ko,
@@ -41,6 +42,15 @@ export default function ProjectBlockEditor({ initialContent, editable = true, on
 
   useEffect(() => () => {
     if (changeTimer.current !== null) window.clearTimeout(changeTimer.current);
+  }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const updateTheme = () => setViewTheme(currentEditorTheme());
+    const observer = new MutationObserver(updateTheme);
+    observer.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    updateTheme();
+    return () => observer.disconnect();
   }, []);
 
   function changed() {
@@ -57,9 +67,13 @@ export default function ProjectBlockEditor({ initialContent, editable = true, on
 
   return (
     <div className="project-block-editor">
-      <BlockNoteView editor={editor} editable={editable} onChange={changed} theme="light" />
+      <BlockNoteView editor={editor} editable={editable} onChange={changed} theme={viewTheme} />
     </div>
   );
+}
+
+function currentEditorTheme(): "light" | "dark" {
+  return typeof document !== "undefined" && document.documentElement.dataset.theme === "dark" ? "dark" : "light";
 }
 
 function parseInitialContent(value: string): Record<string, unknown>[] {
