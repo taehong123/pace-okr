@@ -1,25 +1,56 @@
 :root {
-  --ink: #181b20;
-  --muted: #58616c;
-  --faint: #6b7580;
-  --line: #e4e7eb;
-  --line-strong: #cfd5dc;
-  --sidebar: #f7f8fa;
-  --hover: #edf0f3;
-  --paper: #f4f6f8;
-  --surface: #ffffff;
-  --raised: #ffffff;
-  --blue: #256987;
-  --red: #bd3f43;
-  --green: #287556;
-  --focus: #181b20;
-  --radius-control: 8px;
-  --radius-container: 10px;
-  --radius-overlay: 14px;
-  --shadow-raised: 0 1px 2px rgba(17, 24, 39, .05), 0 5px 16px rgba(17, 24, 39, .05);
-  --shadow-overlay: 0 18px 48px rgba(17, 24, 39, .16);
+  color-scheme: light;
+  --ink: #29251f;
+  --muted: #6e675d;
+  --faint: #8d857a;
+  --line: #e5ddd2;
+  --line-strong: #d5cabc;
+  --sidebar: #ebe4da;
+  --hover: #e9e1d6;
+  --paper: #f3eee7;
+  --surface: #faf7f1;
+  --raised: #fffdf9;
+  --surface-muted: #f4efe7;
+  --surface-hover: #eee7dc;
+  --accent: #766149;
+  --accent-strong: #594735;
+  --accent-soft: #e9dfd1;
+  --blue: var(--accent);
+  --red: #b34c45;
+  --green: #53745c;
+  --focus: #766149;
+  --radius-control: 6px;
+  --radius-container: 8px;
+  --radius-overlay: 10px;
+  --shadow-raised: 0 1px 2px rgba(52, 43, 33, .04), 0 4px 12px rgba(52, 43, 33, .045);
+  --shadow-overlay: 0 18px 48px rgba(43, 35, 27, .18);
   --motion-fast: 120ms;
   --motion-default: 180ms;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #f1ece4;
+  --muted: #b8afa3;
+  --faint: #8e8579;
+  --line: #3a352f;
+  --line-strong: #4a433a;
+  --sidebar: #201e1b;
+  --hover: #332f2a;
+  --paper: #191816;
+  --surface: #211f1c;
+  --raised: #27241f;
+  --surface-muted: #2e2a25;
+  --surface-hover: #37322c;
+  --accent: #cfb692;
+  --accent-strong: #ead8bd;
+  --accent-soft: #403528;
+  --blue: var(--accent);
+  --red: #e18479;
+  --green: #8db295;
+  --focus: #cfb692;
+  --shadow-raised: 0 1px 1px rgba(0, 0, 0, .22), 0 5px 18px rgba(0, 0, 0, .16);
+  --shadow-overlay: 0 20px 56px rgba(0, 0, 0, .42);
 }
 
 * { box-sizing: border-box; }
@@ -780,6 +811,12 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .settings-account-actions button:hover { background: var(--hover); }
 .settings-section { border-bottom: 1px solid var(--line); }
 .settings-section h3 { margin: 0; padding: 14px 18px 4px; color: var(--muted); font-size: 10px; }
+.appearance-settings { padding-bottom: 14px; }
+.appearance-settings > p { margin: 8px 18px 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.theme-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 8px 18px 0; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-container); background: var(--surface-muted); }
+.theme-picker button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }
+.theme-picker button:hover { background: var(--hover); color: var(--ink); }
+.theme-picker button.active { background: var(--raised); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line), var(--shadow-raised); font-weight: 650; }
 .settings-workspace-card { min-height: 52px; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 9px; margin: 6px 18px 10px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; background: #fbfbfa; }
 .settings-workspace-card > div { min-width: 0; display: grid; gap: 3px; }
 .settings-workspace-card b, .settings-workspace-card small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1414,6 +1451,48 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .slack-delivery-history b { font-size: 9px; }
 .slack-delivery-history small { overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .slack-delivery-history em { grid-column: 1 / -1; overflow: hidden; color: var(--red); font-size: 8px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Warm, compact product shell inspired by Linear's restrained density. */
+html, body, .app-shell, .app-loading-shell, .workspace { background: var(--paper); }
+body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+.app-shell, .app-loading-shell { grid-template-columns: 228px minmax(0, 1fr); }
+.sidebar, .app-loading-sidebar { background: var(--sidebar); }
+.workspace-topbar, .app-loading-topbar { height: 43px; background: color-mix(in srgb, var(--raised) 94%, var(--paper)); }
+.page-body, .app-loading-body { min-height: calc(100vh - 43px); padding-top: 30px; background: var(--paper); }
+.page-header { min-height: 64px; }
+.page-header h1, .app-loading-copy h1 { font-size: 26px; font-weight: 680; letter-spacing: -.025em; }
+.nav-item { height: 31px; }
+.nav-item.active { background: color-mix(in srgb, var(--raised) 82%, var(--sidebar)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 84%, transparent), var(--shadow-raised); }
+.assistant-sidebar-tab { border-color: color-mix(in srgb, var(--accent) 28%, var(--line)); background: color-mix(in srgb, var(--accent-soft) 78%, var(--raised)); color: var(--accent-strong); }
+.assistant-sidebar-tab:hover, .assistant-sidebar-tab.active { border-color: color-mix(in srgb, var(--accent) 48%, var(--line)); background: var(--accent-soft); color: var(--accent-strong); }
+.brand-mark { background: var(--ink); color: var(--paper); }
+.project-workspace, .my-work-section, .trash-list, .routine-card, .board-item, .home-okr-chat, .create-project-fields { border-color: var(--line); box-shadow: var(--shadow-raised); }
+.project-tabs, .task-table-head, .trash-section-title, .my-work-section > header, .app-loading-surface > header, .app-loading-table-head, .welcome-hierarchy, .project-property-create, .task-assignee-editor, .compact-integration-card, .slack-automation-locked { background: var(--surface-muted); }
+.board, .project-detail-panel, .project-detail-panel > header { background: var(--paper); }
+.task-table-row:not(.task-table-head):hover, .hierarchy-row:hover, .home-tasks > button:hover, .scrum-task-list > button:hover { background: var(--surface-hover); }
+.task-table-row > * { border-right-color: var(--line); }
+.quick-capture:focus-within, .property-form input:focus, .property-form select:focus, .property-form textarea:focus, .project-property-field input:focus, .project-property-field select:focus, .routine-toolbar input:focus, .routine-toolbar select:focus, .routine-toolbar textarea:focus, .routine-guide-grid input:focus, .routine-guide-grid textarea:focus, .chat-input textarea:focus, .member-mention-box.active { border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 16%, transparent); }
+.project-nudge-button, .chat-okr-context, .create-chat-nudge, .general-routine, .okr-file-row.active { border-color: color-mix(in srgb, var(--accent) 36%, var(--line)); background: color-mix(in srgb, var(--accent-soft) 74%, var(--raised)); color: var(--accent-strong); }
+.project-nudge-button:hover, .create-chat-nudge > button:hover, .assistant-target-options button:hover { border-color: color-mix(in srgb, var(--accent) 52%, var(--line)); background: var(--accent-soft); }
+.assistant-example { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 68%, var(--raised)); color: var(--muted); }
+.assistant-example b, .assistant-target-options button span, .create-chat-nudge > div, .create-chat-nudge > button { color: var(--accent-strong); }
+.create-chat-nudge > button { border-color: color-mix(in srgb, var(--accent) 36%, var(--line)); background: var(--raised); }
+.okr-document-department input:focus, .okr-department-input input:focus { box-shadow: inset 0 0 0 1px var(--focus); }
+.okr-empty-icon, .type-key_result, .welcome-points > div:first-child > span, .team-avatar, .general-routine-icon { background: var(--accent-soft); color: var(--accent-strong); }
+.status-todo, .priority-medium { color: var(--accent) !important; }
+.settings-hint { background: color-mix(in srgb, var(--accent-soft) 64%, var(--raised)); }
+.settings-hint svg { color: var(--accent); }
+.settings-workspace-card, .settings-action-grid button, .settings-account-actions button { background: var(--raised); }
+.modal-backdrop, .welcome-backdrop { background: rgba(35, 29, 23, .34); backdrop-filter: blur(2px); }
+
+html[data-theme="dark"] :where(input, select, textarea) { background-color: var(--raised); color: var(--ink); }
+html[data-theme="dark"] :where(.workspace-menu, .setup-chat, .okr-file-manager, .okr-document-header, .okr-file-row, .okr-document-header > button, .okr-file-row-actions button, .okr-file-row-actions em, .okr-empty-actions button, .home-tasks > button, .row-action, .inbox-item > button, .async-state button, .trash-record button, .integration-modal, .cleanup-modal, .profile-name-modal, .welcome-modal, .welcome-secondary, .settings-action-grid button, .settings-danger-zone button, .team-invite input, .team-invite select, .member-name-editor input, .team-member > select, .group-detail-form input, .group-detail-form textarea, .group-form-actions button, .group-member-add > select, .member-mention-box, .member-mention-menu, .member-mention-menu button, .group-member-row select, .task-detail-fields select, .task-detail-fields input, .project-page-actions > button, .project-property-field input, .project-property-field select, .task-calendar-action button, .routine-toolbar input, .routine-toolbar select, .routine-toolbar textarea, .routine-card, .routine-guide-grid input, .routine-guide-grid textarea, .routine-assignee select, .scrum-toolbar input, .scrum-task-list > button, .my-work-item, .my-work-routine > button, .slack-automation-form input, .slack-automation-form select, .slack-automation-form textarea, .slack-variable-row button, .slack-form-actions button, .slack-automation-list > article, .slack-automation-actions button) { background: var(--raised); color: var(--ink); }
+html[data-theme="dark"] :where(.okr-document-department input, .okr-department-input input, .connector-steps > div, .integration-scope, .assistant-message, .member-chip, .group-address-row, .create-project-fields, .routine-guide-grid input, .routine-guide-grid textarea, .list-selection-toolbar) { background: var(--surface-muted); }
+html[data-theme="dark"] .project-block-editor .bn-container { --bn-colors-editor-background: var(--raised); --bn-colors-menu-background: var(--raised); color: var(--ink); }
+html[data-theme="dark"] .project-block-editor .bn-editor { background: var(--raised); color: var(--ink); }
+html[data-theme="dark"] .task-check { background: var(--raised); color: var(--raised); }
+html[data-theme="dark"] .task-check.checked { background: var(--green); color: var(--raised); }
+html[data-theme="dark"] .settings-danger-zone { background: color-mix(in srgb, var(--red) 8%, var(--raised)); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }

@@ -63,9 +63,10 @@ test("server-renders the OKRPTR application loading shell", async () => {
 });
 
 test("ships product metadata and removes starter assets", async () => {
-  const [layout, page, bootstrapRoute, itemRoute, workspaceRoute, integrationRoute, okrOrganizeRoute, okrPlanRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson] = await Promise.all([
+  const [layout, page, globals, bootstrapRoute, itemRoute, workspaceRoute, integrationRoute, okrOrganizeRoute, okrPlanRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/api/bootstrap/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/items/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/workspaces/route.ts", import.meta.url), "utf8"),
@@ -150,6 +151,12 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /첫 Project를 만들어볼까요\?/);
   assert.match(page, /mode === "project"/);
   assert.match(page, /my_work: "내 업무"/);
+  assert.match(layout, /okrptr\.theme/);
+  assert.match(page, /type ThemeMode = "light" \| "dark" \| "system"/);
+  assert.match(page, /밝게.*어둡게.*시스템/s);
+  assert.match(page, /theme-picker/);
+  assert.match(globals, /--paper: #f3eee7/);
+  assert.match(globals, /html\[data-theme="dark"\]/);
   const myWorkView = page.match(/function MyWorkView[\s\S]*?function MyWorkSection/)?.[0] ?? "";
   assert.ok(
     myWorkView.indexOf('title="Task"') < myWorkView.indexOf('title="Project"')

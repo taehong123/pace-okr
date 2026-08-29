@@ -34,7 +34,9 @@ import {
   LogIn,
   LogOut,
   Menu,
+  Monitor,
   MoreHorizontal,
+  Moon,
   Pencil,
   Plus,
   Plug,
@@ -43,6 +45,7 @@ import {
   Search,
   Send,
   Settings2,
+  Sun,
   Table2,
   Target,
   TextCursorInput,
@@ -70,12 +73,18 @@ type GroupVisibility = "open" | "private";
 type GroupRole = "lead" | "member";
 type ProjectTab = "list" | "properties" | "templates";
 type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
+type ThemeMode = "light" | "dark" | "system";
 type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "openai" | "local" };
 type AuthState = { status: "loading" | "authenticated" | "unauthenticated"; user: AuthUser | null; reason: string | null };
 
 const GOOGLE_SIGN_IN_CLIENT_ID = "497784342268-ik1c65ff3co1s6qt0gga34gt1togmart.apps.googleusercontent.com";
 const GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX = "browser_signin_";
 const GOOGLE_BROWSER_SIGN_IN_STATE_COOKIE_NAME = "__Host-okrptr_google_signin_browser";
+const THEME_STORAGE_KEY = "okrptr.theme";
+
+function isThemeMode(value: string | null | undefined): value is ThemeMode {
+  return value === "light" || value === "dark" || value === "system";
+}
 
 type ItemAssignment = {
   id: string;
@@ -635,6 +644,11 @@ export default function Home() {
   const [workspaceDataState, setWorkspaceDataState] = useState<"loading" | "ready" | "error">("loading");
   const [freshWorkspaceDataReady, setFreshWorkspaceDataReady] = useState(false);
   const [workspaceDataAttempt, setWorkspaceDataAttempt] = useState(0);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    if (typeof document === "undefined") return "light";
+    const preference = document.documentElement.dataset.themePreference;
+    return isThemeMode(preference) ? preference : "light";
+  });
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
   const assistantAutoHandledWorkspaceRef = useRef<string | null>(null);
 
@@ -646,6 +660,21 @@ export default function Home() {
     }, 0);
     return () => window.clearTimeout(timeout);
   }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyTheme = () => {
+      const resolved = themeMode === "system" ? (media.matches ? "dark" : "light") : themeMode;
+      document.documentElement.dataset.themePreference = themeMode;
+      document.documentElement.dataset.theme = resolved;
+      document.documentElement.style.colorScheme = resolved;
+    };
+    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+    applyTheme();
+    if (themeMode !== "system") return;
+    media.addEventListener("change", applyTheme);
+    return () => media.removeEventListener("change", applyTheme);
+  }, [themeMode]);
 
   useEffect(() => {
     let active = true;
@@ -1884,6 +1913,8 @@ export default function Home() {
         <PropertyPanel
           currentWorkspace={currentWorkspace}
           workspaceCount={activeWorkspaces.length}
+          themeMode={themeMode}
+          onThemeModeChange={setThemeMode}
           onClose={() => setPropertyPanelOpen(false)}
           onCleanup={() => { setPropertyPanelOpen(false); setCleanupOpen(true); }}
           onOpenWorkspaceMenu={() => { setPropertyPanelOpen(false); setWorkspaceMenuOpen(true); }}
@@ -4259,8 +4290,13 @@ function ProjectTemplateManager({ readOnly, onNotice }: { readOnly: boolean; onN
   return <section className="project-template-manager"><header><div><h2>본문 템플릿</h2><p>속성과 Task를 포함하지 않는 Project 문서 양식을 관리합니다.</p></div><button disabled={readOnly} onClick={() => setCreatingTemplate(true)}><Plus size={13} />새 템플릿</button></header>{templates === null ? <div className="project-editor-loading"><LoaderCircle size={16} />템플릿을 불러오는 중</div> : <div className="project-template-layout"><aside className="project-template-list">{creatingTemplate && <form className="project-template-create" onSubmit={(event) => void createTemplate(event)}><input aria-label="새 템플릿 이름" value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="템플릿 이름" /><button disabled={!templateName.trim()} aria-label="템플릿 만들기"><Check size={13} /></button><button type="button" aria-label="템플릿 만들기 취소" onClick={() => { setCreatingTemplate(false); setTemplateName(""); }}><X size={13} /></button></form>}{templates.map((template) => <button className={selectedId === template.id ? "selected" : ""} onClick={() => setSelectedId(template.id)} key={template.id}><BookTemplate size={14} /><span><b>{template.name}</b><small>{formatDateTime(template.updatedAt)}</small></span></button>)}{!templates.length && !creatingTemplate && <EmptyState icon={BookTemplate} title="저장된 템플릿이 없습니다" />}</aside><div className="project-template-editor">{selected ? <><div className="project-template-meta"><input disabled={readOnly} defaultValue={selected.name} onBlur={(event) => event.target.value.trim() !== selected.name && void patchTemplate(selected.id, { name: event.target.value })} aria-label="템플릿 이름" /><textarea disabled={readOnly} defaultValue={selected.description} onBlur={(event) => event.target.value !== selected.description && void patchTemplate(selected.id, { description: event.target.value })} placeholder="템플릿 설명" rows={2} /><div><span>{saving ? "저장 중" : "자동 저장"}</span>{!readOnly && <><button onClick={() => void duplicateTemplate(selected)}><Copy size={13} />복제</button><button className="danger" onClick={() => void removeTemplate(selected)}><Trash2 size={13} />삭제</button></>}</div></div><ClientProjectBlockEditor key={selected.id} initialContent={selected.content} editable={!readOnly} onChange={readOnly ? undefined : (change) => void patchTemplate(selected.id, change, true)} /></> : <EmptyState icon={BookTemplate} title="편집할 템플릿을 선택하세요" />}</div></div>}</section>;
 }
 
-function PropertyPanel({ currentWorkspace, workspaceCount, onClose, onCleanup, onOpenWorkspaceMenu, onOpenTeamMembers, onOpenGroups, onSignOut }: { currentWorkspace?: WorkspaceSummary; workspaceCount: number; onClose: () => void; onCleanup: () => void; onOpenWorkspaceMenu: () => void; onOpenTeamMembers: () => void; onOpenGroups: () => void; onSignOut: () => void }) {
-  return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>내 설정</h2><p>워크스페이스와 팀 설정</p></div><button className="icon-button" onClick={onClose} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section"><h3>워크스페이스</h3><div className="settings-workspace-card"><span className="workspace-avatar">{currentWorkspace?.name.slice(0, 1).toLocaleUpperCase() || "O"}</span><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : `${teamRoleLabel(currentWorkspace?.role ?? "member")} · 전체 ${workspaceCount}개`}</small></div></div><div className="settings-action-grid"><button onClick={onOpenWorkspaceMenu}><Columns3 size={13} />워크스페이스 관리</button><button onClick={onOpenTeamMembers}><Users size={13} />멤버 관리</button><button onClick={onOpenGroups}><AtSign size={13} />그룹 관리</button></div></section><section className="settings-hint"><Settings2 size={15} /><div><b>Project 속성</b><p>Project 화면의 속성 관리 탭에서 추가하거나 삭제할 수 있습니다.</p></div></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section><section className="settings-danger-zone"><div><b>OKR 데이터 정리</b><p>워크스페이스와 그룹은 남기고 OKR 실행 데이터를 휴지통으로 보냅니다.</p></div><button onClick={onCleanup}><Trash2 size={13} />클린업 열기</button></section></aside></div>;
+function PropertyPanel({ currentWorkspace, workspaceCount, themeMode, onThemeModeChange, onClose, onCleanup, onOpenWorkspaceMenu, onOpenTeamMembers, onOpenGroups, onSignOut }: { currentWorkspace?: WorkspaceSummary; workspaceCount: number; themeMode: ThemeMode; onThemeModeChange: (mode: ThemeMode) => void; onClose: () => void; onCleanup: () => void; onOpenWorkspaceMenu: () => void; onOpenTeamMembers: () => void; onOpenGroups: () => void; onSignOut: () => void }) {
+  const themes: { mode: ThemeMode; label: string; icon: LucideIcon }[] = [
+    { mode: "light", label: "밝게", icon: Sun },
+    { mode: "dark", label: "어둡게", icon: Moon },
+    { mode: "system", label: "시스템", icon: Monitor },
+  ];
+  return <div className="modal-backdrop align-right"><aside className="property-panel"><header><div><h2>내 설정</h2><p>화면, 워크스페이스와 팀 설정</p></div><button className="icon-button" onClick={onClose} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section appearance-settings"><h3>화면</h3><div className="theme-picker" role="group" aria-label="화면 모드">{themes.map(({ mode, label, icon: Icon }) => <button className={themeMode === mode ? "active" : ""} aria-pressed={themeMode === mode} onClick={() => onThemeModeChange(mode)} key={mode}><Icon size={14} /><span>{label}</span></button>)}</div><p>밝은 모드는 따뜻한 베이지 배경을 사용합니다.</p></section><section className="settings-section"><h3>워크스페이스</h3><div className="settings-workspace-card"><span className="workspace-avatar">{currentWorkspace?.name.slice(0, 1).toLocaleUpperCase() || "O"}</span><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : `${teamRoleLabel(currentWorkspace?.role ?? "member")} · 전체 ${workspaceCount}개`}</small></div></div><div className="settings-action-grid"><button onClick={onOpenWorkspaceMenu}><Columns3 size={13} />워크스페이스 관리</button><button onClick={onOpenTeamMembers}><Users size={13} />멤버 관리</button><button onClick={onOpenGroups}><AtSign size={13} />그룹 관리</button></div></section><section className="settings-hint"><Settings2 size={15} /><div><b>Project 속성</b><p>Project 화면의 속성 관리 탭에서 추가하거나 삭제할 수 있습니다.</p></div></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section><section className="settings-danger-zone"><div><b>OKR 데이터 정리</b><p>워크스페이스와 그룹은 남기고 OKR 실행 데이터를 휴지통으로 보냅니다.</p></div><button onClick={onCleanup}><Trash2 size={13} />클린업 열기</button></section></aside></div>;
 }
 
 function TeamPanel({ initialTeam, initialTab, initialGroupHandle, onMembersChange, onClose, onNotice }: { initialTeam: TeamData | null; initialTab: "members" | "groups"; initialGroupHandle: string | null; onMembersChange: (members: TeamMember[]) => void; onClose: () => void; onNotice: (message: string) => void }) {
