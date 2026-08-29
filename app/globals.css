@@ -198,8 +198,6 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .page-header { min-height: 72px; display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
 .page-header h1 { margin: 0; font-size: 30px; line-height: 1.25; font-weight: 700; }
 .page-header p { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
-.select-all-work { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid #ddb2b2; border-radius: var(--radius-control); background: #fff7f6; color: var(--red); font-size: 10px; white-space: nowrap; cursor: pointer; }
-.select-all-work:hover { background: #f8e6e5; }
 .primary-action { height: 31px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border: 0; border-radius: 4px; background: var(--ink); color: white; font-size: 11px; cursor: pointer; }
 .primary-action:disabled { opacity: .55; cursor: default; }
 .cadence-switch { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 5px; }
@@ -440,9 +438,8 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .objective-row h2 { margin: 5px 0 0; font-size: 17px; line-height: 1.4; }
 .objective-row > b { font-size: 18px; }
 .hierarchy-row { --depth: 0; min-height: 49px; display: grid; grid-template-columns: 27px minmax(0, 1fr) 78px 38px 28px; align-items: center; gap: 9px; padding: 5px 3px 5px calc(8px + var(--depth) * 18px); border-bottom: 1px solid var(--line); }
-.hierarchy-row.deletion-selectable { grid-template-columns: 21px 27px minmax(0, 1fr) 78px 38px 28px; }
-.tree-select-all, .list-selection-toolbar button { min-height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 1px solid #ddb2b2; border-radius: 4px; background: #fff7f6; color: var(--red); font-size: 9px; cursor: pointer; }
-.tree-select-all:hover, .list-selection-toolbar button:hover { background: #f8e6e5; }
+.list-selection-toolbar button { min-height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 1px solid #ddb2b2; border-radius: 4px; background: #fff7f6; color: var(--red); font-size: 9px; cursor: pointer; }
+.list-selection-toolbar button:hover { background: #f8e6e5; }
 .hierarchy-row:hover { background: #fbfbfa; }
 .type-icon { width: 23px; height: 23px; display: grid; place-items: center; border-radius: 4px; background: #f1f1ef; color: var(--muted); font-size: 8px; font-weight: 700; }
 .type-key_result { background: #e7f3f8; color: #337ea9; }
@@ -1169,10 +1166,6 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .my-work-section > header b { font-size: 11px; }
 .my-work-section > header span { min-width: 20px; padding: 2px 5px; border-radius: 9px; background: white; color: var(--muted); font-size: 9px; text-align: center; }
 .my-work-item { width: 100%; min-height: 52px; display: grid; grid-template-columns: 26px minmax(0, 1fr) 20px; align-items: center; gap: 9px; padding: 7px 12px; border: 0; border-bottom: 1px solid var(--line); background: white; color: var(--ink); text-align: left; cursor: pointer; }
-.my-work-selectable { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; border-bottom: 1px solid var(--line); background: white; }
-.my-work-selectable:last-child { border-bottom: 0; }
-.my-work-selectable > .delete-select { justify-self: center; }
-.my-work-selectable > .my-work-item { border-bottom: 0; }
 .my-work-item:last-child { border-bottom: 0; }
 .my-work-item:hover { background: var(--hover); }
 .my-work-item > span:nth-child(2) { min-width: 0; display: grid; gap: 3px; }
@@ -1483,7 +1476,6 @@ button:active:not(:disabled) { transform: translateY(1px); }
   .toast { bottom: calc(72px + env(safe-area-inset-bottom)); }
   .page-header { min-height: 58px; }
   .page-header h1 { font-size: 24px; }
-  .select-all-work { width: 100%; order: 3; }
   .okr-file-manager { width: 100vw; }
   .okr-document-header { grid-template-columns: 28px minmax(0, 1fr); }
   .okr-document-header > button { grid-column: 1 / -1; width: 100%; }

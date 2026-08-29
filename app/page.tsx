@@ -1045,10 +1045,6 @@ export default function Home() {
     });
   }
 
-  function selectDeleteItems(itemIds: string[]) {
-    setSelectedDeleteItemIds(new Set(itemIds));
-  }
-
   function addDeleteItems(itemIds: string[]) {
     setSelectedDeleteItemIds((current) => new Set([...current, ...itemIds]));
   }
@@ -1696,9 +1692,6 @@ export default function Home() {
             ) : activeView === "reviews" ? (
               <CadenceSwitch value={cadence} onChange={setCadence} />
             ) : null}
-            {canDeleteItems && ["work", "inbox", "my_work", "okr"].includes(activeView) && activeItems.some((item) => item.kind === "project" || item.kind === "task") && (
-              <button className="select-all-work" onClick={() => selectDeleteItems(activeItems.filter((item) => item.kind === "project" || item.kind === "task").map((item) => item.id))}><ListChecks size={14} />모든 Project·Task 선택</button>
-            )}
           </header>}
 
           {workspaceDataState === "error" ? (
@@ -1759,7 +1752,7 @@ export default function Home() {
             />
           ) : (
             <>
-          {activeView === "my_work" && <MyWorkView items={activeItems} routines={routines} currentMember={currentTeamMember ?? null} onOpenProject={openProjectPage} onOpenTask={setSelectedTaskId} onRoutinesChange={setRoutines} onNotice={showNotice} canDelete={canDeleteItems} selectedItemIds={selectedDeleteItemIds} onToggleSelect={toggleDeleteSelection} onSelectItems={addDeleteItems} />}
+          {activeView === "my_work" && <MyWorkView items={activeItems} routines={routines} currentMember={currentTeamMember ?? null} onOpenProject={openProjectPage} onOpenTask={setSelectedTaskId} onRoutinesChange={setRoutines} onNotice={showNotice} />}
           {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={setSelectedTaskId} onPatch={patchItem} canDelete={canDeleteItems} selectedItemIds={selectedDeleteItemIds} onToggleSelect={toggleDeleteSelection} onSelectItems={addDeleteItems} />}
           {activeView === "work" && (
             <section className="project-workspace">
@@ -1806,7 +1799,7 @@ export default function Home() {
                   return (
                     <article className="okr-document-card" key={cycle.id}>
                       <OkrCurrentFile key={`${cycle.id}-${cycle.name}-${cycle.department}`} cycle={cycle} addItemKind={firstItemKind} onRename={(id, name) => void renameOkrFile(id, name)} onDepartmentChange={(id, department) => void setOkrFileDepartment(id, department)} onAddItem={() => openCreateItem(firstItemKind, cycle.id)} />
-                      <TreeView objective={view.objective} items={view.items} depths={view.depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} onCreateObjective={() => openCreateItem("objective", cycle.id)} onCreateWithChat={() => openOkrCreationChat(cycle, "objective")} canDelete={canDeleteItems} selectedItemIds={selectedDeleteItemIds} onToggleSelect={toggleDeleteSelection} onSelectItems={addDeleteItems} />
+                      <TreeView objective={view.objective} items={view.items} depths={view.depths} onComplete={(id) => void patchItem(id, { status: "done", progress: 100 })} onCreateObjective={() => openCreateItem("objective", cycle.id)} onCreateWithChat={() => openOkrCreationChat(cycle, "objective")} />
                     </article>
                   );
                 }) : <EmptyState icon={Archive} title="OKR 파일이 없습니다" />}
@@ -3133,7 +3126,7 @@ function RoutineView({ teamMembers, onNotice, onRoutinesChange }: { teamMembers:
   );
 }
 
-function MyWorkView({ items, routines, currentMember, onOpenProject, onOpenTask, onRoutinesChange, onNotice, canDelete, selectedItemIds, onToggleSelect, onSelectItems }: {
+function MyWorkView({ items, routines, currentMember, onOpenProject, onOpenTask, onRoutinesChange, onNotice }: {
   items: OkrptrItem[];
   routines: Routine[];
   currentMember: TeamMember | null;
@@ -3141,10 +3134,6 @@ function MyWorkView({ items, routines, currentMember, onOpenProject, onOpenTask,
   onOpenTask: (id: string) => void;
   onRoutinesChange: (routines: Routine[]) => void;
   onNotice: (message: string) => void;
-  canDelete: boolean;
-  selectedItemIds: Set<string>;
-  onToggleSelect: (id: string) => void;
-  onSelectItems: (ids: string[]) => void;
 }) {
   const [includeCompleted, setIncludeCompleted] = useState(false);
   const [savingRoutineId, setSavingRoutineId] = useState<string | null>(null);
@@ -3176,20 +3165,19 @@ function MyWorkView({ items, routines, currentMember, onOpenProject, onOpenTask,
     <section className="my-work-view">
       <header className="my-work-toolbar">
         <div><b>{currentMember.displayName}의 업무</b><span>명시적으로 담당된 항목만 표시합니다.</span></div>
-        {canDelete && (projects.length > 0 || tasks.length > 0) && <button onClick={() => onSelectItems([...tasks, ...projects].map((item) => item.id))}><ListChecks size={13} />현재 목록 선택</button>}
         <label><input type="checkbox" checked={includeCompleted} onChange={(event) => setIncludeCompleted(event.target.checked)} />완료 포함</label>
       </header>
       <MyWorkSection title="Task" count={tasks.length}>
         {tasks.map((task) => {
           const project = task.parentId ? byId.get(task.parentId) : null;
           const routine = task.routineId ? routines.find((entry) => entry.id === task.routineId) : null;
-          return <div className="my-work-selectable" key={task.id}>{canDelete && <DeleteSelectCheckbox item={task} selected={selectedItemIds.has(task.id)} onToggle={onToggleSelect} />}<button className="my-work-item" onClick={() => onOpenTask(task.id)}><span className="type-icon type-task">T</span><span><b>{task.title}</b><small>{statusLabel(task.status)} · {routine?.systemKey === "general" ? "미분류 Task" : routine ? routine.title : project?.title ?? "미분류 Task"} · {dueLabel(task.dueDate)}</small></span><ChevronRight size={15} /></button></div>;
+          return <button className="my-work-item" key={task.id} onClick={() => onOpenTask(task.id)}><span className="type-icon type-task">T</span><span><b>{task.title}</b><small>{statusLabel(task.status)} · {routine?.systemKey === "general" ? "미분류 Task" : routine ? routine.title : project?.title ?? "미분류 Task"} · {dueLabel(task.dueDate)}</small></span><ChevronRight size={15} /></button>;
         })}
       </MyWorkSection>
       <MyWorkSection title="Project" count={projects.length}>
         {projects.map((project) => {
           const roles = project.assignments.filter((assignment) => assignment.memberId === currentMember.id).map((assignment) => assignment.role === "project_dri" ? "주 담당" : "보조 담당");
-          return <div className="my-work-selectable" key={project.id}>{canDelete && <DeleteSelectCheckbox item={project} selected={selectedItemIds.has(project.id)} onToggle={onToggleSelect} />}<button className="my-work-item" onClick={() => onOpenProject(project.id)}><span className="type-icon type-project">P</span><span><b>{project.title}</b><small>{roles.join(" · ")} · {statusLabel(project.status)} · {dueLabel(project.dueDate)}</small></span><ChevronRight size={15} /></button></div>;
+          return <button className="my-work-item" key={project.id} onClick={() => onOpenProject(project.id)}><span className="type-icon type-project">P</span><span><b>{project.title}</b><small>{roles.join(" · ")} · {statusLabel(project.status)} · {dueLabel(project.dueDate)}</small></span><ChevronRight size={15} /></button>;
         })}
       </MyWorkSection>
       <MyWorkSection title="Routine" count={assignedRoutines.length}>
@@ -3890,10 +3878,9 @@ function OkrCurrentFile({ cycle, addItemKind, onRename, onDepartmentChange, onAd
   );
 }
 
-function TreeView({ objective, items, depths, onComplete, onCreateObjective, onCreateWithChat, canDelete, selectedItemIds, onToggleSelect, onSelectItems }: { objective?: OkrptrItem; items: OkrptrItem[]; depths: Record<string, number>; onComplete: (id: string) => void; onCreateObjective: () => void; onCreateWithChat: () => void; canDelete: boolean; selectedItemIds: Set<string>; onToggleSelect: (id: string) => void; onSelectItems: (ids: string[]) => void }) {
+function TreeView({ objective, items, depths, onComplete, onCreateObjective, onCreateWithChat }: { objective?: OkrptrItem; items: OkrptrItem[]; depths: Record<string, number>; onComplete: (id: string) => void; onCreateObjective: () => void; onCreateWithChat: () => void }) {
   if (!objective) return <OkrEmptyState onCreateObjective={onCreateObjective} onCreateWithChat={onCreateWithChat} />;
-  const selectable = items.filter((entry) => entry.kind === "project" || entry.kind === "task");
-  return <section className="outline-section"><div className="objective-row"><Target size={18} /><div><span>Objective</span><h2>{objective.title}</h2></div><b>{objective.progress}%</b>{canDelete && selectable.length > 0 && <button className="tree-select-all" onClick={() => onSelectItems(selectable.map((item) => item.id))}><ListChecks size={13} />Project·Task 선택</button>}</div><div className="hierarchy">{items.filter((entry) => entry.id !== objective.id).map((entry) => <div className={`hierarchy-row ${canDelete && (entry.kind === "project" || entry.kind === "task") ? "deletion-selectable" : ""}`} key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as CSSProperties}>{canDelete && (entry.kind === "project" || entry.kind === "task") && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><span className="hierarchy-copy"><small>{kindLabel(entry.kind)}</small><b>{entry.title}</b></span><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span><em>{entry.progress}%</em>{!isCompletedStatus(entry.status) && ["project", "task"].includes(entry.kind) ? <button className="row-action" aria-label="완료 처리" title="완료 처리" onClick={() => onComplete(entry.id)}><Check size={13} /></button> : <ChevronRight className="row-chevron" size={15} />}</div>)}</div></section>;
+  return <section className="outline-section"><div className="objective-row"><Target size={18} /><div><span>Objective</span><h2>{objective.title}</h2></div><b>{objective.progress}%</b></div><div className="hierarchy">{items.filter((entry) => entry.id !== objective.id).map((entry) => <div className="hierarchy-row" key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as CSSProperties}><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><span className="hierarchy-copy"><small>{kindLabel(entry.kind)}</small><b>{entry.title}</b></span><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span><em>{entry.progress}%</em>{!isCompletedStatus(entry.status) && ["project", "task"].includes(entry.kind) ? <button className="row-action" aria-label="완료 처리" title="완료 처리" onClick={() => onComplete(entry.id)}><Check size={13} /></button> : <ChevronRight className="row-chevron" size={15} />}</div>)}</div></section>;
 }
 
 function OkrEmptyState({ onCreateObjective, onCreateWithChat }: { onCreateObjective: () => void; onCreateWithChat: () => void }) {

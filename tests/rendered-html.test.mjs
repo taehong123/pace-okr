@@ -345,7 +345,13 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
 
   assert.match(page, /목록.*속성 관리.*템플릿 관리/s);
   assert.doesNotMatch(page, /setProjectTab\("archive"\)/);
-  assert.match(page, /모든 Project·Task 선택/);
+  assert.doesNotMatch(page, /모든 Project·Task 선택|Project·Task 선택/);
+  const treeView = page.match(/function TreeView[\s\S]*?function OkrEmptyState/)?.[0] ?? "";
+  assert.doesNotMatch(treeView, /DeleteSelectCheckbox|onSelectItems|selectedItemIds/);
+  const myWorkView = page.match(/function MyWorkView[\s\S]*?function MyWorkSection/)?.[0] ?? "";
+  assert.doesNotMatch(myWorkView, /DeleteSelectCheckbox|onSelectItems|selectedItemIds/);
+  assert.match(page, /items=\{executionItems\}/);
+  assert.match(page, /<TaskListView items=\{taskItems\}/);
   assert.match(page, /현재 목록 선택/);
   assert.match(page, /bulk-delete-bar/);
   assert.match(page, /DeleteSelectCheckbox/);
