@@ -41,6 +41,7 @@ import {
   Plus,
   Plug,
   Repeat2,
+  RefreshCw,
   RotateCcw,
   Search,
   Send,
@@ -61,8 +62,8 @@ import {
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { ConfirmationProvider, OverlayDialog, useAppConfirm } from "./overlay-dialog";
 
-type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "data" | "scrum" | "recommendations" | "reviews" | "trash";
-const urlViews = new Set<View>(["my_work", "inbox", "work", "routines", "okr", "data", "scrum", "recommendations", "reviews", "trash"]);
+type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "data" | "scrum" | "recommendations" | "reviews" | "trash" | "integrations";
+const urlViews = new Set<View>(["my_work", "inbox", "work", "routines", "okr", "data", "scrum", "recommendations", "reviews", "trash", "integrations"]);
 type NoticeTone = "success" | "error" | "info";
 type AppNotice = { id: number; message: string; tone: NoticeTone };
 
@@ -487,6 +488,9 @@ type GoogleConnectionStatus = {
 type SlackConnectionStatus = {
   configured: boolean;
   connected: boolean;
+  state: "platform_unavailable" | "workspace_disconnected" | "connected" | "reauthorization_required" | "error";
+  statusMessage: string;
+  missingScopes: string[];
   teamName: string | null;
   teamId: string | null;
   botUserId: string | null;
@@ -682,6 +686,7 @@ const viewTitles: Record<View, string> = {
   recommendations: "추천",
   reviews: "리뷰",
   trash: "휴지통",
+  integrations: "앱 연동",
 };
 
 export default function Home() {
@@ -715,7 +720,6 @@ function WorkspaceApp() {
   const [taskDisplay, setTaskDisplay] = useState<"cards" | "table" | "board">("table");
   const [notice, setNotice] = useState<AppNotice | null>(null);
   const [integrationOpen, setIntegrationOpen] = useState(false);
-  const [appIntegrationsOpen, setAppIntegrationsOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [propertyPanelOpen, setPropertyPanelOpen] = useState(false);
   const [workspaceAvatarOpen, setWorkspaceAvatarOpen] = useState(false);
@@ -746,6 +750,8 @@ function WorkspaceApp() {
   const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null);
   const [slackStatus, setSlackStatus] = useState<SlackConnectionStatus | null>(null);
   const [integrationStatusesLoaded, setIntegrationStatusesLoaded] = useState(false);
+  const [integrationStatusAttempt, setIntegrationStatusAttempt] = useState(0);
+  const [integrationStatusError, setIntegrationStatusError] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [introLanguage, setIntroLanguage] = useState<IntroLanguage>("ko");
   const [authState, setAuthState] = useState<AuthState>({ status: "loading", user: null, reason: null });
@@ -857,7 +863,7 @@ function WorkspaceApp() {
   }, []);
 
   useEffect(() => {
-    if (authState.status !== "authenticated" || !appIntegrationsOpen || integrationStatusesLoaded) return;
+    if (authState.status !== "authenticated" || activeView !== "integrations" || integrationStatusesLoaded) return;
     let active = true;
     void Promise.all([
       fetch("/api/google/status").then(async (response) => response.ok ? response.json() as Promise<{ google: GoogleConnectionStatus }> : Promise.reject()),
@@ -865,13 +871,30 @@ function WorkspaceApp() {
     ])
       .then(([googleData, slackData]) => {
         if (!active) return;
+        setIntegrationStatusError(false);
         setGoogleStatus(googleData.google);
         setSlackStatus(slackData.slack);
       })
-      .catch(() => undefined)
+      .catch(() => { if (active) setIntegrationStatusError(true); })
       .finally(() => { if (active) setIntegrationStatusesLoaded(true); });
     return () => { active = false; };
-  }, [appIntegrationsOpen, authState.status, integrationStatusesLoaded]);
+  }, [activeView, authState.status, integrationStatusesLoaded, integrationStatusAttempt]);
+
+  useEffect(() => {
+    if (activeView !== "integrations") return;
+    const params = new URLSearchParams(window.location.search);
+    const slackResult = params.get("slack");
+    if (!slackResult) return;
+    const timeout = window.setTimeout(() => {
+      if (slackResult === "connected") showNotice("Slack 워크스페이스를 연결했습니다.");
+      else if (slackResult === "missing_config") showNotice("Slack 연결 설정을 확인하지 못했습니다.", "error");
+      else showNotice("Slack 연결을 완료하지 못했습니다. 다시 시도해 주세요.", "error");
+      const url = new URL(window.location.href);
+      url.searchParams.delete("slack");
+      window.history.replaceState(window.history.state, "", url);
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [activeView, showNotice]);
 
   useEffect(() => {
     if (workspaceMenuOpen && workspaceCreateOpen) workspaceNameInputRef.current?.focus();
@@ -999,6 +1022,12 @@ function WorkspaceApp() {
     setSelectedTaskId(null);
     setActiveView(view);
     writeNavigation(view, null, null, mode);
+  }
+
+  function refreshIntegrationStatuses() {
+    setIntegrationStatusesLoaded(false);
+    setIntegrationStatusError(false);
+    setIntegrationStatusAttempt((attempt) => attempt + 1);
   }
 
   function openTaskDetail(id: string) {
@@ -1892,7 +1921,7 @@ function WorkspaceApp() {
         <div className="sidebar-bottom">
           <button className={`nav-item assistant-sidebar-tab ${activeView === "home" ? "active" : ""}`} onClick={openAssistant}><Bot size={16} /><span>OKR 도우미</span></button>
           <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>ChatGPT 연동</span></button>
-          <button className="nav-item" onClick={() => setAppIntegrationsOpen(true)}><Plug size={16} /><span>앱 연동</span></button>
+          <button className={`nav-item ${activeView === "integrations" && !selectedProject && !selectedTask ? "active" : ""}`} aria-current={activeView === "integrations" && !selectedProject && !selectedTask ? "page" : undefined} onClick={() => navigateView("integrations")}><Plug size={16} /><span>앱 연동</span></button>
           <button className="nav-item" onClick={() => { setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={16} /><span>팀 멤버</span></button>
           <button className="nav-item" onClick={() => { setTeamPanelTab("groups"); setTeamPanelOpen(true); }}><AtSign size={16} /><span>그룹 관리</span></button>
           <button className="nav-item" onClick={() => setPropertyPanelOpen(true)}><Settings2 size={16} /><span>내 설정</span></button>
@@ -1907,7 +1936,7 @@ function WorkspaceApp() {
             <div className="mobile-menu-list">
               {navItems.slice(4).map((entry) => { const Icon = entry.icon; return <button key={entry.id} onClick={() => { navigateView(entry.id); setMobileMenuOpen(false); }}><Icon size={16} /><span>{entry.label}</span><ChevronRight size={14} /></button>; })}
               <button onClick={() => { setMobileMenuOpen(false); setIntegrationOpen(true); }}><Link2 size={16} /><span>ChatGPT 연동</span><ChevronRight size={14} /></button>
-              <button onClick={() => { setMobileMenuOpen(false); setAppIntegrationsOpen(true); }}><Plug size={16} /><span>앱 연동</span><ChevronRight size={14} /></button>
+              <button onClick={() => { setMobileMenuOpen(false); navigateView("integrations"); }}><Plug size={16} /><span>앱 연동</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); setTeamPanelTab("members"); setTeamPanelOpen(true); }}><Users size={16} /><span>팀 멤버</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); setTeamPanelTab("groups"); setTeamPanelOpen(true); }}><AtSign size={16} /><span>그룹 관리</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); setPropertyPanelOpen(true); }}><Settings2 size={16} /><span>내 설정</span><ChevronRight size={14} /></button>
@@ -2059,6 +2088,7 @@ function WorkspaceApp() {
             </section>
           )}
           {activeView === "scrum" && <DailyScrumView onOpenTask={openTaskDetail} onNotice={showNotice} />}
+          {activeView === "integrations" && <AppIntegrationsView google={googleStatus} slack={slackStatus} loading={!integrationStatusesLoaded} loadError={integrationStatusError} workspaceName={currentWorkspace?.name || "개인 워크스페이스"} canManageSlack={currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin"} onGoogleChange={setGoogleStatus} onSlackChange={setSlackStatus} onRefresh={refreshIntegrationStatuses} onNotice={showNotice} />}
           {activeView === "recommendations" && <RecommendationsView items={activeItems} onOpenTask={openTaskDetail} onOpenProject={openProjectPage} onNavigate={navigateView} />}
           {activeView === "reviews" && <ReviewView items={periodItems} cadence={cadence} completed={completed} blocked={blocked} averageProgress={averageProgress} onOpenTask={openTaskDetail} onOpenProject={openProjectPage} />}
           {activeView === "trash" && <TrashView onNotice={showNotice} canDeleteRecords={canDeleteRecords} canRestore={Boolean(currentWorkspace && currentWorkspace.role !== "viewer")} />}
@@ -2133,7 +2163,6 @@ function WorkspaceApp() {
         />
       )}
       {integrationOpen && <IntegrationModal onNotice={showNotice} onClose={() => setIntegrationOpen(false)} />}
-      {appIntegrationsOpen && <AppIntegrationsModal google={googleStatus} slack={slackStatus} workspaceName={currentWorkspace?.name || "개인 워크스페이스"} canManageSlack={currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin"} onGoogleChange={setGoogleStatus} onSlackChange={setSlackStatus} onNotice={showNotice} onClose={() => setAppIntegrationsOpen(false)} />}
       {propertyPanelOpen && (
         <PropertyPanel
           currentWorkspace={currentWorkspace}
@@ -3864,7 +3893,7 @@ function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => 
       <fieldset className={`daily-skip-panel ${isSkipped ? "active" : ""}`}>
         <legend>오늘 데일리 스킵</legend>
         <label className="daily-skip-toggle" htmlFor="daily-skip-toggle"><input id="daily-skip-toggle" type="checkbox" checked={isSkipped} onChange={(event) => toggleSkip(event.target.checked)} />오늘은 데일리를 스킵합니다<small>확정하면 선택한 사유가 팀과 Slack 채널에 공유됩니다.</small></label>
-        <div><label><span>스킵 사유</span><select aria-label="데일리 스킵 사유" disabled={!isSkipped} value={currentScrum.draft.skipReason ?? "workload"} onChange={(event) => updateDraft({ skipReason: event.target.value as DailySkipReason, skipNote: event.target.value === "other" ? currentScrum.draft.skipNote : "" })}><option value="workload">본업 과중</option><option value="vacation">휴가</option><option value="personal">개인 일정</option><option value="other">기타</option></select></label><label><span>상세 사유 {currentScrum.draft.skipReason === "other" ? "(필수)" : "(선택)"}</span><input aria-label="데일리 스킵 상세 사유" disabled={!isSkipped} value={currentScrum.draft.skipNote} onChange={(event) => updateDraft({ skipNote: event.target.value })} maxLength={500} placeholder="팀에 공유할 보충 설명" /></label></div>
+        <div><label><span>스킵 사유</span><select aria-label="데일리 스킵 사유" disabled={!isSkipped} value={currentScrum.draft.skipReason ?? "workload"} onChange={(event) => updateDraft({ skipReason: event.target.value as DailySkipReason, skipNote: event.target.value === "other" ? currentScrum.draft.skipNote : "" })}><option value="workload">본업 과중</option><option value="vacation">휴가</option><option value="personal">개인 일정</option><option value="other">기타</option></select></label><label><span>상세 사유 {currentScrum.draft.skipReason === "other" ? "(필수)" : "(선택)"}</span><input aria-label="데일리 스킵 상세 사유" aria-required={currentScrum.draft.skipReason === "other"} required={currentScrum.draft.skipReason === "other"} disabled={!isSkipped} value={currentScrum.draft.skipNote} onChange={(event) => updateDraft({ skipNote: event.target.value })} maxLength={500} placeholder="팀에 공유할 보충 설명" /></label></div>
         {skipNeedsNote && <p role="alert">기타 스킵 사유를 입력해 주세요.</p>}
       </fieldset>
       <div className="daily-notes"><label><span>어제</span><textarea value={currentScrum.draft.yesterdayNote} onChange={(event) => updateDraft({ yesterdayNote: event.target.value })} placeholder="어제 마무리한 일" /></label><label><span>오늘</span><textarea value={currentScrum.draft.todayNote} onChange={(event) => updateDraft({ todayNote: event.target.value })} placeholder="오늘의 초점과 메모" /></label><label><span>블로커</span><textarea value={currentScrum.draft.blockersNote} onChange={(event) => updateDraft({ blockersNote: event.target.value })} placeholder="도움이 필요한 문제" /></label></div>
@@ -5864,7 +5893,7 @@ function IntegrationModal({ onNotice, onClose }: { onNotice: (message: string) =
   </div><footer><span><CheckCircle2 size={15} />OKR · Objective → Key Result → Initiative → Project → Task / Routine → Task</span><button onClick={() => requestClose("close-button")}>닫기</button></footer></section>}</OverlayDialog>;
 }
 
-function AppIntegrationsModal({ google, slack, workspaceName, canManageSlack, onGoogleChange, onSlackChange, onNotice, onClose }: { google: GoogleConnectionStatus | null; slack: SlackConnectionStatus | null; workspaceName: string; canManageSlack: boolean; onGoogleChange: (status: GoogleConnectionStatus | null) => void; onSlackChange: (status: SlackConnectionStatus | null) => void; onNotice: (message: string) => void; onClose: () => void }) {
+function AppIntegrationsView({ google, slack, loading, loadError, workspaceName, canManageSlack, onGoogleChange, onSlackChange, onRefresh, onNotice }: { google: GoogleConnectionStatus | null; slack: SlackConnectionStatus | null; loading: boolean; loadError: boolean; workspaceName: string; canManageSlack: boolean; onGoogleChange: (status: GoogleConnectionStatus | null) => void; onSlackChange: (status: SlackConnectionStatus | null) => void; onRefresh: () => void; onNotice: (message: string) => void }) {
   const [disconnectingGoogle, setDisconnectingGoogle] = useState(false);
   const [disconnectingSlack, setDisconnectingSlack] = useState(false);
 
@@ -5882,38 +5911,61 @@ function AppIntegrationsModal({ google, slack, workspaceName, canManageSlack, on
     const response = await fetch("/api/slack/disconnect", { method: "POST" });
     setDisconnectingSlack(false);
     if (!response.ok) { onNotice("Slack 연결을 해제하지 못했습니다."); return; }
-    onSlackChange(slack ? { ...slack, connected: false, teamName: null, teamId: null, botUserId: null, connectedAt: null, updatedAt: null } : null);
+    onSlackChange(slack ? { ...slack, connected: false, state: "workspace_disconnected", statusMessage: "워크스페이스 관리자가 Slack 연결을 시작할 수 있습니다.", missingScopes: [], teamName: null, teamId: null, botUserId: null, connectedAt: null, updatedAt: null } : null);
     onNotice("Slack 연결을 해제했습니다. 자동화 규칙은 보관됩니다.");
   }
 
   function connectGoogle() {
     if (!google?.configured) return;
-    window.location.href = `/api/google/auth?returnTo=${encodeURIComponent("/")}`;
+    window.location.href = `/api/google/auth?returnTo=${encodeURIComponent("/?view=integrations")}`;
   }
 
   function connectSlack() {
     if (!slack?.configured || !canManageSlack) return;
-    window.location.href = `/api/slack/auth?returnTo=${encodeURIComponent("/")}`;
+    window.location.href = `/api/slack/auth?returnTo=${encodeURIComponent("/?view=integrations")}`;
   }
 
-  return <OverlayDialog title="앱 연동" onRequestClose={() => onClose()}>{(requestClose) => <section className="integration-modal app-integrations-modal">
-    <header><div><h2>앱 연동</h2><p>업무가 움직일 때 팀이 있는 곳으로 바로 전달합니다.</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="닫기"><X size={17} /></button></header>
-    <div className="integration-sections">
-      <section className="integration-card compact-integration-card">
-        <header><CalendarDays size={18} /><div><b>Google Calendar</b><p>{google?.connected ? `${google.email} 계정으로 연결됨` : "내 Task 일정을 개인 캘린더와 연결"}</p></div><span className={google?.connected ? "connection-live" : "connection-local"} /></header>
-        <div className="integration-scope"><b>개인 연결</b><span>현재 사용자에게만 적용</span></div>
-        <div className="integration-actions">{google?.connected ? <button className="secondary-danger" onClick={() => void disconnectGoogle()} disabled={disconnectingGoogle}>{disconnectingGoogle ? "해제 중" : "연결 해제"}</button> : <button onClick={connectGoogle} disabled={!google?.configured}>{google?.configured ? "Google로 연결" : "준비 중"}</button>}<small>{google?.configured ? "일정 생성 및 수정" : "서버 연결 설정이 필요합니다."}</small></div>
+  const slackState = loadError ? "error" : slack?.state ?? (slack?.connected ? "connected" : slack?.configured ? "workspace_disconnected" : "platform_unavailable");
+  const slackConnected = Boolean(slack?.connected);
+  const slackAction = slackState === "connected" ? "연결 완료" : slackState === "reauthorization_required" ? "권한 업데이트 필요" : slackState === "workspace_disconnected" ? "연결 필요" : slackState === "error" ? "확인 실패" : "서비스 설정 확인 필요";
+
+  return <section className="integrations-page" aria-label="앱 연동 설정">
+    <section className="integration-intro">
+      <div><span>CONNECTED WORK</span><h2>연결하고, 확인하고, 바로 사용하세요</h2><p>기술 설정이나 훅 URL을 입력할 필요 없이 계정 승인만으로 연결합니다.</p></div>
+      <button type="button" onClick={onRefresh} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={15} />{loading ? "상태 확인 중" : "연결 상태 새로고침"}</button>
+    </section>
+
+    <section className="integration-service-card google-service-card" aria-labelledby="google-integration-heading">
+      <header><span className="integration-service-icon"><CalendarDays size={20} /></span><div><h3 id="google-integration-heading">Google Calendar</h3><p>내 Task의 마감 일정을 개인 캘린더와 연결합니다.</p></div><strong className={`integration-status-badge ${google?.connected ? "connected" : google?.configured ? "idle" : "warning"}`}>{loading ? "확인 중" : google?.connected ? "연결 완료" : google?.configured ? "연결 가능" : "설정 확인 필요"}</strong></header>
+      {loading ? <div className="integration-loading"><LoaderCircle className="spin" size={16} />연결 상태를 확인하고 있습니다.</div> : google?.connected ? <div className="integration-service-actions"><div><b>{google.email}</b><span>일정 생성 및 수정 권한으로 연결됨</span></div><button className="secondary-danger" onClick={() => void disconnectGoogle()} disabled={disconnectingGoogle}>{disconnectingGoogle ? "해제 중" : "연결 해제"}</button></div> : google?.configured ? <div className="integration-service-actions"><div><b>개인 연결</b><span>현재 사용자에게만 적용됩니다.</span></div><button onClick={connectGoogle}>Google로 연결</button></div> : <div className="integration-state-message warning"><AlertTriangle size={17} /><div><b>Google 연결 설정을 확인할 수 없습니다</b><p>현재 사용자가 입력할 설정은 없습니다. 상태를 다시 확인해 주세요.</p></div><button onClick={onRefresh}>다시 확인</button></div>}
+    </section>
+
+    <section className="integration-service-card slack-service-card" aria-labelledby="slack-integration-heading">
+      <header><span className="integration-service-icon slack"><Hash size={20} /></span><div><h3 id="slack-integration-heading">Slack 데일리 봇</h3><p>{slackConnected ? `${slack?.teamName || "Slack"}과 연결되어 있습니다.` : "개인 데일리 DM과 팀 채널 공유를 한 번에 설정합니다."}</p></div><strong className={`integration-status-badge ${slackState}`}>{loading ? "확인 중" : slackAction}</strong></header>
+
+      <section className="integration-step integration-connect-step" aria-labelledby="slack-step-connect">
+        <span className="integration-step-number">1</span><div className="integration-step-copy"><h4 id="slack-step-connect">Slack 워크스페이스 연결</h4><p>{slack?.statusMessage || "연결 상태를 확인하고 있습니다."}</p></div>
+        <div className="integration-step-action">
+          {loading ? <span className="integration-inline-loading"><LoaderCircle className="spin" size={14} />확인 중</span>
+            : slackState === "error" || slackState === "platform_unavailable" ? <button onClick={onRefresh}><RefreshCw size={14} />다시 확인</button>
+            : slackState === "workspace_disconnected" && canManageSlack ? <button className="slack-primary-action" onClick={connectSlack}><Hash size={14} />Slack에 연결</button>
+            : slackState === "workspace_disconnected" ? <span className="integration-role-note">Owner 또는 Admin이 연결할 수 있습니다.</span>
+            : slackState === "reauthorization_required" && canManageSlack ? <button className="slack-primary-action" onClick={connectSlack}>권한 업데이트</button>
+            : slackState === "reauthorization_required" ? <span className="integration-role-note">관리자가 권한을 업데이트해야 합니다.</span>
+            : canManageSlack ? <button className="secondary-danger" onClick={() => void disconnectSlack()} disabled={disconnectingSlack}>{disconnectingSlack ? "해제 중" : "연결 해제"}</button>
+            : <span className="integration-connected-note"><CheckCircle2 size={14} />연결됨</span>}
+        </div>
       </section>
-      <section className="integration-card slack-integration-card">
-        <header><Hash size={18} /><div><b>Slack</b><p>{slack?.connected ? `${slack.teamName}에 OKRPTR 봇 연결됨` : "업무 이벤트를 원하는 채널로 자동 전송"}</p></div><span className={slack?.connected ? "connection-live" : "connection-local"} /></header>
-        <div className="integration-scope"><b>워크스페이스 연결</b><span>{workspaceName} 전체에 적용</span></div>
-        <div className="integration-actions">{slack?.connected ? <button className="secondary-danger" onClick={() => void disconnectSlack()} disabled={disconnectingSlack || !canManageSlack}>{disconnectingSlack ? "해제 중" : canManageSlack ? "연결 해제" : "관리자만 변경"}</button> : <button onClick={connectSlack} disabled={!slack?.configured || !canManageSlack}>{!canManageSlack ? "관리자만 연결" : slack?.configured ? "Slack에 연결" : "준비 중"}</button>}<small>{slack?.connected ? "/okrptr 수집 · 자동 알림" : "연결 후 자동화 봇을 만들 수 있습니다."}</small></div>
-        <SlackDailySettingsPanel connected={Boolean(slack?.connected)} canManage={canManageSlack} onNotice={onNotice} />
-        <SlackAutomationManager connected={Boolean(slack?.connected)} canManage={canManageSlack} workspaceName={workspaceName} onNotice={onNotice} />
-      </section>
-    </div>
-    <footer><span><Plug size={15} />자동화는 연결된 OKRPTR Slack 봇으로 전송됩니다.</span><button onClick={() => requestClose("close-button")}>닫기</button></footer>
-  </section>}</OverlayDialog>;
+
+      {slackConnected ? <>
+        {slackState === "reauthorization_required" && <div className="integration-state-message warning"><AlertTriangle size={17} /><div><b>새 데일리 기능 권한이 필요합니다</b><p>관리자가 권한 업데이트를 완료하기 전까지 일부 DM·채널 기능이 작동하지 않을 수 있습니다.</p></div></div>}
+        <SlackDailySettingsPanel connected canManage={canManageSlack} onNotice={onNotice} />
+        <section className="integration-extra-automation"><SlackAutomationManager connected canManage={canManageSlack} workspaceName={workspaceName} onNotice={onNotice} /></section>
+      </> : <div className="integration-locked-preview" aria-label="Slack 연결 후 사용할 기능">
+        {["사용자 이메일 자동 연결", "개인 데일리 알림 시간", "팀 공유 채널", "테스트 DM과 작동 확인"].map((label, index) => <div key={label}><span>{index + 2}</span><p><b>{label}</b><small>Slack 연결 후 이 단계가 자동으로 열립니다.</small></p></div>)}
+      </div>}
+    </section>
+  </section>;
 }
 
 type SlackDailyAdminData = {
@@ -5930,16 +5982,27 @@ function SlackDailySettingsPanel({ connected, canManage, onNotice }: { connected
   const [admin, setAdmin] = useState<SlackDailyAdminData | null>(null);
   const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string; isPrivate: boolean }>>([]);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   useEffect(() => {
     if (!connected) return;
     let active = true;
-    void fetch("/api/slack/daily/preferences").then(async (response) => response.ok ? response.json() as Promise<SlackDailyPreferenceData> : Promise.reject()).then((data) => { if (active) setPreference(data); }).catch(() => undefined);
-    if (canManage) void Promise.all([
-      fetch("/api/slack/daily/settings").then((response) => response.json() as Promise<SlackDailyAdminData>),
-      fetch("/api/slack/channels").then((response) => response.json() as Promise<{ channels?: Array<{ id: string; name: string; isPrivate: boolean }> }>),
-    ]).then(([settings, channels]) => { if (active) { setAdmin(settings); setAvailableChannels(channels.channels ?? []); } }).catch(() => undefined);
+    const preferenceRequest = fetch("/api/slack/daily/preferences").then(async (response) => {
+      if (!response.ok) throw new Error("preference load failed");
+      return response.json() as Promise<SlackDailyPreferenceData>;
+    });
+    const adminRequest = canManage ? Promise.all([
+      fetch("/api/slack/daily/settings").then(async (response) => { if (!response.ok) throw new Error("settings load failed"); return response.json() as Promise<SlackDailyAdminData>; }),
+      fetch("/api/slack/channels").then(async (response) => { if (!response.ok) throw new Error("channels load failed"); return response.json() as Promise<{ channels?: Array<{ id: string; name: string; isPrivate: boolean }> }>; }),
+    ]) : Promise.resolve(null);
+    void Promise.all([preferenceRequest, adminRequest]).then(([nextPreference, adminResult]) => {
+      if (!active) return;
+      setLoadError(false);
+      setPreference(nextPreference);
+      if (adminResult) { setAdmin(adminResult[0]); setAvailableChannels(adminResult[1].channels ?? []); }
+    }).catch(() => { if (active) setLoadError(true); });
     return () => { active = false; };
-  }, [connected, canManage]);
+  }, [connected, canManage, loadAttempt]);
 
   async function savePreference(patch: Partial<Pick<SlackDailyPreferenceData, "enabled" | "reminderTime" | "timezone">>) {
     setBusy(true);
@@ -5957,18 +6020,36 @@ function SlackDailySettingsPanel({ connected, canManage, onNotice }: { connected
       if (data.settings) setAdmin(data); onNotice(notice);
     } catch (error) { onNotice(error instanceof Error ? error.message : "Slack 데일리 설정을 저장하지 못했습니다."); } finally { setBusy(false); }
   }
-  if (!connected) return <div className="slack-daily-locked"><Bot size={16} /><div><b>개인 데일리 봇</b><p>Slack을 연결하면 평일 DM과 팀 롤업 공유를 사용할 수 있습니다.</p></div></div>;
-  return <section className="slack-daily-settings"><header><div><span>DAILY BOT</span><h3>개인 데일리 알림</h3><p>GPT 없이 할당 관계와 직접 선택한 Task만 사용합니다.</p></div>{admin?.needsReauthorization && <button onClick={() => { window.location.href = "/api/slack/auth?returnTo=/"; }}>권한 업데이트</button>}</header>
-    {preference ? <div className="slack-personal-preference"><label><input type="checkbox" checked={preference.enabled} disabled={busy || !preference.linked} onChange={(event) => void savePreference({ enabled: event.target.checked })} /><span>내 Slack DM 알림 사용</span></label><label><span>시간</span><input type="time" value={preference.reminderTime} disabled={busy || !preference.linked} onChange={(event) => void savePreference({ reminderTime: event.target.value })} /></label><label><span>시간대</span><select value={preference.timezone} disabled={busy || !preference.linked} onChange={(event) => void savePreference({ timezone: event.target.value })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label>{!preference.linked && <p>Slack 사용자 연결이 필요합니다. `/okrptr daily`에서 일회용 연결 링크를 받을 수 있습니다.</p>}</div> : <div className="slack-daily-loading"><LoaderCircle className="spin" size={14} /> 개인 설정 확인 중</div>}
-    {canManage && admin && <details className="slack-daily-admin"><summary>관리자 기본 일정·공유 채널·연결 상태 <ChevronDown size={13} /></summary><div>
-      <div className="slack-admin-grid"><label><span>기본 시간</span><input type="time" value={admin.settings.reminderTime} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, reminderTime: event.target.value } })} /></label><label><span>기본 시간대</span><select value={admin.settings.timezone} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, timezone: event.target.value } })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label></div>
-      <div className="slack-weekdays">{["일", "월", "화", "수", "목", "금", "토"].map((label, day) => <label key={label}><input type="checkbox" checked={admin.settings.weekdays.includes(day)} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, weekdays: event.target.checked ? [...admin.settings.weekdays, day].sort() : admin.settings.weekdays.filter((entry) => entry !== day) } })} />{label}</label>)}</div>
-      <fieldset><legend>개인 카드 공유 채널</legend>{availableChannels.length ? availableChannels.map((channel) => <label key={channel.id}><input type="checkbox" checked={admin.channels.some((entry) => entry.id === channel.id)} onChange={(event) => setAdmin({ ...admin, channels: event.target.checked ? [...admin.channels, channel] : admin.channels.filter((entry) => entry.id !== channel.id) })} /><span>#{channel.name}{channel.isPrivate ? " · 비공개" : ""}</span></label>) : <p>봇이 참여한 채널이 없습니다. Slack에서 봇을 초대한 뒤 재동기화하세요.</p>}</fieldset>
-      <div className="slack-admin-actions"><button disabled={busy} onClick={() => void patchAdmin({ reminderTime: admin.settings.reminderTime, timezone: admin.settings.timezone, weekdays: admin.settings.weekdays, channelIds: admin.channels.map((channel) => channel.id) }, "Slack 데일리 기본 설정을 저장했습니다.")}>설정 저장</button><button disabled={busy} onClick={() => void patchAdmin({ action: "resync" }, "Slack 사용자와 예약을 재동기화했습니다.")}>재동기화</button></div>
-      <div className="slack-member-links">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? member.slackDisplayName || "연결됨" : "Slack 미연결"}{member.reminder ? ` · ${member.reminder.status}` : ""}</small></p>{member.linked && <button disabled={busy} onClick={() => void patchAdmin({ action: "test_dm", memberId: member.memberId }, `${member.displayName}님에게 테스트 DM을 보냈습니다.`)}>테스트 DM</button>}</div>)}</div>
-      {admin.failedPublications.length > 0 && <div className="slack-publication-failures"><b>채널 전송 실패</b>{admin.failedPublications.map((failure) => <div key={failure.id}><p>{failure.memberName} · {failure.date} · {failure.channelId}<small>{failure.error}</small></p><button disabled={busy} onClick={() => void patchAdmin({ action: "retry_publication", publicationId: failure.id }, "채널 전송을 다시 시도했습니다.")}>재시도</button></div>)}</div>}
-    </div></details>}
-  </section>;
+  if (!connected) return null;
+  if (loadError) return <section className="integration-state-message error"><AlertTriangle size={17} /><div><b>Slack 데일리 설정을 불러오지 못했습니다</b><p>연결은 유지됩니다. 잠시 후 다시 불러와 주세요.</p></div><button onClick={() => { setLoadError(false); setPreference(null); setAdmin(null); setLoadAttempt((attempt) => attempt + 1); }}>다시 불러오기</button></section>;
+  return <div className="slack-setup-flow">
+    <section className="integration-step" aria-labelledby="slack-step-members">
+      <span className="integration-step-number">2</span><div className="integration-step-copy"><h4 id="slack-step-members">사용자 이메일 연결 상태</h4><p>OKRPTR와 Slack 이메일이 같으면 자동으로 연결됩니다.</p></div>
+      <div className="integration-step-body">
+        {!preference || (canManage && !admin) ? <div className="slack-daily-loading"><LoaderCircle className="spin" size={14} />사용자 연결 상태 확인 중</div> : canManage && admin ? <><div className="integration-step-summary"><b>{admin.members.filter((member) => member.linked).length}/{admin.members.length}명 연결</b><span>미연결 사용자는 Slack의 `/okrptr daily`에서 일회용 연결 링크를 받을 수 있습니다.</span></div><div className="slack-member-links">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? member.slackDisplayName || "Slack 연결됨" : "Slack 미연결"}{member.reminder ? ` · 알림 ${member.reminder.status}` : ""}</small></p></div>)}</div></> : <div className={`integration-personal-link ${preference.linked ? "linked" : "unlinked"}`}><span>{preference.linked ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}</span><p><b>{preference.linked ? "내 Slack 계정이 연결되었습니다" : "내 Slack 계정 연결이 필요합니다"}</b><small>{preference.linked ? "개인 DM 알림을 설정할 수 있습니다." : "Slack에서 `/okrptr daily`를 입력해 일회용 연결 링크를 받아 주세요."}</small></p></div>}
+      </div>
+    </section>
+
+    <section className="integration-step" aria-labelledby="slack-step-preference">
+      <span className="integration-step-number">3</span><div className="integration-step-copy"><h4 id="slack-step-preference">개인 데일리 알림 시간</h4><p>평일 아침에 오늘 할 Task를 고르는 DM을 받습니다.</p></div>
+      <div className="integration-step-body">{preference ? <div className="slack-personal-preference"><label><input type="checkbox" checked={preference.enabled} disabled={busy || !preference.linked} onChange={(event) => void savePreference({ enabled: event.target.checked })} /><span>내 Slack DM 알림 사용</span></label><label><span>시간</span><input aria-label="개인 데일리 알림 시간" type="time" value={preference.reminderTime} disabled={busy || !preference.linked} onChange={(event) => void savePreference({ reminderTime: event.target.value })} /></label><label><span>시간대</span><select aria-label="개인 데일리 알림 시간대" value={preference.timezone} disabled={busy || !preference.linked} onChange={(event) => void savePreference({ timezone: event.target.value })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label>{!preference.linked && <p>Slack 사용자 연결을 완료하면 알림 설정이 활성화됩니다.</p>}</div> : <div className="slack-daily-loading"><LoaderCircle className="spin" size={14} />개인 알림 설정 확인 중</div>}</div>
+    </section>
+
+    <section className="integration-step" aria-labelledby="slack-step-channel">
+      <span className="integration-step-number">4</span><div className="integration-step-copy"><h4 id="slack-step-channel">팀 공유 채널</h4><p>확정된 데일리와 스킵 사유를 공유할 채널과 기본 시간을 정합니다.</p></div>
+      <div className="integration-step-body">{canManage && admin ? <div className="slack-daily-admin">
+        <div className="slack-admin-grid"><label><span>기본 시간</span><input aria-label="Slack 데일리 기본 시간" type="time" value={admin.settings.reminderTime} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, reminderTime: event.target.value } })} /></label><label><span>기본 시간대</span><select aria-label="Slack 데일리 기본 시간대" value={admin.settings.timezone} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, timezone: event.target.value } })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label></div>
+        <div className="slack-weekdays" aria-label="Slack 데일리 기본 요일">{["일", "월", "화", "수", "목", "금", "토"].map((label, day) => <label key={label}><input type="checkbox" checked={admin.settings.weekdays.includes(day)} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, weekdays: event.target.checked ? [...admin.settings.weekdays, day].sort() : admin.settings.weekdays.filter((entry) => entry !== day) } })} />{label}</label>)}</div>
+        <fieldset><legend>개인 카드 공유 채널</legend>{availableChannels.length ? availableChannels.map((channel) => <label key={channel.id}><input type="checkbox" checked={admin.channels.some((entry) => entry.id === channel.id)} onChange={(event) => setAdmin({ ...admin, channels: event.target.checked ? [...admin.channels, channel] : admin.channels.filter((entry) => entry.id !== channel.id) })} /><span>#{channel.name}{channel.isPrivate ? " · 비공개" : ""}</span></label>) : <p>봇이 참여한 채널이 없습니다. Slack에서 OKRPTR 봇을 채널에 초대한 뒤 5단계의 재동기화를 실행하세요.</p>}</fieldset>
+        <div className="slack-admin-actions"><button disabled={busy} onClick={() => void patchAdmin({ reminderTime: admin.settings.reminderTime, timezone: admin.settings.timezone, weekdays: admin.settings.weekdays, channelIds: admin.channels.map((channel) => channel.id) }, "Slack 데일리 기본 설정을 저장했습니다.")}>{busy ? "저장 중" : "팀 공유 설정 저장"}</button></div>
+      </div> : <div className="integration-role-note">팀 기본 시간과 공유 채널은 Owner 또는 Admin이 관리합니다.</div>}</div>
+    </section>
+
+    <section className="integration-step" aria-labelledby="slack-step-test">
+      <span className="integration-step-number">5</span><div className="integration-step-copy"><h4 id="slack-step-test">테스트 DM과 작동 확인</h4><p>사용자 연결과 다음 알림 예약을 확인하고 실제 테스트 DM을 보냅니다.</p></div>
+      <div className="integration-step-body">{canManage && admin ? <><div className="slack-admin-actions"><button disabled={busy} onClick={() => void patchAdmin({ action: "resync" }, "Slack 사용자와 예약을 재동기화했습니다.")}><RefreshCw size={13} />사용자·예약 재동기화</button></div><div className="slack-member-links slack-test-list">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? member.reminder ? `다음 알림 · ${member.reminder.status}` : "알림 예약 확인 필요" : "Slack 미연결"}</small></p>{member.linked && <button disabled={busy} onClick={() => void patchAdmin({ action: "test_dm", memberId: member.memberId }, `${member.displayName}님에게 테스트 DM을 보냈습니다.`)}>테스트 DM</button>}</div>)}</div>{admin.failedPublications.length > 0 && <div className="slack-publication-failures"><b>채널 전송 실패</b>{admin.failedPublications.map((failure) => <div key={failure.id}><p>{failure.memberName} · {failure.date} · {failure.channelId}<small>{failure.error}</small></p><button disabled={busy} onClick={() => void patchAdmin({ action: "retry_publication", publicationId: failure.id }, "채널 전송을 다시 시도했습니다.")}>재시도</button></div>)}</div>}</> : <div className="integration-connected-note"><CheckCircle2 size={15} />연결된 사용자는 Slack에서 `/okrptr daily`로 언제든 데일리를 열 수 있습니다.</div>}</div>
+    </section>
+  </div>;
 }
 
 type SlackAutomationDraft = {
@@ -6221,6 +6302,6 @@ function preferredIntroLanguage(): IntroLanguage {
   if (language.startsWith("es")) return "es";
   return "en";
 }
-function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", data: "Key Result와 Project에 외부 API 수치 연결", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "삭제한 Project·Task와 전체 데이터 정리 기록" }[view]; }
+function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", data: "Key Result와 Project에 외부 API 수치 연결", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "삭제한 Project·Task와 전체 데이터 정리 기록", integrations: "외부 앱 연결부터 개인 알림과 팀 공유까지 한곳에서 설정" }[view]; }
 function routineCadenceLabel(cadence: RoutineCadence) { return { daily: "매일", weekly: "매주", monthly: "매월" }[cadence]; }
 function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "due_soon") return "3"; return "P"; }

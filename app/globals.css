@@ -1738,8 +1738,66 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .settings-workspace-card { background: var(--raised); box-shadow: var(--shadow-raised); }
 .member-chip { border-color: var(--line); border-radius: 7px; background: #f7f8fa; }
 
-.app-integrations-modal { width: min(780px, 100%); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; }
-.app-integrations-modal .integration-sections { overflow-y: auto; gap: 16px; }
+.integrations-page { width: min(1080px, 100%); display: grid; gap: 20px; padding-bottom: 32px; }
+.integration-intro { min-height: 112px; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 22px 24px; border: 1px solid #cfd8df; border-radius: 12px; background: linear-gradient(135deg, #f8fbfd, #eef4f7); box-shadow: var(--shadow-raised); }
+.integration-intro > div { min-width: 0; }
+.integration-intro span { color: #577184; font-size: 9px; font-weight: 800; letter-spacing: .11em; }
+.integration-intro h2 { margin: 4px 0 0; color: var(--ink); font-size: 21px; line-height: 1.3; }
+.integration-intro p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.integration-intro > button { min-height: 38px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--raised); color: var(--ink); font-size: 11px; font-weight: 650; cursor: pointer; }
+.integration-intro > button:disabled { opacity: .6; cursor: default; }
+.integration-service-card { display: grid; gap: 16px; padding: 20px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--raised); box-shadow: var(--shadow-raised); }
+.integration-service-card > header { min-height: 52px; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.integration-service-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 10px; background: #edf3f7; color: #48687b; }
+.integration-service-icon.slack { background: #f4effc; color: #5b3fc6; }
+.integration-service-card h3 { margin: 0; font-size: 16px; }
+.integration-service-card > header p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.integration-status-badge { min-height: 27px; display: inline-flex; align-items: center; justify-content: center; padding: 0 9px; border-radius: 999px; background: #eff1f3; color: #626a73; font-size: 9px; font-weight: 750; white-space: nowrap; }
+.integration-status-badge.connected { background: #e8f5ec; color: #34704a; }
+.integration-status-badge.workspace_disconnected, .integration-status-badge.idle { background: #eef3f6; color: #526b7b; }
+.integration-status-badge.reauthorization_required, .integration-status-badge.warning, .integration-status-badge.platform_unavailable { background: #fff3df; color: #8c5c14; }
+.integration-status-badge.error { background: #fff0ee; color: #a0443d; }
+.integration-loading, .integration-inline-loading { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
+.integration-service-actions { min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.integration-service-actions > div { min-width: 0; display: grid; gap: 3px; }
+.integration-service-actions b { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.integration-service-actions span { color: var(--muted); font-size: 10px; }
+.integration-service-actions button, .integration-state-message button, .integration-step-action button { min-height: 36px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border: 1px solid var(--ink); border-radius: 7px; background: var(--ink); color: var(--raised); font-size: 10px; font-weight: 700; cursor: pointer; }
+.integration-service-actions .secondary-danger, .integration-step-action .secondary-danger { border-color: #e2bdb7; background: #fff8f6; color: var(--red); }
+.integration-state-message { min-height: 66px; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid #ead6ae; border-radius: 9px; background: #fffaf0; color: #835b1f; }
+.integration-state-message.error { border-color: #edcbc6; background: #fff6f4; color: #983f39; }
+.integration-state-message b { color: currentColor; font-size: 11px; }
+.integration-state-message p { margin: 3px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.integration-state-message button { border-color: currentColor; background: transparent; color: currentColor; }
+.slack-service-card { gap: 14px; }
+.integration-step { display: grid; grid-template-columns: 34px minmax(190px, 260px) minmax(0, 1fr); align-items: start; gap: 14px; padding: 18px 0 4px; border-top: 1px solid var(--line); }
+.integration-step-number { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: #222b33; color: white; font-size: 11px; font-weight: 800; }
+.integration-step-copy h4 { margin: 1px 0 0; font-size: 13px; }
+.integration-step-copy p { margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.integration-step-action { min-height: 36px; display: flex; align-items: center; justify-content: flex-end; }
+.integration-step-action .slack-primary-action { border-color: #5b3fc6; background: #5b3fc6; color: white; }
+.integration-step-body { min-width: 0; display: grid; gap: 11px; }
+.integration-role-note { min-height: 36px; display: flex; align-items: center; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.integration-connected-note { min-height: 36px; display: flex; align-items: center; gap: 7px; color: #3d7b52; font-size: 10px; font-weight: 650; line-height: 1.5; }
+.integration-locked-preview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding-top: 2px; }
+.integration-locked-preview > div { min-height: 62px; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 9px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 8px; background: var(--surface); }
+.integration-locked-preview > div > span { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: var(--hover); color: var(--muted); font-size: 10px; font-weight: 750; }
+.integration-locked-preview p { display: grid; gap: 3px; margin: 0; }
+.integration-locked-preview b { font-size: 10px; }
+.integration-locked-preview small { color: var(--muted); font-size: 9px; }
+.slack-setup-flow { display: grid; }
+.integration-step-summary { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+.integration-step-summary b { font-size: 11px; }
+.integration-step-summary span { color: var(--muted); font-size: 9px; text-align: right; }
+.integration-personal-link { min-height: 48px; display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+.integration-personal-link > span { color: #a3671b; }
+.integration-personal-link.linked > span { color: #3d7b52; }
+.integration-personal-link p { display: grid; gap: 3px; margin: 0; }
+.integration-personal-link b { font-size: 11px; }
+.integration-personal-link small { color: var(--muted); font-size: 9px; }
+.slack-daily-admin { display: grid; gap: 12px; margin: 0; border: 0; }
+.integration-step-body > .slack-personal-preference { margin: 0; padding: 0; border-top: 0; }
+.integration-extra-automation { padding-top: 18px; border-top: 1px solid var(--line); }
 .compact-integration-card { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 8px 14px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-container); background: #fafbfc; }
 .compact-integration-card > header { grid-column: 1 / -1; }
 .compact-integration-card:last-child { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
@@ -1790,6 +1848,7 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .slack-automation-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .slack-automation-heading > div { min-width: 0; }
 .slack-automation-heading span { display: block; margin-bottom: 3px; color: #747b85; font-size: 8px; font-weight: 750; letter-spacing: 0; }
+.integrations-page .slack-automation-heading span { color: #626a73; }
 .slack-automation-heading h3 { margin: 0; font-size: 15px; }
 .slack-automation-heading p { margin-top: 4px; }
 .slack-automation-heading > button { flex: 0 0 auto; height: 31px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: var(--ink); color: white; font-size: 10px; font-weight: 650; cursor: pointer; }
@@ -1900,6 +1959,11 @@ html[data-theme="dark"] .project-block-editor .bn-editor { background: var(--rai
 html[data-theme="dark"] .task-check { background: var(--raised); color: var(--raised); }
 html[data-theme="dark"] .task-check.checked { background: var(--green); color: var(--raised); }
 html[data-theme="dark"] .settings-danger-zone { background: color-mix(in srgb, var(--red) 8%, var(--raised)); }
+html[data-theme="dark"] :where(.integration-intro, .integration-service-card, .integration-service-actions, .integration-locked-preview > div, .integration-step-summary, .integration-personal-link) { background: var(--raised); border-color: var(--line); }
+html[data-theme="dark"] .integration-intro { background: linear-gradient(135deg, var(--raised), var(--surface-muted)); }
+html[data-theme="dark"] .integration-service-icon { background: var(--surface-muted); }
+html[data-theme="dark"] .integration-state-message { background: color-mix(in srgb, #b47719 12%, var(--raised)); }
+html[data-theme="dark"] .integration-state-message.error { background: color-mix(in srgb, var(--red) 12%, var(--raised)); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
@@ -2037,6 +2101,36 @@ html[data-theme="dark"] .settings-danger-zone { background: color-mix(in srgb, v
   .scrum-column { border-right: 0; border-bottom: 1px solid var(--line); }
   .scrum-task-list { min-height: 90px; }
   .scrum-column textarea { min-height: 105px; }
+  .integrations-page { gap: 14px; padding-bottom: 12px; }
+  .integration-intro { min-height: 0; align-items: stretch; flex-direction: column; gap: 16px; padding: 18px 16px; }
+  .integration-intro h2 { font-size: 18px; }
+  .integration-intro > button { width: 100%; min-height: 44px; }
+  .integration-service-card { gap: 14px; padding: 15px 13px; border-radius: 10px; }
+  .integration-service-card > header { grid-template-columns: 38px minmax(0, 1fr); align-items: start; gap: 10px; }
+  .integration-service-icon { width: 38px; height: 38px; }
+  .integration-status-badge { grid-column: 2; justify-self: start; min-height: 28px; }
+  .integration-service-actions { align-items: stretch; flex-direction: column; }
+  .integration-service-actions button { width: 100%; min-height: 44px; }
+  .integration-state-message { grid-template-columns: 22px minmax(0, 1fr); align-items: start; }
+  .integration-state-message button { grid-column: 1 / -1; width: 100%; min-height: 44px; }
+  .integration-step { grid-template-columns: 32px minmax(0, 1fr); gap: 10px; padding-top: 16px; }
+  .integration-step-copy h4 { font-size: 13px; }
+  .integration-step-action, .integration-step-body { grid-column: 1 / -1; }
+  .integration-step-action { justify-content: stretch; }
+  .integration-step-action button { width: 100%; min-height: 44px; }
+  .integration-role-note, .integration-connected-note { min-height: 44px; }
+  .integration-locked-preview { grid-template-columns: 1fr; }
+  .integration-step-summary { align-items: flex-start; flex-direction: column; }
+  .integration-step-summary span { text-align: left; }
+  .slack-personal-preference { grid-template-columns: 1fr; margin: 0; padding: 0; border-top: 0; }
+  .slack-personal-preference label:first-child { min-height: 44px; }
+  .slack-personal-preference input[type="time"], .slack-personal-preference select, .slack-admin-grid input, .slack-admin-grid select { min-height: 44px; font-size: 13px; }
+  .slack-admin-grid { grid-template-columns: 1fr; }
+  .slack-weekdays label { min-width: 44px; min-height: 44px; }
+  .slack-admin-actions { display: grid; }
+  .slack-admin-actions button, .slack-member-links button, .slack-publication-failures button { min-height: 44px; }
+  .slack-member-links > div, .slack-publication-failures > div { align-items: flex-start; flex-wrap: wrap; min-height: 58px; }
+  .slack-member-links > div > button, .slack-publication-failures > div > button { width: 100%; }
   .integration-modal footer { align-items: flex-end; }
   .integration-modal footer span { max-width: 260px; }
   .integration-card > header { grid-template-columns: 22px minmax(0, 1fr); }
@@ -2044,7 +2138,6 @@ html[data-theme="dark"] .settings-danger-zone { background: color-mix(in srgb, v
   .integration-actions { align-items: stretch; flex-direction: column; }
   .integration-actions button { width: 100%; }
   .integration-actions small { text-align: left; line-height: 1.4; }
-  .app-integrations-modal { max-height: calc(100vh - 16px); }
   .compact-integration-card { grid-template-columns: 1fr; }
   .compact-integration-card > header { grid-column: 1; }
   .slack-integration-card { padding: 12px; }

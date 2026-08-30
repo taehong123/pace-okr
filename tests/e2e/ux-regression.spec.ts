@@ -103,7 +103,7 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean } = {}) {
+async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "platform_unavailable" | "workspace_disconnected" | "connected" | "reauthorization_required" } = {}) {
   let krDataConnections: Array<Record<string, unknown>> = [];
   const bootstrapResponse = options.withoutTaskContainers
     ? { ...bootstrap, items: bootstrap.items.filter((entry) => entry.kind !== "project" && entry.kind !== "task") }
@@ -116,6 +116,27 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
     const request = route.request();
     const url = new URL(request.url());
     if (url.pathname === "/api/bootstrap") return json(route, bootstrapResponse);
+    if (url.pathname === "/api/google/status") return json(route, { google: { configured: true, connected: false, email: null, displayName: null, scope: "", connectedAt: null, updatedAt: null } });
+    if (url.pathname === "/api/slack/status") {
+      const state = options.slackState ?? "workspace_disconnected";
+      const connected = state === "connected" || state === "reauthorization_required";
+      return json(route, { slack: {
+        configured: state !== "platform_unavailable", connected, state,
+        statusMessage: state === "platform_unavailable" ? "Slack 연결 설정이 아직 완료되지 않았습니다. 현재 이용자가 입력할 기술 설정은 없습니다." : state === "workspace_disconnected" ? "Owner 또는 Admin이 Slack 승인 한 번으로 워크스페이스를 연결할 수 있습니다." : state === "reauthorization_required" ? "새 데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요." : "테스트 Slack과 연결되어 데일리 알림을 설정할 수 있습니다.",
+        missingScopes: state === "reauthorization_required" ? ["im:write"] : [], teamName: connected ? "테스트 Slack" : null, teamId: connected ? "T123" : null, botUserId: connected ? "U-BOT" : null, scope: connected ? "commands,chat:write,im:write,im:history,users:read,users:read.email,channels:read,groups:read" : "", connectedAt: connected ? now : null, updatedAt: connected ? now : null,
+        redirectUrl: "https://okrptr.com/api/slack/callback", commandUrl: "https://okrptr.com/api/slack/commands", interactionUrl: "https://okrptr.com/api/slack/interactions", eventsUrl: "https://okrptr.com/api/slack/events",
+      } });
+    }
+    if (url.pathname === "/api/slack/daily/preferences") return json(route, { linked: true, enabled: true, reminderTime: "09:00", timezone: "Asia/Seoul", usesWorkspaceTime: true, usesWorkspaceTimezone: true });
+    if (url.pathname === "/api/slack/daily/settings") return json(route, {
+      connected: true, teamName: "테스트 Slack", needsReauthorization: false,
+      settings: { enabled: true, weekdays: [1, 2, 3, 4, 5], reminderTime: "09:00", timezone: "Asia/Seoul", installStatus: "connected", lastSyncedAt: now, lastError: "" },
+      channels: [{ id: "C123", name: "daily", isPrivate: false }],
+      members: [{ memberId: "member-1", displayName: "테스트 사용자", email: "owner@example.com", linked: true, slackDisplayName: "test-owner", reminder: { status: "scheduled", postAt: 1788120000, error: "" } }],
+      failedPublications: [],
+    });
+    if (url.pathname === "/api/slack/channels") return json(route, { channels: [{ id: "C123", name: "daily", isPrivate: false }] });
+    if (url.pathname === "/api/slack/automations") return json(route, { automations: [], deliveries: [] });
     if (url.pathname === "/api/data-connections/sync" && request.method() === "POST") {
       const payload = request.postDataJSON() as { id: string };
       const connection = krDataConnections.find((entry) => entry.id === payload.id);
@@ -237,6 +258,8 @@ test.describe("개인 데일리와 팀 롤업", () => {
 
   test("데일리 스킵 사유를 저장하고 공유 확정할 수 있다", async ({ page }) => {
     await page.getByRole("checkbox", { name: "오늘은 데일리를 스킵합니다" }).check();
+    await page.getByLabel("데일리 스킵 사유").selectOption("other");
+    await expect(page.getByLabel("데일리 스킵 상세 사유")).toHaveAttribute("required", "");
     await page.getByLabel("데일리 스킵 사유").selectOption("vacation");
     await page.getByLabel("데일리 스킵 상세 사유").fill("오후까지 휴가입니다.");
     await expect(page.getByRole("checkbox", { name: "오버레이 동작 점검 선택", exact: true })).toBeDisabled();
@@ -272,6 +295,42 @@ test.describe("개인 데일리와 팀 롤업", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     const results = await new AxeBuilder({ page: page as never }).include(".daily-workspace").analyze();
+    expect(results.violations).toEqual([]);
+  });
+});
+
+test.describe("독립 앱 연동 화면", () => {
+  test("연결 전에는 이해 가능한 단일 Slack CTA를 제공한다", async ({ page }) => {
+    await installApiMocks(page, { slackState: "workspace_disconnected" });
+    await page.goto("/?view=integrations");
+    await expect(page).toHaveURL(/view=integrations/);
+    await expect(page.getByRole("heading", { name: "앱 연동" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Slack 데일리 봇" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Slack에 연결" })).toBeVisible();
+    await expect(page.getByText("준비 중", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "앱 연동" })).toHaveCount(0);
+  });
+
+  test("서비스 설정 오류에는 죽은 버튼 대신 설명과 재확인을 제공한다", async ({ page }) => {
+    await installApiMocks(page, { slackState: "platform_unavailable" });
+    await page.goto("/?view=integrations");
+    await expect(page.getByText("서비스 설정 확인 필요", { exact: true })).toBeVisible();
+    await expect(page.getByText(/현재 이용자가 입력할 기술 설정은 없습니다/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "다시 확인" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Slack에 연결" })).toHaveCount(0);
+  });
+
+  test("연결 후 5단계 설정이 페이지 스크롤로 모두 접근 가능하다", async ({ page, isMobile }) => {
+    await installApiMocks(page, { slackState: "connected" });
+    await page.goto("/?view=integrations");
+    for (const heading of ["Slack 워크스페이스 연결", "사용자 이메일 연결 상태", "개인 데일리 알림 시간", "팀 공유 채널", "테스트 DM과 작동 확인"]) {
+      await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    }
+    await expect(page.getByRole("button", { name: "테스트 DM" })).toBeVisible();
+    const metrics = await page.evaluate(() => ({ scrollHeight: document.documentElement.scrollHeight, clientHeight: document.documentElement.clientHeight, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth }));
+    expect(metrics.overflow).toBeLessThanOrEqual(1);
+    if (isMobile) expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+    const results = await new AxeBuilder({ page: page as never }).include(".integrations-page").analyze();
     expect(results.violations).toEqual([]);
   });
 });
