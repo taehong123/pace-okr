@@ -326,6 +326,14 @@ test("Objective·Initiative에는 퍼센트를 표시하지 않고 KR API를 연
   await expect(page.locator(".objective-row").filter({ hasText: "고객 경험 개선" })).not.toContainText("50%");
   await expect(page.locator(".hierarchy-row:has(.type-initiative)").filter({ hasText: "핵심 흐름 개편" })).not.toContainText("40%");
   await expect(page.locator(".hierarchy-row:has(.type-key_result)").filter({ hasText: "활성 사용자 20% 증가" })).toContainText("45%");
+  await expect(page.locator(".hierarchy-row:has(.type-project)")).toHaveCount(0);
+  await expect(page.locator(".hierarchy-row:has(.type-task)")).toHaveCount(0);
+  const executionToggle = page.getByRole("button", { name: "핵심 흐름 개편 Project·Task 2개 펼치기" });
+  await expect(executionToggle).toHaveAttribute("aria-expanded", "false");
+  await executionToggle.click();
+  await expect(page.locator(".hierarchy-row:has(.type-project)").filter({ hasText: "모바일 사용성 개선" })).toBeVisible();
+  await expect(page.locator(".hierarchy-row:has(.type-task)").filter({ hasText: "오버레이 동작 점검" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "핵심 흐름 개편 Project·Task 2개 접기" })).toHaveAttribute("aria-expanded", "true");
 
   await page.goto("/?view=kr_data");
   const krCard = page.locator(".kr-data-card").filter({ hasText: "활성 사용자 20% 증가" });

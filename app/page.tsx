@@ -4617,15 +4617,52 @@ function OkrCurrentFile({ cycle, addItemKind, onRename, onDepartmentChange, onAd
 }
 
 function TreeView({ objective, items, depths, canEdit, onEditOkrItem, onComplete, onOpenProject, onOpenTask, onCreateObjective, onCreateWithChat }: { objective?: OkrptrItem; items: OkrptrItem[]; depths: Record<string, number>; canEdit: boolean; onEditOkrItem: (id: string) => void; onComplete: (id: string) => void; onOpenProject: (id: string) => void; onOpenTask: (id: string) => void; onCreateObjective: () => void; onCreateWithChat: () => void }) {
+  const [expandedInitiatives, setExpandedInitiatives] = useState<Set<string>>(() => new Set());
   if (!objective) return <OkrEmptyState onCreateObjective={onCreateObjective} onCreateWithChat={onCreateWithChat} />;
   const byId = new Map(items.map((entry) => [entry.id, entry]));
-  return <section className="outline-section"><div className="objective-row"><Target size={18} /><div><span>Objective</span><h2>{objective.title}</h2></div><span className={`status-tag status-${objective.status}`}>{statusLabel(objective.status)}</span>{canEdit ? <button className="icon-button okr-node-edit" onClick={() => onEditOkrItem(objective.id)} aria-label={`${objective.title} 수정`} title="Objective 수정"><Pencil size={13} /></button> : <span aria-hidden="true" />}</div><div className="hierarchy">{items.filter((entry) => entry.id !== objective.id).map((entry) => {
+
+  function initiativeAncestorId(entry: OkrptrItem) {
+    let current: OkrptrItem | undefined = entry;
+    for (let depth = 0; current && depth < 6; depth += 1) {
+      if (current.kind === "initiative") return current.id;
+      current = current.parentId ? byId.get(current.parentId) : undefined;
+    }
+    return null;
+  }
+
+  const executionCounts = new Map<string, number>();
+  for (const entry of items) {
+    if (entry.kind !== "project" && entry.kind !== "task") continue;
+    const initiativeId = initiativeAncestorId(entry);
+    if (initiativeId) executionCounts.set(initiativeId, (executionCounts.get(initiativeId) ?? 0) + 1);
+  }
+  const visibleItems = items.filter((entry) => {
+    if (entry.id === objective.id) return false;
+    if (entry.kind !== "project" && entry.kind !== "task") return true;
+    const initiativeId = initiativeAncestorId(entry);
+    return !initiativeId || expandedInitiatives.has(initiativeId);
+  });
+
+  function toggleInitiative(id: string) {
+    setExpandedInitiatives((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  return <section className="outline-section"><div className="objective-row"><Target size={18} /><div><span>Objective</span><h2>{objective.title}</h2></div><span className={`status-tag status-${objective.status}`}>{statusLabel(objective.status)}</span>{canEdit ? <button className="icon-button okr-node-edit" onClick={() => onEditOkrItem(objective.id)} aria-label={`${objective.title} 수정`} title="Objective 수정"><Pencil size={13} /></button> : <span aria-hidden="true" />}</div><div className="hierarchy">{visibleItems.flatMap((entry) => {
     const canOpen = entry.kind === "project" || entry.kind === "task";
     const canEditNode = canEdit && (entry.kind === "key_result" || entry.kind === "initiative");
     const parent = entry.parentId ? byId.get(entry.parentId) : undefined;
     const open = () => entry.kind === "project" ? onOpenProject(entry.id) : entry.kind === "task" ? onOpenTask(entry.id) : undefined;
     const tracksProgress = entry.kind === "key_result" || entry.kind === "project" || entry.kind === "task";
-    return <div className={`hierarchy-row ${canOpen ? "interactive" : ""}`} role={canOpen ? "button" : undefined} tabIndex={canOpen ? 0 : undefined} aria-label={canOpen ? `${entry.title} 상세 열기` : undefined} onClick={canOpen ? open : undefined} onKeyDown={canOpen ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } } : undefined} key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as CSSProperties}><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><span className="hierarchy-copy"><small title={parent?.title}>{kindLabel(entry.kind)}{entry.kind === "initiative" && parent ? ` · 상위 KR: ${parent.title}` : ""}</small><b>{entry.title}</b></span><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span>{tracksProgress ? <em>{entry.progress}%</em> : <span aria-hidden="true" />}{canEditNode ? <button className="row-action okr-node-edit" aria-label={`${entry.title} 수정`} title={`${kindLabel(entry.kind)} 수정`} onClick={(event) => { event.stopPropagation(); onEditOkrItem(entry.id); }}><Pencil size={12} /></button> : canOpen && !isCompletedStatus(entry.status) ? <button className="row-action" aria-label={`${entry.title} 완료 처리`} title="완료 처리" onClick={(event) => { event.stopPropagation(); onComplete(entry.id); }}><Check size={13} /></button> : canOpen ? <ChevronRight className="row-chevron" size={15} /> : <span aria-hidden="true" />}</div>;
+    const row = <div className={`hierarchy-row ${canOpen ? "interactive" : ""}`} role={canOpen ? "button" : undefined} tabIndex={canOpen ? 0 : undefined} aria-label={canOpen ? `${entry.title} 상세 열기` : undefined} onClick={canOpen ? open : undefined} onKeyDown={canOpen ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } } : undefined} key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as CSSProperties}><span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><span className="hierarchy-copy"><small title={parent?.title}>{kindLabel(entry.kind)}{entry.kind === "initiative" && parent ? ` · 상위 KR: ${parent.title}` : ""}</small><b>{entry.title}</b></span><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span>{tracksProgress ? <em>{entry.progress}%</em> : <span aria-hidden="true" />}{canEditNode ? <button className="row-action okr-node-edit" aria-label={`${entry.title} 수정`} title={`${kindLabel(entry.kind)} 수정`} onClick={(event) => { event.stopPropagation(); onEditOkrItem(entry.id); }}><Pencil size={12} /></button> : canOpen && !isCompletedStatus(entry.status) ? <button className="row-action" aria-label={`${entry.title} 완료 처리`} title="완료 처리" onClick={(event) => { event.stopPropagation(); onComplete(entry.id); }}><Check size={13} /></button> : canOpen ? <ChevronRight className="row-chevron" size={15} /> : <span aria-hidden="true" />}</div>;
+    const executionCount = entry.kind === "initiative" ? executionCounts.get(entry.id) ?? 0 : 0;
+    if (!executionCount) return [row];
+    const expanded = expandedInitiatives.has(entry.id);
+    return [row, <div className="okr-execution-disclosure" key={`${entry.id}-execution`} style={{ "--depth": Math.min((depths[entry.id] ?? 2) + 1, 4) } as CSSProperties}><button type="button" aria-expanded={expanded} aria-label={`${entry.title} Project·Task ${executionCount}개 ${expanded ? "접기" : "펼치기"}`} onClick={() => toggleInitiative(entry.id)}>{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<span>{expanded ? "Project·Task 접기" : `Project·Task ${executionCount}개 보기`}</span></button></div>];
   })}</div></section>;
 }
 

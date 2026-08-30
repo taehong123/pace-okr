@@ -407,6 +407,9 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.doesNotMatch(page, /모든 Project·Task 선택|Project·Task 선택/);
   const treeView = page.match(/function TreeView[\s\S]*?function OkrEmptyState/)?.[0] ?? "";
   assert.doesNotMatch(treeView, /DeleteSelectCheckbox|onSelectItems|selectedItemIds/);
+  assert.match(treeView, /expandedInitiatives/);
+  assert.match(treeView, /Project·Task.*?보기/);
+  assert.match(treeView, /aria-expanded=\{expanded\}/);
   const myWorkView = page.match(/function MyWorkView[\s\S]*?function MyWorkSection/)?.[0] ?? "";
   assert.doesNotMatch(myWorkView, /DeleteSelectCheckbox|onSelectItems|selectedItemIds/);
   assert.match(page, /items=\{executionItems\}/);
