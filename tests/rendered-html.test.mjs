@@ -701,3 +701,21 @@ test("uses warm-neutral KR and Initiative hierarchy surfaces", async () => {
   assert.match(styles, /--initiative-badge-bg: #30322e/);
   assert.doesNotMatch(styles, /--kr-soft|--initiative-soft|#42627a|#426653|#e8eff4|#e8f0eb/);
 });
+
+test("uses a restrained large-desktop density without scaling smaller viewports", async () => {
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const largeDesktop = styles.match(/@media \(min-width: 1800px\) \{([\s\S]*)\}\s*$/)?.[1] ?? "";
+
+  assert.ok(largeDesktop);
+  assert.match(largeDesktop, /grid-template-columns: 246px minmax\(0, 1fr\)/);
+  assert.match(largeDesktop, /width: min\(1600px, 100%\)/);
+  assert.match(largeDesktop, /workspace-topbar, \.app-loading-topbar \{ height: 46px/);
+  assert.match(largeDesktop, /page-header h1, \.app-loading-copy h1 \{ font-size: 28px/);
+  assert.match(largeDesktop, /hierarchy-row \{ min-height: 56px/);
+  assert.match(largeDesktop, /task-table-row \{ min-height: 42px/);
+  assert.match(largeDesktop, /routine-card b \{ font-size: 13px/);
+  assert.match(largeDesktop, /my-work-item \{ min-height: 56px/);
+  assert.doesNotMatch(largeDesktop, /\bzoom\s*:|transform\s*:\s*scale/);
+  assert.match(styles, /@media \(max-width: 700px\)/);
+  assert.match(styles, /@media \(max-width: 980px\)/);
+});
