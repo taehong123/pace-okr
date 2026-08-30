@@ -209,7 +209,7 @@ export const krDataConnections = sqliteTable(
   {
     id: text("id").primaryKey(),
     ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
-    krItemId: text("kr_item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    itemId: text("kr_item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     endpointUrl: text("endpoint_url").notNull(),
     valuePath: text("value_path").notNull().default(""),
@@ -228,7 +228,7 @@ export const krDataConnections = sqliteTable(
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
-    uniqueIndex("idx_kr_data_connections_owner_kr").on(table.ownerId, table.krItemId),
+    uniqueIndex("idx_kr_data_connections_owner_kr").on(table.ownerId, table.itemId),
     index("idx_kr_data_connections_due").on(table.active, table.nextSyncAt),
   ],
 );

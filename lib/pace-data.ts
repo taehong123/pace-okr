@@ -72,6 +72,7 @@ export const PROPERTY_TYPES = ["text", "number", "select", "date", "checkbox", "
 export const ITEM_ASSIGNMENT_ROLES = ["project_dri", "project_worker", "task_assignee"] as const;
 export const ROUTINE_CADENCES = ["daily", "weekly", "monthly"] as const;
 export const KR_DATA_CADENCES = ["hourly", "daily", "weekly", "manual"] as const;
+export const DATA_CONNECTION_TARGET_KINDS = ["key_result", "project"] as const;
 export const GENERAL_ROUTINE_SYSTEM_KEY = "general";
 const LEGACY_SEED_OBJECTIVE_TITLE = "셀프 서브 도입으로 팀의 성장 속도를 높인다";
 const LEGACY_SEED_ITEM_TITLES = [
@@ -4742,9 +4743,10 @@ export async function getRecommendations(ownerId: string, requestedDate?: string
   return recommendations.sort((a, b) => b.score - a.score);
 }
 
-export type KrDataConnectionSummary = Omit<KrDataConnection, "ownerId">;
-export type KrDataConnectionInput = Partial<{
-  krItemId: string;
+export type DataConnectionTargetKind = (typeof DATA_CONNECTION_TARGET_KINDS)[number];
+export type DataConnectionSummary = Omit<KrDataConnection, "ownerId"> & { targetKind: DataConnectionTargetKind };
+export type DataConnectionInput = Partial<{
+  itemId: string;
   name: string;
   endpointUrl: string;
   valuePath: string;
@@ -4755,45 +4757,52 @@ export type KrDataConnectionInput = Partial<{
   active: boolean;
 }>;
 
-export async function listKrDataConnections(ownerId: string): Promise<KrDataConnectionSummary[]> {
+export async function listDataConnections(ownerId: string, itemId?: string): Promise<DataConnectionSummary[]> {
   await ensureWorkspace(ownerId);
+  const conditions = [eq(krDataConnections.ownerId, ownerId)];
+  if (itemId) conditions.push(eq(krDataConnections.itemId, itemId));
   const rows = await getDb()
     .select()
     .from(krDataConnections)
-    .where(eq(krDataConnections.ownerId, ownerId))
+    .where(and(...conditions))
     .orderBy(asc(krDataConnections.createdAt));
-  return rows.map(serializeKrDataConnection);
+  const targets = await dataConnectionTargetMap(ownerId, rows.map((connection) => connection.itemId));
+  return rows.flatMap((connection) => {
+    const targetKind = targets.get(connection.itemId);
+    return targetKind ? [serializeDataConnection(connection, targetKind)] : [];
+  });
 }
 
-export async function createKrDataConnection(ownerId: string, userId: string, input: KrDataConnectionInput) {
+export async function createDataConnection(ownerId: string, userId: string, input: DataConnectionInput) {
   await ensureWorkspace(ownerId);
-  const krItemId = input.krItemId?.trim() ?? "";
+  const itemId = input.itemId?.trim() ?? "";
   const name = input.name?.trim() ?? "";
   const endpointUrl = normalizeKrDataEndpoint(input.endpointUrl ?? "");
   const cadence = normalizeKrDataCadence(input.cadence ?? "daily");
   const baselineValue = finiteMetric(input.baselineValue, "baselineValue");
   const targetValue = finiteMetric(input.targetValue, "targetValue");
-  if (!krItemId) throw new Error("KR is required");
+  if (!itemId) throw new Error("Data target is required");
   if (!name) throw new Error("Data source name is required");
   if (baselineValue === targetValue) throw new Error("Baseline and target values must be different");
-  await requireKeyResult(ownerId, krItemId);
+  const target = await requireDataConnectionTarget(ownerId, itemId);
   const now = new Date().toISOString();
   const active = input.active ?? true;
   const [created] = await getDb().insert(krDataConnections).values({
-    id: crypto.randomUUID(), ownerId, krItemId, name, endpointUrl,
+    id: crypto.randomUUID(), ownerId, itemId, name, endpointUrl,
     valuePath: input.valuePath?.trim() ?? "",
     baselineValue, targetValue, unit: input.unit?.trim() ?? "", cadence, active,
     nextSyncAt: active && cadence !== "manual" ? now : null,
     createdByUserId: userId, createdAt: now, updatedAt: now,
   }).returning();
-  return serializeKrDataConnection(created);
+  return serializeDataConnection(created, target.kind as DataConnectionTargetKind);
 }
 
-export async function updateKrDataConnection(ownerId: string, id: string, input: KrDataConnectionInput) {
+export async function updateDataConnection(ownerId: string, id: string, input: DataConnectionInput) {
   await ensureWorkspace(ownerId);
-  const current = await getKrDataConnection(ownerId, id);
-  if (!current) throw new Error("KR data connection not found");
-  const krItemId = input.krItemId?.trim() ?? current.krItemId;
+  const current = await getDataConnection(ownerId, id);
+  if (!current) throw new Error("Data connection not found");
+  const requestedItemId = input.itemId?.trim();
+  if (requestedItemId && requestedItemId !== current.itemId) throw new Error("Data connection target cannot be changed");
   const name = input.name === undefined ? current.name : input.name.trim();
   const endpointUrl = input.endpointUrl === undefined ? current.endpointUrl : normalizeKrDataEndpoint(input.endpointUrl);
   const cadence = input.cadence === undefined ? current.cadence as KrDataCadence : normalizeKrDataCadence(input.cadence);
@@ -4802,10 +4811,10 @@ export async function updateKrDataConnection(ownerId: string, id: string, input:
   const active = input.active ?? current.active;
   if (!name) throw new Error("Data source name is required");
   if (baselineValue === targetValue) throw new Error("Baseline and target values must be different");
-  if (krItemId !== current.krItemId) await requireKeyResult(ownerId, krItemId);
+  const target = await requireDataConnectionTarget(ownerId, current.itemId);
   const now = new Date().toISOString();
   const [updated] = await getDb().update(krDataConnections).set({
-    krItemId, name, endpointUrl,
+    name, endpointUrl,
     valuePath: input.valuePath === undefined ? current.valuePath : input.valuePath.trim(),
     baselineValue, targetValue,
     unit: input.unit === undefined ? current.unit : input.unit.trim(),
@@ -4813,20 +4822,20 @@ export async function updateKrDataConnection(ownerId: string, id: string, input:
     nextSyncAt: active && cadence !== "manual" ? now : null,
     updatedAt: now,
   }).where(and(eq(krDataConnections.ownerId, ownerId), eq(krDataConnections.id, id))).returning();
-  if (!updated) throw new Error("KR data connection not found");
-  return serializeKrDataConnection(updated);
+  if (!updated) throw new Error("Data connection not found");
+  return serializeDataConnection(updated, target.kind as DataConnectionTargetKind);
 }
 
-export async function deleteKrDataConnection(ownerId: string, id: string) {
+export async function deleteDataConnection(ownerId: string, id: string) {
   await ensureWorkspace(ownerId);
   const deleted = await getDb().delete(krDataConnections)
     .where(and(eq(krDataConnections.ownerId, ownerId), eq(krDataConnections.id, id)))
     .returning({ id: krDataConnections.id });
-  if (!deleted.length) throw new Error("KR data connection not found");
+  if (!deleted.length) throw new Error("Data connection not found");
   return { deleted: true, id };
 }
 
-export async function syncKrDataConnection(ownerId: string, id: string) {
+export async function syncDataConnection(ownerId: string, id: string) {
   await ensureWorkspace(ownerId);
   return syncKrDataConnectionWithDb((env as RuntimeEnv).DB, ownerId, id);
 }
@@ -4836,25 +4845,74 @@ export async function syncDueKrDataConnections() {
   return syncDueKrDataConnectionsWithDb((env as RuntimeEnv).DB);
 }
 
-async function getKrDataConnection(ownerId: string, id: string) {
+async function getDataConnection(ownerId: string, id: string) {
   const [connection] = await getDb().select().from(krDataConnections).where(and(
     eq(krDataConnections.ownerId, ownerId), eq(krDataConnections.id, id),
   )).limit(1);
   return connection ?? null;
 }
 
-async function requireKeyResult(ownerId: string, id: string) {
-  const [kr] = await getDb().select().from(items).where(and(
-    eq(items.ownerId, ownerId), eq(items.id, id), eq(items.kind, "key_result"), isNull(items.archivedAt),
+async function requireDataConnectionTarget(ownerId: string, id: string, expectedKind?: DataConnectionTargetKind) {
+  const [target] = await getDb().select().from(items).where(and(
+    eq(items.ownerId, ownerId),
+    eq(items.id, id),
+    inArray(items.kind, [...DATA_CONNECTION_TARGET_KINDS]),
+    isNull(items.archivedAt),
   )).limit(1);
-  if (!kr) throw new Error("Key Result not found");
-  return kr;
+  if (!target || (expectedKind && target.kind !== expectedKind)) throw new Error(expectedKind === "key_result" ? "Key Result not found" : "Data target not found");
+  return target;
 }
 
-function serializeKrDataConnection(connection: KrDataConnection): KrDataConnectionSummary {
+async function dataConnectionTargetMap(ownerId: string, itemIds: string[]) {
+  if (!itemIds.length) return new Map<string, DataConnectionTargetKind>();
+  const targets = await getDb().select({ id: items.id, kind: items.kind }).from(items).where(and(
+    eq(items.ownerId, ownerId),
+    inArray(items.id, itemIds),
+    inArray(items.kind, [...DATA_CONNECTION_TARGET_KINDS]),
+  ));
+  return new Map(targets.map((target) => [target.id, target.kind as DataConnectionTargetKind]));
+}
+
+function serializeDataConnection(connection: KrDataConnection, targetKind: DataConnectionTargetKind): DataConnectionSummary {
   const { ownerId, ...summary } = connection;
   void ownerId;
-  return summary;
+  return { ...summary, targetKind };
+}
+
+export type KrDataConnectionInput = Omit<DataConnectionInput, "itemId"> & { krItemId?: string };
+
+export async function listKrDataConnections(ownerId: string) {
+  const connections = await listDataConnections(ownerId);
+  return connections.filter((connection) => connection.targetKind === "key_result").map((connection) => ({ ...connection, krItemId: connection.itemId }));
+}
+
+export async function createKrDataConnection(ownerId: string, userId: string, input: KrDataConnectionInput) {
+  const itemId = input.krItemId?.trim() ?? "";
+  await requireDataConnectionTarget(ownerId, itemId, "key_result");
+  const connection = await createDataConnection(ownerId, userId, { ...input, itemId });
+  return { ...connection, krItemId: connection.itemId };
+}
+
+export async function updateKrDataConnection(ownerId: string, id: string, input: KrDataConnectionInput) {
+  const current = await getDataConnection(ownerId, id);
+  if (!current) throw new Error("KR data connection not found");
+  await requireDataConnectionTarget(ownerId, current.itemId, "key_result");
+  const connection = await updateDataConnection(ownerId, id, input);
+  return { ...connection, krItemId: connection.itemId };
+}
+
+export async function deleteKrDataConnection(ownerId: string, id: string) {
+  const current = await getDataConnection(ownerId, id);
+  if (!current) throw new Error("KR data connection not found");
+  await requireDataConnectionTarget(ownerId, current.itemId, "key_result");
+  return deleteDataConnection(ownerId, id);
+}
+
+export async function syncKrDataConnection(ownerId: string, id: string) {
+  const current = await getDataConnection(ownerId, id);
+  if (!current) throw new Error("KR data connection not found");
+  await requireDataConnectionTarget(ownerId, current.itemId, "key_result");
+  return syncDataConnection(ownerId, id);
 }
 
 function normalizeKrDataCadence(value: string): KrDataCadence {
@@ -4870,7 +4928,7 @@ function finiteMetric(value: unknown, field: string) {
 function normalizeKrDataEndpoint(value: string) {
   let url: URL;
   try { url = new URL(value.trim()); } catch { throw new Error("A valid API URL is required"); }
-  if (url.protocol !== "https:") throw new Error("KR data APIs must use HTTPS");
+  if (url.protocol !== "https:") throw new Error("Data APIs must use HTTPS");
   if (url.username || url.password) throw new Error("API credentials cannot be embedded in the URL");
   const hostname = url.hostname.toLocaleLowerCase().replace(/^\[|\]$/g, "");
   if (isPrivateHostname(hostname)) throw new Error("Private or local API addresses are not supported");

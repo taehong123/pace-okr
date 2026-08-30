@@ -559,10 +559,12 @@ test("limits Project and Task deletion to creators and accountable assignees", a
   assert.match(cleanupRoute, /authorization\.role !== "owner" && authorization\.role !== "admin"/);
 });
 
-test("measures only Key Results and configures scheduled KR API data", async () => {
-  const [page, view, route, syncRoute, paceData, syncEngine, schema, worker, viteConfig, migration] = await Promise.all([
+test("connects API data independently to Key Results and Projects", async () => {
+  const [page, view, route, syncRoute, legacyRoute, legacySyncRoute, paceData, syncEngine, schema, worker, viteConfig, migration] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/kr-data-view.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/data-connections/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/data-connections/sync/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/kr-data-connections/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/kr-data-connections/sync/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
@@ -572,20 +574,30 @@ test("measures only Key Results and configures scheduled KR API data", async () 
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0025_kr_data_connections.sql", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /id: "kr_data", label: "KR 데이터"/);
+  assert.match(page, /id: "data", label: "데이터"/);
+  assert.match(page, /rawView === "kr_data" \? "data"/);
+  assert.match(page, /function ProjectDataSection/);
   assert.match(page, /tracksProgress = item\.kind === "key_result"/);
   assert.doesNotMatch(page, /objective\.progress\}%/);
   assert.match(page, /entry\.kind === "key_result" \|\| entry\.kind === "project" \|\| entry\.kind === "task"/);
   assert.match(view, /API URL/);
   assert.match(view, /connectionMemoryCache\.get\(cacheKey\)/);
+  assert.match(view, /\["project", "Project"\]/);
+  assert.match(view, /이 \{targetLabels\[item\.kind\]\}에 API 연결/);
   assert.match(view, /숫자 값 경로/);
   assert.match(view, /자동 갱신 주기/);
-  assert.match(route, /createKrDataConnection/);
-  assert.match(syncRoute, /syncKrDataConnection/);
+  assert.match(route, /createDataConnection/);
+  assert.match(route, /itemId/);
+  assert.match(syncRoute, /syncDataConnection/);
+  assert.match(legacyRoute, /createKrDataConnection/);
+  assert.match(legacySyncRoute, /syncKrDataConnection/);
   assert.match(paceData, /Private or local API addresses are not supported/);
+  assert.match(paceData, /DATA_CONNECTION_TARGET_KINDS/);
   assert.match(syncEngine, /AbortSignal\.timeout\(10_000\)/);
-  assert.match(syncEngine, /kind = 'key_result'/);
+  assert.match(syncEngine, /kind IN \('key_result', 'project'\)/);
+  assert.match(syncEngine, /UPDATE items SET progress = \?, updated_at = \?.*kind = \?/);
   assert.match(schema, /kr_data_connections/);
+  assert.match(schema, /itemId: text\("kr_item_id"\)/);
   assert.match(worker, /scheduled\(_controller/);
   assert.match(viteConfig, /crons: \["0 \* \* \* \*"\]/);
   assert.match(migration, /UPDATE `items` SET `progress` = 0 WHERE `kind` IN \('objective', 'initiative'\)/);

@@ -804,7 +804,7 @@ test("adds lossless Project properties, documents, and body templates", async ()
   db.close();
 });
 
-test("creates one scheduled API data connection per Key Result", async () => {
+test("stores one scheduled API data connection per Key Result or Project", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON;");
   const [baseMigration, workspaceMigration, cycleMigration, krDataMigration] = await Promise.all([
@@ -823,7 +823,8 @@ test("creates one scheduled API data connection per Key Result", async () => {
     INSERT INTO items (id, owner_id, cycle_id, kind, title, progress)
       VALUES ('objective', 'workspace', 'cycle', 'objective', 'Grow', 60),
              ('kr', 'workspace', 'cycle', 'key_result', 'Revenue', 25),
-             ('initiative', 'workspace', 'cycle', 'initiative', 'Pricing', 40);
+             ('initiative', 'workspace', 'cycle', 'initiative', 'Pricing', 40),
+             ('project', 'workspace', 'cycle', 'project', 'Pricing rollout', 10);
   `);
   db.exec(krDataMigration.replaceAll("--> statement-breakpoint", ""));
   db.exec(`
@@ -841,11 +842,18 @@ test("creates one scheduled API data connection per Key Result", async () => {
   assert.equal(db.prepare("SELECT progress FROM items WHERE id = 'objective'").get().progress, 0);
   assert.equal(db.prepare("SELECT progress FROM items WHERE id = 'initiative'").get().progress, 0);
   assert.equal(db.prepare("SELECT progress FROM items WHERE id = 'kr'").get().progress, 25);
+  db.exec(`
+    INSERT INTO kr_data_connections (id, owner_id, kr_item_id, name, endpoint_url, target_value)
+      VALUES ('project-connection', 'workspace', 'project', 'Project API', 'https://api.example.com/project', 100);
+  `);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM kr_data_connections").get().count, 2);
   assert.throws(() => db.exec(`
     INSERT INTO kr_data_connections (id, owner_id, kr_item_id, name, endpoint_url, target_value)
-      VALUES ('duplicate', 'workspace', 'kr', 'Other', 'https://api.example.com/other', 2000);
+      VALUES ('duplicate', 'workspace', 'project', 'Other', 'https://api.example.com/other', 2000);
   `), /UNIQUE/i);
   db.exec("DELETE FROM items WHERE id = 'kr'");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM kr_data_connections").get().count, 1);
+  db.exec("DELETE FROM items WHERE id = 'project'");
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM kr_data_connections").get().count, 0);
   db.close();
 });

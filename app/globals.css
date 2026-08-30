@@ -873,7 +873,9 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .okr-item-progress-field > div { display: grid; grid-template-columns: minmax(0, 1fr) 42px; align-items: center; gap: 10px; }
 .property-form .okr-item-progress-field input[type="range"] { height: 22px; padding: 0; border: 0; box-shadow: none; accent-color: var(--accent-strong); }
 .okr-item-progress-field b { font-size: 11px; text-align: right; }
-.kr-data-toolbar { display: grid; grid-template-columns: minmax(220px, 1fr) 132px auto; gap: 8px; margin-bottom: 12px; }
+.kr-data-toolbar { display: grid; grid-template-columns: auto minmax(220px, 1fr) 132px auto; gap: 8px; margin-bottom: 12px; }
+.kr-data-toolbar .data-target-tabs { width: max-content; }
+.kr-data-toolbar .data-target-tabs button { min-width: 54px; padding: 0 9px; }
 .kr-data-toolbar > label { min-width: 0; height: 38px; display: flex; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--raised); color: var(--muted); }
 .kr-data-toolbar input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 11px; }
 .kr-data-toolbar select { height: 38px; padding: 0 9px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--raised); color: var(--ink); font-size: 11px; }
@@ -914,6 +916,8 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .kr-data-state b { color: var(--ink); font-size: 12px; }
 .kr-data-state p { margin: 0; font-size: 10px; }
 .kr-data-panel .property-form label > small { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.data-target-type-tabs { width: 100%; }
+.data-target-type-tabs button { flex: 1; }
 .kr-data-number-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .kr-data-active { display: flex !important; align-items: center; gap: 7px !important; }
 .property-form .kr-data-active input { width: 16px; height: 16px; }
@@ -1279,6 +1283,26 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .hidden-property-list button { height: 27px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: #e9eef1; color: var(--muted); font-size: 9px; cursor: pointer; }
 .hidden-property-list button:hover { background: var(--raised); color: var(--ink); }
 .project-lineage-compact { background: #eef2f4; }
+.project-linked-data { display: grid; gap: 10px; padding: 14px 18px 18px; border-bottom: 1px solid var(--line); background: var(--surface-muted); }
+.project-linked-data > header { display: flex; align-items: center; justify-content: space-between; }
+.project-linked-data > header > div { display: flex; align-items: center; gap: 7px; }
+.project-linked-data > header b { font-size: 12px; }
+.project-linked-data > header span { min-width: 20px; padding: 2px 6px; border-radius: 9px; background: var(--raised); color: var(--muted); font-size: 9px; text-align: center; }
+.project-linked-data > header svg { color: var(--muted); }
+.project-data-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--raised); }
+.project-data-summary > div { min-width: 0; display: grid; gap: 4px; padding: 9px 10px; }
+.project-data-summary > div + div { border-left: 1px solid var(--line); }
+.project-data-summary small { color: var(--muted); font-size: 9px; }
+.project-data-summary b { min-width: 0; display: flex; align-items: center; gap: 4px; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.project-data-summary b.sync-success { color: var(--green); }
+.project-data-summary b.sync-error { color: var(--red); }
+.project-data-summary em { color: var(--muted); font-style: normal; font-weight: 500; }
+.project-data-progress { display: grid; grid-template-columns: minmax(100px, 1fr) auto; align-items: center; gap: 10px; }
+.project-data-progress > span { height: 6px; overflow: hidden; border-radius: 999px; background: var(--hover); }
+.project-data-progress i { height: 100%; display: block; border-radius: inherit; background: var(--accent); }
+.project-data-progress b { font-size: 10px; }
+.project-data-state { min-height: 54px; display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
+.project-data-state.error { color: var(--red); }
 .project-linked-tasks { padding: 14px 18px 18px; border-bottom: 1px solid var(--line); background: #f0f3f5; }
 .project-linked-tasks > header { min-height: 30px; display: flex; align-items: center; justify-content: space-between; }
 .project-linked-tasks > header > div { display: flex; align-items: center; gap: 7px; }
@@ -1791,6 +1815,8 @@ html[data-theme="dark"] .settings-danger-zone { background: color-mix(in srgb, v
   .page-create-actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .page-create-actions > button { min-height: 44px; }
   .kr-data-toolbar { grid-template-columns: minmax(0, 1fr) 112px; }
+  .kr-data-toolbar .data-target-tabs { width: 100%; grid-column: 1 / -1; }
+  .kr-data-toolbar .data-target-tabs button { flex: 1; }
   .kr-data-toolbar > button { grid-column: 1 / -1; min-height: 44px; }
   .kr-data-card { padding: 12px; }
   .kr-data-card dl { grid-template-columns: 1fr 1fr; }
@@ -1955,7 +1981,10 @@ html[data-theme="dark"] .settings-danger-zone { background: color-mix(in srgb, v
   .project-page-head > div:first-child { grid-column: 1 / -1; grid-row: 2; padding-top: 5px; }
   .project-page-actions { grid-column: 2; grid-row: 1; padding-top: 0; }
   .project-title-input { min-height: 48px; font-size: 19px; }
-  .project-detail-form, .project-custom-properties, .project-linked-tasks { padding-right: 12px; padding-left: 12px; }
+  .project-detail-form, .project-custom-properties, .project-linked-data, .project-linked-tasks { padding-right: 12px; padding-left: 12px; }
+  .project-data-summary { grid-template-columns: 1fr 1fr; }
+  .project-data-summary > div:nth-child(3) { border-left: 0; border-top: 1px solid var(--line); }
+  .project-data-summary > div:nth-child(4) { border-top: 1px solid var(--line); }
   .project-field-grid { grid-template-columns: 1fr; }
   .project-system-property > .icon-button { top: 21px; }
   .project-document-section > header { align-items: stretch; flex-direction: column; padding: 10px 12px; }

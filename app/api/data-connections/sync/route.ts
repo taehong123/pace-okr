@@ -1,4 +1,4 @@
-import { authorizeRequest, ensureWorkspace, syncKrDataConnection } from "@/lib/pace-data";
+import { authorizeRequest, ensureWorkspace, syncDataConnection } from "@/lib/pace-data";
 
 export async function POST(request: Request) {
   const authorization = await authorizeRequest(request);
@@ -8,11 +8,10 @@ export async function POST(request: Request) {
     const payload = await request.json() as Record<string, unknown>;
     const id = typeof payload.id === "string" ? payload.id.trim() : "";
     if (!id) return Response.json({ error: "id is required" }, { status: 400 });
-    const result = await syncKrDataConnection(authorization.ownerId, id);
-    return Response.json({ ...result, connection: { ...result.connection, krItemId: result.connection.itemId } });
+    return Response.json(await syncDataConnection(authorization.ownerId, id));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
-    const status = /not found|required|API|numeric|path|timed out|HTTPS|Private/i.test(message) ? 400 : 500;
+    const status = /not found|required|API|numeric|path|timed out|HTTPS|Private|target/i.test(message) ? 400 : 500;
     return Response.json({ error: message }, { status });
   }
 }

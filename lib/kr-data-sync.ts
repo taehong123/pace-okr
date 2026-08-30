@@ -22,10 +22,12 @@ type ConnectionRow = {
   updated_at: string;
 };
 
+type DataTargetKind = "key_result" | "project";
+
 export async function syncKrDataConnectionWithDb(d1: D1Database, ownerId: string, id: string) {
   const connection = await d1.prepare("SELECT * FROM kr_data_connections WHERE owner_id = ? AND id = ? LIMIT 1")
     .bind(ownerId, id).first<ConnectionRow>();
-  if (!connection) throw new Error("KR data connection not found");
+  if (!connection) throw new Error("Data connection not found");
   return syncConnection(d1, connection);
 }
 
@@ -33,8 +35,15 @@ export async function syncDueKrDataConnectionsWithDb(d1: D1Database) {
   const now = new Date().toISOString();
   let due: ConnectionRow[];
   try {
-    const result = await d1.prepare(`SELECT * FROM kr_data_connections
-      WHERE active = 1 AND next_sync_at IS NOT NULL AND next_sync_at <= ?
+    const result = await d1.prepare(`SELECT connection.* FROM kr_data_connections AS connection
+      WHERE connection.active = 1 AND connection.next_sync_at IS NOT NULL AND connection.next_sync_at <= ?
+        AND EXISTS (
+          SELECT 1 FROM items AS target
+          WHERE target.owner_id = connection.owner_id
+            AND target.id = connection.kr_item_id
+            AND target.kind IN ('key_result', 'project')
+            AND target.archived_at IS NULL
+        )
       ORDER BY next_sync_at ASC LIMIT 25`).bind(now).all<ConnectionRow>();
     due = result.results;
   } catch {
@@ -52,10 +61,10 @@ async function syncConnection(d1: D1Database, connection: ConnectionRow) {
   const timestamp = now.toISOString();
   const nextSyncAt = connection.active && connection.cadence !== "manual" ? nextSync(connection.cadence, now) : null;
   try {
-    const kr = await d1.prepare(`SELECT id FROM items
-      WHERE owner_id = ? AND id = ? AND kind = 'key_result' AND archived_at IS NULL LIMIT 1`)
-      .bind(connection.owner_id, connection.kr_item_id).first<{ id: string }>();
-    if (!kr) throw new Error("Key Result not found");
+    const target = await d1.prepare(`SELECT id, kind FROM items
+      WHERE owner_id = ? AND id = ? AND kind IN ('key_result', 'project') AND archived_at IS NULL LIMIT 1`)
+      .bind(connection.owner_id, connection.kr_item_id).first<{ id: string; kind: DataTargetKind }>();
+    if (!target) throw new Error("Data target not found");
     const payload = await fetchMetric(connection.endpoint_url);
     const value = numericValueAtPath(payload, connection.value_path);
     const progress = metricProgress(value, connection.baseline_value, connection.target_value);
@@ -63,13 +72,13 @@ async function syncConnection(d1: D1Database, connection: ConnectionRow) {
       d1.prepare(`UPDATE kr_data_connections SET
         last_value = ?, last_sync_status = 'success', last_error = '', last_synced_at = ?, next_sync_at = ?, updated_at = ?
         WHERE owner_id = ? AND id = ?`).bind(value, timestamp, nextSyncAt, timestamp, connection.owner_id, connection.id),
-      d1.prepare("UPDATE items SET progress = ?, updated_at = ? WHERE owner_id = ? AND id = ? AND kind = 'key_result'")
-        .bind(progress, timestamp, connection.owner_id, kr.id),
+      d1.prepare("UPDATE items SET progress = ?, updated_at = ? WHERE owner_id = ? AND id = ? AND kind = ?")
+        .bind(progress, timestamp, connection.owner_id, target.id, target.kind),
       d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
-        VALUES (?, ?, ?, 'kr_data_synced', 'api', ?, ?)`)
-        .bind(crypto.randomUUID(), connection.owner_id, kr.id, JSON.stringify({ connectionId: connection.id, value, progress }), timestamp),
+        VALUES (?, ?, ?, 'data_synced', 'api', ?, ?)`)
+        .bind(crypto.randomUUID(), connection.owner_id, target.id, JSON.stringify({ connectionId: connection.id, targetKind: target.kind, value, progress }), timestamp),
     ]);
-    return { connection: serialize({ ...connection, last_value: value, last_sync_status: "success", last_error: "", last_synced_at: timestamp, next_sync_at: nextSyncAt, updated_at: timestamp }), progress, value };
+    return { connection: serialize({ ...connection, last_value: value, last_sync_status: "success", last_error: "", last_synced_at: timestamp, next_sync_at: nextSyncAt, updated_at: timestamp }, target.kind), progress, value };
   } catch (error) {
     const message = errorMessage(error);
     await d1.prepare(`UPDATE kr_data_connections SET
@@ -79,10 +88,11 @@ async function syncConnection(d1: D1Database, connection: ConnectionRow) {
   }
 }
 
-function serialize(row: ConnectionRow) {
+function serialize(row: ConnectionRow, targetKind: DataTargetKind) {
   return {
     id: row.id,
-    krItemId: row.kr_item_id,
+    itemId: row.kr_item_id,
+    targetKind,
     name: row.name,
     endpointUrl: row.endpoint_url,
     valuePath: row.value_path,
@@ -105,7 +115,7 @@ function serialize(row: ConnectionRow) {
 function normalizeEndpoint(value: string) {
   let url: URL;
   try { url = new URL(value.trim()); } catch { throw new Error("A valid API URL is required"); }
-  if (url.protocol !== "https:") throw new Error("KR data APIs must use HTTPS");
+  if (url.protocol !== "https:") throw new Error("Data APIs must use HTTPS");
   if (url.username || url.password) throw new Error("API credentials cannot be embedded in the URL");
   const hostname = url.hostname.toLocaleLowerCase().replace(/^\[|\]$/g, "");
   if (isPrivateHostname(hostname)) throw new Error("Private or local API addresses are not supported");
@@ -165,5 +175,5 @@ function nextSync(cadence: KrDataSyncCadence, from: Date) {
 
 function errorMessage(error: unknown) {
   if (error instanceof DOMException && error.name === "TimeoutError") return "API request timed out after 10 seconds";
-  return error instanceof Error ? error.message.slice(0, 300) : "KR data sync failed";
+  return error instanceof Error ? error.message.slice(0, 300) : "Data sync failed";
 }

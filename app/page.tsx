@@ -61,15 +61,16 @@ import {
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { ConfirmationProvider, OverlayDialog, useAppConfirm } from "./overlay-dialog";
 
-type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "kr_data" | "scrum" | "recommendations" | "reviews" | "trash";
-const urlViews = new Set<View>(["my_work", "inbox", "work", "routines", "okr", "kr_data", "scrum", "recommendations", "reviews", "trash"]);
+type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "data" | "scrum" | "recommendations" | "reviews" | "trash";
+const urlViews = new Set<View>(["my_work", "inbox", "work", "routines", "okr", "data", "scrum", "recommendations", "reviews", "trash"]);
 type NoticeTone = "success" | "error" | "info";
 type AppNotice = { id: number; message: string; tone: NoticeTone };
 
 function navigationFromLocation() {
   if (typeof window === "undefined") return { view: "okr" as View, projectId: null as string | null, taskId: null as string | null };
   const params = new URLSearchParams(window.location.search);
-  const requestedView = params.get("view") as View | null;
+  const rawView = params.get("view");
+  const requestedView = (rawView === "kr_data" ? "data" : rawView) as View | null;
   const projectId = params.get("project");
   return {
     view: projectId ? "work" : requestedView && urlViews.has(requestedView) ? requestedView : "okr",
@@ -147,9 +148,9 @@ type OkrCycle = {
   updatedAt: string;
 };
 
-type KrDataViewProps = {
+type DataViewProps = {
   cacheKey: string;
-  keyResults: Pick<OkrptrItem, "id" | "cycleId" | "parentId" | "title" | "progress">[];
+  items: Pick<OkrptrItem, "id" | "kind" | "cycleId" | "parentId" | "title" | "progress">[];
   cycles: Pick<OkrCycle, "id" | "name">[];
   readOnly: boolean;
   onProgressChange: (id: string, progress: number) => void;
@@ -171,6 +172,22 @@ type PropertyDefinition = {
 type ProjectDocument = { id: string | null; projectId: string; content: string; plainText: string; version: number; updatedAt: string };
 type ProjectTemplate = { id: string; name: string; description: string; content: string; plainText: string; createdAt: string; updatedAt: string };
 type ProjectBlockEditorChange = { content: string; plainText: string };
+type ProjectDataConnection = {
+  id: string;
+  itemId: string;
+  targetKind: "project";
+  name: string;
+  valuePath: string;
+  baselineValue: number;
+  targetValue: number;
+  unit: string;
+  cadence: "hourly" | "daily" | "weekly" | "manual";
+  active: boolean;
+  lastValue: number | null;
+  lastSyncStatus: "never" | "success" | "error";
+  lastError: string;
+  lastSyncedAt: string | null;
+};
 
 type PropertyValueMap = Record<string, Record<string, PropertyValue>>;
 type ProjectHiddenPropertyMap = Record<string, string[]>;
@@ -636,7 +653,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "work", label: "Project", icon: Table2 },
   { id: "inbox", label: "Task", icon: Inbox },
   { id: "routines", label: "루틴", icon: Repeat2 },
-  { id: "kr_data", label: "KR 데이터", icon: Database },
+  { id: "data", label: "데이터", icon: Database },
   { id: "scrum", label: "데일리", icon: CalendarCheck },
   { id: "recommendations", label: "추천", icon: Lightbulb },
   { id: "reviews", label: "리뷰", icon: Activity },
@@ -651,7 +668,7 @@ const viewTitles: Record<View, string> = {
   work: "Project",
   routines: "루틴",
   okr: "OKR",
-  kr_data: "KR 데이터",
+  data: "데이터",
   scrum: "데일리 스크럼",
   recommendations: "추천",
   reviews: "리뷰",
@@ -662,14 +679,14 @@ export default function Home() {
   return <ConfirmationProvider><WorkspaceApp /></ConfirmationProvider>;
 }
 
-function ClientKrDataView(props: KrDataViewProps) {
-  const [ViewComponent, setViewComponent] = useState<ComponentType<KrDataViewProps> | null>(null);
+function ClientDataView(props: DataViewProps) {
+  const [ViewComponent, setViewComponent] = useState<ComponentType<DataViewProps> | null>(null);
   useEffect(() => {
     let active = true;
     void import("@/app/kr-data-view").then((module) => { if (active) setViewComponent(() => module.default); });
     return () => { active = false; };
   }, []);
-  return ViewComponent ? <ViewComponent {...props} /> : <AsyncState icon={LoaderCircle} title="KR 데이터 화면을 준비하는 중입니다" loading />;
+  return ViewComponent ? <ViewComponent {...props} /> : <AsyncState icon={LoaderCircle} title="데이터 화면을 준비하는 중입니다" loading />;
 }
 
 function WorkspaceApp() {
@@ -2015,7 +2032,7 @@ function WorkspaceApp() {
             </section>
           )}
           {activeView === "routines" && <RoutineView initialRoutines={routines} teamMembers={teamMembers} onNotice={showNotice} onRoutinesChange={setRoutines} createOpen={routineCreateOpen} onCreateClose={() => setRoutineCreateOpen(false)} onCreateWithChat={openRoutineCreationChat} />}
-          {activeView === "kr_data" && <ClientKrDataView key={currentWorkspace?.id ?? ""} cacheKey={currentWorkspace?.id ?? ""} keyResults={activeItems.filter((entry) => entry.kind === "key_result")} cycles={okrCycles} readOnly={currentWorkspace?.role === "viewer"} onProgressChange={(id, progress) => setItems((current) => current.map((entry) => entry.id === id ? { ...entry, progress } : entry))} onNotice={showNotice} />}
+          {activeView === "data" && <ClientDataView key={currentWorkspace?.id ?? ""} cacheKey={currentWorkspace?.id ?? ""} items={activeItems} cycles={okrCycles} readOnly={currentWorkspace?.role === "viewer"} onProgressChange={(id, progress) => setItems((current) => current.map((entry) => entry.id === id ? { ...entry, progress } : entry))} onNotice={showNotice} />}
           {activeView === "okr" && (
             <section className="okr-workbench">
               <section className="okr-document">
@@ -2669,6 +2686,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
           {visibleProperties.length ? visibleProperties.map((property) => <ProjectPropertyField key={property.id} projectId={project.id} property={property} value={propertyValues[project.id]?.[property.id] ?? null} members={teamMembers} readOnly={readOnly} onChange={onPropertyChange} onHide={() => onPropertyVisibility(property.id, true)} />) : <EmptyState icon={Settings2} title="표시 중인 커스텀 속성이 없습니다" />}
           {hiddenPropertyDefinitions.length > 0 && <div className="hidden-property-list"><span>숨긴 속성 {hiddenPropertyDefinitions.length}</span>{hiddenPropertyDefinitions.map((property) => <button key={property.id} onClick={() => onPropertyVisibility(property.id, false)}><Eye size={13} />{property.name}</button>)}</div>}
         </section>
+        <ProjectDataSection key={project.id} project={project} />
         <section className="task-lineage project-lineage-compact">
           <header><b>상위 OKR</b><span>Objective → KR → Initiative</span></header>
           <LineageRow label="Objective" value={objective?.title ?? "미연결"} />
@@ -2700,6 +2718,55 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
       </aside>}
     </OverlayDialog>
   );
+}
+
+function ProjectDataSection({ project }: { project: OkrptrItem }) {
+  const [connection, setConnection] = useState<ProjectDataConnection | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    void fetch(`/api/data-connections?itemId=${encodeURIComponent(project.id)}`, { signal: controller.signal })
+      .then(async (response) => response.ok ? response.json() as Promise<{ connections: ProjectDataConnection[] }> : Promise.reject())
+      .then((data) => { if (active) setConnection(data.connections[0] ?? null); })
+      .catch((error: unknown) => {
+        if (active && !(error instanceof DOMException && error.name === "AbortError")) setLoadError(true);
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; controller.abort(); };
+  }, [project.id]);
+
+  return <section className="project-linked-data">
+    <header><div><b>연결 데이터</b><span>{connection ? "1개" : "연결 없음"}</span></div><Database size={15} /></header>
+    {loading ? <div className="project-data-state"><LoaderCircle className="spinning" size={15} />데이터를 불러오는 중</div>
+      : loadError ? <div className="project-data-state error"><AlertTriangle size={15} />연결 데이터를 불러오지 못했습니다.</div>
+      : connection ? <>
+        <div className="project-data-summary">
+          <div><small>데이터 소스</small><b><Link2 size={12} />{connection.name}</b></div>
+          <div><small>현재 / 목표</small><b>{formatProjectDataMetric(connection.lastValue, connection.unit)} <em>/ {formatProjectDataMetric(connection.targetValue, connection.unit)}</em></b></div>
+          <div><small>갱신</small><b>{projectDataCadenceLabel(connection.cadence)} · {connection.active ? "활성" : "일시정지"}</b></div>
+          <div><small>최근 결과</small><b className={`sync-${connection.lastSyncStatus}`}>{projectDataSyncLabel(connection)}</b></div>
+        </div>
+        <div className="project-data-progress"><span><i style={{ width: `${project.progress}%` }} /></span><b>{project.progress}%</b></div>
+        {connection.lastError && <p className="kr-data-error"><AlertTriangle size={13} />{connection.lastError}</p>}
+      </> : <div className="project-data-state"><Database size={15} />데이터 화면에서 이 Project에 API를 연결할 수 있습니다.</div>}
+  </section>;
+}
+
+function formatProjectDataMetric(value: number | null, unit: string) {
+  return value === null ? "아직 값 없음" : `${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(value)}${unit}`;
+}
+
+function projectDataCadenceLabel(cadence: ProjectDataConnection["cadence"]) {
+  return { hourly: "매시간", daily: "매일", weekly: "매주", manual: "수동만" }[cadence];
+}
+
+function projectDataSyncLabel(connection: ProjectDataConnection) {
+  if (connection.lastSyncStatus === "never") return "업데이트 전";
+  if (connection.lastSyncStatus === "error") return "오류";
+  return connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" }) : "완료";
 }
 
 function ProjectSystemPropertySlot({ property, readOnly, onHide, children }: { property?: PropertyDefinition; readOnly: boolean; onHide: (propertyId: string, hidden: boolean) => void; children: ReactNode }) {
@@ -6022,6 +6089,6 @@ function preferredIntroLanguage(): IntroLanguage {
   if (language.startsWith("es")) return "es";
   return "en";
 }
-function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", kr_data: "Key Result와 외부 API 값·목표·갱신 주기 연결", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "삭제한 Project·Task와 전체 데이터 정리 기록" }[view]; }
+function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", data: "Key Result와 Project에 외부 API 수치 연결", scrum: "어제, 오늘, 막힘", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "삭제한 Project·Task와 전체 데이터 정리 기록" }[view]; }
 function routineCadenceLabel(cadence: RoutineCadence) { return { daily: "매일", weekly: "매주", monthly: "매월" }[cadence]; }
 function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "due_soon") return "3"; return "P"; }

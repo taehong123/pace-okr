@@ -116,19 +116,23 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
     const request = route.request();
     const url = new URL(request.url());
     if (url.pathname === "/api/bootstrap") return json(route, bootstrapResponse);
-    if (url.pathname === "/api/kr-data-connections/sync" && request.method() === "POST") {
+    if (url.pathname === "/api/data-connections/sync" && request.method() === "POST") {
       const payload = request.postDataJSON() as { id: string };
       const connection = krDataConnections.find((entry) => entry.id === payload.id);
       if (!connection) return json(route, { error: "not found" }, 400);
-      const updated = { ...connection, lastValue: 600, lastSyncStatus: "success", lastSyncedAt: now, nextSyncAt: now };
+      const progress = connection.targetKind === "project" ? 35 : 60;
+      const updated = { ...connection, lastValue: progress, lastSyncStatus: "success", lastSyncedAt: now, nextSyncAt: now };
       krDataConnections = krDataConnections.map((entry) => entry.id === payload.id ? updated : entry);
-      return json(route, { connection: updated, progress: 60, value: 600 });
+      return json(route, { connection: updated, progress, value: progress });
     }
-    if (url.pathname === "/api/kr-data-connections") {
-      if (request.method() === "GET") return json(route, { connections: krDataConnections });
+    if (url.pathname === "/api/data-connections") {
+      if (request.method() === "GET") {
+        const itemId = url.searchParams.get("itemId");
+        return json(route, { connections: itemId ? krDataConnections.filter((entry) => entry.itemId === itemId) : krDataConnections });
+      }
       if (request.method() === "POST") {
         const payload = request.postDataJSON() as Record<string, unknown>;
-        const connection = { id: "kr-connection-1", ...payload, lastValue: null, lastSyncStatus: "never", lastError: "", lastSyncedAt: null, nextSyncAt: now, createdAt: now, updatedAt: now };
+        const connection = { id: `connection-${String(payload.itemId)}`, ...payload, lastValue: null, lastSyncStatus: "never", lastError: "", lastSyncedAt: null, nextSyncAt: now, createdAt: now, updatedAt: now };
         krDataConnections.push(connection);
         return json(route, { connection }, 201);
       }
@@ -321,7 +325,7 @@ test("모바일 Project 기본 보기는 카드이며 페이지가 가로로 넘
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
-test("Objective·Initiative에는 퍼센트를 표시하지 않고 KR API를 연결한다", async ({ page }) => {
+test("KR과 Project 데이터는 각 대상 진행률만 갱신한다", async ({ page }) => {
   await installApiMocks(page);
   await page.goto("/?view=okr");
   await expect(page.locator(".objective-row").filter({ hasText: "고객 경험 개선" })).not.toContainText("50%");
@@ -344,15 +348,17 @@ test("Objective·Initiative에는 퍼센트를 표시하지 않고 KR API를 연
   await expect(executionToggle).toHaveAttribute("aria-expanded", "false");
   await page.keyboard.press("Escape");
 
-  await page.goto("/?view=kr_data");
+  await page.goto("/?view=data");
+  await expect(page.getByRole("heading", { name: "데이터" })).toBeVisible();
   const krCard = page.locator(".kr-data-card").filter({ hasText: "활성 사용자 20% 증가" });
+  const projectCard = page.locator(".kr-data-card").filter({ hasText: "모바일 사용성 개선" });
   await expect(krCard).toContainText("아직 연결된 데이터가 없습니다.");
   await krCard.getByRole("button", { name: "이 KR에 API 연결" }).click();
-  let panel = page.getByRole("dialog", { name: "KR API 연결" });
+  let panel = page.getByRole("dialog", { name: "API 연결" });
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
   await krCard.getByRole("button", { name: "이 KR에 API 연결" }).click();
-  panel = page.getByRole("dialog", { name: "KR API 연결" });
+  panel = page.getByRole("dialog", { name: "API 연결" });
   await panel.getByLabel("데이터 소스 이름").fill("활성 사용자 API");
   await panel.getByLabel("API URL").fill("https://api.example.com/metrics/active-users");
   await panel.getByLabel("숫자 값 경로").fill("data.value");
@@ -361,6 +367,21 @@ test("Objective·Initiative에는 퍼센트를 표시하지 않고 KR API를 연
   await expect(krCard).toContainText("활성 사용자 API");
   await krCard.getByRole("button", { name: "지금 업데이트" }).click();
   await expect(krCard).toContainText("60%");
+  await expect(projectCard).toContainText("0%");
+
+  await projectCard.getByRole("button", { name: "이 Project에 API 연결" }).click();
+  panel = page.getByRole("dialog", { name: "API 연결" });
+  await panel.getByLabel("데이터 소스 이름").fill("Project 품질 API");
+  await panel.getByLabel("API URL").fill("https://api.example.com/metrics/project-quality");
+  await panel.getByLabel("목표값").fill("100");
+  await panel.getByRole("button", { name: "연결 저장" }).click();
+  await projectCard.getByRole("button", { name: "지금 업데이트" }).click();
+  await expect(projectCard).toContainText("35%");
+  await expect(krCard).toContainText("60%");
+
+  await page.goto("/?view=work");
+  await page.getByRole("button", { name: /모바일 사용성 개선/ }).first().click();
+  await expect(page.locator(".project-linked-data")).toContainText("Project 품질 API");
 });
 
 test("핵심 화면은 axe 자동 접근성 검사에서 치명적 위반이 없다", async ({ page }) => {
