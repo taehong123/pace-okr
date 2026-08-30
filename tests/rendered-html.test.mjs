@@ -67,7 +67,7 @@ test("serves ChatGPT OAuth discovery metadata from well-known URLs", async () =>
   assert.equal(protectedResourceResponse.status, 200);
   assert.match(protectedResourceResponse.headers.get("content-type") ?? "", /^application\/json\b/i);
   assert.deepEqual(await protectedResourceResponse.json(), {
-    resource: "http://localhost/mcp",
+    resource: "http://localhost/api/mcp",
     authorization_servers: ["http://localhost"],
     scopes_supported: ["okrptr:read", "okrptr:write"],
     bearer_methods_supported: ["header"],

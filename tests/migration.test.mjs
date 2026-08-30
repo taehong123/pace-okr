@@ -620,7 +620,7 @@ test("creates ChatGPT OAuth DCR clients and single-use PKCE authorization codes"
     ) VALUES (
       'hash', '{"ownerId":"workspace","userId":"owner","role":"owner"}', 'client',
       'https://chatgpt.com/connector_platform_oauth_redirect', 'challenge',
-      'https://okrptr.com/mcp', 'okrptr:read okrptr:write', '2099-01-01T00:00:00.000Z'
+      'https://okrptr.com/api/mcp', 'okrptr:read okrptr:write', '2099-01-01T00:00:00.000Z'
     );
   `);
 

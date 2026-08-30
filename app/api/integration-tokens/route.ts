@@ -35,7 +35,7 @@ function buildChatGptPrompt(origin: string, workspaceName: string) {
     "설정 방법이나 주의사항만 설명하지 말고 브라우저 컨트롤로 ChatGPT 설정 화면을 직접 열어, 이미 승인된 단계는 추가 확인 없이 끝까지 실행해 주세요.",
     "",
     `워크스페이스: ${workspaceName}`,
-    `MCP 서버 주소: ${origin}/mcp`,
+    `MCP 서버 주소: ${origin}/api/mcp`,
     "",
     "다음 순서로 처리해 주세요.",
     "1. 브라우저 컨트롤로 ChatGPT 설정을 열고, 필요한 경우 개발자 모드를 바로 켠 뒤 플러그인 또는 커스텀 MCP 연결 추가 화면으로 이동합니다.",
