@@ -1487,6 +1487,17 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .daily-editor > header h2, .daily-rollup > header h2 { margin: 3px 0; font-size: 20px; }
 .daily-editor > header p, .daily-rollup > header p { margin: 0; color: var(--muted); font-size: 12px; }
 .daily-editor > header small { align-self: flex-start; color: var(--muted); font-size: 10px; }
+.daily-skip-panel { display: grid; gap: 11px; margin: 0 0 16px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); }
+.daily-skip-panel.active { border-color: #d9bd73; background: #fff9e8; }
+.daily-skip-panel legend { padding: 0 5px; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+.daily-skip-toggle { min-height: 44px; display: grid; grid-template-columns: 19px minmax(0, 1fr); align-items: center; gap: 2px 10px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.daily-skip-toggle input { width: 19px; height: 19px; flex: 0 0 auto; }
+.daily-skip-toggle small { grid-column: 2; color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.4; }
+.daily-skip-panel > div { display: grid; grid-template-columns: minmax(130px, .6fr) minmax(180px, 1.4fr); gap: 8px; }
+.daily-skip-panel > div label { min-width: 0; display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 650; }
+.daily-skip-panel select, .daily-skip-panel input:not([type="checkbox"]) { width: 100%; min-width: 0; min-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--raised); color: var(--ink); font-size: 12px; }
+.daily-skip-panel select:disabled, .daily-skip-panel input:disabled { opacity: .58; cursor: not-allowed; }
+.daily-skip-panel > p { margin: 0; color: var(--red); font-size: 11px; }
 .daily-notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .daily-notes label { min-width: 0; }
 .daily-notes label > span { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 700; }
@@ -1517,6 +1528,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .daily-new-task > div { display: grid; grid-template-columns: minmax(150px, .75fr) minmax(180px, 1fr) auto; gap: 8px; padding: 12px; }
 .daily-new-task select, .daily-new-task input { min-width: 0; min-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--raised); color: var(--ink); font-size: 12px; }
 .daily-new-task button { min-height: 40px; padding: 0 14px; border: 0; border-radius: 7px; background: var(--ink); color: var(--raised); font-size: 12px; font-weight: 700; cursor: pointer; }
+.daily-work-disabled { opacity: .58; }
 .daily-rollup { min-width: 0; padding: 22px 16px; }
 .daily-rollup > header { display: block; }
 .daily-rollup > div { display: grid; gap: 10px; }
@@ -1527,6 +1539,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .daily-member-card > header small { color: var(--muted); font-size: 9px; }
 .daily-member-card > header > span { padding: 4px 7px; border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 10px; white-space: nowrap; }
 .daily-member-card.submitted > header > span { background: #eaf7ee; color: #2d7a46; }
+.daily-member-card.skipped > header > span { background: #fff0c8; color: #7b5a0b; }
 .daily-member-card.writing > header > span { background: #fff6dc; color: #8a6715; }
 .daily-member-card > div { padding: 11px 12px; }
 .daily-member-card ul { display: grid; gap: 5px; margin: 0 0 9px; padding: 0; list-style: none; }
@@ -1537,6 +1550,10 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .daily-member-card p { margin: 7px 0 0; color: var(--ink); font-size: 11px; line-height: 1.5; white-space: pre-wrap; }
 .daily-member-card p b { display: block; margin-bottom: 2px; font-size: 10px; }
 .daily-member-card p.blocker { color: #9a3e3e; }
+.daily-skip-summary { display: grid; gap: 4px; border-left: 3px solid #d9bd73; background: #fffaf0; }
+.daily-skip-summary > b { font-size: 12px; }
+.daily-skip-summary > span { color: #7b5a0b; font-size: 11px; font-weight: 700; }
+.daily-skip-summary > p { margin-top: 2px; color: var(--muted); }
 .daily-private-draft { padding: 15px 12px; color: var(--muted) !important; }
 .daily-legacy { margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); font-size: 11px; }
 .daily-legacy p { white-space: pre-wrap; }
@@ -2157,6 +2174,8 @@ html[data-theme="dark"] .settings-danger-zone { background: color-mix(in srgb, v
   .daily-editor { padding: 14px 12px; border-right: 0; border-bottom: 1px solid var(--line); }
   .daily-rollup { padding: 16px 12px; }
   .daily-notes { grid-template-columns: 1fr; }
+  .daily-skip-panel > div { grid-template-columns: 1fr; }
+  .daily-skip-panel select, .daily-skip-panel input:not([type="checkbox"]) { min-height: 44px; }
   .daily-notes textarea { min-height: 84px; }
   .daily-new-task > div { grid-template-columns: 1fr; }
   .daily-new-task select, .daily-new-task input, .daily-new-task button { min-height: 44px; }

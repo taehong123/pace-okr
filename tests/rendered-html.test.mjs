@@ -648,21 +648,26 @@ test("connects API data independently to Key Results and Projects", async () => 
 });
 
 test("implements personal daily drafts and the managed Slack daily bot contract", async () => {
-  const [page, styles, dailyDomain, schema, migration, oauth, interactions, events, manifest] = await Promise.all([
+  const [page, styles, dailyDomain, schema, migration, skipMigration, oauth, interactions, events, slackDaily, manifest] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../lib/daily-bot.ts", import.meta.url), "utf8"),
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0026_slack_daily_bot.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0028_daily_skip.sql", import.meta.url), "utf8"),
     readFile(new URL("../lib/slack-oauth.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/interactions/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/slack-daily.ts", import.meta.url), "utf8"),
     readFile(new URL("../slack-app-manifest.yml", import.meta.url), "utf8"),
   ]);
   assert.match(page, /내 데일리/);
   assert.match(page, /확정 및 공유/);
   assert.match(page, /작성 중인 초안은 상태만 표시/);
   assert.match(page, /DRI이지만 미완료 Task가 없는 Project/);
+  assert.match(page, /오늘은 데일리를 스킵합니다/);
+  assert.match(page, /본업 과중/);
+  assert.match(page, /확정된 스킵 사유만 공개/);
   assert.match(page, /SlackDailySettingsPanel/);
   assert.match(styles, /\.daily-layout/);
   assert.match(styles, /\.slack-daily-settings/);
@@ -674,8 +679,12 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(schema, /slackDailyReminders/);
   assert.match(schema, /slackDailyPublications/);
   assert.match(migration, /idx_daily_scrums_legacy_owner_date/);
+  assert.match(skipMigration, /skip_reason/);
+  assert.match(skipMigration, /skip_note/);
   for (const scope of ["im:write", "im:history", "users:read.email", "channels:read", "groups:read"]) assert.match(oauth, new RegExp(scope.replace(".", "\\.")));
   assert.match(interactions, /view_submission/);
+  assert.match(interactions, /skip_reason/);
+  assert.match(slackDaily, /오늘 데일리 스킵/);
   assert.match(interactions, /block_suggestion/);
   assert.match(events, /slack_event_receipts/);
   assert.match(manifest, /https:\/\/okrptr\.com\/api\/slack\/interactions/);

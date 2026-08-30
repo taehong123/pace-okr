@@ -9,7 +9,7 @@ import {
   workspaceMembers,
   type SlackConnection,
 } from "@/db/schema";
-import { getDailyDashboard, type DailySubmissionValue } from "@/lib/daily-bot";
+import { dailySkipReasonLabel, getDailyDashboard, normalizeDailySkipReason, type DailySkipReason, type DailySubmissionValue } from "@/lib/daily-bot";
 import { ensureWorkspace, getSlackConnection, getSlackConnectionByTeam, type RequestAuthorization } from "@/lib/pace-data";
 import { decryptSlackSecret, slackScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 
@@ -408,7 +408,7 @@ export async function retryDailyPublication(ownerId: string, publicationId: stri
 
 export function dailyReminderBlocks(blockId: string) {
   return [
-    { type: "section", block_id: blockId, text: { type: "mrkdwn", text: "*오늘의 데일리를 정리할 시간입니다.*\n할당된 Task를 고르고 오늘 할 일을 확정해 주세요." } },
+    { type: "section", block_id: blockId, text: { type: "mrkdwn", text: "*오늘의 데일리를 정리할 시간입니다.*\n할당된 Task를 고르거나, 필요한 경우 사유와 함께 오늘 데일리를 스킵할 수 있습니다." } },
     { type: "actions", block_id: blockId, elements: [{ type: "button", action_id: "daily_open", text: { type: "plain_text", text: "데일리 작성" }, style: "primary", value: "daily" }] },
   ];
 }
@@ -423,7 +423,22 @@ export async function openDailyModal(triggerId: string, authorization: RequestAu
     ...dashboard.createTargets.routines.map((routine) => ({ text: { type: "plain_text", text: `Routine · ${routine.title}`.slice(0, 75) }, value: `routine:${routine.id}` })),
     ...(dashboard.createTargets.allowGeneral ? [{ text: { type: "plain_text", text: "General" }, value: "general:" }] : []),
   ];
+  const skipOptions = [
+    { text: { type: "plain_text", text: "스킵하지 않음" }, value: "none" },
+    ...(["workload", "vacation", "personal", "other"] as DailySkipReason[]).map((reason) => ({
+      text: { type: "plain_text", text: dailySkipReasonLabel(reason) }, value: reason,
+    })),
+  ];
+  const selectedSkip = dashboard.draft.skipReason ?? "none";
   const blocks: Record<string, unknown>[] = [
+    { type: "input", block_id: "skip_reason", optional: true, label: { type: "plain_text", text: "데일리 스킵" }, element: {
+      type: "static_select", action_id: "value", options: skipOptions,
+      initial_option: skipOptions.find((option) => option.value === selectedSkip) ?? skipOptions[0],
+    } },
+    { type: "input", block_id: "skip_note", optional: true, label: { type: "plain_text", text: "스킵 상세 사유 (기타는 필수)" }, element: {
+      type: "plain_text_input", action_id: "value", max_length: 500, initial_value: dashboard.draft.skipNote,
+      placeholder: { type: "plain_text", text: "팀에 공유할 보충 설명" },
+    } },
     { type: "input", block_id: "daily_tasks", optional: true, label: { type: "plain_text", text: "오늘 할 Task" }, element: {
       type: "multi_external_select", action_id: "selected_tasks", min_query_length: 0, max_selected_items: 50,
       placeholder: { type: "plain_text", text: "할당된 Task 검색" },
@@ -519,7 +534,9 @@ async function loadSubmission(id: string) {
   return {
     id: String(row.id), memberId: row.member_id ? String(row.member_id) : null, memberName: String(row.member_name), memberEmail: String(row.member_email),
     date: String(row.scrum_date), version: Number(row.version), yesterdayNote: String(row.yesterday_note), todayNote: String(row.today_note),
-    blockersNote: String(row.blockers_note), noPlannedTasks: Boolean(row.no_planned_tasks), source: String(row.source), submittedAt: String(row.submitted_at),
+    blockersNote: String(row.blockers_note), noPlannedTasks: Boolean(row.no_planned_tasks),
+    skipReason: normalizeDailySkipReason(row.skip_reason), skipNote: String(row.skip_note || ""),
+    source: String(row.source), submittedAt: String(row.submitted_at),
     tasks: snapshots.results.map((snapshot) => ({ id: String(snapshot.id), taskId: snapshot.task_id ? String(snapshot.task_id) : null,
       taskTitle: String(snapshot.task_title), parentKind: String(snapshot.parent_kind), parentId: snapshot.parent_id ? String(snapshot.parent_id) : null,
       parentTitle: String(snapshot.parent_title), status: String(snapshot.status), isNew: Boolean(snapshot.is_new), sortOrder: Number(snapshot.sort_order) })),
@@ -527,6 +544,16 @@ async function loadSubmission(id: string) {
 }
 
 function dailyCard(submission: DailySubmissionValue) {
+  if (submission.skipReason) {
+    const reason = dailySkipReasonLabel(submission.skipReason);
+    const detail = submission.skipNote ? `\n${escapeSlack(submission.skipNote)}` : "";
+    const appUrl = `${String((env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?view=scrum`;
+    return { text: `${submission.memberName}님의 ${submission.date} 데일리 스킵 · ${reason}`, unfurl_links: false, unfurl_media: false, blocks: [
+      { type: "header", text: { type: "plain_text", text: `${submission.memberName} · ${submission.date}`.slice(0, 150) } },
+      { type: "section", text: { type: "mrkdwn", text: `*⏭️ 오늘 데일리 스킵*\n*사유:* ${reason}${detail}`.slice(0, 2900) } },
+      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRPTR에서 보기" }, url: appUrl }] },
+    ] };
+  }
   const visible = submission.tasks.slice(0, 20);
   const taskLines = visible.length ? visible.map((task) => `${task.isNew ? "✨ " : "• "}${escapeSlack(task.taskTitle)} _(${escapeSlack(task.parentTitle)})_`).join("\n") : "• 오늘 예정 없음";
   const overflow = submission.tasks.length > 20 ? `\n_외 ${submission.tasks.length - 20}개_` : "";

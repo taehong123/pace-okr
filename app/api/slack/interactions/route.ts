@@ -1,5 +1,5 @@
 import { env, waitUntil } from "cloudflare:workers";
-import { createExplicitDailyTask, getDailyDashboard, saveDailyDraft, submitDailyDraft } from "@/lib/daily-bot";
+import { createExplicitDailyTask, getDailyDashboard, normalizeDailySkipReason, saveDailyDraft, submitDailyDraft } from "@/lib/daily-bot";
 import { getSlackConnectionByTeam } from "@/lib/pace-data";
 import { createSlackMemberLinkUrl, dailyMemberBySlack, externalTaskOptions, openDailyModal, publishDailySubmission, reconcileDailyReminders } from "@/lib/slack-daily";
 import { slackConfigured, verifySlackRequest, type SlackRuntimeEnv } from "@/lib/slack-oauth";
@@ -57,12 +57,26 @@ async function submitFromModal(payload: SlackInteraction, authorization: Awaited
   const todayNote = stringValue(state, "today_note", "value");
   const blockersNote = stringValue(state, "blockers_note", "value");
   const noPlannedTasks = selectedOptions(state, "no_planned", "value").includes("yes");
+  const rawSkipReason = selectedValue(state, "skip_reason", "value").replace(/^none$/, "");
+  let skipReason;
+  try {
+    skipReason = normalizeDailySkipReason(rawSkipReason);
+  } catch {
+    return Response.json({ response_action: "errors", errors: { skip_reason: "올바른 데일리 스킵 사유를 선택해 주세요." } });
+  }
+  const skipNote = stringValue(state, "skip_note", "value").trim();
   const newTaskTitle = stringValue(state, "new_task_title", "value").trim();
   const parentValue = selectedValue(state, "new_task_parent", "value");
   if (newTaskTitle && !parentValue) {
     return Response.json({ response_action: "errors", errors: { new_task_parent: "새 Task의 상위 항목을 선택해 주세요." } });
   }
-  if (!noPlannedTasks && selectedTaskIds.length === 0 && !newTaskTitle && !todayNote.trim()) {
+  if (skipReason && newTaskTitle) {
+    return Response.json({ response_action: "errors", errors: { new_task_title: "스킵하는 날에는 새 Task를 함께 만들 수 없습니다." } });
+  }
+  if (skipReason === "other" && !skipNote) {
+    return Response.json({ response_action: "errors", errors: { skip_note: "기타 스킵 사유를 입력해 주세요." } });
+  }
+  if (!skipReason && !noPlannedTasks && selectedTaskIds.length === 0 && !newTaskTitle && !todayNote.trim()) {
     return Response.json({ response_action: "errors", errors: { daily_tasks: "Task를 선택하거나 ‘오늘 예정 없음’을 선택해 주세요." } });
   }
   try {
@@ -74,6 +88,8 @@ async function submitFromModal(payload: SlackInteraction, authorization: Awaited
       blockersNote,
       selectedTaskIds,
       noPlannedTasks,
+      skipReason,
+      skipNote,
       source: "slack",
     });
     if (newTaskTitle) {

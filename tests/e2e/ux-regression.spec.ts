@@ -103,7 +103,7 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean } = {}) {
+async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean } = {}) {
   let krDataConnections: Array<Record<string, unknown>> = [];
   const bootstrapResponse = options.withoutTaskContainers
     ? { ...bootstrap, items: bootstrap.items.filter((entry) => entry.kind !== "project" && entry.kind !== "task") }
@@ -175,13 +175,15 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
     if (url.pathname === "/api/daily-scrum" && request.method() === "GET") return json(route, {
       date: "2026-08-30",
       member: { id: "member-1", displayName: "테스트 사용자", email: "owner@example.com", role: "owner" },
-      draft: { id: "draft-1", date: "2026-08-30", yesterdayNote: "", todayNote: "", blockersNote: "", noPlannedTasks: false, selectedTaskIds: [], source: "web", updatedAt: now },
+      draft: { id: "draft-1", date: "2026-08-30", yesterdayNote: "", todayNote: "", blockersNote: "", noPlannedTasks: false, skipReason: null, skipNote: "", selectedTaskIds: [], source: "web", updatedAt: now },
       latestSubmission: null,
       candidates: { tasks: [{ id: "task-1", title: "오버레이 동작 점검", status: "todo", dueDate: "2026-09-03", parentKind: "project", parentId: "project-1", parentTitle: "모바일 사용성 개선" }], groups: [{ key: "project:project-1", kind: "project", id: "project-1", title: "모바일 사용성 개선", tasks: [{ id: "task-1", title: "오버레이 동작 점검", status: "todo", dueDate: "2026-09-03", parentKind: "project", parentId: "project-1", parentTitle: "모바일 사용성 개선" }] }] },
       createTargets: { projects: [{ id: "project-empty", title: "실행 항목 없는 Project", needsTask: true }], routines: [], allowGeneral: false },
       team: [
         { memberId: "member-1", displayName: "테스트 사용자", email: "owner@example.com", role: "owner", status: "missing", slackConnected: true, submission: null },
-        { memberId: "member-2", displayName: "초안 멤버", email: "draft@example.com", role: "member", status: "writing", slackConnected: false, submission: null },
+        options.skippedTeam
+          ? { memberId: "member-2", displayName: "휴가 멤버", email: "leave@example.com", role: "member", status: "skipped", slackConnected: true, submission: { id: "submission-skip", memberId: "member-2", memberName: "휴가 멤버", memberEmail: "leave@example.com", date: "2026-08-30", version: 1, yesterdayNote: "", todayNote: "", blockersNote: "", noPlannedTasks: false, skipReason: "personal", skipNote: "병원 일정", source: "web", submittedAt: now, tasks: [] } }
+          : { memberId: "member-2", displayName: "초안 멤버", email: "draft@example.com", role: "member", status: "writing", slackConnected: false, submission: null },
       ],
       legacyWorkspaceNote: { yesterdayNote: "", todayNote: "기존 공용 메모", blockersNote: "", updatedAt: now },
     });
@@ -190,7 +192,7 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
       return json(route, {
         date: payload.date,
         member: { id: "member-1", displayName: "테스트 사용자", email: "owner@example.com", role: "owner" },
-        draft: { id: "draft-1", date: payload.date, yesterdayNote: payload.yesterdayNote, todayNote: payload.todayNote, blockersNote: payload.blockersNote, noPlannedTasks: payload.noPlannedTasks, selectedTaskIds: payload.selectedTaskIds, source: "web", updatedAt: now },
+        draft: { id: "draft-1", date: payload.date, yesterdayNote: payload.yesterdayNote, todayNote: payload.todayNote, blockersNote: payload.blockersNote, noPlannedTasks: payload.noPlannedTasks, skipReason: payload.skipReason, skipNote: payload.skipNote, selectedTaskIds: payload.selectedTaskIds, source: "web", updatedAt: now },
         latestSubmission: null, candidates: { tasks: [], groups: [] }, createTargets: { projects: [], routines: [], allowGeneral: true }, team: [], legacyWorkspaceNote: null,
       });
     }
@@ -231,6 +233,30 @@ test.describe("개인 데일리와 팀 롤업", () => {
     await expect(card).toContainText("작성 중");
     await expect(card).toContainText("내용은 제출 후 공개됩니다");
     await expect(page.getByText("기존 공용 메모")).toBeHidden();
+  });
+
+  test("데일리 스킵 사유를 저장하고 공유 확정할 수 있다", async ({ page }) => {
+    await page.getByRole("checkbox", { name: "오늘은 데일리를 스킵합니다" }).check();
+    await page.getByLabel("데일리 스킵 사유").selectOption("vacation");
+    await page.getByLabel("데일리 스킵 상세 사유").fill("오후까지 휴가입니다.");
+    await expect(page.getByRole("checkbox", { name: "오버레이 동작 점검 선택", exact: true })).toBeDisabled();
+    const saveRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/daily-scrum" && request.method() === "PUT");
+    await page.getByRole("button", { name: "초안 저장" }).click();
+    const payload = (await saveRequest).postDataJSON() as { selectedTaskIds: string[]; noPlannedTasks: boolean; skipReason: string; skipNote: string };
+    expect(payload).toMatchObject({ selectedTaskIds: [], noPlannedTasks: false, skipReason: "vacation", skipNote: "오후까지 휴가입니다." });
+    const submitRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/daily-scrum/submit" && request.method() === "POST");
+    await page.getByRole("button", { name: "스킵 확정 및 공유" }).click();
+    await submitRequest;
+  });
+
+  test("확정된 스킵 사유만 팀 롤업에 공유한다", async ({ page }) => {
+    await page.unroute("**/api/**");
+    await installApiMocks(page, { skippedTeam: true });
+    await page.reload();
+    const card = page.locator(".daily-member-card", { hasText: "휴가 멤버" });
+    await expect(card).toContainText("스킵");
+    await expect(card).toContainText("개인 일정");
+    await expect(card).toContainText("병원 일정");
   });
 
   test("DRI 무Task Project에서 명시적 Task 생성으로 진입한다", async ({ page }) => {

@@ -26,7 +26,7 @@ const guide = {
     { purpose: "Create a routine", method: "POST", path: "/api/routines", body: "title required; triggerPoint, actionPlace, actionSteps, cadence, active" },
     { purpose: "Update a routine", method: "PATCH", path: "/api/routines", body: "id required plus changed fields" },
     { purpose: "Delete a routine after explicit confirmation", method: "DELETE", path: "/api/routines?id=<routine-id>", requiresConfirmation: true },
-    { purpose: "Read or update today's scrum", method: "GET or PUT", path: "/api/daily-scrum?date=YYYY-MM-DD", body: "For PUT: date, yesterdayNote, todayNote, blockersNote" },
+    { purpose: "Read or update today's scrum", method: "GET or PUT", path: "/api/daily-scrum?date=YYYY-MM-DD", body: "For PUT: date, yesterdayNote, todayNote, blockersNote, selectedTaskIds, noPlannedTasks, skipReason, skipNote" },
     { purpose: "Complete or reopen a routine for a date", method: "PUT or DELETE", path: "/api/routine-completions", body: "routineId and date required; note optional" },
     { purpose: "Archive a Project and its direct Tasks", method: "POST", path: "/api/project-archives", body: "projectId required" },
     { purpose: "List archived Projects", method: "GET", path: "/api/project-archives" },

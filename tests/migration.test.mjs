@@ -918,8 +918,12 @@ test("adds member daily drafts, immutable submissions, and Slack daily delivery 
     INSERT INTO daily_scrums (id, owner_id, scrum_date, today_note)
       VALUES ('legacy', 'workspace', '2026-08-30', 'Existing workspace note');
   `);
-  const migration = await readFile(new URL("../drizzle/0026_slack_daily_bot.sql", import.meta.url), "utf8");
+  const [migration, skipMigration] = await Promise.all([
+    readFile(new URL("../drizzle/0026_slack_daily_bot.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0028_daily_skip.sql", import.meta.url), "utf8"),
+  ]);
   db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(skipMigration.replaceAll("--> statement-breakpoint", ""));
   db.exec(`
     INSERT INTO daily_scrums (id, owner_id, member_id, scrum_date, today_note)
       VALUES ('draft-1', 'workspace', 'member-1', '2026-08-30', 'Owner draft'),
@@ -930,6 +934,9 @@ test("adds member daily drafts, immutable submissions, and Slack daily delivery 
       (id, owner_id, member_id, member_name, scrum_date, version, today_note)
       VALUES ('submission-v1', 'workspace', 'member-1', 'Owner', '2026-08-30', 1, 'First'),
              ('submission-v2', 'workspace', 'member-1', 'Owner', '2026-08-30', 2, 'Second');
+    INSERT INTO daily_submissions
+      (id, owner_id, member_id, member_name, scrum_date, version, skip_reason, skip_note)
+      VALUES ('submission-skip', 'workspace', 'member-2', 'Member', '2026-08-30', 1, 'vacation', 'Annual leave');
     INSERT INTO daily_task_snapshots
       (id, owner_id, submission_id, task_id, task_title, parent_kind, parent_title, status)
       VALUES ('snapshot', 'workspace', 'submission-v2', 'task', 'Ship daily bot', 'general', 'General', 'todo');
@@ -953,6 +960,10 @@ test("adds member daily drafts, immutable submissions, and Slack daily delivery 
   });
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM daily_scrums WHERE owner_id = 'workspace' AND scrum_date = '2026-08-30'").get().count, 3);
   assert.equal(db.prepare("SELECT MAX(version) AS version FROM daily_submissions WHERE member_id = 'member-1'").get().version, 2);
+  assert.deepEqual({ ...db.prepare("SELECT skip_reason, skip_note FROM daily_submissions WHERE id = 'submission-skip'").get() }, {
+    skip_reason: "vacation",
+    skip_note: "Annual leave",
+  });
   assert.throws(() => db.exec("INSERT INTO slack_member_links (id, owner_id, member_id, team_id, slack_user_id) VALUES ('duplicate', 'workspace', 'member-2', 'T123', 'U123')"), /UNIQUE/i);
   db.exec("DELETE FROM items WHERE id = 'task'");
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM daily_scrum_task_selections").get().count, 0);

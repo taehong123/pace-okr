@@ -448,6 +448,8 @@ async function ensureSchema() {
           today_note TEXT NOT NULL DEFAULT '',
           blockers_note TEXT NOT NULL DEFAULT '',
           no_planned_tasks INTEGER NOT NULL DEFAULT 0,
+          skip_reason TEXT,
+          skip_note TEXT NOT NULL DEFAULT '',
           source TEXT NOT NULL DEFAULT 'web',
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -629,6 +631,8 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE item_property_values ADD COLUMN legacy_value TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE daily_scrums ADD COLUMN member_id TEXT REFERENCES workspace_members(id) ON DELETE CASCADE");
       await addColumnIfMissing(d1, "ALTER TABLE daily_scrums ADD COLUMN no_planned_tasks INTEGER NOT NULL DEFAULT 0");
+      await addColumnIfMissing(d1, "ALTER TABLE daily_scrums ADD COLUMN skip_reason TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE daily_scrums ADD COLUMN skip_note TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE daily_scrums ADD COLUMN source TEXT NOT NULL DEFAULT 'web'");
       await d1.prepare("DROP INDEX IF EXISTS idx_daily_scrums_owner_date").run();
       await d1.batch([
@@ -650,6 +654,7 @@ async function ensureSchema() {
           member_name TEXT NOT NULL DEFAULT '', member_email TEXT NOT NULL DEFAULT '', scrum_date TEXT NOT NULL,
           version INTEGER NOT NULL, yesterday_note TEXT NOT NULL DEFAULT '', today_note TEXT NOT NULL DEFAULT '',
           blockers_note TEXT NOT NULL DEFAULT '', no_planned_tasks INTEGER NOT NULL DEFAULT 0,
+          skip_reason TEXT, skip_note TEXT NOT NULL DEFAULT '',
           source TEXT NOT NULL DEFAULT 'web', submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_submissions_owner_member_date_version ON daily_submissions(owner_id, member_id, scrum_date, version)"),
@@ -749,6 +754,8 @@ async function ensureSchema() {
           WHERE status = 'archived' AND archived_at IS NULL`),
         d1.prepare("UPDATE items SET progress = 0 WHERE kind IN ('objective', 'initiative') AND progress <> 0"),
       ]);
+      await addColumnIfMissing(d1, "ALTER TABLE daily_submissions ADD COLUMN skip_reason TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE daily_submissions ADD COLUMN skip_note TEXT NOT NULL DEFAULT ''");
     })()
       .catch((error: unknown) => {
         schemaReady = null;
@@ -778,6 +785,8 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       kr_data_connection.target_value,
       daily_scrum.member_id,
       daily_scrum.no_planned_tasks,
+      daily_scrum.skip_reason,
+      daily_submission.skip_reason,
       slack_daily_setting.reminder_time
     FROM workspaces AS workspace
     LEFT JOIN routines AS routine ON 1 = 0
@@ -786,6 +795,7 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
     LEFT JOIN project_documents AS project_document ON 1 = 0
     LEFT JOIN kr_data_connections AS kr_data_connection ON 1 = 0
     LEFT JOIN daily_scrums AS daily_scrum ON 1 = 0
+    LEFT JOIN daily_submissions AS daily_submission ON 1 = 0
     LEFT JOIN slack_daily_settings AS slack_daily_setting ON 1 = 0
     LIMIT 0`).first();
     return true;
