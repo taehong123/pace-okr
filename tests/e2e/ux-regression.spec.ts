@@ -245,7 +245,7 @@ test.describe("개인 데일리와 팀 롤업", () => {
   test("390px에서 가로 넘침이 없고 핵심 컨트롤이 접근 가능하다", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-    const results = await new AxeBuilder({ page }).include(".daily-workspace").analyze();
+    const results = await new AxeBuilder({ page: page as never }).include(".daily-workspace").analyze();
     expect(results.violations).toEqual([]);
   });
 });
