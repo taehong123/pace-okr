@@ -713,6 +713,7 @@ test("uses a restrained large-desktop density without scaling smaller viewports"
   assert.match(largeDesktop, /page-header h1, \.app-loading-copy h1 \{ font-size: 28px/);
   assert.match(largeDesktop, /hierarchy-row \{ min-height: 56px/);
   assert.match(largeDesktop, /task-table-row \{ min-height: 42px/);
+  assert.match(largeDesktop, /task-list-row \{ min-height: 54px/);
   assert.match(largeDesktop, /routine-card b \{ font-size: 13px/);
   assert.match(largeDesktop, /my-work-item \{ min-height: 56px/);
   assert.doesNotMatch(largeDesktop, /\bzoom\s*:|transform\s*:\s*scale/);

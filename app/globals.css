@@ -2216,6 +2216,12 @@ html[data-theme="dark"] .settings-danger-zone { background: color-mix(in srgb, v
   .task-table-row select, .task-table-row > input, .relation-cell, .property-input { font-size: 12px; }
   .task-selection-bar { min-height: 48px; padding: 7px; }
   .task-selection-bar > label, .task-selection-bar > button { min-height: 33px; font-size: 10px; }
+  .task-list-row { min-height: 54px; grid-template-columns: 30px minmax(0, 1fr) 30px; gap: 9px; padding: 0 7px; }
+  .task-list-row.deletion-selectable { grid-template-columns: 23px 30px minmax(0, 1fr) 30px; }
+  .task-list-check, .task-list-chevron { width: 28px; height: 28px; }
+  .task-list-open { min-height: 53px; grid-template-columns: minmax(194px, 1fr) minmax(281px, .85fr); gap: 19px; }
+  .task-list-open b { font-size: 13px; }
+  .task-list-inline-meta { font-size: 11px; }
 
   .okr-document { gap: 15px; }
   .okr-document-header { min-height: 82px; grid-template-columns: 35px minmax(0, 1fr) auto; gap: 13px; padding: 13px; }
