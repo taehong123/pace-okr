@@ -682,3 +682,22 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(manifest, /message\.im/);
   assert.doesNotMatch(manifest, /incoming-webhook/);
 });
+
+test("uses warm-neutral KR and Initiative hierarchy surfaces", async () => {
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(styles, /--okr-card-bg: #fdfdfc/);
+  assert.match(styles, /--okr-card-border: #dad9d6/);
+  assert.match(styles, /--kr-badge-bg: #f6edea/);
+  assert.match(styles, /--kr-badge-text: #7d5e54/);
+  assert.match(styles, /--kr-rail: #a18072/);
+  assert.match(styles, /--initiative-badge-bg: #eff1ef/);
+  assert.match(styles, /--initiative-badge-text: #60655f/);
+  assert.match(styles, /--initiative-rail: #898e87/);
+  assert.match(styles, /\.hierarchy-kind-key_result \{[^}]*border-left: 2px solid var\(--kr-rail\)[^}]*box-shadow: none/);
+  assert.match(styles, /\.hierarchy-kind-initiative \{[^}]*border-left: 2px solid var\(--initiative-rail\)[^}]*box-shadow: none/);
+  assert.match(styles, /\.hierarchy-kind-initiative \.initiative-execution-summary \{ color: var\(--muted\); \}/);
+  assert.match(styles, /--kr-badge-bg: #43302b/);
+  assert.match(styles, /--initiative-badge-bg: #30322e/);
+  assert.doesNotMatch(styles, /--kr-soft|--initiative-soft|#42627a|#426653|#e8eff4|#e8f0eb/);
+});
