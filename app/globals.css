@@ -38,22 +38,6 @@
   --motion-default: 180ms;
 }
 
-@media (max-width: 700px) {
-  .daily-layout { grid-template-columns: minmax(0, 1fr); }
-  .daily-editor { padding: 14px 12px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .daily-rollup { padding: 16px 12px; }
-  .daily-notes { grid-template-columns: 1fr; }
-  .daily-notes textarea { min-height: 84px; }
-  .daily-new-task > div { grid-template-columns: 1fr; }
-  .daily-new-task select, .daily-new-task input, .daily-new-task button { min-height: 44px; }
-  .scrum-toolbar { min-height: 58px; gap: 8px; }
-  .scrum-toolbar > div { gap: 5px; }
-  .scrum-toolbar > div > button { min-height: 44px; padding: 0 9px; }
-  .scrum-toolbar input { min-height: 44px; max-width: 142px; }
-  .daily-editor > header { display: block; }
-  .daily-editor > header small { display: block; margin-top: 8px; }
-}
-
 html[data-theme="gray"] {
   color-scheme: light;
   --ink: #252a30;
@@ -2169,5 +2153,18 @@ html[data-theme="dark"] .settings-danger-zone { background: color-mix(in srgb, v
 @media (max-width: 700px) {
   .nav-item span, .mobile-menu-list > button span { font-size: 12px; }
   .page-body { overflow-x: clip; }
+  .daily-layout { grid-template-columns: minmax(0, 1fr); }
+  .daily-editor { padding: 14px 12px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .daily-rollup { padding: 16px 12px; }
+  .daily-notes { grid-template-columns: 1fr; }
+  .daily-notes textarea { min-height: 84px; }
+  .daily-new-task > div { grid-template-columns: 1fr; }
+  .daily-new-task select, .daily-new-task input, .daily-new-task button { min-height: 44px; }
+  .scrum-toolbar { min-height: 58px; gap: 8px; }
+  .scrum-toolbar > div { gap: 5px; }
+  .scrum-toolbar > div > button { min-height: 44px; padding: 0 9px; }
+  .scrum-toolbar input { min-height: 44px; max-width: 142px; }
+  .daily-editor > header { display: block; }
+  .daily-editor > header small { display: block; margin-top: 8px; }
   .task-list-inline-meta { max-width: 100%; display: flex; flex-wrap: wrap; gap: 3px; white-space: normal; }
 }

@@ -238,7 +238,7 @@ test.describe("개인 데일리와 팀 롤업", () => {
     await expect(page.getByLabel("새 Task 상위 항목")).toHaveValue("project:project-empty");
     await page.getByLabel("새 Task 제목").fill("새 실행 Task");
     const createRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/daily-scrum/tasks");
-    await page.getByRole("button", { name: "Task 생성" }).click({ force: true });
+    await page.getByRole("button", { name: "Task 생성" }).click();
     expect((await createRequest).postDataJSON()).toMatchObject({ title: "새 실행 Task", parentKind: "project", parentId: "project-empty" });
   });
 
