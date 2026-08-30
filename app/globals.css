@@ -599,8 +599,8 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .hierarchy-row.interactive { cursor: pointer; }
 .hierarchy-row.interactive:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--focus); outline-offset: -2px; }
 .type-icon { width: 23px; height: 23px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: 6px; background: var(--surface-muted); color: var(--muted); font-size: 8px; font-weight: 750; }
-.type-key_result { background: var(--kr-soft); color: var(--kr); }
-.type-initiative { background: var(--initiative-soft); color: var(--initiative); }
+.hierarchy .type-key_result { background: var(--kr-soft); color: var(--kr); }
+.hierarchy .type-initiative { background: var(--initiative-soft); color: var(--initiative); }
 .type-task { background: #edf3ec; color: #448361; }
 .type-project { background: #f3eeee; color: #9065b0; }
 .hierarchy-kind-key_result { border-color: color-mix(in srgb, var(--kr) 15%, var(--line)); background: color-mix(in srgb, var(--kr-soft) 38%, var(--raised)); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--kr) 58%, transparent); }
