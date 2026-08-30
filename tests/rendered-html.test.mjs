@@ -62,8 +62,29 @@ test("server-renders the OKRPTR application loading shell", async () => {
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview|react-loading-skeleton/i);
 });
 
+test("serves ChatGPT OAuth discovery metadata from well-known URLs", async () => {
+  const protectedResourceResponse = await render("/.well-known/oauth-protected-resource");
+  assert.equal(protectedResourceResponse.status, 200);
+  assert.match(protectedResourceResponse.headers.get("content-type") ?? "", /^application\/json\b/i);
+  assert.deepEqual(await protectedResourceResponse.json(), {
+    resource: "http://localhost/mcp",
+    authorization_servers: ["http://localhost"],
+    scopes_supported: ["okrptr:read", "okrptr:write"],
+    bearer_methods_supported: ["header"],
+    resource_documentation: "http://localhost/#integrations",
+  });
+
+  const authorizationServerResponse = await render("/.well-known/oauth-authorization-server");
+  assert.equal(authorizationServerResponse.status, 200);
+  const authorizationServer = await authorizationServerResponse.json();
+  assert.equal(authorizationServer.issuer, "http://localhost");
+  assert.equal(authorizationServer.registration_endpoint, "http://localhost/oauth/register");
+  assert.deepEqual(authorizationServer.code_challenge_methods_supported, ["S256"]);
+  assert.deepEqual(authorizationServer.token_endpoint_auth_methods_supported, ["none"]);
+});
+
 test("ships product metadata and removes starter assets", async () => {
-  const [layout, page, globals, bootstrapRoute, itemRoute, workspaceRoute, integrationRoute, okrOrganizeRoute, okrPlanRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson, avatarRoute, schema, hosting] = await Promise.all([
+  const [layout, page, globals, bootstrapRoute, itemRoute, workspaceRoute, integrationRoute, okrOrganizeRoute, okrPlanRoute, slackAuthRoute, slackDisconnectRoute, slackAutomationRoute, slackAutomationTestRoute, slackAutomation, paceData, googleSession, googleSignInRoute, googleCallbackRoute, logoutRoute, packageJson, avatarRoute, schema, hosting, mcpRoute, mcpOAuth, protectedResourceRoute, authorizationServerRoute, oauthRegisterRoute, oauthAuthorizeRoute, oauthTokenRoute] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -87,6 +108,13 @@ test("ships product metadata and removes starter assets", async () => {
     readFile(new URL("../app/api/workspaces/avatar/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
+    readFile(new URL("../app/mcp/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/mcp-oauth.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/[wellKnown]/oauth-protected-resource/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/[wellKnown]/oauth-authorization-server/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/oauth/register/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/oauth/authorize/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/oauth/token/route.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(layout, /openGraph/);
@@ -204,10 +232,25 @@ test("ships product metadata and removes starter assets", async () => {
   assert.doesNotMatch(page, /루틴부터/);
   assert.match(page, /Routine 도우미/);
   assert.match(page, /브라우저 제어가 가능한 ChatGPT 대화/);
-  assert.match(integrationRoute, /브라우저 컨트롤을 사용해 ChatGPT 설정 화면을 직접 열고/);
-  assert.match(integrationRoute, /Authorization: Bearer <OKRPTR_ACCESS_TOKEN>/);
-  assert.match(integrationRoute, /중간마다 승인 여부를 반복해서 묻지 말고/);
+  assert.match(integrationRoute, /이 메시지를 보낸 것은 다음 연결 작업을 확인하고 명시적으로 승인한 것입니다/);
+  assert.match(integrationRoute, /이미 승인된 단계는 추가 확인 없이 끝까지 실행해 주세요/);
+  assert.match(integrationRoute, /OAuth 2\.1 메타데이터와 DCR, S256 PKCE 흐름/);
+  assert.doesNotMatch(integrationRoute, /OKRPTR_ACCESS_TOKEN|Authorization: Bearer <OKRPTR_ACCESS_TOKEN>/);
+  assert.match(integrationRoute, /같은 권한 설명을 반복하거나 다시 승인받지 말고/);
+  assert.match(integrationRoute, /OKRPTR 연결을 계속할까요\?/);
   assert.match(integrationRoute, /사용자가 직접 해야 하는 마지막 한 단계만/);
+  assert.match(protectedResourceRoute, /authorization_servers/);
+  assert.match(authorizationServerRoute, /registration_endpoint/);
+  assert.match(authorizationServerRoute, /code_challenge_methods_supported/);
+  assert.match(oauthRegisterRoute, /token_endpoint_auth_method: "none"/);
+  assert.match(oauthAuthorizeRoute, /code_challenge_method/);
+  assert.match(oauthAuthorizeRoute, /callback\.searchParams\.set\("iss"/);
+  assert.match(oauthTokenRoute, /exchangeMcpOAuthAuthorizationCode/);
+  assert.match(mcpOAuth, /mcp_oauth_clients/);
+  assert.match(mcpOAuth, /mcp_oauth_codes/);
+  assert.match(mcpOAuth, /sha256Base64Url/);
+  assert.match(mcpRoute, /resource_metadata/);
+  assert.match(googleSession, /slice\(0, 4000\)/);
   assert.match(slackAuthRoute, /canManageTeam/);
   assert.match(slackDisconnectRoute, /canManageTeam/);
   assert.match(slackAutomationRoute, /canManageTeam/);
@@ -602,4 +645,40 @@ test("connects API data independently to Key Results and Projects", async () => 
   assert.match(worker, /scheduled\(_controller/);
   assert.match(viteConfig, /crons: \["0 \* \* \* \*"\]/);
   assert.match(migration, /UPDATE `items` SET `progress` = 0 WHERE `kind` IN \('objective', 'initiative'\)/);
+});
+
+test("implements personal daily drafts and the managed Slack daily bot contract", async () => {
+  const [page, styles, dailyDomain, schema, migration, oauth, interactions, events, manifest] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../lib/daily-bot.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0026_slack_daily_bot.sql", import.meta.url), "utf8"),
+    readFile(new URL("../lib/slack-oauth.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/slack/interactions/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../slack-app-manifest.yml", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /내 데일리/);
+  assert.match(page, /확정 및 공유/);
+  assert.match(page, /작성 중인 초안은 상태만 표시/);
+  assert.match(page, /DRI이지만 미완료 Task가 없는 Project/);
+  assert.match(page, /SlackDailySettingsPanel/);
+  assert.match(styles, /\.daily-layout/);
+  assert.match(styles, /\.slack-daily-settings/);
+  assert.match(dailyDomain, /task\.status NOT IN \('done', 'development_done', 'archived'\)/);
+  assert.match(dailyDomain, /assignment\.role = 'task_assignee'/);
+  assert.match(dailyDomain, /source: "daily"/);
+  assert.match(dailyDomain, /dueDate: date/);
+  assert.match(dailyDomain, /daily_task_snapshots/);
+  assert.match(schema, /slackDailyReminders/);
+  assert.match(schema, /slackDailyPublications/);
+  assert.match(migration, /idx_daily_scrums_legacy_owner_date/);
+  for (const scope of ["im:write", "im:history", "users:read.email", "channels:read", "groups:read"]) assert.match(oauth, new RegExp(scope.replace(".", "\\.")));
+  assert.match(interactions, /view_submission/);
+  assert.match(interactions, /block_suggestion/);
+  assert.match(events, /slack_event_receipts/);
+  assert.match(manifest, /https:\/\/okrptr\.com\/api\/slack\/interactions/);
+  assert.match(manifest, /message\.im/);
+  assert.doesNotMatch(manifest, /incoming-webhook/);
 });

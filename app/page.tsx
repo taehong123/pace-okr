@@ -194,15 +194,17 @@ type ProjectHiddenPropertyMap = Record<string, string[]>;
 type ArchivedProject = OkrptrItem & { archivedTaskCount: number };
 type TrashedItem = OkrptrItem & { trashedTaskCount: number; canDelete: boolean };
 type ChecklistItem = { id: string; taskId: string; title: string; completed: boolean; sortOrder: number };
-type Scrum = {
+type DailyTaskCandidate = { id: string; title: string; status: ItemStatus; dueDate: string | null; parentKind: "project" | "routine" | "general"; parentId: string | null; parentTitle: string };
+type DailySubmission = { id: string; memberId: string | null; memberName: string; memberEmail: string; date: string; version: number; yesterdayNote: string; todayNote: string; blockersNote: string; noPlannedTasks: boolean; source: string; submittedAt: string; tasks: Array<{ id: string; taskId: string | null; taskTitle: string; parentKind: string; parentId: string | null; parentTitle: string; status: string; isNew: boolean; sortOrder: number }> };
+type DailyDashboard = {
   date: string;
-  yesterdayNote: string;
-  todayNote: string;
-  blockersNote: string;
-  yesterdayTasks: OkrptrItem[];
-  todayTasks: OkrptrItem[];
-  blockers: OkrptrItem[];
-  updatedAt: string | null;
+  member: { id: string; displayName: string; email: string; role: TeamRole };
+  draft: { id: string | null; date: string; yesterdayNote: string; todayNote: string; blockersNote: string; noPlannedTasks: boolean; selectedTaskIds: string[]; source: string; updatedAt: string | null };
+  latestSubmission: DailySubmission | null;
+  candidates: { tasks: DailyTaskCandidate[]; groups: Array<{ key: string; kind: string; id: string | null; title: string; tasks: DailyTaskCandidate[] }> };
+  createTargets: { projects: Array<{ id: string; title: string; needsTask: boolean }>; routines: Array<{ id: string; title: string }>; allowGeneral: boolean };
+  team: Array<{ memberId: string; displayName: string; email: string; role: TeamRole; status: "submitted" | "writing" | "missing"; slackConnected: boolean; submission: DailySubmission | null }>;
+  legacyWorkspaceNote: { yesterdayNote: string; todayNote: string; blockersNote: string; updatedAt: string } | null;
 };
 type Recommendation = {
   id: string;
@@ -492,6 +494,8 @@ type SlackConnectionStatus = {
   updatedAt: string | null;
   redirectUrl: string;
   commandUrl: string;
+  interactionUrl?: string | null;
+  eventsUrl?: string | null;
 };
 type SlackAutomationTrigger = "task_created" | "task_status_changed";
 type SlackAutomation = {
@@ -539,12 +543,12 @@ type TrashRecord = {
   archivedAt: string;
 };
 
-const dailyScrumMemoryCache = new Map<string, Scrum>();
+const dailyScrumMemoryCache = new Map<string, DailyDashboard>();
 const recommendationMemoryCache = new Map<string, Recommendation[]>();
 let trashMemoryCache: { records: TrashRecord[]; items: TrashedItem[] } | null = null;
 
-function scrumNotesSnapshot(scrum: Scrum) {
-  return JSON.stringify([scrum.yesterdayNote, scrum.todayNote, scrum.blockersNote]);
+function scrumNotesSnapshot(scrum: DailyDashboard) {
+  return JSON.stringify(scrum.draft);
 }
 
 type IntroLanguage = "ko" | "en" | "ja" | "zh" | "es";
@@ -3755,17 +3759,29 @@ function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => 
   const initialDate = localDate();
   const initialScrum = dailyScrumMemoryCache.get(initialDate) ?? null;
   const [date, setDate] = useState(initialDate);
-  const [scrum, setScrum] = useState<Scrum | null>(initialScrum);
-  const [saving, setSaving] = useState(false);
+  const [scrum, setScrum] = useState<DailyDashboard | null>(initialScrum);
+  const [saving, setSaving] = useState<"draft" | "submit" | "task" | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [savedNotes, setSavedNotes] = useState(initialScrum ? scrumNotesSnapshot(initialScrum) : "");
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newTaskParent, setNewTaskParent] = useState("");
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("slack_link");
+    if (!token) return;
+    params.delete("slack_link");
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${params.size ? `?${params}` : ""}`);
+    void fetch("/api/slack/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) })
+      .then(async (response) => { const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(result.error || "Slack 사용자를 연결하지 못했습니다."); onNotice("Slack 사용자 연결을 완료했습니다."); })
+      .catch((error: unknown) => onNotice(error instanceof Error ? error.message : "Slack 사용자를 연결하지 못했습니다."));
+  }, [onNotice]);
   useEffect(() => {
     let active = true;
     const cachedScrum = dailyScrumMemoryCache.get(date) ?? null;
     fetch(`/api/daily-scrum?date=${date}`)
-      .then(async (response) => response.ok ? response.json() as Promise<{ scrum: Scrum }> : Promise.reject())
-      .then((data) => { if (active) { dailyScrumMemoryCache.set(date, data.scrum); setLoadError(false); setScrum(data.scrum); setSavedNotes(scrumNotesSnapshot(data.scrum)); } })
+      .then(async (response) => response.ok ? response.json() as Promise<DailyDashboard> : Promise.reject())
+      .then((data) => { if (active) { dailyScrumMemoryCache.set(date, data); setLoadError(false); setScrum(data); setSavedNotes(scrumNotesSnapshot(data)); setNewTaskParent(defaultDailyParent(data)); } })
       .catch(() => { if (active && !cachedScrum) setLoadError(true); });
     return () => { active = false; };
   }, [date, loadAttempt]);
@@ -3779,27 +3795,68 @@ function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => 
   if (loadError) return <AsyncState icon={AlertTriangle} title="데일리 스크럼을 불러오지 못했습니다" detail="날짜를 유지한 채 다시 불러옵니다." actionLabel="다시 시도" onAction={() => { setScrum(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} />;
   if (!scrum) return <AsyncState icon={LoaderCircle} title="데일리 스크럼을 불러오는 중입니다" loading />;
   const currentScrum = scrum;
-  async function save() {
-    setSaving(true);
+  async function save(showNotice = true) {
+    setSaving("draft");
     try {
-      const response = await fetch("/api/daily-scrum", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(currentScrum) });
-      if (!response.ok) throw new Error("데일리 스크럼을 저장하지 못했습니다.");
-      dailyScrumMemoryCache.set(date, currentScrum);
-      setSavedNotes(scrumNotesSnapshot(currentScrum));
-      onNotice("데일리 스크럼을 저장했습니다.");
+      const response = await fetch("/api/daily-scrum", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...currentScrum.draft, date }) });
+      const data = await response.json() as DailyDashboard & { error?: string };
+      if (!response.ok) throw new Error(data.error || "데일리 초안을 저장하지 못했습니다.");
+      dailyScrumMemoryCache.set(date, data); setScrum(data); setSavedNotes(scrumNotesSnapshot(data));
+      if (showNotice) onNotice("데일리 초안을 저장했습니다.");
+      return data;
     } catch (saveError) {
-      onNotice(saveError instanceof Error ? saveError.message : "데일리 스크럼을 저장하지 못했습니다.");
+      onNotice(saveError instanceof Error ? saveError.message : "데일리 초안을 저장하지 못했습니다.");
+      return null;
     } finally {
-      setSaving(false);
+      setSaving(null);
     }
   }
-  const sections: { key: "yesterdayNote" | "todayNote" | "blockersNote"; title: string; tasks: OkrptrItem[]; icon: LucideIcon }[] = [
-    { key: "yesterdayNote", title: "어제 완료", tasks: scrum.yesterdayTasks, icon: CheckCircle2 },
-    { key: "todayNote", title: "오늘 집중", tasks: scrum.todayTasks, icon: Target },
-    { key: "blockersNote", title: "막힘", tasks: scrum.blockers, icon: CircleHelp },
-  ];
-  return <section className="scrum-section"><div className="scrum-toolbar"><label><CalendarDays size={14} /><input aria-label="데일리 스크럼 날짜" type="date" value={date} onChange={(event) => { const nextDate = event.target.value; const cached = dailyScrumMemoryCache.get(nextDate) ?? null; setScrum(cached); setSavedNotes(cached ? scrumNotesSnapshot(cached) : ""); setLoadError(false); setDate(nextDate); }} /></label><button className="primary-action" onClick={() => void save()} disabled={saving || !notesDirty}><Check size={14} />{saving ? "저장 중" : notesDirty ? "저장" : "저장됨"}</button></div><div className="scrum-grid">{sections.map((section) => { const Icon = section.icon; return <section className="scrum-column" key={section.key}><header><Icon size={15} /><b>{section.title}</b><span>{section.tasks.length}</span></header><div className="scrum-task-list">{section.tasks.map((task) => <button key={task.id} onClick={() => onOpenTask(task.id)}><span className={`status-dot status-${task.status}`} /><b>{task.title}</b><small>{dueLabel(task.dueDate)}</small></button>)}{!section.tasks.length && <span className="empty-column">자동으로 모인 Task가 없습니다</span>}</div><textarea value={scrum[section.key]} onChange={(event) => setScrum({ ...scrum, [section.key]: event.target.value })} placeholder={`${section.title} 메모`} aria-label={`${section.title} 메모`} /></section>; })}</div></section>;
+
+  async function submit() {
+    if (notesDirty && !await save(false)) return;
+    setSaving("submit");
+    try {
+      const response = await fetch("/api/daily-scrum/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date }) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "데일리를 확정하지 못했습니다.");
+      await reload(); onNotice("데일리를 확정했습니다. Slack 공유는 백그라운드에서 진행됩니다.");
+    } catch (error) { onNotice(error instanceof Error ? error.message : "데일리를 확정하지 못했습니다."); }
+    finally { setSaving(null); }
+  }
+  async function reload() {
+    const refreshed = await fetch(`/api/daily-scrum?date=${date}`).then((entry) => entry.json() as Promise<DailyDashboard>);
+    dailyScrumMemoryCache.set(date, refreshed); setScrum(refreshed); setSavedNotes(scrumNotesSnapshot(refreshed)); return refreshed;
+  }
+  async function createDailyTask(event: FormEvent) {
+    event.preventDefault(); if (!newTaskTitle.trim() || !newTaskParent) return; setSaving("task");
+    try {
+      const [parentKind, parentId = ""] = newTaskParent.split(":", 2);
+      const response = await fetch("/api/daily-scrum/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, title: newTaskTitle, parentKind, parentId: parentId || null, requestId: crypto.randomUUID() }) });
+      const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(result.error || "Task를 만들지 못했습니다.");
+      await reload(); setNewTaskTitle(""); onNotice("오늘 기한의 Task를 만들고 데일리에 선택했습니다.");
+    } catch (error) { onNotice(error instanceof Error ? error.message : "Task를 만들지 못했습니다."); }
+    finally { setSaving(null); }
+  }
+  function updateDraft(patch: Partial<DailyDashboard["draft"]>) { setScrum({ ...currentScrum, draft: { ...currentScrum.draft, ...patch } }); }
+  function toggleTask(id: string) {
+    const selectedTaskIds = currentScrum.draft.selectedTaskIds.includes(id) ? currentScrum.draft.selectedTaskIds.filter((entry) => entry !== id) : [...currentScrum.draft.selectedTaskIds, id];
+    updateDraft({ selectedTaskIds, noPlannedTasks: false });
+  }
+  const noTaskProjects = currentScrum.createTargets.projects.filter((project) => project.needsTask);
+  return <section className="daily-workspace">
+    <div className="scrum-toolbar"><label><CalendarDays size={14} /><span className="sr-only">데일리 날짜</span><input aria-label="데일리 날짜" type="date" value={date} onChange={(event) => { const nextDate = event.target.value; const cached = dailyScrumMemoryCache.get(nextDate) ?? null; setScrum(cached); setSavedNotes(cached ? scrumNotesSnapshot(cached) : ""); setLoadError(false); setDate(nextDate); }} /></label><div><button onClick={() => void save()} disabled={Boolean(saving) || !notesDirty}>{saving === "draft" ? "저장 중" : notesDirty ? "초안 저장" : "저장됨"}</button><button className="primary-action" onClick={() => void submit()} disabled={Boolean(saving)}><Send size={14} />{saving === "submit" ? "확정 중" : "확정 및 공유"}</button></div></div>
+    <div className="daily-layout"><section className="daily-editor" aria-labelledby="my-daily-heading"><header><div><span>MY DAILY</span><h2 id="my-daily-heading">내 데일리</h2><p>조회와 선택은 Task 상태·기한·담당자를 바꾸지 않습니다.</p></div>{currentScrum.latestSubmission && <small>제출 v{currentScrum.latestSubmission.version} · {formatDateTime(currentScrum.latestSubmission.submittedAt)}</small>}</header>
+      <div className="daily-notes"><label><span>어제</span><textarea value={currentScrum.draft.yesterdayNote} onChange={(event) => updateDraft({ yesterdayNote: event.target.value })} placeholder="어제 마무리한 일" /></label><label><span>오늘</span><textarea value={currentScrum.draft.todayNote} onChange={(event) => updateDraft({ todayNote: event.target.value })} placeholder="오늘의 초점과 메모" /></label><label><span>블로커</span><textarea value={currentScrum.draft.blockersNote} onChange={(event) => updateDraft({ blockersNote: event.target.value })} placeholder="도움이 필요한 문제" /></label></div>
+      <section className="daily-task-picker"><header><div><b>오늘 할 Task</b><span>본인에게 할당된 미완료 Task만 표시합니다.</span></div><strong>{currentScrum.draft.selectedTaskIds.length}/50</strong></header><label className="daily-none"><input type="checkbox" checked={currentScrum.draft.noPlannedTasks} onChange={(event) => updateDraft({ noPlannedTasks: event.target.checked, selectedTaskIds: event.target.checked ? [] : currentScrum.draft.selectedTaskIds })} />오늘 예정 없음</label>
+        {currentScrum.candidates.groups.length ? <div className="daily-task-groups">{currentScrum.candidates.groups.map((group) => <section key={group.key}><h3>{group.kind === "project" ? "Project" : group.kind === "routine" ? "Routine" : "General"} · {group.title}</h3>{group.tasks.map((task) => <div className="daily-task-option" key={task.id}><label aria-label={`${task.title} 선택`}><input type="checkbox" aria-label={`${task.title} 선택`} checked={currentScrum.draft.selectedTaskIds.includes(task.id)} disabled={currentScrum.draft.noPlannedTasks || (!currentScrum.draft.selectedTaskIds.includes(task.id) && currentScrum.draft.selectedTaskIds.length >= 50)} onChange={() => toggleTask(task.id)} /><span><b>{task.title}</b><small>{statusLabel(task.status)} · {dueLabel(task.dueDate)}</small></span></label><button onClick={() => onOpenTask(task.id)} aria-label={`${task.title} 열기`}><ChevronRight size={15} /></button></div>)}</section>)}</div> : <p className="daily-empty">할당된 미완료 Task가 없습니다.</p>}
+      </section>
+      {noTaskProjects.length > 0 && <aside className="daily-dri-alert"><Target size={18} /><div><b>DRI이지만 미완료 Task가 없는 Project</b><p>실행 항목을 바로 추가할 수 있습니다.</p><div>{noTaskProjects.map((project) => <button key={project.id} onClick={() => setNewTaskParent(`project:${project.id}`)}>{project.title}<Plus size={13} /></button>)}</div></div></aside>}
+      <form className="daily-new-task" onSubmit={(event) => void createDailyTask(event)}><header><b>새 Task 만들기</b><span>이 양식을 제출할 때만 실제 Task가 생성됩니다.</span></header><div><select aria-label="새 Task 상위 항목" value={newTaskParent} onChange={(event) => setNewTaskParent(event.target.value)}>{currentScrum.createTargets.projects.map((project) => <option key={project.id} value={`project:${project.id}`}>Project · {project.title}</option>)}{currentScrum.createTargets.routines.map((routine) => <option key={routine.id} value={`routine:${routine.id}`}>Routine · {routine.title}</option>)}{currentScrum.createTargets.allowGeneral && <option value="general:">General</option>}</select><input aria-label="새 Task 제목" value={newTaskTitle} onChange={(event) => setNewTaskTitle(event.target.value)} maxLength={240} placeholder="오늘 할 Task 제목" /><button disabled={!newTaskTitle.trim() || !newTaskParent || Boolean(saving)}>{saving === "task" ? "생성 중" : "Task 생성"}</button></div></form>
+    </section><section className="daily-rollup" aria-labelledby="daily-rollup-heading"><header><span>TEAM ROLLUP</span><h2 id="daily-rollup-heading">팀 데일리</h2><p>작성 중인 초안은 상태만 표시합니다.</p></header><div>{currentScrum.team.map((member) => <article key={member.memberId} className={`daily-member-card ${member.status}`}><header><div><b>{member.displayName}</b><small>{member.slackConnected ? "Slack 연결" : "Slack 미연결"}</small></div><span>{member.status === "submitted" ? "제출 완료" : member.status === "writing" ? "작성 중" : "미제출"}</span></header>{member.submission ? <div><ul>{member.submission.tasks.map((task) => <li key={task.id}>{task.isNew && <em>신규</em>}<button disabled={!task.taskId} onClick={() => task.taskId && onOpenTask(task.taskId)}>{task.taskTitle}</button><small>{task.parentTitle}</small></li>)}{member.submission.noPlannedTasks && !member.submission.tasks.length && <li>오늘 예정 없음</li>}</ul>{member.submission.todayNote && <p><b>오늘</b>{member.submission.todayNote}</p>}{member.submission.blockersNote && <p className="blocker"><b>블로커</b>{member.submission.blockersNote}</p>}</div> : <p className="daily-private-draft">{member.status === "writing" ? "초안을 작성 중입니다. 내용은 제출 후 공개됩니다." : "아직 제출된 데일리가 없습니다."}</p>}</article>)}</div>{currentScrum.legacyWorkspaceNote && <details className="daily-legacy"><summary>기존 워크스페이스 메모</summary><p>{currentScrum.legacyWorkspaceNote.todayNote || currentScrum.legacyWorkspaceNote.yesterdayNote || currentScrum.legacyWorkspaceNote.blockersNote}</p></details>}</section></div>
+  </section>;
 }
+
+function defaultDailyParent(scrum: DailyDashboard) { const project = scrum.createTargets.projects.find((entry) => entry.needsTask) ?? scrum.createTargets.projects[0]; if (project) return `project:${project.id}`; if (scrum.createTargets.routines[0]) return `routine:${scrum.createTargets.routines[0].id}`; return scrum.createTargets.allowGeneral ? "general:" : ""; }
 
 function RecommendationsView({ items, onOpenTask, onOpenProject, onNavigate }: { items: OkrptrItem[]; onOpenTask: (id: string) => void; onOpenProject: (id: string) => void; onNavigate: (view: View) => void }) {
   const date = localDate();
@@ -4725,7 +4782,7 @@ function TreeView({ objective, items, depths, canEdit, onEditOkrItem, onComplete
     const parent = entry.parentId ? byId.get(entry.parentId) : undefined;
     const open = () => entry.kind === "project" ? onOpenProject(entry.id) : entry.kind === "task" ? onOpenTask(entry.id) : undefined;
     const tracksProgress = entry.kind === "key_result" || entry.kind === "project" || entry.kind === "task";
-    return <div className={`hierarchy-row ${canOpen ? "interactive" : ""} ${canExpandInitiative ? "initiative-disclosure-row" : ""}`} role={canOpen ? "button" : undefined} tabIndex={canOpen ? 0 : undefined} aria-label={canOpen ? `${entry.title} 상세 열기` : undefined} onClick={canOpen ? open : undefined} onKeyDown={canOpen ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } } : undefined} key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as CSSProperties}>
+    return <div className={`hierarchy-row hierarchy-kind-${entry.kind} ${canOpen ? "interactive" : ""} ${canExpandInitiative ? "initiative-disclosure-row" : ""}`} role={canOpen ? "button" : undefined} tabIndex={canOpen ? 0 : undefined} aria-label={canOpen ? `${entry.title} 상세 열기` : undefined} onClick={canOpen ? open : undefined} onKeyDown={canOpen ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } } : undefined} key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as CSSProperties}>
       {canExpandInitiative && <button type="button" className={`initiative-disclosure-hit ${canEditNode ? "" : "full"}`} aria-expanded={expanded} aria-controls={`initiative-execution-${entry.id}`} aria-label={`${entry.title} Project·Task ${executionCount}개 ${expanded ? "접기" : "펼치기"}`} onClick={() => toggleInitiative(entry.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleInitiative(entry.id); } }} />}
       <span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span>
       <span className="hierarchy-copy"><small title={parent?.title}>{kindLabel(entry.kind)}{entry.kind === "initiative" && parent ? ` · 상위 KR: ${parent.title}` : ""}</small><b>{entry.title}</b></span>
@@ -5742,19 +5799,17 @@ function IntegrationModal({ onNotice, onClose }: { onNotice: (message: string) =
     setCreatingConnection(true);
     try {
       const response = await fetch("/api/integration-tokens", { method: "POST" });
-      const data = await response.json() as { prompt?: string; connection?: IntegrationConnection; error?: string };
-      if (!response.ok || !data.prompt || !data.connection) {
+      const data = await response.json() as { prompt?: string; error?: string };
+      if (!response.ok || !data.prompt) {
         onNotice(data.error || "연결 내용을 만들지 못했습니다.");
         return;
       }
       try {
         await navigator.clipboard.writeText(data.prompt);
       } catch {
-        await fetch(`/api/integration-tokens?id=${encodeURIComponent(data.connection.id)}`, { method: "DELETE" });
         onNotice("클립보드에 복사하지 못했습니다. 브라우저의 클립보드 권한을 확인해 주세요.");
         return;
       }
-      setConnections((current) => [data.connection!, ...current]);
       onNotice("연결 내용을 복사했습니다. 브라우저 제어가 가능한 ChatGPT 대화에 붙여넣으세요.");
     } catch {
       onNotice("연결 내용을 만들지 못했습니다.");
@@ -5832,11 +5887,67 @@ function AppIntegrationsModal({ google, slack, workspaceName, canManageSlack, on
         <header><Hash size={18} /><div><b>Slack</b><p>{slack?.connected ? `${slack.teamName}에 OKRPTR 봇 연결됨` : "업무 이벤트를 원하는 채널로 자동 전송"}</p></div><span className={slack?.connected ? "connection-live" : "connection-local"} /></header>
         <div className="integration-scope"><b>워크스페이스 연결</b><span>{workspaceName} 전체에 적용</span></div>
         <div className="integration-actions">{slack?.connected ? <button className="secondary-danger" onClick={() => void disconnectSlack()} disabled={disconnectingSlack || !canManageSlack}>{disconnectingSlack ? "해제 중" : canManageSlack ? "연결 해제" : "관리자만 변경"}</button> : <button onClick={connectSlack} disabled={!slack?.configured || !canManageSlack}>{!canManageSlack ? "관리자만 연결" : slack?.configured ? "Slack에 연결" : "준비 중"}</button>}<small>{slack?.connected ? "/okrptr 수집 · 자동 알림" : "연결 후 자동화 봇을 만들 수 있습니다."}</small></div>
+        <SlackDailySettingsPanel connected={Boolean(slack?.connected)} canManage={canManageSlack} onNotice={onNotice} />
         <SlackAutomationManager connected={Boolean(slack?.connected)} canManage={canManageSlack} workspaceName={workspaceName} onNotice={onNotice} />
       </section>
     </div>
     <footer><span><Plug size={15} />자동화는 연결된 OKRPTR Slack 봇으로 전송됩니다.</span><button onClick={() => requestClose("close-button")}>닫기</button></footer>
   </section>}</OverlayDialog>;
+}
+
+type SlackDailyAdminData = {
+  connected: boolean; teamName: string | null; needsReauthorization: boolean;
+  settings: { enabled: boolean; weekdays: number[]; reminderTime: string; timezone: string; installStatus: string; lastSyncedAt: string | null; lastError: string };
+  channels: Array<{ id: string; name: string; isPrivate: boolean }>;
+  members: Array<{ memberId: string; displayName: string; email: string; linked: boolean; slackDisplayName: string | null; reminder: { status: string; postAt: number; error: string } | null }>;
+  failedPublications: Array<{ id: string; channelId: string; memberName: string; date: string; error: string; attempts: number }>;
+};
+type SlackDailyPreferenceData = { linked: boolean; enabled: boolean; reminderTime: string; timezone: string; usesWorkspaceTime: boolean; usesWorkspaceTimezone: boolean };
+
+function SlackDailySettingsPanel({ connected, canManage, onNotice }: { connected: boolean; canManage: boolean; onNotice: (message: string) => void }) {
+  const [preference, setPreference] = useState<SlackDailyPreferenceData | null>(null);
+  const [admin, setAdmin] = useState<SlackDailyAdminData | null>(null);
+  const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string; isPrivate: boolean }>>([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!connected) return;
+    let active = true;
+    void fetch("/api/slack/daily/preferences").then(async (response) => response.ok ? response.json() as Promise<SlackDailyPreferenceData> : Promise.reject()).then((data) => { if (active) setPreference(data); }).catch(() => undefined);
+    if (canManage) void Promise.all([
+      fetch("/api/slack/daily/settings").then((response) => response.json() as Promise<SlackDailyAdminData>),
+      fetch("/api/slack/channels").then((response) => response.json() as Promise<{ channels?: Array<{ id: string; name: string; isPrivate: boolean }> }>),
+    ]).then(([settings, channels]) => { if (active) { setAdmin(settings); setAvailableChannels(channels.channels ?? []); } }).catch(() => undefined);
+    return () => { active = false; };
+  }, [connected, canManage]);
+
+  async function savePreference(patch: Partial<Pick<SlackDailyPreferenceData, "enabled" | "reminderTime" | "timezone">>) {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/slack/daily/preferences", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+      const data = await response.json() as SlackDailyPreferenceData & { error?: string }; if (!response.ok) throw new Error(data.error || "개인 알림을 저장하지 못했습니다.");
+      setPreference(data); onNotice("개인 Slack 데일리 알림을 저장했습니다.");
+    } catch (error) { onNotice(error instanceof Error ? error.message : "개인 알림을 저장하지 못했습니다."); } finally { setBusy(false); }
+  }
+  async function patchAdmin(payload: Record<string, unknown>, notice: string) {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/slack/daily/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const data = await response.json() as SlackDailyAdminData & { error?: string }; if (!response.ok) throw new Error(data.error || "Slack 데일리 설정을 저장하지 못했습니다.");
+      if (data.settings) setAdmin(data); onNotice(notice);
+    } catch (error) { onNotice(error instanceof Error ? error.message : "Slack 데일리 설정을 저장하지 못했습니다."); } finally { setBusy(false); }
+  }
+  if (!connected) return <div className="slack-daily-locked"><Bot size={16} /><div><b>개인 데일리 봇</b><p>Slack을 연결하면 평일 DM과 팀 롤업 공유를 사용할 수 있습니다.</p></div></div>;
+  return <section className="slack-daily-settings"><header><div><span>DAILY BOT</span><h3>개인 데일리 알림</h3><p>GPT 없이 할당 관계와 직접 선택한 Task만 사용합니다.</p></div>{admin?.needsReauthorization && <button onClick={() => { window.location.href = "/api/slack/auth?returnTo=/"; }}>권한 업데이트</button>}</header>
+    {preference ? <div className="slack-personal-preference"><label><input type="checkbox" checked={preference.enabled} disabled={busy || !preference.linked} onChange={(event) => void savePreference({ enabled: event.target.checked })} /><span>내 Slack DM 알림 사용</span></label><label><span>시간</span><input type="time" value={preference.reminderTime} disabled={busy || !preference.linked} onChange={(event) => void savePreference({ reminderTime: event.target.value })} /></label><label><span>시간대</span><select value={preference.timezone} disabled={busy || !preference.linked} onChange={(event) => void savePreference({ timezone: event.target.value })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label>{!preference.linked && <p>Slack 사용자 연결이 필요합니다. `/okrptr daily`에서 일회용 연결 링크를 받을 수 있습니다.</p>}</div> : <div className="slack-daily-loading"><LoaderCircle className="spin" size={14} /> 개인 설정 확인 중</div>}
+    {canManage && admin && <details className="slack-daily-admin"><summary>관리자 기본 일정·공유 채널·연결 상태 <ChevronDown size={13} /></summary><div>
+      <div className="slack-admin-grid"><label><span>기본 시간</span><input type="time" value={admin.settings.reminderTime} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, reminderTime: event.target.value } })} /></label><label><span>기본 시간대</span><select value={admin.settings.timezone} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, timezone: event.target.value } })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label></div>
+      <div className="slack-weekdays">{["일", "월", "화", "수", "목", "금", "토"].map((label, day) => <label key={label}><input type="checkbox" checked={admin.settings.weekdays.includes(day)} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, weekdays: event.target.checked ? [...admin.settings.weekdays, day].sort() : admin.settings.weekdays.filter((entry) => entry !== day) } })} />{label}</label>)}</div>
+      <fieldset><legend>개인 카드 공유 채널</legend>{availableChannels.length ? availableChannels.map((channel) => <label key={channel.id}><input type="checkbox" checked={admin.channels.some((entry) => entry.id === channel.id)} onChange={(event) => setAdmin({ ...admin, channels: event.target.checked ? [...admin.channels, channel] : admin.channels.filter((entry) => entry.id !== channel.id) })} /><span>#{channel.name}{channel.isPrivate ? " · 비공개" : ""}</span></label>) : <p>봇이 참여한 채널이 없습니다. Slack에서 봇을 초대한 뒤 재동기화하세요.</p>}</fieldset>
+      <div className="slack-admin-actions"><button disabled={busy} onClick={() => void patchAdmin({ reminderTime: admin.settings.reminderTime, timezone: admin.settings.timezone, weekdays: admin.settings.weekdays, channelIds: admin.channels.map((channel) => channel.id) }, "Slack 데일리 기본 설정을 저장했습니다.")}>설정 저장</button><button disabled={busy} onClick={() => void patchAdmin({ action: "resync" }, "Slack 사용자와 예약을 재동기화했습니다.")}>재동기화</button></div>
+      <div className="slack-member-links">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? member.slackDisplayName || "연결됨" : "Slack 미연결"}{member.reminder ? ` · ${member.reminder.status}` : ""}</small></p>{member.linked && <button disabled={busy} onClick={() => void patchAdmin({ action: "test_dm", memberId: member.memberId }, `${member.displayName}님에게 테스트 DM을 보냈습니다.`)}>테스트 DM</button>}</div>)}</div>
+      {admin.failedPublications.length > 0 && <div className="slack-publication-failures"><b>채널 전송 실패</b>{admin.failedPublications.map((failure) => <div key={failure.id}><p>{failure.memberName} · {failure.date} · {failure.channelId}<small>{failure.error}</small></p><button disabled={busy} onClick={() => void patchAdmin({ action: "retry_publication", publicationId: failure.id }, "채널 전송을 다시 시도했습니다.")}>재시도</button></div>)}</div>}
+    </div></details>}
+  </section>;
 }
 
 type SlackAutomationDraft = {

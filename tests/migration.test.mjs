@@ -607,6 +607,37 @@ test("creates revocable workspace-scoped integration tokens", async () => {
   db.close();
 });
 
+test("creates ChatGPT OAuth DCR clients and single-use PKCE authorization codes", async () => {
+  const db = new DatabaseSync(":memory:");
+  const migration = await readFile(new URL("../drizzle/0027_mcp_oauth.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO mcp_oauth_clients (client_id, redirect_uris, client_name)
+      VALUES ('client', '["https://chatgpt.com/connector_platform_oauth_redirect"]', 'ChatGPT');
+    INSERT INTO mcp_oauth_codes (
+      code_hash, authorization_json, client_id, redirect_uri, code_challenge,
+      resource, scope, expires_at
+    ) VALUES (
+      'hash', '{"ownerId":"workspace","userId":"owner","role":"owner"}', 'client',
+      'https://chatgpt.com/connector_platform_oauth_redirect', 'challenge',
+      'https://okrptr.com/mcp', 'okrptr:read okrptr:write', '2099-01-01T00:00:00.000Z'
+    );
+  `);
+
+  assert.deepEqual({ ...db.prepare("SELECT client_id, client_name FROM mcp_oauth_clients").get() }, {
+    client_id: "client",
+    client_name: "ChatGPT",
+  });
+  assert.deepEqual({ ...db.prepare("SELECT client_id, used_at FROM mcp_oauth_codes").get() }, {
+    client_id: "client",
+    used_at: null,
+  });
+  db.exec("UPDATE mcp_oauth_codes SET used_at = CURRENT_TIMESTAMP WHERE code_hash = 'hash' AND used_at IS NULL");
+  assert.notEqual(db.prepare("SELECT used_at FROM mcp_oauth_codes WHERE code_hash = 'hash'").get().used_at, null);
+  assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_mcp_oauth_codes_expires'").get().name, "idx_mcp_oauth_codes_expires");
+  db.close();
+});
+
 test("creates OKR cycles and links OKR items to a cycle", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON;");
@@ -855,5 +886,83 @@ test("stores one scheduled API data connection per Key Result or Project", async
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM kr_data_connections").get().count, 1);
   db.exec("DELETE FROM items WHERE id = 'project'");
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM kr_data_connections").get().count, 0);
+  db.close();
+});
+
+test("adds member daily drafts, immutable submissions, and Slack daily delivery state", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_user_id TEXT NOT NULL);
+    CREATE TABLE workspace_members (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      user_id TEXT, email TEXT, display_name TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT 'member',
+      status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE items (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'todo', source TEXT NOT NULL DEFAULT 'web', source_ref TEXT
+    );
+    CREATE TABLE daily_scrums (
+      id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, scrum_date TEXT NOT NULL,
+      yesterday_note TEXT NOT NULL DEFAULT '', today_note TEXT NOT NULL DEFAULT '', blockers_note TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX idx_daily_scrums_owner_date ON daily_scrums(owner_id, scrum_date);
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
+    INSERT INTO workspace_members (id, workspace_id, user_id, email, display_name, role)
+      VALUES ('member-1', 'workspace', 'owner', 'owner@example.com', 'Owner', 'owner'),
+             ('member-2', 'workspace', 'member', 'member@example.com', 'Member', 'member');
+    INSERT INTO items (id, owner_id, kind, title) VALUES ('task', 'workspace', 'task', 'Ship daily bot');
+    INSERT INTO daily_scrums (id, owner_id, scrum_date, today_note)
+      VALUES ('legacy', 'workspace', '2026-08-30', 'Existing workspace note');
+  `);
+  const migration = await readFile(new URL("../drizzle/0026_slack_daily_bot.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO daily_scrums (id, owner_id, member_id, scrum_date, today_note)
+      VALUES ('draft-1', 'workspace', 'member-1', '2026-08-30', 'Owner draft'),
+             ('draft-2', 'workspace', 'member-2', '2026-08-30', 'Member draft');
+    INSERT INTO daily_scrum_task_selections (id, owner_id, daily_scrum_id, member_id, task_id)
+      VALUES ('selection', 'workspace', 'draft-1', 'member-1', 'task');
+    INSERT INTO daily_submissions
+      (id, owner_id, member_id, member_name, scrum_date, version, today_note)
+      VALUES ('submission-v1', 'workspace', 'member-1', 'Owner', '2026-08-30', 1, 'First'),
+             ('submission-v2', 'workspace', 'member-1', 'Owner', '2026-08-30', 2, 'Second');
+    INSERT INTO daily_task_snapshots
+      (id, owner_id, submission_id, task_id, task_title, parent_kind, parent_title, status)
+      VALUES ('snapshot', 'workspace', 'submission-v2', 'task', 'Ship daily bot', 'general', 'General', 'todo');
+    INSERT INTO slack_member_links
+      (id, owner_id, member_id, team_id, slack_user_id, slack_email)
+      VALUES ('link', 'workspace', 'member-1', 'T123', 'U123', 'owner@example.com');
+    INSERT INTO slack_daily_settings (owner_id) VALUES ('workspace');
+    INSERT INTO slack_daily_channels (id, owner_id, channel_id, channel_name)
+      VALUES ('channel', 'workspace', 'C123', 'daily');
+    INSERT INTO slack_daily_reminders
+      (id, owner_id, member_id, slack_user_id, dm_channel_id, scheduled_message_id, post_at, block_id)
+      VALUES ('reminder', 'workspace', 'member-1', 'U123', 'D123', 'Q123', 1788120000, 'okrptr_daily_reminder:1');
+    INSERT INTO slack_daily_publications
+      (id, owner_id, member_id, submission_id, scrum_date, channel_id)
+      VALUES ('publication', 'workspace', 'member-1', 'submission-v2', '2026-08-30', 'C123');
+  `);
+
+  assert.deepEqual({ ...db.prepare("SELECT member_id, today_note FROM daily_scrums WHERE id = 'legacy'").get() }, {
+    member_id: null,
+    today_note: "Existing workspace note",
+  });
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM daily_scrums WHERE owner_id = 'workspace' AND scrum_date = '2026-08-30'").get().count, 3);
+  assert.equal(db.prepare("SELECT MAX(version) AS version FROM daily_submissions WHERE member_id = 'member-1'").get().version, 2);
+  assert.throws(() => db.exec("INSERT INTO slack_member_links (id, owner_id, member_id, team_id, slack_user_id) VALUES ('duplicate', 'workspace', 'member-2', 'T123', 'U123')"), /UNIQUE/i);
+  db.exec("DELETE FROM items WHERE id = 'task'");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM daily_scrum_task_selections").get().count, 0);
+  assert.deepEqual({ ...db.prepare("SELECT task_title, status FROM daily_task_snapshots WHERE id = 'snapshot'").get() }, {
+    task_title: "Ship daily bot",
+    status: "todo",
+  });
+  db.exec("DELETE FROM workspaces WHERE id = 'workspace'");
+  for (const table of ["daily_submissions", "slack_member_links", "slack_daily_reminders", "slack_daily_publications"]) {
+    assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0, `${table} should cascade with workspace deletion`);
+  }
   db.close();
 });

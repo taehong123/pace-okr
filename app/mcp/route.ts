@@ -1335,7 +1335,7 @@ async function handleMcp(request: Request) {
   }
 
   const authorization = await authorizeRequest(request);
-  if (authorization instanceof Response) return withCors(authorization);
+  if (authorization instanceof Response) return withCors(withMcpAuthChallenge(authorization, request));
 
   try {
     await ensureWorkspace(authorization.ownerId);
@@ -1361,6 +1361,14 @@ function corsHeaders() {
 function withCors(response: Response) {
   const headers = new Headers(response.headers);
   Object.entries(corsHeaders()).forEach(([key, value]) => headers.set(key, value));
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+function withMcpAuthChallenge(response: Response, request: Request) {
+  if (response.status !== 401) return response;
+  const headers = new Headers(response.headers);
+  const metadataUrl = new URL("/.well-known/oauth-protected-resource", request.url).toString();
+  headers.set("WWW-Authenticate", `Bearer resource_metadata="${metadataUrl}", scope="okrptr:read okrptr:write"`);
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 

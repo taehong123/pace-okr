@@ -88,6 +88,33 @@ export const integrationTokens = sqliteTable(
   ],
 );
 
+export const mcpOAuthClients = sqliteTable(
+  "mcp_oauth_clients",
+  {
+    clientId: text("client_id").primaryKey(),
+    redirectUris: text("redirect_uris").notNull(),
+    clientName: text("client_name").notNull().default("ChatGPT"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+);
+
+export const mcpOAuthCodes = sqliteTable(
+  "mcp_oauth_codes",
+  {
+    codeHash: text("code_hash").primaryKey(),
+    authorizationJson: text("authorization_json").notNull(),
+    clientId: text("client_id").notNull(),
+    redirectUri: text("redirect_uri").notNull(),
+    codeChallenge: text("code_challenge").notNull(),
+    resource: text("resource").notNull(),
+    scope: text("scope").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    expiresAt: text("expires_at").notNull(),
+    usedAt: text("used_at"),
+  },
+  (table) => [index("idx_mcp_oauth_codes_expires").on(table.expiresAt)],
+);
+
 export const okrCycles = sqliteTable(
   "okr_cycles",
   {
@@ -367,16 +394,84 @@ export const dailyScrums = sqliteTable(
   "daily_scrums",
   {
     id: text("id").primaryKey(),
-    ownerId: text("owner_id").notNull(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    memberId: text("member_id").references(() => workspaceMembers.id, { onDelete: "cascade" }),
     scrumDate: text("scrum_date").notNull(),
     yesterdayNote: text("yesterday_note").notNull().default(""),
     todayNote: text("today_note").notNull().default(""),
     blockersNote: text("blockers_note").notNull().default(""),
+    noPlannedTasks: integer("no_planned_tasks", { mode: "boolean" }).notNull().default(false),
+    source: text("source").notNull().default("web"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
-    uniqueIndex("idx_daily_scrums_owner_date").on(table.ownerId, table.scrumDate),
+    uniqueIndex("idx_daily_scrums_owner_member_date")
+      .on(table.ownerId, table.memberId, table.scrumDate)
+      .where(sql`${table.memberId} IS NOT NULL`),
+    uniqueIndex("idx_daily_scrums_legacy_owner_date")
+      .on(table.ownerId, table.scrumDate)
+      .where(sql`${table.memberId} IS NULL`),
+    index("idx_daily_scrums_owner_date").on(table.ownerId, table.scrumDate),
+  ],
+);
+
+export const dailyScrumTaskSelections = sqliteTable(
+  "daily_scrum_task_selections",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    dailyScrumId: text("daily_scrum_id").notNull().references(() => dailyScrums.id, { onDelete: "cascade" }),
+    memberId: text("member_id").notNull().references(() => workspaceMembers.id, { onDelete: "cascade" }),
+    taskId: text("task_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_daily_scrum_task_selections_unique").on(table.dailyScrumId, table.taskId),
+    index("idx_daily_scrum_task_selections_member").on(table.ownerId, table.memberId),
+  ],
+);
+
+export const dailySubmissions = sqliteTable(
+  "daily_submissions",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    memberId: text("member_id").references(() => workspaceMembers.id, { onDelete: "set null" }),
+    memberName: text("member_name").notNull().default(""),
+    memberEmail: text("member_email").notNull().default(""),
+    scrumDate: text("scrum_date").notNull(),
+    version: integer("version").notNull(),
+    yesterdayNote: text("yesterday_note").notNull().default(""),
+    todayNote: text("today_note").notNull().default(""),
+    blockersNote: text("blockers_note").notNull().default(""),
+    noPlannedTasks: integer("no_planned_tasks", { mode: "boolean" }).notNull().default(false),
+    source: text("source").notNull().default("web"),
+    submittedAt: text("submitted_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_daily_submissions_owner_member_date_version").on(table.ownerId, table.memberId, table.scrumDate, table.version),
+    index("idx_daily_submissions_owner_date").on(table.ownerId, table.scrumDate, table.submittedAt),
+  ],
+);
+
+export const dailyTaskSnapshots = sqliteTable(
+  "daily_task_snapshots",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    submissionId: text("submission_id").notNull().references(() => dailySubmissions.id, { onDelete: "cascade" }),
+    taskId: text("task_id"),
+    taskTitle: text("task_title").notNull(),
+    parentKind: text("parent_kind").notNull().default("general"),
+    parentId: text("parent_id"),
+    parentTitle: text("parent_title").notNull().default("General"),
+    status: text("status").notNull().default("todo"),
+    isNew: integer("is_new", { mode: "boolean" }).notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (table) => [
+    index("idx_daily_task_snapshots_submission").on(table.submissionId, table.sortOrder),
   ],
 );
 
@@ -581,6 +676,144 @@ export const slackOAuthStates = sqliteTable(
   ],
 );
 
+export const slackMemberLinks = sqliteTable(
+  "slack_member_links",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    memberId: text("member_id").notNull().references(() => workspaceMembers.id, { onDelete: "cascade" }),
+    teamId: text("team_id").notNull(),
+    slackUserId: text("slack_user_id").notNull(),
+    slackEmail: text("slack_email").notNull().default(""),
+    slackDisplayName: text("slack_display_name").notNull().default(""),
+    dmChannelId: text("dm_channel_id").notNull().default(""),
+    matchedBy: text("matched_by").notNull().default("email"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_slack_member_links_owner_member").on(table.ownerId, table.memberId),
+    uniqueIndex("idx_slack_member_links_team_user").on(table.teamId, table.slackUserId),
+    index("idx_slack_member_links_owner").on(table.ownerId),
+  ],
+);
+
+export const slackDailySettings = sqliteTable(
+  "slack_daily_settings",
+  {
+    ownerId: text("owner_id").primaryKey().references(() => workspaces.id, { onDelete: "cascade" }),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    weekdays: text("weekdays").notNull().default("[1,2,3,4,5]"),
+    reminderTime: text("reminder_time").notNull().default("09:00"),
+    timezone: text("timezone").notNull().default("Asia/Seoul"),
+    installStatus: text("install_status").notNull().default("not_connected"),
+    requiredScopes: text("required_scopes").notNull().default(""),
+    lastSyncedAt: text("last_synced_at"),
+    lastError: text("last_error").notNull().default(""),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+);
+
+export const slackDailyPreferences = sqliteTable(
+  "slack_daily_preferences",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    memberId: text("member_id").notNull().references(() => workspaceMembers.id, { onDelete: "cascade" }),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    reminderTime: text("reminder_time"),
+    timezone: text("timezone"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("idx_slack_daily_preferences_owner_member").on(table.ownerId, table.memberId)],
+);
+
+export const slackDailyChannels = sqliteTable(
+  "slack_daily_channels",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    channelId: text("channel_id").notNull(),
+    channelName: text("channel_name").notNull().default(""),
+    isPrivate: integer("is_private", { mode: "boolean" }).notNull().default(false),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_slack_daily_channels_owner_channel").on(table.ownerId, table.channelId),
+    index("idx_slack_daily_channels_owner").on(table.ownerId),
+  ],
+);
+
+export const slackDailyReminders = sqliteTable(
+  "slack_daily_reminders",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    memberId: text("member_id").notNull().references(() => workspaceMembers.id, { onDelete: "cascade" }),
+    slackUserId: text("slack_user_id").notNull(),
+    dmChannelId: text("dm_channel_id").notNull(),
+    scheduledMessageId: text("scheduled_message_id").notNull(),
+    postAt: integer("post_at").notNull(),
+    blockId: text("block_id").notNull(),
+    botUserId: text("bot_user_id").notNull().default(""),
+    status: text("status").notNull().default("scheduled"),
+    lastError: text("last_error").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_slack_daily_reminders_owner_member").on(table.ownerId, table.memberId),
+    index("idx_slack_daily_reminders_post_at").on(table.status, table.postAt),
+  ],
+);
+
+export const slackDailyPublications = sqliteTable(
+  "slack_daily_publications",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    memberId: text("member_id").references(() => workspaceMembers.id, { onDelete: "set null" }),
+    submissionId: text("submission_id").notNull().references(() => dailySubmissions.id, { onDelete: "cascade" }),
+    scrumDate: text("scrum_date").notNull(),
+    channelId: text("channel_id").notNull(),
+    slackMessageTs: text("slack_message_ts"),
+    status: text("status").notNull().default("pending"),
+    error: text("error").notNull().default(""),
+    attempts: integer("attempts").notNull().default(0),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_slack_daily_publications_submission_channel").on(table.submissionId, table.channelId),
+    index("idx_slack_daily_publications_owner_status").on(table.ownerId, table.status, table.updatedAt),
+  ],
+);
+
+export const slackEventReceipts = sqliteTable(
+  "slack_event_receipts",
+  {
+    eventId: text("event_id").primaryKey(),
+    teamId: text("team_id").notNull(),
+    eventType: text("event_type").notNull().default(""),
+    receivedAt: text("received_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("idx_slack_event_receipts_received").on(table.receivedAt)],
+);
+
+export const slackLinkTokens = sqliteTable(
+  "slack_link_tokens",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    teamId: text("team_id").notNull(),
+    slackUserId: text("slack_user_id").notNull(),
+    slackEmail: text("slack_email").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    expiresAt: text("expires_at").notNull(),
+    usedAt: text("used_at"),
+  },
+  (table) => [index("idx_slack_link_tokens_expires").on(table.expiresAt)],
+);
+
 export const trashRecords = sqliteTable(
   "trash_records",
   {
@@ -611,6 +844,9 @@ export type ProjectDocument = typeof projectDocuments.$inferSelect;
 export type ProjectTemplate = typeof projectTemplates.$inferSelect;
 export type ChecklistItem = typeof checklistItems.$inferSelect;
 export type DailyScrum = typeof dailyScrums.$inferSelect;
+export type DailyDraft = typeof dailyScrums.$inferSelect;
+export type DailySubmission = typeof dailySubmissions.$inferSelect;
+export type DailyTaskSnapshot = typeof dailyTaskSnapshots.$inferSelect;
 export type Routine = typeof routines.$inferSelect;
 export type RoutineCompletion = typeof routineCompletions.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
@@ -618,6 +854,8 @@ export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
 export type UserWorkspacePreference = typeof userWorkspacePreferences.$inferSelect;
 export type WorkspaceRule = typeof workspaceRules.$inferSelect;
 export type IntegrationToken = typeof integrationTokens.$inferSelect;
+export type McpOAuthClient = typeof mcpOAuthClients.$inferSelect;
+export type McpOAuthCode = typeof mcpOAuthCodes.$inferSelect;
 export type OkrCycle = typeof okrCycles.$inferSelect;
 export type WorkspaceGroup = typeof workspaceGroups.$inferSelect;
 export type WorkspaceGroupMember = typeof workspaceGroupMembers.$inferSelect;
@@ -629,4 +867,8 @@ export type SlackConnection = typeof slackConnections.$inferSelect;
 export type SlackAutomation = typeof slackAutomations.$inferSelect;
 export type SlackAutomationDelivery = typeof slackAutomationDeliveries.$inferSelect;
 export type SlackOAuthState = typeof slackOAuthStates.$inferSelect;
+export type SlackMemberLink = typeof slackMemberLinks.$inferSelect;
+export type SlackDailySettings = typeof slackDailySettings.$inferSelect;
+export type SlackDailyReminder = typeof slackDailyReminders.$inferSelect;
+export type SlackDailyPublication = typeof slackDailyPublications.$inferSelect;
 export type TrashRecord = typeof trashRecords.$inferSelect;

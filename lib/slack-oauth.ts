@@ -16,7 +16,16 @@ export type SlackOAuthResponse = {
   error?: string;
 };
 
-export const slackScopes = ["commands", "chat:write"];
+export const slackScopes = [
+  "commands",
+  "chat:write",
+  "im:write",
+  "im:history",
+  "users:read",
+  "users:read.email",
+  "channels:read",
+  "groups:read",
+];
 
 export function slackConfigured(runtime: SlackRuntimeEnv) {
   return Boolean(runtime.SLACK_CLIENT_ID && runtime.SLACK_CLIENT_SECRET && runtime.SLACK_SIGNING_SECRET && runtime.SLACK_TOKEN_ENCRYPTION_KEY);
@@ -28,6 +37,14 @@ export function slackRedirectUri(runtime: SlackRuntimeEnv, request: Request) {
 
 export function slackCommandUrl(request: Request) {
   return new URL("/api/slack/commands", request.url).toString();
+}
+
+export function slackInteractionUrl(request: Request) {
+  return new URL("/api/slack/interactions", request.url).toString();
+}
+
+export function slackEventsUrl(request: Request) {
+  return new URL("/api/slack/events", request.url).toString();
 }
 
 export function slackAuthorizationUrl(runtime: SlackRuntimeEnv, request: Request, state: string) {

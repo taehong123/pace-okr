@@ -130,7 +130,7 @@ function readCookie(request: Request, name: string) {
 
 function normalizeReturnTo(value: string) {
   if (!value.startsWith("/") || value.startsWith("//")) return "/";
-  return value.slice(0, 200);
+  return value.slice(0, 4000);
 }
 
 function bytesToBase64Url(bytes: Uint8Array) {

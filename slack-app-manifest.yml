@@ -1,0 +1,38 @@
+display_information:
+  name: OKRPTR
+  description: 개인 데일리와 OKR 실행 Task를 연결합니다.
+  background_color: "#171717"
+features:
+  bot_user:
+    display_name: OKRPTR
+    always_online: false
+  slash_commands:
+    - command: /okrptr
+      url: https://okrptr.com/api/slack/commands
+      description: Task를 수집하거나 개인 데일리를 작성합니다.
+      usage_hint: daily | <Task 내용>
+      should_escape: false
+oauth_config:
+  redirect_urls:
+    - https://okrptr.com/api/slack/callback
+  scopes:
+    bot:
+      - commands
+      - chat:write
+      - im:write
+      - im:history
+      - users:read
+      - users:read.email
+      - channels:read
+      - groups:read
+settings:
+  interactivity:
+    is_enabled: true
+    request_url: https://okrptr.com/api/slack/interactions
+  event_subscriptions:
+    request_url: https://okrptr.com/api/slack/events
+    bot_events:
+      - message.im
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

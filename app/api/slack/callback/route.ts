@@ -1,6 +1,7 @@
-import { env } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
 import { consumeSlackOAuthState, saveSlackConnection } from "@/lib/pace-data";
 import { encryptSlackSecret, exchangeSlackCode, slackConfigured, type SlackRuntimeEnv } from "@/lib/slack-oauth";
+import { syncSlackDailyInstallation } from "@/lib/slack-daily";
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
@@ -35,6 +36,7 @@ export async function GET(request: Request) {
       encryptedBotToken: await encryptSlackSecret(botToken, runtime.SLACK_TOKEN_ENCRYPTION_KEY!),
       scope: install.scope ?? "",
     });
+    waitUntil(syncSlackDailyInstallation(state.ownerId));
     return redirectWithSlackStatus(request, returnTo, "connected");
   } catch {
     return redirectWithSlackStatus(request, returnTo, "failed");

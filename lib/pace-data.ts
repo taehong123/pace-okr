@@ -442,14 +442,17 @@ async function ensureSchema() {
         d1.prepare(`CREATE TABLE IF NOT EXISTS daily_scrums (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL,
+          member_id TEXT REFERENCES workspace_members(id) ON DELETE CASCADE,
           scrum_date TEXT NOT NULL,
           yesterday_note TEXT NOT NULL DEFAULT '',
           today_note TEXT NOT NULL DEFAULT '',
           blockers_note TEXT NOT NULL DEFAULT '',
+          no_planned_tasks INTEGER NOT NULL DEFAULT 0,
+          source TEXT NOT NULL DEFAULT 'web',
           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
-        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_scrums_owner_date ON daily_scrums(owner_id, scrum_date)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_daily_scrums_owner_date ON daily_scrums(owner_id, scrum_date)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS routines (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL,
@@ -624,7 +627,100 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE property_definitions ADD COLUMN system_key TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE property_definitions ADD COLUMN active INTEGER NOT NULL DEFAULT 1");
       await addColumnIfMissing(d1, "ALTER TABLE item_property_values ADD COLUMN legacy_value TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE daily_scrums ADD COLUMN member_id TEXT REFERENCES workspace_members(id) ON DELETE CASCADE");
+      await addColumnIfMissing(d1, "ALTER TABLE daily_scrums ADD COLUMN no_planned_tasks INTEGER NOT NULL DEFAULT 0");
+      await addColumnIfMissing(d1, "ALTER TABLE daily_scrums ADD COLUMN source TEXT NOT NULL DEFAULT 'web'");
+      await d1.prepare("DROP INDEX IF EXISTS idx_daily_scrums_owner_date").run();
       await d1.batch([
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_scrums_owner_member_date ON daily_scrums(owner_id, member_id, scrum_date) WHERE member_id IS NOT NULL"),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_scrums_legacy_owner_date ON daily_scrums(owner_id, scrum_date) WHERE member_id IS NULL"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_daily_scrums_owner_date ON daily_scrums(owner_id, scrum_date)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS daily_scrum_task_selections (
+          id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          daily_scrum_id TEXT NOT NULL REFERENCES daily_scrums(id) ON DELETE CASCADE,
+          member_id TEXT NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
+          task_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_scrum_task_selections_unique ON daily_scrum_task_selections(daily_scrum_id, task_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_daily_scrum_task_selections_member ON daily_scrum_task_selections(owner_id, member_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS daily_submissions (
+          id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          member_id TEXT REFERENCES workspace_members(id) ON DELETE SET NULL,
+          member_name TEXT NOT NULL DEFAULT '', member_email TEXT NOT NULL DEFAULT '', scrum_date TEXT NOT NULL,
+          version INTEGER NOT NULL, yesterday_note TEXT NOT NULL DEFAULT '', today_note TEXT NOT NULL DEFAULT '',
+          blockers_note TEXT NOT NULL DEFAULT '', no_planned_tasks INTEGER NOT NULL DEFAULT 0,
+          source TEXT NOT NULL DEFAULT 'web', submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_submissions_owner_member_date_version ON daily_submissions(owner_id, member_id, scrum_date, version)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_daily_submissions_owner_date ON daily_submissions(owner_id, scrum_date, submitted_at)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS daily_task_snapshots (
+          id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          submission_id TEXT NOT NULL REFERENCES daily_submissions(id) ON DELETE CASCADE,
+          task_id TEXT, task_title TEXT NOT NULL, parent_kind TEXT NOT NULL DEFAULT 'general', parent_id TEXT,
+          parent_title TEXT NOT NULL DEFAULT 'General', status TEXT NOT NULL DEFAULT 'todo',
+          is_new INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_daily_task_snapshots_submission ON daily_task_snapshots(submission_id, sort_order)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_member_links (
+          id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          member_id TEXT NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
+          team_id TEXT NOT NULL, slack_user_id TEXT NOT NULL, slack_email TEXT NOT NULL DEFAULT '',
+          slack_display_name TEXT NOT NULL DEFAULT '', dm_channel_id TEXT NOT NULL DEFAULT '', matched_by TEXT NOT NULL DEFAULT 'email',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_member_links_owner_member ON slack_member_links(owner_id, member_id)"),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_member_links_team_user ON slack_member_links(team_id, slack_user_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_member_links_owner ON slack_member_links(owner_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_daily_settings (
+          owner_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE, enabled INTEGER NOT NULL DEFAULT 1,
+          weekdays TEXT NOT NULL DEFAULT '[1,2,3,4,5]', reminder_time TEXT NOT NULL DEFAULT '09:00',
+          timezone TEXT NOT NULL DEFAULT 'Asia/Seoul', install_status TEXT NOT NULL DEFAULT 'not_connected',
+          required_scopes TEXT NOT NULL DEFAULT '', last_synced_at TEXT, last_error TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_daily_preferences (
+          id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          member_id TEXT NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE, enabled INTEGER NOT NULL DEFAULT 1,
+          reminder_time TEXT, timezone TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_daily_preferences_owner_member ON slack_daily_preferences(owner_id, member_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_daily_channels (
+          id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          channel_id TEXT NOT NULL, channel_name TEXT NOT NULL DEFAULT '', is_private INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_daily_channels_owner_channel ON slack_daily_channels(owner_id, channel_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_daily_channels_owner ON slack_daily_channels(owner_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_daily_reminders (
+          id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          member_id TEXT NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE, slack_user_id TEXT NOT NULL,
+          dm_channel_id TEXT NOT NULL, scheduled_message_id TEXT NOT NULL, post_at INTEGER NOT NULL, block_id TEXT NOT NULL,
+          bot_user_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'scheduled', last_error TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_daily_reminders_owner_member ON slack_daily_reminders(owner_id, member_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_daily_reminders_post_at ON slack_daily_reminders(status, post_at)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_daily_publications (
+          id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          member_id TEXT REFERENCES workspace_members(id) ON DELETE SET NULL,
+          submission_id TEXT NOT NULL REFERENCES daily_submissions(id) ON DELETE CASCADE, scrum_date TEXT NOT NULL,
+          channel_id TEXT NOT NULL, slack_message_ts TEXT, status TEXT NOT NULL DEFAULT 'pending', error TEXT NOT NULL DEFAULT '',
+          attempts INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_daily_publications_submission_channel ON slack_daily_publications(submission_id, channel_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_daily_publications_owner_status ON slack_daily_publications(owner_id, status, updated_at)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_event_receipts (
+          event_id TEXT PRIMARY KEY, team_id TEXT NOT NULL, event_type TEXT NOT NULL DEFAULT '',
+          received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_event_receipts_received ON slack_event_receipts(received_at)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_link_tokens (
+          token_hash TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          team_id TEXT NOT NULL, slack_user_id TEXT NOT NULL, slack_email TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, expires_at TEXT NOT NULL, used_at TEXT
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_link_tokens_expires ON slack_link_tokens(expires_at)"),
         d1.prepare(`UPDATE items
           SET created_by_user_id = (
             SELECT owner_user_id FROM workspaces
@@ -679,13 +775,18 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       property.active,
       item.created_by_user_id,
       project_document.version,
-      kr_data_connection.target_value
+      kr_data_connection.target_value,
+      daily_scrum.member_id,
+      daily_scrum.no_planned_tasks,
+      slack_daily_setting.reminder_time
     FROM workspaces AS workspace
     LEFT JOIN routines AS routine ON 1 = 0
     LEFT JOIN property_definitions AS property ON 1 = 0
     LEFT JOIN items AS item ON 1 = 0
     LEFT JOIN project_documents AS project_document ON 1 = 0
     LEFT JOIN kr_data_connections AS kr_data_connection ON 1 = 0
+    LEFT JOIN daily_scrums AS daily_scrum ON 1 = 0
+    LEFT JOIN slack_daily_settings AS slack_daily_setting ON 1 = 0
     LIMIT 0`).first();
     return true;
   } catch {
@@ -1534,6 +1635,10 @@ export async function saveSlackConnection(input: {
   scope: string;
 }) {
   await ensureSchema();
+  const [teamConnection] = await getDb().select().from(slackConnections).where(eq(slackConnections.teamId, input.teamId)).limit(1);
+  if (teamConnection && teamConnection.ownerId !== input.ownerId) {
+    throw new Error("This Slack workspace is already connected to another OKRPTR workspace. Disconnect it there before reconnecting.");
+  }
   const now = new Date().toISOString();
   const values = {
     userId: input.userId,
@@ -1556,7 +1661,7 @@ export async function saveSlackConnection(input: {
     })
     .onConflictDoUpdate({
       target: slackConnections.teamId,
-      set: { ...values, ownerId: input.ownerId },
+      set: values,
     })
     .returning();
   return connection;
@@ -1569,7 +1674,7 @@ export async function deleteSlackConnection(ownerId: string) {
   return current;
 }
 
-export function serializeSlackConnection(connection: SlackConnection | null, configured: boolean, urls: { redirectUrl: string; commandUrl: string }) {
+export function serializeSlackConnection(connection: SlackConnection | null, configured: boolean, urls: { redirectUrl: string; commandUrl: string; interactionUrl?: string; eventsUrl?: string }) {
   return {
     configured,
     connected: Boolean(connection),
@@ -1581,6 +1686,8 @@ export function serializeSlackConnection(connection: SlackConnection | null, con
     updatedAt: connection?.updatedAt ?? null,
     redirectUrl: urls.redirectUrl,
     commandUrl: urls.commandUrl,
+    interactionUrl: urls.interactionUrl ?? null,
+    eventsUrl: urls.eventsUrl ?? null,
   };
 }
 

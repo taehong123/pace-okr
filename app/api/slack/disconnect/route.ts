@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { authorizeRequest, canManageTeam, deleteSlackConnection, ensureWorkspace } from "@/lib/pace-data";
 import { decryptSlackSecret, revokeSlackToken, slackConfigured, type SlackRuntimeEnv } from "@/lib/slack-oauth";
+import { disconnectSlackDaily } from "@/lib/slack-daily";
 
 export async function POST(request: Request) {
   const authorization = await authorizeRequest(request);
@@ -12,6 +13,7 @@ export async function POST(request: Request) {
   const connection = await deleteSlackConnection(authorization.ownerId);
   if (connection && slackConfigured(runtime)) {
     try {
+      await disconnectSlackDaily(authorization.ownerId, connection);
       const token = await decryptSlackSecret(connection.encryptedBotToken, runtime.SLACK_TOKEN_ENCRYPTION_KEY!);
       await revokeSlackToken(token);
     } catch {

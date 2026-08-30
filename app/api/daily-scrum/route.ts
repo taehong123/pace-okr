@@ -1,21 +1,18 @@
-import {
-  authorizeRequest,
-  ensureWorkspace,
-  getDailyScrum,
-  saveDailyScrum,
-  serializeItem,
-} from "@/lib/pace-data";
+import { getDailyDashboard, saveDailyDraft } from "@/lib/daily-bot";
+import { authorizeRequest } from "@/lib/pace-data";
+import { waitUntil } from "cloudflare:workers";
+import { reconcileDailyReminders } from "@/lib/slack-daily";
 
 export async function GET(request: Request) {
-  const authorization = await authorizeRequest(request);
+  const authorization = await authorizeRequest(request, { allowViewerWrite: true });
   if (authorization instanceof Response) return authorization;
 
   try {
-    await ensureWorkspace(authorization.ownerId);
     const date = new URL(request.url).searchParams.get("date") ?? today();
-    return Response.json({ scrum: serializeScrum(await getDailyScrum(authorization.ownerId, date)) });
+    waitUntil(reconcileDailyReminders(authorization.ownerId));
+    return Response.json(await getDailyDashboard(authorization, date));
   } catch (error) {
-    return routeError(error);
+    return dailyRouteError(error);
   }
 }
 
@@ -24,27 +21,20 @@ export async function PUT(request: Request) {
   if (authorization instanceof Response) return authorization;
 
   try {
-    await ensureWorkspace(authorization.ownerId);
     const payload = (await request.json()) as Record<string, unknown>;
-    const date = typeof payload.date === "string" ? payload.date : today();
-    const scrum = await saveDailyScrum(authorization.ownerId, date, {
+    const result = await saveDailyDraft(authorization, {
+      date: typeof payload.date === "string" ? payload.date : today(),
       yesterdayNote: asText(payload.yesterdayNote),
       todayNote: asText(payload.todayNote),
       blockersNote: asText(payload.blockersNote),
+      selectedTaskIds: Array.isArray(payload.selectedTaskIds) ? payload.selectedTaskIds.filter((value): value is string => typeof value === "string") : [],
+      noPlannedTasks: payload.noPlannedTasks === true,
+      source: "web",
     });
-    return Response.json({ scrum: serializeScrum(scrum) });
+    return Response.json(result);
   } catch (error) {
-    return routeError(error);
+    return dailyRouteError(error);
   }
-}
-
-function serializeScrum(scrum: Awaited<ReturnType<typeof getDailyScrum>>) {
-  return {
-    ...scrum,
-    yesterdayTasks: scrum.yesterdayTasks.map((item) => serializeItem(item)),
-    todayTasks: scrum.todayTasks.map((item) => serializeItem(item)),
-    blockers: scrum.blockers.map((item) => serializeItem(item)),
-  };
 }
 
 function today() {
@@ -55,8 +45,8 @@ function asText(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
-function routeError(error: unknown) {
-  const message = error instanceof Error ? error.message : "Unexpected error";
-  const status = /date|invalid|required/i.test(message) ? 400 : 500;
+export function dailyRouteError(error: unknown) {
+  const message = error instanceof Error ? error.message : "데일리 요청을 처리하지 못했습니다.";
+  const status = /날짜|입력|선택|할당|담당|최대|초안|멤버|Task|date|invalid|required/i.test(message) ? 400 : 500;
   return Response.json({ error: message }, { status });
 }

@@ -1,49 +1,51 @@
 import { env } from "cloudflare:workers";
-import {
-  createItem,
-  ensureWorkspace,
-  getSlackConnectionByTeam,
-  serializeItem,
-} from "@/lib/pace-data";
+import { createItem, ensureWorkspace, getSlackConnectionByTeam, serializeItem } from "@/lib/pace-data";
+import { createSlackMemberLinkUrl, dailyMemberBySlack, openDailyModal, reconcileDailyReminders } from "@/lib/slack-daily";
 import { slackConfigured, verifySlackRequest, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 
 export async function POST(request: Request) {
   const runtime = env as SlackRuntimeEnv;
-  if (!slackConfigured(runtime)) {
-    return slackMessage("OKRPTR Slack 설정이 아직 완료되지 않았습니다.");
-  }
-
+  if (!slackConfigured(runtime)) return slackMessage("OKRPTR Slack 설정이 아직 완료되지 않았습니다.");
   const rawBody = await request.text();
-  const verified = await verifySlackRequest(request, rawBody, runtime.SLACK_SIGNING_SECRET!);
-  if (!verified) return new Response("invalid Slack signature", { status: 401 });
-
+  if (!await verifySlackRequest(request, rawBody, runtime.SLACK_SIGNING_SECRET!)) {
+    return new Response("invalid Slack signature", { status: 401 });
+  }
   const body = new URLSearchParams(rawBody);
   const text = body.get("text")?.trim() ?? "";
   const teamId = body.get("team_id") ?? "";
-  const userName = body.get("user_name") || body.get("user_id") || "Slack";
-  const channelName = body.get("channel_name") || body.get("channel_id") || "Slack";
-
-  if (!text || text === "help") {
-    return slackMessage("사용법: /okrptr 고객 인터뷰 질문지 정리\n입력한 내용은 OKRPTR 미분류 Task로 저장됩니다.");
-  }
-
+  const slackUserId = body.get("user_id") ?? "";
   const connection = teamId ? await getSlackConnectionByTeam(teamId) : null;
   if (!connection) return slackMessage("이 Slack 워크스페이스는 아직 OKRPTR에 연결되지 않았습니다.");
-
   await ensureWorkspace(connection.ownerId);
+
+  if (["daily", "데일리", "daily 작성", "데일리 작성"].includes(text.toLocaleLowerCase())) {
+    const linked = await dailyMemberBySlack(teamId, slackUserId);
+    if (!linked) {
+      const link = await createSlackMemberLinkUrl(connection.ownerId, teamId, slackUserId, request);
+      return slackMessage(`OKRPTR 계정 연결이 필요합니다. 15분 안에 로그인해 연결해 주세요.\n${link}`);
+    }
+    const triggerId = body.get("trigger_id") ?? "";
+    if (!triggerId) return slackMessage("Slack 데일리 창을 열 수 없습니다. 다시 시도해 주세요.");
+    await openDailyModal(triggerId, linked.authorization);
+    void reconcileDailyReminders(connection.ownerId);
+    return new Response(null, { status: 200 });
+  }
+
+  if (!text || text === "help") {
+    return slackMessage("사용법\n• `/okrptr daily` — 개인 데일리 작성\n• `/okrptr <문장>` — 문장을 General Task로 수집");
+  }
+
+  const userName = body.get("user_name") || slackUserId || "Slack";
+  const channelName = body.get("channel_name") || body.get("channel_id") || "Slack";
   const item = await createItem(connection.ownerId, {
     title: text.slice(0, 240),
     description: `Captured from Slack by ${userName} in #${channelName}`,
     kind: "task",
     source: "slack",
-    sourceRef: `${teamId}:${body.get("channel_id") ?? ""}:${body.get("user_id") ?? ""}`,
+    sourceRef: `${teamId}:${body.get("channel_id") ?? ""}:${slackUserId}`,
     createdByUserId: connection.userId,
   });
-
-  return Response.json({
-    response_type: "ephemeral",
-    text: `OKRPTR 미분류 Task에 저장했습니다: ${serializeItem(item).title}`,
-  });
+  return Response.json({ response_type: "ephemeral", text: `Task로 저장했습니다: ${serializeItem(item).title}` });
 }
 
 function slackMessage(text: string) {

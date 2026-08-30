@@ -172,6 +172,30 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
     if (url.pathname === "/api/project-templates") return json(route, { templates: [] });
     if (url.pathname === "/api/checklists") return json(route, { items: [] });
     if (url.pathname === "/api/recommendations") return json(route, { recommendations: [] });
+    if (url.pathname === "/api/daily-scrum" && request.method() === "GET") return json(route, {
+      date: "2026-08-30",
+      member: { id: "member-1", displayName: "테스트 사용자", email: "owner@example.com", role: "owner" },
+      draft: { id: "draft-1", date: "2026-08-30", yesterdayNote: "", todayNote: "", blockersNote: "", noPlannedTasks: false, selectedTaskIds: [], source: "web", updatedAt: now },
+      latestSubmission: null,
+      candidates: { tasks: [{ id: "task-1", title: "오버레이 동작 점검", status: "todo", dueDate: "2026-09-03", parentKind: "project", parentId: "project-1", parentTitle: "모바일 사용성 개선" }], groups: [{ key: "project:project-1", kind: "project", id: "project-1", title: "모바일 사용성 개선", tasks: [{ id: "task-1", title: "오버레이 동작 점검", status: "todo", dueDate: "2026-09-03", parentKind: "project", parentId: "project-1", parentTitle: "모바일 사용성 개선" }] }] },
+      createTargets: { projects: [{ id: "project-empty", title: "실행 항목 없는 Project", needsTask: true }], routines: [], allowGeneral: false },
+      team: [
+        { memberId: "member-1", displayName: "테스트 사용자", email: "owner@example.com", role: "owner", status: "missing", slackConnected: true, submission: null },
+        { memberId: "member-2", displayName: "초안 멤버", email: "draft@example.com", role: "member", status: "writing", slackConnected: false, submission: null },
+      ],
+      legacyWorkspaceNote: { yesterdayNote: "", todayNote: "기존 공용 메모", blockersNote: "", updatedAt: now },
+    });
+    if (url.pathname === "/api/daily-scrum" && request.method() === "PUT") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      return json(route, {
+        date: payload.date,
+        member: { id: "member-1", displayName: "테스트 사용자", email: "owner@example.com", role: "owner" },
+        draft: { id: "draft-1", date: payload.date, yesterdayNote: payload.yesterdayNote, todayNote: payload.todayNote, blockersNote: payload.blockersNote, noPlannedTasks: payload.noPlannedTasks, selectedTaskIds: payload.selectedTaskIds, source: "web", updatedAt: now },
+        latestSubmission: null, candidates: { tasks: [], groups: [] }, createTargets: { projects: [], routines: [], allowGeneral: true }, team: [], legacyWorkspaceNote: null,
+      });
+    }
+    if (url.pathname === "/api/daily-scrum/submit") return json(route, { submission: { id: "submission-1" } }, 201);
+    if (url.pathname === "/api/daily-scrum/tasks") return json(route, { task: { ...baseItem, id: "new-task", parentId: "project-empty", kind: "task", title: "새 실행 Task" } }, 201);
     if (url.pathname === "/api/routines" && request.method() === "GET") {
       if (options.slowRoutineRefresh) await new Promise((resolve) => setTimeout(resolve, 800));
       return json(route, { routines: bootstrapResponse.routines });
@@ -180,6 +204,51 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
     return json(route, {});
   });
 }
+
+test.describe("개인 데일리와 팀 롤업", () => {
+  test.beforeEach(async ({ page }) => {
+    await installApiMocks(page);
+    await page.goto("/?view=scrum");
+    await expect(page.locator(".daily-workspace")).toBeVisible({ timeout: 20_000 });
+  });
+
+  test("할당 Task 선택과 초안 저장은 Item API를 호출하지 않는다", async ({ page }) => {
+    const itemMutations: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/items" && request.method() !== "GET") itemMutations.push(request.method());
+    });
+    await page.getByRole("checkbox", { name: "오버레이 동작 점검 선택", exact: true }).check();
+    const saveRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/daily-scrum" && request.method() === "PUT");
+    await page.getByRole("button", { name: "초안 저장" }).click();
+    const payload = (await saveRequest).postDataJSON() as { selectedTaskIds: string[]; noPlannedTasks: boolean };
+    expect(payload.selectedTaskIds).toEqual(["task-1"]);
+    expect(payload.noPlannedTasks).toBe(false);
+    expect(itemMutations).toEqual([]);
+  });
+
+  test("작성 중 초안은 내용 대신 상태만 공개한다", async ({ page }) => {
+    const card = page.locator(".daily-member-card", { hasText: "초안 멤버" });
+    await expect(card).toContainText("작성 중");
+    await expect(card).toContainText("내용은 제출 후 공개됩니다");
+    await expect(page.getByText("기존 공용 메모")).toBeHidden();
+  });
+
+  test("DRI 무Task Project에서 명시적 Task 생성으로 진입한다", async ({ page }) => {
+    await page.getByRole("button", { name: /실행 항목 없는 Project/ }).click();
+    await expect(page.getByLabel("새 Task 상위 항목")).toHaveValue("project:project-empty");
+    await page.getByLabel("새 Task 제목").fill("새 실행 Task");
+    const createRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/daily-scrum/tasks");
+    await page.getByRole("button", { name: "Task 생성" }).click({ force: true });
+    expect((await createRequest).postDataJSON()).toMatchObject({ title: "새 실행 Task", parentKind: "project", parentId: "project-empty" });
+  });
+
+  test("390px에서 가로 넘침이 없고 핵심 컨트롤이 접근 가능하다", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    const results = await new AxeBuilder({ page }).include(".daily-workspace").analyze();
+    expect(results.violations).toEqual([]);
+  });
+});
 
 test.describe("공통 오버레이", () => {
   test.beforeEach(async ({ page }) => {
