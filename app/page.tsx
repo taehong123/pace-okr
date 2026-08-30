@@ -574,13 +574,13 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
     languageLabel: "안내 언어",
     eyebrow: "목표를 실행으로 바꾸는 워크스페이스",
     title: "OKR이 오늘의 일로 이어지도록.",
-    description: "OKRPTR은 목표, 프로젝트, 할 일과 반복 루틴을 한곳에 연결하고 대화와 봇에서도 바로 기록할 수 있는 실행 관리 서비스입니다.",
+    description: "OKRPTR은 목표, 프로젝트, 할 일과 Routine을 한곳에 연결하고 대화와 봇에서도 바로 기록할 수 있는 실행 관리 서비스입니다.",
     hierarchyLabel: "목표에서 실행까지",
     routineNote: "Routine은 Project처럼 Task를 담는 실행 컨테이너지만 OKR 계층과 독립적입니다.",
     points: [
-      { title: "대화에서 바로 등록", description: "MCP를 연결하면 AI 대화와 봇에서 Task, 프로젝트, 루틴을 바로 만들 수 있습니다." },
+      { title: "대화에서 바로 등록", description: "MCP를 연결하면 AI 대화와 봇에서 Task, 프로젝트, Routine을 바로 만들 수 있습니다." },
       { title: "책임과 맥락을 선명하게", description: "Project의 DRI와 속성, Task의 담당자와 소속을 한눈에 관리합니다." },
-      { title: "매일 실행을 놓치지 않게", description: "루틴, 데일리 스크럼과 추천이 지금 집중할 일을 정리해 줍니다." },
+      { title: "매일 실행을 놓치지 않게", description: "Routine, 데일리 스크럼과 추천이 지금 집중할 일을 정리해 줍니다." },
     ],
     mcpAction: "MCP 연결 보기",
     startAction: "워크스페이스 시작",
@@ -652,7 +652,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "my_work", label: "내 업무", icon: Briefcase },
   { id: "work", label: "Project", icon: Table2 },
   { id: "inbox", label: "Task", icon: Inbox },
-  { id: "routines", label: "루틴", icon: Repeat2 },
+  { id: "routines", label: "Routine", icon: Repeat2 },
   { id: "data", label: "데이터", icon: Database },
   { id: "scrum", label: "데일리", icon: CalendarCheck },
   { id: "recommendations", label: "추천", icon: Lightbulb },
@@ -666,7 +666,7 @@ const viewTitles: Record<View, string> = {
   inbox: "Task",
   my_work: "내 업무",
   work: "Project",
-  routines: "루틴",
+  routines: "Routine",
   okr: "OKR",
   data: "데이터",
   scrum: "데일리 스크럼",
@@ -3480,7 +3480,7 @@ function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title, description, triggerPoint, actionPlace, actionSteps, cadence, date, assigneeMemberId: assigneeMemberId || null }),
       });
-      if (!response.ok) throw new Error("루틴을 추가하지 못했습니다.");
+      if (!response.ok) throw new Error("Routine을 추가하지 못했습니다.");
       const data = await response.json() as { routine: Routine };
       setRows((current) => {
         const next = [...(current ?? []), data.routine];
@@ -3495,9 +3495,9 @@ function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange,
       setAssigneeMemberId("");
       setCadence("daily");
       onCreateClose();
-      onNotice("루틴을 추가했습니다.");
+      onNotice("Routine을 추가했습니다.");
     } catch (createError) {
-      onNotice(createError instanceof Error ? createError.message : "루틴을 추가하지 못했습니다.");
+      onNotice(createError instanceof Error ? createError.message : "Routine을 추가하지 못했습니다.");
     } finally {
       setSaving(false);
     }
@@ -3514,7 +3514,7 @@ function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ routineId: routine.id, date, completed }),
       });
-      if (!response.ok) throw new Error("루틴 완료 상태를 저장하지 못했습니다.");
+      if (!response.ok) throw new Error("Routine 완료 상태를 저장하지 못했습니다.");
       const data = await response.json() as { routine: Routine };
       setRows((current) => {
         const next = current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? [];
@@ -3523,7 +3523,7 @@ function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange,
       });
     } catch (toggleError) {
       setRows(previous);
-      onNotice(toggleError instanceof Error ? toggleError.message : "루틴 완료 상태를 저장하지 못했습니다.");
+      onNotice(toggleError instanceof Error ? toggleError.message : "Routine 완료 상태를 저장하지 못했습니다.");
     }
   }
 
@@ -3538,7 +3538,7 @@ function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: routine.id, active, date }),
       });
-      if (!response.ok) throw new Error("루틴 활성 상태를 저장하지 못했습니다.");
+      if (!response.ok) throw new Error("Routine 활성 상태를 저장하지 못했습니다.");
       const data = await response.json() as { routine: Routine };
       setRows((current) => {
         const next = current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? [];
@@ -3547,7 +3547,7 @@ function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange,
       });
     } catch (toggleError) {
       setRows(previous);
-      onNotice(toggleError instanceof Error ? toggleError.message : "루틴 활성 상태를 저장하지 못했습니다.");
+      onNotice(toggleError instanceof Error ? toggleError.message : "Routine 활성 상태를 저장하지 못했습니다.");
     }
   }
 
@@ -3584,7 +3584,7 @@ function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange,
       body: JSON.stringify({ id: routine.id, date, ...draft }),
     });
     setSaving(false);
-    if (!response.ok) { onNotice("루틴 실행 방법을 저장하지 못했습니다."); return; }
+    if (!response.ok) { onNotice("Routine 실행 방법을 저장하지 못했습니다."); return; }
     const data = await response.json() as { routine: Routine };
     setRows((current) => {
       const next = current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? [];
@@ -3596,13 +3596,13 @@ function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange,
       delete next[routine.id];
       return next;
     });
-    onNotice("루틴 실행 방법을 저장했습니다.");
+    onNotice("Routine 실행 방법을 저장했습니다.");
   }
 
   async function remove(id: string) {
     const routine = rows?.find((entry) => entry.id === id);
     if (!routine || routine.systemKey === "general") return;
-    if (!await confirmAction({ title: "루틴 삭제", message: `'${routine.title}' 루틴을 삭제합니다.`, confirmLabel: "루틴 삭제", danger: true })) return;
+    if (!await confirmAction({ title: "Routine 삭제", message: `'${routine.title}' Routine을 삭제합니다.`, confirmLabel: "Routine 삭제", danger: true })) return;
     const response = await fetch(`/api/routines?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     if (response.ok) {
       setRows((current) => {
@@ -3610,8 +3610,8 @@ function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange,
         onRoutinesChange(next);
         return next;
       });
-      onNotice("루틴을 삭제했습니다.");
-    } else onNotice("루틴을 삭제하지 못했습니다.");
+      onNotice("Routine을 삭제했습니다.");
+    } else onNotice("Routine을 삭제하지 못했습니다.");
   }
 
   async function updateAssignee(routine: Routine, memberId: string) {
@@ -3622,7 +3622,7 @@ function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange,
       body: JSON.stringify({ id: routine.id, date, assigneeMemberId: memberId || null }),
     });
     if (!response.ok) {
-      onNotice("루틴 담당자를 저장하지 못했습니다.");
+      onNotice("Routine 담당자를 저장하지 못했습니다.");
       return;
     }
     const data = await response.json() as { routine: Routine };
@@ -3642,15 +3642,15 @@ function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange,
         <p>반복 실행 날짜와 오늘의 완료 상태를 확인합니다.</p>
       </div>
       <div className="routine-cards">
-        {loadError && rows === null ? <AsyncState icon={AlertTriangle} title="루틴을 불러오지 못했습니다" detail="잠시 후 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => { setRows(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} /> : rows === null ? <AsyncState icon={LoaderCircle} title="루틴을 불러오는 중입니다" loading /> : rows.length ? rows.map((routine) => {
+        {loadError && rows === null ? <AsyncState icon={AlertTriangle} title="Routine을 불러오지 못했습니다" detail="잠시 후 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => { setRows(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} /> : rows === null ? <AsyncState icon={LoaderCircle} title="Routine을 불러오는 중입니다" loading /> : rows.length ? rows.map((routine) => {
           const draft = routineDraft(routine);
           return (
             <article className={`routine-card ${routine.active ? "" : "inactive"} ${routine.systemKey === "general" ? "general-routine" : ""}`} key={routine.id}>
               <header>
                 {routine.systemKey === "general" ? <span className="general-routine-icon"><Inbox size={13} /></span> : <button className={`task-check ${routine.completed ? "checked" : ""}`} disabled={!routine.active} onClick={() => void toggleCompletion(routine)} aria-label={routine.completed ? "완료 취소" : "완료 처리"}><Check size={12} /></button>}
                 <div><b>{routine.title}{routine.systemKey === "general" && <em className="system-badge">기본</em>}</b><small>{routine.systemKey === "general" ? "Project·Routine에 연결하지 않은 Task가 모이는 기본 목록" : `${routineCadenceLabel(routine.cadence)} · ${routine.completed ? "오늘 완료" : "오늘 미완료"}`}</small></div>
-                {routine.systemKey !== "general" && <label className="routine-switch"><input type="checkbox" checked={routine.active} onChange={() => void toggleActive(routine)} /><span /><em className="sr-only">루틴 활성 상태</em></label>}
-                {routine.systemKey !== "general" && <button className="icon-button" onClick={() => void remove(routine.id)} aria-label="루틴 삭제" title="루틴 삭제"><Trash2 size={13} /></button>}
+                {routine.systemKey !== "general" && <label className="routine-switch"><input type="checkbox" checked={routine.active} onChange={() => void toggleActive(routine)} /><span /><em className="sr-only">Routine 활성 상태</em></label>}
+                {routine.systemKey !== "general" && <button className="icon-button" onClick={() => void remove(routine.id)} aria-label="Routine 삭제" title="Routine 삭제"><Trash2 size={13} /></button>}
               </header>
               {routine.systemKey !== "general" && <div className="routine-guide-grid">
                 <label><span>트리거 포인트</span><input value={draft.triggerPoint} onChange={(event) => updateDraft(routine, "triggerPoint", event.target.value)} placeholder="예: 오전 9시, Slack 알림 확인 후" /></label>
@@ -3664,20 +3664,20 @@ function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange,
               </footer>}
             </article>
           );
-        }) : <EmptyState icon={Repeat2} title="등록된 루틴이 없습니다" />}
+        }) : <EmptyState icon={Repeat2} title="등록된 Routine이 없습니다" />}
       </div>
     </section>
     {createOpen && <OverlayDialog title="새 Routine" variant="drawer" dirty={createDirty} initialFocus="input" onRequestClose={onCreateClose}>
       {(requestClose) => <aside className="property-panel routine-create-panel">
         <header><div><h2>새 Routine</h2><p>OKR과 독립된 반복 실행을 추가합니다.</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="새 Routine 닫기" title="새 Routine 닫기"><X size={17} /></button></header>
         <form className="property-form routine-create" onSubmit={create}>
-          <label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 매일 고객 피드백 확인" aria-label="루틴 이름" /></label>
+          <label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 매일 고객 피드백 확인" aria-label="Routine 이름" /></label>
           <div className="create-chat-nudge"><div><Bot size={15} /><span><b>대화로 정리할까요?</b><small>반복할 일을 말하면 트리거와 실행 방법을 정리합니다.</small></span></div><button type="button" onClick={() => onCreateWithChat(title)}>AI 대화로 추가<ChevronRight size={13} /></button></div>
           <label><span>반복 주기</span><select value={cadence} onChange={(event) => setCadence(event.target.value as RoutineCadence)} aria-label="반복 주기"><option value="daily">매일</option><option value="weekly">매주</option><option value="monthly">매월</option></select></label>
           <label><span>트리거 포인트</span><input value={triggerPoint} onChange={(event) => setTriggerPoint(event.target.value)} placeholder="예: 오전 9시" aria-label="트리거 포인트" /></label>
           <label><span>어디서</span><input value={actionPlace} onChange={(event) => setActionPlace(event.target.value)} placeholder="장소 또는 도구" aria-label="어디서 실행" /></label>
-          <label><span>목적/메모</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="왜 반복하는지" aria-label="루틴 목적" /></label>
-          <label><span>담당자</span><select value={assigneeMemberId} onChange={(event) => setAssigneeMemberId(event.target.value)} aria-label="루틴 담당자"><option value="">담당자 없음</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>
+          <label><span>목적/메모</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="왜 반복하는지" aria-label="Routine 목적" /></label>
+          <label><span>담당자</span><select value={assigneeMemberId} onChange={(event) => setAssigneeMemberId(event.target.value)} aria-label="Routine 담당자"><option value="">담당자 없음</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>
           <label><span>무엇을 어떻게</span><textarea value={actionSteps} onChange={(event) => setActionSteps(event.target.value)} placeholder="실행 순서와 완료 기준" aria-label="실행 방법" rows={5} /></label>
           <button className="primary-action" disabled={!title.trim() || saving}>{saving ? "추가 중" : "Routine 추가"}</button>
         </form>
@@ -3714,7 +3714,7 @@ function MyWorkView({ items, routines, currentMember, onOpenProject, onOpenTask,
     });
     setSavingRoutineId(null);
     if (!response.ok) {
-      onNotice("루틴 완료 상태를 저장하지 못했습니다.");
+      onNotice("Routine 완료 상태를 저장하지 못했습니다.");
       return;
     }
     const data = await response.json() as { routine: Routine };
@@ -4251,10 +4251,10 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
           {mode === "task" && visibleFields.has("tasks") && members.length > 0 && <label><span>담당자</span><select value={taskAssigneeMemberId} onChange={(event) => setTaskAssigneeMemberId(event.target.value)}><option value="">미지정</option>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
           {mode === "task" && visibleFields.has("tasks") && taskContainers.length === 0 && <p className="task-container-empty task-container-general">연결할 Project·Routine이 없어 General(기본)에 저장됩니다.</p>}
           {visibleFields.has("tasks") && plan.project.trim() && plan.routineTitle.trim() && <label><span>Task 상위</span><select value={plan.taskParent || "project"} onChange={(event) => patch("taskParent", event.target.value)}><option value="project">Project</option><option value="routine">Routine</option></select></label>}
-          {visibleFields.has("routineTitle") && <label><span>루틴 이름</span><input value={plan.routineTitle} onChange={(event) => patch("routineTitle", event.target.value)} placeholder="반복해서 할 일의 이름" /></label>}
-          {visibleFields.has("routineTrigger") && <label><span>루틴 트리거</span><input value={plan.routineTrigger} onChange={(event) => patch("routineTrigger", event.target.value)} placeholder="루틴이 시작되는 시점" /></label>}
+          {visibleFields.has("routineTitle") && <label><span>Routine 이름</span><input value={plan.routineTitle} onChange={(event) => patch("routineTitle", event.target.value)} placeholder="반복해서 할 일의 이름" /></label>}
+          {visibleFields.has("routineTrigger") && <label><span>Routine 트리거</span><input value={plan.routineTrigger} onChange={(event) => patch("routineTrigger", event.target.value)} placeholder="Routine이 시작되는 시점" /></label>}
           {visibleFields.has("routinePlace") && <label><span>어디서</span><input value={plan.routinePlace} onChange={(event) => patch("routinePlace", event.target.value)} placeholder="실행할 장소나 도구" /></label>}
-          {visibleFields.has("routineSteps") && <label className="wide"><span>무엇을 어떻게</span><textarea value={plan.routineSteps} onChange={(event) => patch("routineSteps", event.target.value)} rows={3} placeholder="루틴 실행 방법" /></label>}
+          {visibleFields.has("routineSteps") && <label className="wide"><span>무엇을 어떻게</span><textarea value={plan.routineSteps} onChange={(event) => patch("routineSteps", event.target.value)} rows={3} placeholder="Routine 실행 방법" /></label>}
           {mode === "routine" && visibleFields.has("routineTitle") && <label><span>반복 주기</span><select value={plan.routineCadence} onChange={(event) => setPlan((current) => ({ ...current, routineCadence: event.target.value as RoutineCadence }))}><option value="daily">매일</option><option value="weekly">매주</option><option value="monthly">매월</option></select></label>}
           {mode === "routine" && visibleFields.has("routineTitle") && members.length > 0 && <label><span>담당자</span><select value={routineAssigneeMemberId} onChange={(event) => setRoutineAssigneeMemberId(event.target.value)}><option value="">담당자 없음</option>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
           {mode === "project" && visibleFields.has("project") && projectTargets.length === 0 && <div className="task-container-empty"><span>연결할 Initiative가 없습니다.</span><button type="button" onClick={onNavigateToOkr}>먼저 Initiative 만들기</button></div>}
@@ -6073,7 +6073,7 @@ function workspaceDeletionLabel(value: string | null) {
 }
 function groupColorLabel(color: GroupColor) { return { gray: "회색", blue: "파랑", green: "초록", yellow: "노랑", orange: "주황", red: "빨강", purple: "보라" }[color]; }
 function dueLabel(value: string | null) { if (!value) return "기한 없음"; const due = new Date(`${value}T00:00:00`); return `${due.getMonth() + 1}월 ${due.getDate()}일`; }
-function trashSummary(record: TrashRecord) { return `OKR ${record.cycleCount}개, 작업 ${record.itemCount}개, 루틴 ${record.routineCount}개 보관`; }
+function trashSummary(record: TrashRecord) { return `OKR ${record.cycleCount}개, 작업 ${record.itemCount}개, Routine ${record.routineCount}개 보관`; }
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;

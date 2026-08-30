@@ -19,7 +19,7 @@ export default function TermsPage() {
         <section>
           <h2>1. 서비스</h2>
           <p>
-            OKRPTR는 워크스페이스의 목표, 프로젝트, 업무와 루틴을 관리하고 선택한
+            OKRPTR는 워크스페이스의 목표, 프로젝트, 업무와 Routine을 관리하고 선택한
             외부 서비스와 연동할 수 있는 업무 관리 도구입니다.
           </p>
         </section>

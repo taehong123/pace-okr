@@ -275,7 +275,7 @@ test("연결할 Project·Routine이 없으면 직접 추가와 AI 추가 모두 
   await expect(page.getByRole("button", { name: "Task 1개 만들기" })).toBeEnabled();
 
   await page.goto("/?view=routines");
-  await expect(page.getByText("루틴을 불러오는 중입니다", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Routine을 불러오는 중입니다", { exact: true })).toHaveCount(0);
   const generalCard = page.getByRole("article").filter({ hasText: "General" });
   await expect(generalCard).toContainText("General");
   await expect(generalCard.getByText("기본", { exact: true })).toBeVisible();
@@ -309,7 +309,7 @@ test("Project·Task·Routine 추가 진입과 AI 도우미를 같은 구조로 �
   await page.getByRole("button", { name: "직접 추가", exact: true }).click();
   const routineDialog = page.getByRole("dialog", { name: "새 Routine" });
   await expect(routineDialog.getByLabel("반복 주기")).toHaveValue("daily");
-  await expect(routineDialog.getByLabel("루틴 담당자")).toHaveValue("");
+  await expect(routineDialog.getByLabel("Routine 담당자")).toHaveValue("");
   await expect(routineDialog.getByText("Initiative", { exact: true })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(routineDialog).toBeHidden();

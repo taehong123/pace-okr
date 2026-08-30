@@ -266,7 +266,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /aria-label="내 설정 닫기" title="내 설정 닫기"/);
   assert.match(page, /workspaceNameCounts/);
   assert.match(page, /생성 \$\{formatDateTime\(workspace\.createdAt\)\}/);
-  assert.match(page, /루틴을 불러오지 못했습니다/);
+  assert.match(page, /Routine을 불러오지 못했습니다/);
   assert.match(page, /데일리 스크럼을 불러오지 못했습니다/);
   assert.match(page, /추천을 계산하지 못했습니다/);
   assert.match(page, /휴지통을 불러오지 못했습니다/);

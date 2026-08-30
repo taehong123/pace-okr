@@ -1238,7 +1238,7 @@ export async function getWorkspaceRules(ownerId: string) {
       workspaceId: ownerId,
       captureInstruction: "대화에서 나온 일은 우선 있는 그대로 잡고, 실행 구조가 명확할 때만 Project 또는 독립 Routine 아래 Task로 연결합니다.",
       structureInstruction: "OKR은 Objective > Key Result > Initiative > Project > Task로 정리합니다. Routine은 Project처럼 Task를 담는 실행 컨테이너지만 OKR 계층과 독립적으로 관리합니다.",
-      routineInstruction: "루틴은 트리거 포인트, 어디서/어떤 도구로, 무엇을 어떻게 할지까지 함께 정리합니다.",
+      routineInstruction: "Routine은 트리거 포인트, 어디서/어떤 도구로, 무엇을 어떻게 할지까지 함께 정리합니다.",
       defaultPriority: "medium",
       defaultCadence: "weekly",
       reviewBeforeCreate: true,
