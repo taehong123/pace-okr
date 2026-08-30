@@ -412,6 +412,7 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.match(treeView, /initiative-disclosure-hit/);
   assert.match(treeView, /aria-expanded=\{expanded\}/);
   assert.match(treeView, /aria-controls=\{`initiative-execution-\$\{entry\.id\}`\}/);
+  assert.match(treeView, /event\.key === "Enter" \|\| event\.key === " "/);
   assert.match(treeView, /executionItems\.length \|\| !expanded/);
   const myWorkView = page.match(/function MyWorkView[\s\S]*?function MyWorkSection/)?.[0] ?? "";
   assert.doesNotMatch(myWorkView, /DeleteSelectCheckbox|onSelectItems|selectedItemIds/);
