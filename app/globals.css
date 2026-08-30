@@ -595,10 +595,15 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .hierarchy-copy b { overflow: hidden; font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .status-tag { justify-self: start; padding: 3px 6px; border-radius: 3px; background: #f1f1ef; font-size: 9px; }
 .hierarchy-row em { color: var(--muted); font-size: 10px; font-style: normal; text-align: right; }
-.okr-execution-disclosure { --depth: 3; min-height: 42px; display: flex; align-items: center; padding: 4px 3px 4px calc(44px + var(--depth) * 18px); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface-muted) 58%, transparent); }
-.okr-execution-disclosure button { min-height: 32px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--raised); color: var(--muted); font-size: 10px; font-weight: 600; cursor: pointer; }
-.okr-execution-disclosure button:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); background: var(--surface-hover); color: var(--ink); }
-.okr-execution-disclosure button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.initiative-disclosure-row { position: relative; }
+.initiative-disclosure-hit { position: absolute; z-index: 1; inset: 0 44px 0 0; min-height: 44px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.initiative-disclosure-hit.full { right: 0; }
+.initiative-disclosure-hit:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.initiative-disclosure-row:has(.initiative-disclosure-hit:hover), .initiative-disclosure-row:has(.initiative-disclosure-hit:focus-visible) { background: var(--surface-hover); }
+.initiative-execution-summary { display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; color: var(--muted); font-size: 9px; }
+.initiative-execution-summary small { font-size: inherit; font-weight: 600; }
+.initiative-execution-group { display: contents; }
+.initiative-disclosure-row .row-action { position: relative; z-index: 2; }
 .row-action { width: 32px; height: 32px; padding: 0; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 5px; background: white; color: var(--green); cursor: pointer; }
 .row-action.okr-node-edit { background: transparent; color: var(--muted); }
 .okr-node-edit:hover { background: var(--surface-hover); color: var(--ink); }
@@ -1907,7 +1912,7 @@ html[data-theme="dark"] .settings-danger-zone { background: color-mix(in srgb, v
   .project-property-catalog { border-right: 0; border-bottom: 1px solid var(--line); }
   .project-archive-row { grid-template-columns: 30px minmax(0, 1fr) 132px; }
   .project-archive-row > .status-tag { display: none; }
-  .okr-execution-disclosure button { min-height: 44px; }
+  .initiative-disclosure-hit { min-height: 44px; }
   .task-list { border-top: 1px solid var(--line); }
   .task-list-row { min-height: 64px; grid-template-columns: 44px minmax(0, 1fr) 44px; gap: 3px; padding: 0; }
   .task-list-row.deletion-selectable { grid-template-columns: 44px 44px minmax(0, 1fr) 44px; }

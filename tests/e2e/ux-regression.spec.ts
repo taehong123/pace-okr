@@ -90,6 +90,7 @@ const bootstrap = {
     { ...baseItem, id: "initiative-1", parentId: "kr-1", kind: "initiative", title: "핵심 흐름 개편", progress: 40 },
     { ...baseItem, id: "project-1", parentId: "initiative-1", kind: "project", title: "모바일 사용성 개선", assignments: [{ id: "assignment-1", memberId: "member-1", displayName: "테스트 사용자", email: "owner@example.com", role: "project_dri" }] },
     { ...baseItem, id: "task-1", parentId: "project-1", kind: "task", title: "오버레이 동작 점검", status: "todo", progress: 0, assignments: [{ id: "assignment-2", memberId: "member-1", displayName: "테스트 사용자", email: "owner@example.com", role: "task_assignee" }] },
+    { ...baseItem, id: "initiative-2", parentId: "kr-1", kind: "initiative", title: "후속 실행 방향", progress: 0 },
   ],
   properties: [],
   propertyValues: {},
@@ -330,10 +331,18 @@ test("Objective·Initiative에는 퍼센트를 표시하지 않고 KR API를 연
   await expect(page.locator(".hierarchy-row:has(.type-task)")).toHaveCount(0);
   const executionToggle = page.getByRole("button", { name: "핵심 흐름 개편 Project·Task 2개 펼치기" });
   await expect(executionToggle).toHaveAttribute("aria-expanded", "false");
-  await executionToggle.click();
+  await expect(page.locator(".hierarchy-row").filter({ hasText: "후속 실행 방향" }).locator(".initiative-disclosure-hit")).toHaveCount(0);
+  await executionToggle.press("Enter");
   await expect(page.locator(".hierarchy-row:has(.type-project)").filter({ hasText: "모바일 사용성 개선" })).toBeVisible();
   await expect(page.locator(".hierarchy-row:has(.type-task)").filter({ hasText: "오버레이 동작 점검" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "핵심 흐름 개편 Project·Task 2개 접기" })).toHaveAttribute("aria-expanded", "true");
+  const collapseToggle = page.getByRole("button", { name: "핵심 흐름 개편 Project·Task 2개 접기" });
+  await expect(collapseToggle).toHaveAttribute("aria-expanded", "true");
+  await expect(collapseToggle).toHaveAttribute("aria-controls", "initiative-execution-initiative-1");
+  await collapseToggle.press("Space");
+  await expect(page.locator(".hierarchy-row:has(.type-project)")).toHaveCount(0);
+  await page.getByRole("button", { name: "핵심 흐름 개편 수정" }).click();
+  await expect(executionToggle).toHaveAttribute("aria-expanded", "false");
+  await page.keyboard.press("Escape");
 
   await page.goto("/?view=kr_data");
   const krCard = page.locator(".kr-data-card").filter({ hasText: "활성 사용자 20% 증가" });
