@@ -16,6 +16,26 @@ export type SlackOAuthResponse = {
   error?: string;
 };
 
+export type SlackOAuthResultCode =
+  | "connected"
+  | "workspace_admin_required"
+  | "slack_admin_approval_required"
+  | "workspace_already_connected"
+  | "authorization_cancelled"
+  | "missing_scope"
+  | "oauth_exchange_failed"
+  | "missing_config";
+
+export class SlackOAuthExchangeError extends Error {
+  readonly slackCode: string;
+
+  constructor(slackCode: string) {
+    super(`Slack OAuth exchange failed: ${slackCode}`);
+    this.name = "SlackOAuthExchangeError";
+    this.slackCode = slackCode;
+  }
+}
+
 export const slackScopes = [
   "commands",
   "chat:write",
@@ -68,8 +88,22 @@ export async function exchangeSlackCode(runtime: SlackRuntimeEnv, request: Reque
     }),
   });
   const data = await response.json() as SlackOAuthResponse;
-  if (!response.ok || !data.ok) throw new Error(data.error || "Slack OAuth exchange failed");
+  if (!response.ok || !data.ok) throw new SlackOAuthExchangeError(data.error || "oauth_exchange_failed");
   return data;
+}
+
+export function classifySlackOAuthError(code: string, description = ""): SlackOAuthResultCode {
+  const normalized = `${code} ${description}`.toLocaleLowerCase();
+  if (/admin|approval|approved|restricted_action|request_pending/.test(normalized)) return "slack_admin_approval_required";
+  if (/invalid_scope|missing_scope|scope_not_allowed/.test(normalized)) return "missing_scope";
+  if (/access_denied|cancel|denied_by_user/.test(normalized)) return "authorization_cancelled";
+  return "oauth_exchange_failed";
+}
+
+export function redirectWithSlackStatus(request: Request, returnTo: string, status: SlackOAuthResultCode) {
+  const url = new URL(returnTo, request.url);
+  url.searchParams.set("slack", status);
+  return Response.redirect(url.toString(), 303);
 }
 
 export async function revokeSlackToken(token: string) {

@@ -1,19 +1,19 @@
 import { env } from "cloudflare:workers";
 import { authorizeRequest, canManageTeam, createSlackOAuthState, ensureWorkspace } from "@/lib/pace-data";
-import { slackAuthorizationUrl, slackConfigured, type SlackRuntimeEnv } from "@/lib/slack-oauth";
+import { redirectWithSlackStatus, slackAuthorizationUrl, slackConfigured, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 
 export async function GET(request: Request) {
   const authorization = await authorizeRequest(request, { allowViewerWrite: true });
   if (authorization instanceof Response) return authorization;
-  if (!canManageTeam(authorization)) return Response.json({ error: "Workspace admin access is required" }, { status: 403 });
+  if (!canManageTeam(authorization)) return redirectWithSlackStatus(request, "/?view=integrations", "workspace_admin_required");
   await ensureWorkspace(authorization.ownerId);
 
   const runtime = env as SlackRuntimeEnv;
   if (!slackConfigured(runtime)) {
-    return Response.json({ error: "Slack OAuth is not configured", code: "missing_slack_config" }, { status: 503 });
+    return redirectWithSlackStatus(request, "/?view=integrations", "missing_config");
   }
 
   const url = new URL(request.url);
-  const state = await createSlackOAuthState(authorization.ownerId, authorization.userId, url.searchParams.get("returnTo") || "/");
+  const state = await createSlackOAuthState(authorization.ownerId, authorization.userId, url.searchParams.get("returnTo") || "/?view=integrations");
   return Response.redirect(slackAuthorizationUrl(runtime, request, state), 302);
 }

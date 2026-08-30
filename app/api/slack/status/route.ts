@@ -23,10 +23,10 @@ export async function GET(request: Request) {
   const statusMessage = state === "platform_unavailable"
     ? "Slack 연결 설정이 아직 완료되지 않았습니다. 현재 이용자가 입력할 기술 설정은 없습니다."
     : state === "workspace_disconnected"
-      ? "Owner 또는 Admin이 Slack 승인 한 번으로 워크스페이스를 연결할 수 있습니다."
+      ? "Owner 또는 Admin이 이 OKRPTR 워크스페이스에 사용할 Slack을 직접 선택하고 승인할 수 있습니다."
       : state === "reauthorization_required"
         ? "새 데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요."
-        : `${connection?.teamName || "Slack"}과 연결되어 데일리 알림을 설정할 수 있습니다.`;
+        : `${connection?.teamName || "Slack"} 워크스페이스가 연결되어 데일리 알림을 설정할 수 있습니다.`;
   return Response.json({
     slack: {
       ...serializeSlackConnection(connection, configured, {
@@ -38,6 +38,9 @@ export async function GET(request: Request) {
       state,
       statusMessage,
       missingScopes,
+      connectionScope: "workspace",
+      distributionMode: "direct_oauth",
+      connectedTeam: connection ? { id: connection.teamId, name: connection.teamName } : null,
     },
   });
 }

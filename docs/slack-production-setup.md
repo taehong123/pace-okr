@@ -5,7 +5,7 @@
 ## 1. 공용 Slack 앱 만들기
 
 1. Slack API의 **Your Apps**에서 **Create New App → From an app manifest**를 선택한다.
-2. 개발 워크스페이스를 선택하고 저장소의 `slack-app-manifest.yml` 내용을 붙여넣는다.
+2. 운영자 소유의 중립적인 개발 워크스페이스를 선택하고 저장소의 `slack-app-manifest.yml` 내용을 붙여넣는다. 이 워크스페이스는 앱 소유·검증용이며 고객 연결 대상이 아니다.
 3. 생성 전 요약에서 다음 URL이 모두 `https://okrptr.com`을 사용하는지 확인한다.
    - OAuth Redirect: `/api/slack/callback`
    - Slash Command: `/api/slack/commands`
@@ -45,9 +45,13 @@ Slack 앱의 **Basic Information**과 **OAuth & Permissions**에서 다음 값�
 7. 같은 날짜에 다시 제출해 새 메시지가 아니라 기존 카드가 갱신되는지 확인한다.
 8. 스킵의 `본업 과중 / 휴가 / 개인 일정 / 기타`를 각각 확인하고, `기타`에서 상세 사유가 필수인지 확인한다.
 
-## 5. 다른 고객 워크스페이스 허용
+## 5. 모든 고객 워크스페이스의 직접 설치 허용
 
-AllVibe 검증이 끝난 뒤 Slack 앱의 **Manage Distribution**에서 배포 체크리스트를 완료하고 비공개 목록 방식의 공개 배포를 활성화한다. 고객은 OKRPTR의 **Slack에 연결** 버튼으로 OAuth 설치를 시작하며 훅 URL이나 개발자 설정을 입력하지 않는다.
+테스트 워크스페이스 A에서 기본 흐름을 확인한 뒤 Slack 앱의 **Manage Distribution**에서 배포 체크리스트를 완료하고 비공개 목록 방식의 Public Distribution을 활성화한다. 이어서 별도의 테스트 워크스페이스 B에서도 OKRPTR의 연결 버튼만으로 설치되는지 확인한다.
+
+고객은 OKRPTR의 **내 Slack 워크스페이스에 연결** 버튼으로 OAuth 설치를 시작한다. Slack 승인 화면에서 자기 워크스페이스를 선택하며 훅 URL, Client ID, Signing Secret 같은 개발자 설정은 입력하지 않는다.
+
+한 OKRPTR 워크스페이스에는 Slack 워크스페이스 하나만 연결한다. 같은 Slack 워크스페이스를 다른 OKRPTR 워크스페이스로 옮기려면 기존 연결을 먼저 해제한다.
 
 권한을 추가하면 기존 워크스페이스에는 자동으로 권한이 생기지 않는다. OKRPTR에서 **권한 업데이트**를 눌러 한 번 다시 승인해야 한다.
 
@@ -56,6 +60,7 @@ AllVibe 검증이 끝난 뒤 Slack 앱의 **Manage Distribution**에서 배포 �
 - **서비스 설정 확인 필요**: 운영 환경의 Client ID, Client Secret, Signing Secret을 확인하고 재배포한다.
 - **권한 업데이트 필요**: 매니페스트의 Bot Token Scopes를 반영한 뒤 OKRPTR에서 다시 승인한다.
 - **Slack 미연결 사용자**: 이메일 대소문자와 활성 멤버 여부를 확인하거나 `/okrptr daily` 일회용 링크를 사용한다.
+- **Slack 관리자 승인 필요**: 고객 Slack의 앱 설치 정책에 따른 상태이므로 해당 Slack의 Owner/Admin 승인 후 다시 연결한다.
+- **이미 다른 OKRPTR에 연결됨**: 기존 OKRPTR 워크스페이스에서 Slack 연결을 해제한 뒤 다시 시도한다.
 - **공유 채널이 보이지 않음**: Slack에서 OKRPTR 봇을 해당 채널에 초대한 뒤 재동기화한다.
 - **DM 또는 채널 전송 실패**: 앱 연동의 오류 항목에서 재시도하고 Sites Worker 오류 로그에서 Slack API 오류 코드를 확인한다.
-

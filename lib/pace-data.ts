@@ -545,9 +545,8 @@ async function ensureSchema() {
           connected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
-        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_connections_owner_user ON slack_connections(owner_id, user_id)"),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_connections_team ON slack_connections(team_id)"),
-        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_connections_owner ON slack_connections(owner_id)"),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_connections_owner ON slack_connections(owner_id)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS slack_automations (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -1581,7 +1580,7 @@ export async function saveGoogleCalendarEvent(input: {
   return event;
 }
 
-export async function createSlackOAuthState(ownerId: string, userId: string, returnTo = "/") {
+export async function createSlackOAuthState(ownerId: string, userId: string, returnTo = "/?view=integrations") {
   await ensureSchema();
   const state = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
@@ -1634,6 +1633,16 @@ export async function getSlackConnectionByTeam(teamId: string) {
   return row?.connection ?? null;
 }
 
+export class SlackWorkspaceConnectionError extends Error {
+  readonly code: "workspace_already_connected";
+
+  constructor(code: "workspace_already_connected", message: string) {
+    super(message);
+    this.name = "SlackWorkspaceConnectionError";
+    this.code = code;
+  }
+}
+
 export async function saveSlackConnection(input: {
   ownerId: string;
   userId: string;
@@ -1645,36 +1654,40 @@ export async function saveSlackConnection(input: {
   scope: string;
 }) {
   await ensureSchema();
+  const previousConnection = await getSlackConnection(input.ownerId);
   const [teamConnection] = await getDb().select().from(slackConnections).where(eq(slackConnections.teamId, input.teamId)).limit(1);
   if (teamConnection && teamConnection.ownerId !== input.ownerId) {
-    throw new Error("This Slack workspace is already connected to another OKRPTR workspace. Disconnect it there before reconnecting.");
+    throw new SlackWorkspaceConnectionError(
+      "workspace_already_connected",
+      "이 Slack 워크스페이스는 다른 OKRPTR 워크스페이스에 연결되어 있습니다. 기존 연결을 해제한 뒤 다시 시도해 주세요.",
+    );
   }
   const now = new Date().toISOString();
-  const values = {
-    userId: input.userId,
-    teamId: input.teamId,
-    teamName: input.teamName,
-    botUserId: input.botUserId,
-    appId: input.appId,
-    encryptedBotToken: input.encryptedBotToken,
-    scope: input.scope,
-    updatedAt: now,
-  };
-  await getDb().delete(slackConnections).where(eq(slackConnections.ownerId, input.ownerId));
-  const [connection] = await getDb()
-    .insert(slackConnections)
-    .values({
-      id: crypto.randomUUID(),
-      ownerId: input.ownerId,
-      connectedAt: now,
-      ...values,
-    })
-    .onConflictDoUpdate({
-      target: slackConnections.teamId,
-      set: values,
-    })
-    .returning();
-  return connection;
+  try {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM slack_connections WHERE owner_id = ?").bind(input.ownerId),
+      env.DB.prepare(`INSERT INTO slack_connections (
+        id, owner_id, user_id, team_id, team_name, bot_user_id, app_id,
+        encrypted_bot_token, scope, connected_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(
+          crypto.randomUUID(), input.ownerId, input.userId, input.teamId, input.teamName,
+          input.botUserId, input.appId, input.encryptedBotToken, input.scope, now, now,
+        ),
+    ]);
+  } catch (error) {
+    const [conflict] = await getDb().select().from(slackConnections).where(eq(slackConnections.teamId, input.teamId)).limit(1);
+    if (conflict && conflict.ownerId !== input.ownerId) {
+      throw new SlackWorkspaceConnectionError(
+        "workspace_already_connected",
+        "이 Slack 워크스페이스는 다른 OKRPTR 워크스페이스에 연결되어 있습니다. 기존 연결을 해제한 뒤 다시 시도해 주세요.",
+      );
+    }
+    throw error;
+  }
+  const connection = await getSlackConnection(input.ownerId);
+  if (!connection) throw new Error("Slack 연결 저장 결과를 확인하지 못했습니다.");
+  return { connection, previousConnection };
 }
 
 export async function deleteSlackConnection(ownerId: string) {

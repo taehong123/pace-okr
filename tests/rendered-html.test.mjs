@@ -136,7 +136,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /더보기/);
   assert.match(page, /개인 연결/);
   assert.match(page, /워크스페이스 연결/);
-  assert.match(page, /Slack에 연결/);
+  assert.match(page, /내 Slack 워크스페이스에 연결/);
   assert.match(page, /view=integrations/);
   assert.match(page, /기술 설정이나 훅 URL을 입력할 필요 없이/);
   assert.match(page, /자동화 봇/);
@@ -650,20 +650,23 @@ test("connects API data independently to Key Results and Projects", async () => 
 });
 
 test("implements personal daily drafts and the managed Slack daily bot contract", async () => {
-  const [page, styles, dailyDomain, schema, migration, skipMigration, oauth, interactions, events, slackDaily, manifest, slackStatus, operationsGuide] = await Promise.all([
+  const [page, styles, dailyDomain, schema, migration, skipMigration, isolationMigration, oauth, interactions, events, slackDaily, manifest, slackStatus, slackCallback, operationsGuide, customerGuide] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../lib/daily-bot.ts", import.meta.url), "utf8"),
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0026_slack_daily_bot.sql", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0028_daily_skip.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0029_slack_workspace_isolation.sql", import.meta.url), "utf8"),
     readFile(new URL("../lib/slack-oauth.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/interactions/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/slack-daily.ts", import.meta.url), "utf8"),
     readFile(new URL("../slack-app-manifest.yml", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/status/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/slack/callback/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../docs/slack-production-setup.md", import.meta.url), "utf8"),
+    readFile(new URL("../docs/slack-customer-connect.md", import.meta.url), "utf8"),
   ]);
   assert.match(page, /내 데일리/);
   assert.match(page, /확정 및 공유/);
@@ -686,6 +689,7 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(migration, /idx_daily_scrums_legacy_owner_date/);
   assert.match(skipMigration, /skip_reason/);
   assert.match(skipMigration, /skip_note/);
+  assert.match(isolationMigration, /CREATE UNIQUE INDEX `idx_slack_connections_owner`/);
   for (const scope of ["im:write", "im:history", "users:read.email", "channels:read", "groups:read"]) assert.match(oauth, new RegExp(scope.replace(".", "\\.")));
   assert.match(interactions, /view_submission/);
   assert.match(interactions, /skip_reason/);
@@ -696,8 +700,13 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(manifest, /message\.im/);
   assert.doesNotMatch(manifest, /incoming-webhook/);
   for (const state of ["platform_unavailable", "workspace_disconnected", "reauthorization_required", "connected"]) assert.match(slackStatus, new RegExp(state));
+  for (const field of ["connectionScope", "distributionMode", "connectedTeam"]) assert.match(slackStatus, new RegExp(field));
+  for (const code of ["slack_admin_approval_required", "workspace_already_connected", "authorization_cancelled", "missing_scope", "oauth_exchange_failed"]) assert.match(`${oauth}\n${slackCallback}`, new RegExp(code));
   assert.match(operationsGuide, /일반 고객은 이 절차를 수행하지 않으며/);
+  assert.doesNotMatch(operationsGuide, /AllVibe/i);
   assert.match(operationsGuide, /테스트 DM/);
+  assert.match(customerGuide, /훅 URL, Client ID, Client Secret을 입력할 필요는 없다/);
+  assert.match(customerGuide, /다른 고객의 Slack이나 운영자의 테스트 Slack과 연결되지 않는다/);
 });
 
 test("uses warm-neutral KR and Initiative hierarchy surfaces", async () => {

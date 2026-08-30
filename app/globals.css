@@ -1779,6 +1779,18 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .integration-step-body { min-width: 0; display: grid; gap: 11px; }
 .integration-role-note { min-height: 36px; display: flex; align-items: center; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .integration-connected-note { min-height: 36px; display: flex; align-items: center; gap: 7px; color: #3d7b52; font-size: 10px; font-weight: 650; line-height: 1.5; }
+.integration-oauth-flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.integration-oauth-flow > div { min-height: 68px; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 9px; padding: 10px; border: 1px solid #d9d2ee; border-radius: 8px; background: #faf8ff; }
+.integration-oauth-flow > div > span { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: #5b3fc6; color: white; font-size: 10px; font-weight: 800; }
+.integration-oauth-flow p { display: grid; gap: 3px; margin: 0; }
+.integration-oauth-flow b { font-size: 10px; }
+.integration-oauth-flow small { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.integration-permission-help { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.integration-permission-help summary { min-height: 40px; display: flex; align-items: center; padding: 0 11px; color: var(--ink); font-size: 10px; font-weight: 700; cursor: pointer; }
+.integration-permission-help > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 0 11px 11px; }
+.integration-permission-help p { display: grid; gap: 4px; margin: 0; }
+.integration-permission-help b { font-size: 10px; }
+.integration-permission-help span { color: var(--muted); font-size: 9px; line-height: 1.5; }
 .integration-locked-preview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding-top: 2px; }
 .integration-locked-preview > div { min-height: 62px; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 9px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 8px; background: var(--surface); }
 .integration-locked-preview > div > span { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: var(--hover); color: var(--muted); font-size: 10px; font-weight: 750; }
@@ -2119,6 +2131,9 @@ html[data-theme="dark"] .integration-state-message.error { background: color-mix
   .integration-step-action { justify-content: stretch; }
   .integration-step-action button { width: 100%; min-height: 44px; }
   .integration-role-note, .integration-connected-note { min-height: 44px; }
+  .integration-oauth-flow { grid-template-columns: 1fr; }
+  .integration-permission-help summary { min-height: 44px; }
+  .integration-permission-help > div { grid-template-columns: 1fr; }
   .integration-locked-preview { grid-template-columns: 1fr; }
   .integration-step-summary { align-items: flex-start; flex-direction: column; }
   .integration-step-summary span { text-align: left; }

@@ -545,8 +545,12 @@ test("creates Google OAuth and Calendar sync tables", async () => {
 
 test("creates Slack bot connection and OAuth state tables", async () => {
   const db = new DatabaseSync(":memory:");
-  const migration = await readFile(new URL("../drizzle/0012_parallel_vindicator.sql", import.meta.url), "utf8");
+  const [migration, workspaceIsolation] = await Promise.all([
+    readFile(new URL("../drizzle/0012_parallel_vindicator.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0029_slack_workspace_isolation.sql", import.meta.url), "utf8"),
+  ]);
   db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(workspaceIsolation.replaceAll("--> statement-breakpoint", ""));
   db.exec(`
     INSERT INTO slack_connections (
       id, owner_id, user_id, team_id, team_name, bot_user_id, app_id, encrypted_bot_token, scope
@@ -562,12 +566,43 @@ test("creates Slack bot connection and OAuth state tables", async () => {
     scope: "commands,chat:write",
   });
   assert.equal(db.prepare("SELECT return_to FROM slack_oauth_states WHERE state = 'state'").get().return_to, "/");
+  db.exec("INSERT INTO slack_connections (id, owner_id, user_id, team_id, encrypted_bot_token) VALUES ('other-team', 'other', 'other-user', 'T456', 'encrypted-b')");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM slack_connections").get().count, 2);
+  assert.deepEqual(
+    db.prepare("SELECT owner_id, encrypted_bot_token FROM slack_connections ORDER BY team_id").all().map((row) => ({ ...row })),
+    [
+      { owner_id: "workspace", encrypted_bot_token: "encrypted" },
+      { owner_id: "other", encrypted_bot_token: "encrypted-b" },
+    ],
+  );
   assert.throws(
     () => db.exec("INSERT INTO slack_connections (id, owner_id, user_id, team_id, encrypted_bot_token) VALUES ('duplicate-user', 'workspace', 'user', 'T456', 'encrypted')"),
     /UNIQUE/i,
   );
   assert.throws(
     () => db.exec("INSERT INTO slack_connections (id, owner_id, user_id, team_id, encrypted_bot_token) VALUES ('duplicate-team', 'other', 'other-user', 'T123', 'encrypted')"),
+    /UNIQUE/i,
+  );
+  db.close();
+});
+
+test("keeps the latest Slack connection while enforcing one team per OKRPTR workspace", async () => {
+  const db = new DatabaseSync(":memory:");
+  const [baseMigration, workspaceIsolation] = await Promise.all([
+    readFile(new URL("../drizzle/0012_parallel_vindicator.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0029_slack_workspace_isolation.sql", import.meta.url), "utf8"),
+  ]);
+  db.exec(baseMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO slack_connections (id, owner_id, user_id, team_id, encrypted_bot_token, updated_at)
+      VALUES ('older', 'workspace', 'user-a', 'T-OLD', 'encrypted-old', '2026-08-29T09:00:00.000Z');
+    INSERT INTO slack_connections (id, owner_id, user_id, team_id, encrypted_bot_token, updated_at)
+      VALUES ('newer', 'workspace', 'user-b', 'T-NEW', 'encrypted-new', '2026-08-30T09:00:00.000Z');
+  `);
+  db.exec(workspaceIsolation.replaceAll("--> statement-breakpoint", ""));
+  assert.deepEqual({ ...db.prepare("SELECT id, team_id FROM slack_connections WHERE owner_id = 'workspace'").get() }, { id: "newer", team_id: "T-NEW" });
+  assert.throws(
+    () => db.exec("INSERT INTO slack_connections (id, owner_id, user_id, team_id, encrypted_bot_token) VALUES ('duplicate-owner', 'workspace', 'user-c', 'T-OTHER', 'encrypted')"),
     /UNIQUE/i,
   );
   db.close();

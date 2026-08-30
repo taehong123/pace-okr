@@ -1,17 +1,17 @@
 import { env, waitUntil } from "cloudflare:workers";
-import { consumeSlackOAuthState, saveSlackConnection } from "@/lib/pace-data";
-import { encryptSlackSecret, exchangeSlackCode, slackConfigured, type SlackRuntimeEnv } from "@/lib/slack-oauth";
-import { syncSlackDailyInstallation } from "@/lib/slack-daily";
+import { consumeSlackOAuthState, saveSlackConnection, SlackWorkspaceConnectionError } from "@/lib/pace-data";
+import { classifySlackOAuthError, decryptSlackSecret, encryptSlackSecret, exchangeSlackCode, redirectWithSlackStatus, revokeSlackToken, SlackOAuthExchangeError, slackConfigured, slackScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
+import { disconnectSlackDaily, syncSlackDailyInstallation } from "@/lib/slack-daily";
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const stateValue = requestUrl.searchParams.get("state") ?? "";
   const state = await consumeSlackOAuthState(stateValue);
-  const returnTo = state?.returnTo ?? "/";
+  const returnTo = state?.returnTo ?? "/?view=integrations";
 
-  if (!state || requestUrl.searchParams.get("error")) {
-    return redirectWithSlackStatus(request, returnTo, "failed");
-  }
+  if (!state) return redirectWithSlackStatus(request, returnTo, "oauth_exchange_failed");
+  const authorizationError = requestUrl.searchParams.get("error");
+  if (authorizationError) return redirectWithSlackStatus(request, returnTo, classifySlackOAuthError(authorizationError, requestUrl.searchParams.get("error_description") ?? ""));
 
   const runtime = env as SlackRuntimeEnv;
   if (!slackConfigured(runtime)) {
@@ -19,14 +19,14 @@ export async function GET(request: Request) {
   }
 
   const code = requestUrl.searchParams.get("code");
-  if (!code) return redirectWithSlackStatus(request, returnTo, "failed");
+  if (!code) return redirectWithSlackStatus(request, returnTo, "oauth_exchange_failed");
 
   try {
     const install = await exchangeSlackCode(runtime, request, code);
     const botToken = install.access_token ?? "";
     const teamId = install.team?.id ?? "";
-    if (!botToken || !teamId) return redirectWithSlackStatus(request, returnTo, "failed");
-    await saveSlackConnection({
+    if (!botToken || !teamId) return redirectWithSlackStatus(request, returnTo, "oauth_exchange_failed");
+    const { previousConnection } = await saveSlackConnection({
       ownerId: state.ownerId,
       userId: state.userId,
       teamId,
@@ -36,15 +36,24 @@ export async function GET(request: Request) {
       encryptedBotToken: await encryptSlackSecret(botToken, runtime.SLACK_TOKEN_ENCRYPTION_KEY!),
       scope: install.scope ?? "",
     });
-    waitUntil(syncSlackDailyInstallation(state.ownerId));
-    return redirectWithSlackStatus(request, returnTo, "connected");
-  } catch {
-    return redirectWithSlackStatus(request, returnTo, "failed");
+    waitUntil(finalizeSlackInstallation(state.ownerId, teamId, previousConnection, runtime));
+    const grantedScopes = new Set((install.scope ?? "").split(/[ ,]/).map((scope) => scope.trim()).filter(Boolean));
+    const missingScopes = slackScopes.filter((scope) => !grantedScopes.has(scope));
+    return redirectWithSlackStatus(request, returnTo, missingScopes.length ? "missing_scope" : "connected");
+  } catch (error) {
+    if (error instanceof SlackWorkspaceConnectionError) return redirectWithSlackStatus(request, returnTo, error.code);
+    if (error instanceof SlackOAuthExchangeError) return redirectWithSlackStatus(request, returnTo, classifySlackOAuthError(error.slackCode));
+    return redirectWithSlackStatus(request, returnTo, "oauth_exchange_failed");
   }
 }
 
-function redirectWithSlackStatus(request: Request, returnTo: string, status: string) {
-  const url = new URL(returnTo, request.url);
-  url.searchParams.set("slack", status);
-  return Response.redirect(url.toString(), 303);
+async function finalizeSlackInstallation(ownerId: string, teamId: string, previousConnection: Awaited<ReturnType<typeof saveSlackConnection>>["previousConnection"], runtime: SlackRuntimeEnv) {
+  if (previousConnection && previousConnection.teamId !== teamId) {
+    try { await disconnectSlackDaily(ownerId, previousConnection); } catch { /* The new connection remains valid even if old schedules cannot be cancelled. */ }
+    try {
+      const previousToken = await decryptSlackSecret(previousConnection.encryptedBotToken, runtime.SLACK_TOKEN_ENCRYPTION_KEY!);
+      await revokeSlackToken(previousToken);
+    } catch { /* Old-token revocation is best effort after the atomic swap. */ }
+  }
+  await syncSlackDailyInstallation(ownerId);
 }

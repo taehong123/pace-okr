@@ -204,6 +204,13 @@
       "when": 1788379200000,
       "tag": "0028_daily_skip",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1788465600000,
+      "tag": "0029_slack_workspace_isolation",
+      "breakpoints": true
     }
   ]
 }

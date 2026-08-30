@@ -491,6 +491,9 @@ type SlackConnectionStatus = {
   state: "platform_unavailable" | "workspace_disconnected" | "connected" | "reauthorization_required" | "error";
   statusMessage: string;
   missingScopes: string[];
+  connectionScope: "workspace";
+  distributionMode: "direct_oauth";
+  connectedTeam: { id: string; name: string } | null;
   teamName: string | null;
   teamId: string | null;
   botUserId: string | null;
@@ -501,6 +504,16 @@ type SlackConnectionStatus = {
   commandUrl: string;
   interactionUrl?: string | null;
   eventsUrl?: string | null;
+};
+type SlackOAuthIssue = "workspace_admin_required" | "slack_admin_approval_required" | "workspace_already_connected" | "authorization_cancelled" | "missing_scope" | "oauth_exchange_failed" | "missing_config";
+const slackOAuthIssueCopy: Record<SlackOAuthIssue, { title: string; detail: string; tone: "warning" | "error" }> = {
+  workspace_admin_required: { title: "OKRPTR 관리자 권한이 필요합니다", detail: "이 워크스페이스의 Owner 또는 Admin에게 Slack 연결을 요청해 주세요.", tone: "warning" },
+  slack_admin_approval_required: { title: "Slack 관리자 승인이 필요합니다", detail: "선택한 Slack 워크스페이스의 앱 설치 정책에 따라 관리자 승인을 받은 뒤 다시 연결해 주세요.", tone: "warning" },
+  workspace_already_connected: { title: "이미 다른 OKRPTR 워크스페이스에 연결된 Slack입니다", detail: "기존 OKRPTR 워크스페이스에서 연결을 해제한 뒤 다시 시도해 주세요.", tone: "warning" },
+  authorization_cancelled: { title: "Slack 승인이 취소되었습니다", detail: "연결할 워크스페이스를 다시 선택하려면 아래 연결 버튼을 눌러 주세요.", tone: "warning" },
+  missing_scope: { title: "Slack 권한 업데이트가 필요합니다", detail: "데일리 DM과 채널 공유에 필요한 권한을 Slack에서 한 번 더 승인해 주세요.", tone: "warning" },
+  oauth_exchange_failed: { title: "Slack 연결을 완료하지 못했습니다", detail: "승인 정보가 만료되었거나 Slack 응답을 확인하지 못했습니다. 다시 연결해 주세요.", tone: "error" },
+  missing_config: { title: "Slack 서비스 설정을 확인할 수 없습니다", detail: "고객이 입력할 기술 설정은 없습니다. 운영 설정을 확인한 뒤 다시 시도해 주세요.", tone: "error" },
 };
 type SlackAutomationTrigger = "task_created" | "task_status_changed";
 type SlackAutomation = {
@@ -749,6 +762,7 @@ function WorkspaceApp() {
   const [trashingItems, setTrashingItems] = useState(false);
   const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null);
   const [slackStatus, setSlackStatus] = useState<SlackConnectionStatus | null>(null);
+  const [slackOAuthIssue, setSlackOAuthIssue] = useState<SlackOAuthIssue | null>(null);
   const [integrationStatusesLoaded, setIntegrationStatusesLoaded] = useState(false);
   const [integrationStatusAttempt, setIntegrationStatusAttempt] = useState(0);
   const [integrationStatusError, setIntegrationStatusError] = useState(false);
@@ -886,9 +900,14 @@ function WorkspaceApp() {
     const slackResult = params.get("slack");
     if (!slackResult) return;
     const timeout = window.setTimeout(() => {
-      if (slackResult === "connected") showNotice("Slack 워크스페이스를 연결했습니다.");
-      else if (slackResult === "missing_config") showNotice("Slack 연결 설정을 확인하지 못했습니다.", "error");
-      else showNotice("Slack 연결을 완료하지 못했습니다. 다시 시도해 주세요.", "error");
+      if (slackResult === "connected") {
+        setSlackOAuthIssue(null);
+        showNotice("선택한 Slack 워크스페이스를 연결했습니다.");
+      } else if (Object.prototype.hasOwnProperty.call(slackOAuthIssueCopy, slackResult)) {
+        const issue = slackResult as SlackOAuthIssue;
+        setSlackOAuthIssue(issue);
+        showNotice(slackOAuthIssueCopy[issue].detail, slackOAuthIssueCopy[issue].tone === "error" ? "error" : undefined);
+      }
       const url = new URL(window.location.href);
       url.searchParams.delete("slack");
       window.history.replaceState(window.history.state, "", url);
@@ -2088,7 +2107,7 @@ function WorkspaceApp() {
             </section>
           )}
           {activeView === "scrum" && <DailyScrumView onOpenTask={openTaskDetail} onNotice={showNotice} />}
-          {activeView === "integrations" && <AppIntegrationsView google={googleStatus} slack={slackStatus} loading={!integrationStatusesLoaded} loadError={integrationStatusError} workspaceName={currentWorkspace?.name || "개인 워크스페이스"} canManageSlack={currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin"} onGoogleChange={setGoogleStatus} onSlackChange={setSlackStatus} onRefresh={refreshIntegrationStatuses} onNotice={showNotice} />}
+          {activeView === "integrations" && <AppIntegrationsView google={googleStatus} slack={slackStatus} slackOAuthIssue={slackOAuthIssue} loading={!integrationStatusesLoaded} loadError={integrationStatusError} workspaceName={currentWorkspace?.name || "개인 워크스페이스"} canManageSlack={currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin"} onGoogleChange={setGoogleStatus} onSlackChange={setSlackStatus} onRefresh={refreshIntegrationStatuses} onNotice={showNotice} />}
           {activeView === "recommendations" && <RecommendationsView items={activeItems} onOpenTask={openTaskDetail} onOpenProject={openProjectPage} onNavigate={navigateView} />}
           {activeView === "reviews" && <ReviewView items={periodItems} cadence={cadence} completed={completed} blocked={blocked} averageProgress={averageProgress} onOpenTask={openTaskDetail} onOpenProject={openProjectPage} />}
           {activeView === "trash" && <TrashView onNotice={showNotice} canDeleteRecords={canDeleteRecords} canRestore={Boolean(currentWorkspace && currentWorkspace.role !== "viewer")} />}
@@ -5893,7 +5912,7 @@ function IntegrationModal({ onNotice, onClose }: { onNotice: (message: string) =
   </div><footer><span><CheckCircle2 size={15} />OKR · Objective → Key Result → Initiative → Project → Task / Routine → Task</span><button onClick={() => requestClose("close-button")}>닫기</button></footer></section>}</OverlayDialog>;
 }
 
-function AppIntegrationsView({ google, slack, loading, loadError, workspaceName, canManageSlack, onGoogleChange, onSlackChange, onRefresh, onNotice }: { google: GoogleConnectionStatus | null; slack: SlackConnectionStatus | null; loading: boolean; loadError: boolean; workspaceName: string; canManageSlack: boolean; onGoogleChange: (status: GoogleConnectionStatus | null) => void; onSlackChange: (status: SlackConnectionStatus | null) => void; onRefresh: () => void; onNotice: (message: string) => void }) {
+function AppIntegrationsView({ google, slack, slackOAuthIssue, loading, loadError, workspaceName, canManageSlack, onGoogleChange, onSlackChange, onRefresh, onNotice }: { google: GoogleConnectionStatus | null; slack: SlackConnectionStatus | null; slackOAuthIssue: SlackOAuthIssue | null; loading: boolean; loadError: boolean; workspaceName: string; canManageSlack: boolean; onGoogleChange: (status: GoogleConnectionStatus | null) => void; onSlackChange: (status: SlackConnectionStatus | null) => void; onRefresh: () => void; onNotice: (message: string) => void }) {
   const [disconnectingGoogle, setDisconnectingGoogle] = useState(false);
   const [disconnectingSlack, setDisconnectingSlack] = useState(false);
 
@@ -5911,7 +5930,7 @@ function AppIntegrationsView({ google, slack, loading, loadError, workspaceName,
     const response = await fetch("/api/slack/disconnect", { method: "POST" });
     setDisconnectingSlack(false);
     if (!response.ok) { onNotice("Slack 연결을 해제하지 못했습니다."); return; }
-    onSlackChange(slack ? { ...slack, connected: false, state: "workspace_disconnected", statusMessage: "워크스페이스 관리자가 Slack 연결을 시작할 수 있습니다.", missingScopes: [], teamName: null, teamId: null, botUserId: null, connectedAt: null, updatedAt: null } : null);
+    onSlackChange(slack ? { ...slack, connected: false, state: "workspace_disconnected", statusMessage: "Owner 또는 Admin이 이 OKRPTR 워크스페이스에 사용할 Slack을 선택하고 승인할 수 있습니다.", missingScopes: [], connectedTeam: null, teamName: null, teamId: null, botUserId: null, connectedAt: null, updatedAt: null } : null);
     onNotice("Slack 연결을 해제했습니다. 자동화 규칙은 보관됩니다.");
   }
 
@@ -5927,6 +5946,7 @@ function AppIntegrationsView({ google, slack, loading, loadError, workspaceName,
 
   const slackState = loadError ? "error" : slack?.state ?? (slack?.connected ? "connected" : slack?.configured ? "workspace_disconnected" : "platform_unavailable");
   const slackConnected = Boolean(slack?.connected);
+  const connectedSlackName = slack?.connectedTeam?.name || slack?.teamName || "Slack";
   const slackAction = slackState === "connected" ? "연결 완료" : slackState === "reauthorization_required" ? "권한 업데이트 필요" : slackState === "workspace_disconnected" ? "연결 필요" : slackState === "error" ? "확인 실패" : "서비스 설정 확인 필요";
 
   return <section className="integrations-page" aria-label="앱 연동 설정">
@@ -5941,21 +5961,30 @@ function AppIntegrationsView({ google, slack, loading, loadError, workspaceName,
     </section>
 
     <section className="integration-service-card slack-service-card" aria-labelledby="slack-integration-heading">
-      <header><span className="integration-service-icon slack"><Hash size={20} /></span><div><h3 id="slack-integration-heading">Slack 데일리 봇</h3><p>{slackConnected ? `${slack?.teamName || "Slack"}과 연결되어 있습니다.` : "개인 데일리 DM과 팀 채널 공유를 한 번에 설정합니다."}</p></div><strong className={`integration-status-badge ${slackState}`}>{loading ? "확인 중" : slackAction}</strong></header>
+      <header><span className="integration-service-icon slack"><Hash size={20} /></span><div><h3 id="slack-integration-heading">Slack 데일리 봇</h3><p>{slackConnected ? `${connectedSlackName} 워크스페이스가 연결되어 있습니다.` : "고객마다 자기 Slack 워크스페이스를 선택해 데일리 DM과 팀 공유를 설정합니다."}</p></div><strong className={`integration-status-badge ${slackState}`}>{loading ? "확인 중" : slackAction}</strong></header>
+
+      {slackOAuthIssue && <div className={`integration-state-message ${slackOAuthIssueCopy[slackOAuthIssue].tone}`} role="alert"><AlertTriangle size={17} /><div><b>{slackOAuthIssueCopy[slackOAuthIssue].title}</b><p>{slackOAuthIssueCopy[slackOAuthIssue].detail}</p></div></div>}
 
       <section className="integration-step integration-connect-step" aria-labelledby="slack-step-connect">
         <span className="integration-step-number">1</span><div className="integration-step-copy"><h4 id="slack-step-connect">Slack 워크스페이스 연결</h4><p>{slack?.statusMessage || "연결 상태를 확인하고 있습니다."}</p></div>
         <div className="integration-step-action">
           {loading ? <span className="integration-inline-loading"><LoaderCircle className="spin" size={14} />확인 중</span>
             : slackState === "error" || slackState === "platform_unavailable" ? <button onClick={onRefresh}><RefreshCw size={14} />다시 확인</button>
-            : slackState === "workspace_disconnected" && canManageSlack ? <button className="slack-primary-action" onClick={connectSlack}><Hash size={14} />Slack에 연결</button>
-            : slackState === "workspace_disconnected" ? <span className="integration-role-note">Owner 또는 Admin이 연결할 수 있습니다.</span>
+            : slackState === "workspace_disconnected" && canManageSlack ? <button className="slack-primary-action" onClick={connectSlack}><Hash size={14} />내 Slack 워크스페이스에 연결</button>
+            : slackState === "workspace_disconnected" ? <span className="integration-role-note">OKRPTR Owner 또는 Admin에게 Slack 연결을 요청해 주세요.</span>
             : slackState === "reauthorization_required" && canManageSlack ? <button className="slack-primary-action" onClick={connectSlack}>권한 업데이트</button>
             : slackState === "reauthorization_required" ? <span className="integration-role-note">관리자가 권한을 업데이트해야 합니다.</span>
             : canManageSlack ? <button className="secondary-danger" onClick={() => void disconnectSlack()} disabled={disconnectingSlack}>{disconnectingSlack ? "해제 중" : "연결 해제"}</button>
             : <span className="integration-connected-note"><CheckCircle2 size={14} />연결됨</span>}
         </div>
       </section>
+
+      <div className="integration-oauth-flow" aria-label="Slack 연결 방법">
+        <div><span>1</span><p><b>OKRPTR에서 시작</b><small>Owner/Admin이 연결 버튼을 누릅니다.</small></p></div>
+        <div><span>2</span><p><b>내 Slack 선택</b><small>Slack 승인 화면에서 고객 워크스페이스를 직접 선택합니다.</small></p></div>
+        <div><span>3</span><p><b>자동 설정</b><small>훅 URL 입력 없이 사용자·알림·채널 설정이 열립니다.</small></p></div>
+      </div>
+      <details className="integration-permission-help"><summary>Slack에서 어떤 권한을 요청하나요?</summary><div><p><b>명령과 메시지</b><span>`/okrptr` 실행, 개인 DM, 선택한 팀 채널의 데일리 카드 전송에 사용합니다.</span></p><p><b>사용자와 채널 확인</b><span>이메일 자동 매칭과 봇이 참여한 공유 채널 목록을 불러오는 데 사용합니다.</span></p><p><b>고객별 분리</b><span>승인한 Slack의 Bot Token은 암호화해 현재 OKRPTR 워크스페이스에만 연결합니다.</span></p></div></details>
 
       {slackConnected ? <>
         {slackState === "reauthorization_required" && <div className="integration-state-message warning"><AlertTriangle size={17} /><div><b>새 데일리 기능 권한이 필요합니다</b><p>관리자가 권한 업데이트를 완료하기 전까지 일부 DM·채널 기능이 작동하지 않을 수 있습니다.</p></div></div>}

@@ -612,9 +612,8 @@ export const slackConnections = sqliteTable(
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
-    uniqueIndex("idx_slack_connections_owner_user").on(table.ownerId, table.userId),
     uniqueIndex("idx_slack_connections_team").on(table.teamId),
-    index("idx_slack_connections_owner").on(table.ownerId),
+    uniqueIndex("idx_slack_connections_owner").on(table.ownerId),
   ],
 );
 

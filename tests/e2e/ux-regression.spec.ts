@@ -103,11 +103,17 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "platform_unavailable" | "workspace_disconnected" | "connected" | "reauthorization_required" } = {}) {
+async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "platform_unavailable" | "workspace_disconnected" | "connected" | "reauthorization_required"; workspaceRole?: "owner" | "member" } = {}) {
   let krDataConnections: Array<Record<string, unknown>> = [];
-  const bootstrapResponse = options.withoutTaskContainers
+  const baseBootstrapResponse = options.withoutTaskContainers
     ? { ...bootstrap, items: bootstrap.items.filter((entry) => entry.kind !== "project" && entry.kind !== "task") }
     : bootstrap;
+  const workspaceRole = options.workspaceRole ?? "owner";
+  const bootstrapResponse = {
+    ...baseBootstrapResponse,
+    workspaces: baseBootstrapResponse.workspaces.map((workspace) => ({ ...workspace, role: workspaceRole })),
+    team: { ...baseBootstrapResponse.team, currentRole: workspaceRole, canManage: workspaceRole === "owner", members: baseBootstrapResponse.team.members.map((member) => ({ ...member, role: workspaceRole })) },
+  };
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem("okrptr.intro-language", "ko");
@@ -122,8 +128,9 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
       const connected = state === "connected" || state === "reauthorization_required";
       return json(route, { slack: {
         configured: state !== "platform_unavailable", connected, state,
-        statusMessage: state === "platform_unavailable" ? "Slack 연결 설정이 아직 완료되지 않았습니다. 현재 이용자가 입력할 기술 설정은 없습니다." : state === "workspace_disconnected" ? "Owner 또는 Admin이 Slack 승인 한 번으로 워크스페이스를 연결할 수 있습니다." : state === "reauthorization_required" ? "새 데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요." : "테스트 Slack과 연결되어 데일리 알림을 설정할 수 있습니다.",
+        statusMessage: state === "platform_unavailable" ? "Slack 연결 설정이 아직 완료되지 않았습니다. 현재 이용자가 입력할 기술 설정은 없습니다." : state === "workspace_disconnected" ? "Owner 또는 Admin이 이 OKRPTR 워크스페이스에 사용할 Slack을 직접 선택하고 승인할 수 있습니다." : state === "reauthorization_required" ? "새 데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요." : "고객 Slack A와 연결되어 데일리 알림을 설정할 수 있습니다.",
         missingScopes: state === "reauthorization_required" ? ["im:write"] : [], teamName: connected ? "테스트 Slack" : null, teamId: connected ? "T123" : null, botUserId: connected ? "U-BOT" : null, scope: connected ? "commands,chat:write,im:write,im:history,users:read,users:read.email,channels:read,groups:read" : "", connectedAt: connected ? now : null, updatedAt: connected ? now : null,
+        connectionScope: "workspace", distributionMode: "direct_oauth", connectedTeam: connected ? { id: "T123", name: "고객 Slack A" } : null,
         redirectUrl: "https://okrptr.com/api/slack/callback", commandUrl: "https://okrptr.com/api/slack/commands", interactionUrl: "https://okrptr.com/api/slack/interactions", eventsUrl: "https://okrptr.com/api/slack/events",
       } });
     }
@@ -306,7 +313,8 @@ test.describe("독립 앱 연동 화면", () => {
     await expect(page).toHaveURL(/view=integrations/);
     await expect(page.getByRole("heading", { name: "앱 연동" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Slack 데일리 봇" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Slack에 연결" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "내 Slack 워크스페이스에 연결" })).toBeVisible();
+    await expect(page.getByText("고객 워크스페이스를 직접 선택합니다.")).toBeVisible();
     await expect(page.getByText("준비 중", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("dialog", { name: "앱 연동" })).toHaveCount(0);
   });
@@ -317,7 +325,25 @@ test.describe("독립 앱 연동 화면", () => {
     await expect(page.getByText("서비스 설정 확인 필요", { exact: true })).toBeVisible();
     await expect(page.getByText(/현재 이용자가 입력할 기술 설정은 없습니다/)).toBeVisible();
     await expect(page.getByRole("button", { name: "다시 확인" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Slack에 연결" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "내 Slack 워크스페이스에 연결" })).toHaveCount(0);
+  });
+
+  test("Slack 관리자 승인과 중복 연결 오류를 구체적으로 안내한다", async ({ page }) => {
+    await installApiMocks(page, { slackState: "workspace_disconnected" });
+    await page.goto("/?view=integrations&slack=slack_admin_approval_required");
+    const oauthAlert = page.locator(".slack-service-card .integration-state-message[role='alert']");
+    await expect(oauthAlert).toContainText("Slack 관리자 승인이 필요합니다");
+    await expect(oauthAlert).toContainText("앱 설치 정책");
+    await page.goto("/?view=integrations&slack=workspace_already_connected");
+    await expect(oauthAlert).toContainText("이미 다른 OKRPTR 워크스페이스에 연결된 Slack입니다");
+  });
+
+  test("일반 멤버는 공용 연결 대신 개인 Slack 설정만 사용한다", async ({ page }) => {
+    await installApiMocks(page, { slackState: "connected", workspaceRole: "member" });
+    await page.goto("/?view=integrations");
+    await expect(page.getByText("고객 Slack A 워크스페이스가 연결되어 있습니다.")).toBeVisible();
+    await expect(page.getByText("내 Slack 계정이 연결되었습니다")).toBeVisible();
+    await expect(page.getByRole("button", { name: "연결 해제" })).toHaveCount(0);
   });
 
   test("연결 후 5단계 설정이 페이지 스크롤로 모두 접근 가능하다", async ({ page, isMobile }) => {
@@ -327,6 +353,7 @@ test.describe("독립 앱 연동 화면", () => {
       await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     }
     await expect(page.getByRole("button", { name: "테스트 DM" })).toBeVisible();
+    await expect(page.getByText("고객 Slack A 워크스페이스가 연결되어 있습니다.")).toBeVisible();
     const metrics = await page.evaluate(() => ({ scrollHeight: document.documentElement.scrollHeight, clientHeight: document.documentElement.clientHeight, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth }));
     expect(metrics.overflow).toBeLessThanOrEqual(1);
     if (isMobile) expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
