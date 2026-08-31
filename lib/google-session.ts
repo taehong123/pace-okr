@@ -4,11 +4,9 @@ export const GOOGLE_SIGN_IN_STATE_OWNER = "__google_signin__";
 export const GOOGLE_SIGN_IN_STATE_USER = "__google_signin__";
 const SESSION_COOKIE_NAME = "__Host-okrptr_session";
 const GOOGLE_SIGN_IN_STATE_COOKIE_NAME = "__Host-okrptr_google_signin";
-const GOOGLE_BROWSER_SIGN_IN_STATE_COOKIE_NAME = "__Host-okrptr_google_signin_browser";
 const SESSION_DURATION_SECONDS = 7 * 24 * 60 * 60;
 const GOOGLE_SIGN_IN_STATE_DURATION_SECONDS = 10 * 60;
 export const GOOGLE_SIGN_IN_STATE_PREFIX = "signin_";
-export const GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX = "browser_signin_";
 
 export type GoogleSession = {
   provider: "google";
@@ -55,16 +53,9 @@ export async function readGoogleSignInState(request: Request, expectedState: str
   }
 }
 
-export function readGoogleBrowserSignInState(request: Request, expectedState: string) {
-  if (!expectedState.startsWith(GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX)) return null;
-  const state = readCookie(request, GOOGLE_BROWSER_SIGN_IN_STATE_COOKIE_NAME);
-  return state === expectedState ? { state, returnTo: "/", expiresAt: Math.floor(Date.now() / 1000) + 1 } : null;
-}
-
 export function clearGoogleSignInStateCookies() {
   return [
     `${GOOGLE_SIGN_IN_STATE_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
-    `${GOOGLE_BROWSER_SIGN_IN_STATE_COOKIE_NAME}=; Path=/; Secure; SameSite=Lax; Max-Age=0`,
   ];
 }
 

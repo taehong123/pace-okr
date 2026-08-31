@@ -1012,3 +1012,46 @@ test("adds member daily drafts, immutable submissions, and Slack daily delivery 
   }
   db.close();
 });
+
+test("separates Google identities from users and pending invitations from active members", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE workspaces (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE workspace_members (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      user_id TEXT, email TEXT, display_name TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT 'member',
+      status TEXT NOT NULL DEFAULT 'active', invited_by_user_id TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES
+      ('personal', 'Personal', 'personal'), ('team', 'AllVibe', 'owner');
+  `);
+  const migration = await readFile(new URL("../drizzle/0030_identity_and_invitations.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+
+  assert.deepEqual(db.prepare("SELECT id, kind FROM workspaces ORDER BY id").all().map((row) => ({ ...row })), [
+    { id: "personal", kind: "personal" },
+    { id: "team", kind: "team" },
+  ]);
+  db.exec(`
+    INSERT INTO users (id, email_normalized, display_name) VALUES ('user', 'member@example.com', 'Member');
+    INSERT INTO auth_identities (id, user_id, provider, provider_subject, email)
+      VALUES ('identity', 'user', 'google', 'google-sub', 'member@example.com');
+    INSERT INTO workspace_invitations
+      (id, workspace_id, email, display_name, role, token_hash, expires_at, invited_by_user_id)
+      VALUES ('invite', 'team', 'new@example.com', 'New', 'member', 'hash', '2026-09-30T00:00:00.000Z', 'owner');
+  `);
+  assert.throws(() => db.exec("INSERT INTO users (id, email_normalized) VALUES ('duplicate', 'member@example.com')"), /UNIQUE/i);
+  assert.throws(() => db.exec(`INSERT INTO auth_identities (id, user_id, provider, provider_subject, email)
+    VALUES ('duplicate-identity', 'user', 'google', 'google-sub', 'member@example.com')`), /UNIQUE/i);
+  assert.throws(() => db.exec(`INSERT INTO workspace_invitations
+    (id, workspace_id, email, role, expires_at, invited_by_user_id)
+    VALUES ('duplicate-invite', 'team', 'new@example.com', 'viewer', '2026-09-30T00:00:00.000Z', 'owner')`), /UNIQUE/i);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM workspace_members").get().count, 0);
+  db.close();
+});

@@ -5,6 +5,7 @@ import { readGoogleSession } from "@/lib/google-session";
 import {
   activityLog,
   aiUsageEvents,
+  authIdentities,
   checklistItems,
   dailyScrums,
   googleCalendarEvents,
@@ -27,11 +28,13 @@ import {
   slackConnections,
   slackOAuthStates,
   trashRecords,
+  users,
   userWorkspacePreferences,
   workspaceRules,
   workspaceGroupMembers,
   workspaceGroups,
   workspaceMembers,
+  workspaceInvitations,
   workspaces,
   type PaceItem,
   type PropertyDefinition,
@@ -40,6 +43,7 @@ import {
   type WorkspaceGroup,
   type WorkspaceGroupMember,
   type WorkspaceMember,
+  type WorkspaceInvitation,
   type WorkspaceRule,
   type IntegrationToken,
   type KrDataConnection,
@@ -113,6 +117,19 @@ export type WorkspaceRuleInput = Partial<{
   configured: boolean;
 }>;
 export type TeamRole = (typeof TEAM_ROLES)[number];
+export type InvitationDeliveryStatus = "not_sent" | "sent" | "failed" | "unavailable";
+export type InvitationStatus = "pending" | "expired" | "accepted" | "revoked";
+export type WorkspaceInvitationSummary = {
+  id: string;
+  email: string;
+  displayName: string;
+  role: Exclude<TeamRole, "owner">;
+  status: InvitationStatus;
+  deliveryStatus: InvitationDeliveryStatus;
+  expiresAt: string;
+  lastSentAt: string | null;
+  createdAt: string;
+};
 export type GroupColor = (typeof GROUP_COLORS)[number];
 export type GroupVisibility = (typeof GROUP_VISIBILITIES)[number];
 export type GroupRole = (typeof GROUP_ROLES)[number];
@@ -168,10 +185,14 @@ type RuntimeEnv = typeof env & {
   PACE_API_TOKEN?: string;
   GOOGLE_TOKEN_ENCRYPTION_KEY?: string;
   SLACK_TOKEN_ENCRYPTION_KEY?: string;
+  RESEND_API_KEY?: string;
+  OKRPTR_PUBLIC_URL?: string;
+  OKRPTR_INVITE_FROM?: string;
   WORKSPACE_AVATARS?: R2Bucket;
 };
 let schemaReady: Promise<void> | null = null;
 const workspaceReady = new Map<string, Promise<void>>();
+let invitationDomainCache: { verified: boolean; checkedAt: number } | null = null;
 
 const parentKind: Record<ItemKind, ItemKind | null> = {
   objective: null,
@@ -188,12 +209,20 @@ async function ensureSchema() {
   if (!schemaReady) {
     const d1 = (env as RuntimeEnv).DB;
     schemaReady = (async () => {
-      if (await schemaIsCurrent(d1)) return;
+      if (await schemaIsCurrent(d1)) {
+        await migrateIdentityAndInvitations(d1);
+        return;
+      }
       await d1.batch([
+        d1.prepare(`CREATE TABLE IF NOT EXISTS app_migrations (
+          id TEXT PRIMARY KEY,
+          applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
         d1.prepare(`CREATE TABLE IF NOT EXISTS workspaces (
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
           owner_user_id TEXT NOT NULL,
+          kind TEXT NOT NULL DEFAULT 'team',
           deletion_requested_at TEXT,
           scheduled_deletion_at TEXT,
           deletion_requested_by_user_id TEXT,
@@ -204,6 +233,25 @@ async function ensureSchema() {
         )`),
         d1.prepare("DROP INDEX IF EXISTS idx_workspaces_owner_user"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspaces_owner ON workspaces(owner_user_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS users (
+          id TEXT PRIMARY KEY,
+          email_normalized TEXT NOT NULL,
+          display_name TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_normalized ON users(email_normalized)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS auth_identities (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          provider TEXT NOT NULL,
+          provider_subject TEXT NOT NULL,
+          email TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          last_used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_identities_provider_subject ON auth_identities(provider, provider_subject)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_auth_identities_user ON auth_identities(user_id)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS workspace_members (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -221,6 +269,29 @@ async function ensureSchema() {
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspace_members_user_lookup ON workspace_members(user_id, status)"),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_members_workspace_email ON workspace_members(workspace_id, email)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace_status ON workspace_members(workspace_id, status)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS workspace_invitations (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          email TEXT NOT NULL,
+          display_name TEXT NOT NULL DEFAULT '',
+          role TEXT NOT NULL DEFAULT 'member',
+          token_hash TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'pending',
+          delivery_status TEXT NOT NULL DEFAULT 'not_sent',
+          provider_message_id TEXT,
+          invited_by_user_id TEXT NOT NULL,
+          accepted_by_user_id TEXT,
+          expires_at TEXT NOT NULL,
+          last_sent_at TEXT,
+          accepted_at TEXT,
+          revoked_at TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_invitations_pending_email ON workspace_invitations(workspace_id, email) WHERE status = 'pending'"),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_invitations_token ON workspace_invitations(token_hash) WHERE token_hash <> ''"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspace_invitations_workspace_status ON workspace_invitations(workspace_id, status)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspace_invitations_email_status ON workspace_invitations(email, status)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS user_workspace_preferences (
           user_id TEXT PRIMARY KEY,
           active_workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
@@ -624,6 +695,7 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN deletion_requested_by_user_id TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN avatar_key TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN avatar_updated_at TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN kind TEXT NOT NULL DEFAULT 'team'");
       await addColumnIfMissing(d1, "ALTER TABLE property_definitions ADD COLUMN default_value TEXT NOT NULL DEFAULT 'null'");
       await addColumnIfMissing(d1, "ALTER TABLE property_definitions ADD COLUMN system_key TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE property_definitions ADD COLUMN active INTEGER NOT NULL DEFAULT 1");
@@ -755,6 +827,7 @@ async function ensureSchema() {
       ]);
       await addColumnIfMissing(d1, "ALTER TABLE daily_submissions ADD COLUMN skip_reason TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE daily_submissions ADD COLUMN skip_note TEXT NOT NULL DEFAULT ''");
+      await migrateIdentityAndInvitations(d1);
     })()
       .catch((error: unknown) => {
         schemaReady = null;
@@ -772,6 +845,7 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       workspace.deletion_requested_at,
       workspace.scheduled_deletion_at,
       workspace.deletion_requested_by_user_id,
+      workspace.kind,
       workspace.avatar_key,
       workspace.avatar_updated_at,
       routine.system_key,
@@ -787,6 +861,7 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       daily_scrum.skip_reason,
       daily_submission.skip_reason,
       slack_daily_setting.reminder_time
+      ,app_migration.applied_at
     FROM workspaces AS workspace
     LEFT JOIN routines AS routine ON 1 = 0
     LEFT JOIN property_definitions AS property ON 1 = 0
@@ -796,6 +871,10 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
     LEFT JOIN daily_scrums AS daily_scrum ON 1 = 0
     LEFT JOIN daily_submissions AS daily_submission ON 1 = 0
     LEFT JOIN slack_daily_settings AS slack_daily_setting ON 1 = 0
+    LEFT JOIN users AS app_user ON 1 = 0
+    LEFT JOIN auth_identities AS auth_identity ON 1 = 0
+    LEFT JOIN workspace_invitations AS invitation ON 1 = 0
+    LEFT JOIN app_migrations AS app_migration ON 1 = 0
     LIMIT 0`).first();
     return true;
   } catch {
@@ -810,6 +889,105 @@ async function addColumnIfMissing(d1: RuntimeEnv["DB"], statement: string) {
     const message = error instanceof Error ? error.message : String(error);
     if (!/duplicate column|already exists/i.test(message)) throw error;
   }
+}
+
+async function migrateIdentityAndInvitations(d1: RuntimeEnv["DB"]) {
+  const migrationId = "identity_invitations_v1";
+  const applied = await d1.prepare("SELECT id FROM app_migrations WHERE id = ?").bind(migrationId).first();
+  if (applied) return;
+  const duplicateWorkspaceId = "E6WSfoIlmC4YdGCMeD5Pcc0vPe4WgTmCKlJhSyb96ovmjgAzTmphTT";
+  const canonicalPodongUserId = "google:110361141304883691643";
+  const allVibeWorkspaceId = "07a2ec53-447a-4e2c-9403-175815cb7bca";
+  const duplicate = await d1.prepare(`SELECT
+    EXISTS(SELECT 1 FROM workspaces WHERE id = ?) AS present,
+    (SELECT count(*) FROM items WHERE owner_id = ?) AS item_count,
+    (SELECT count(*) FROM routines WHERE owner_id = ? AND coalesce(system_key, '') <> 'general') AS custom_routine_count,
+    (SELECT count(*) FROM daily_scrums WHERE owner_id = ?) AS daily_count,
+    (SELECT count(*) FROM trash_records WHERE owner_id = ?) AS trash_count,
+    (SELECT count(*) FROM integration_tokens WHERE workspace_id = ?) AS token_count,
+    (SELECT count(*) FROM google_connections WHERE owner_id = ?) AS google_count,
+    (SELECT count(*) FROM slack_connections WHERE owner_id = ?) AS slack_count
+  `).bind(
+    duplicateWorkspaceId,
+    duplicateWorkspaceId,
+    duplicateWorkspaceId,
+    duplicateWorkspaceId,
+    duplicateWorkspaceId,
+    duplicateWorkspaceId,
+    duplicateWorkspaceId,
+    duplicateWorkspaceId,
+  ).first<Record<string, number>>();
+  if (Number(duplicate?.present ?? 0)) {
+    const unsafeCount = ["item_count", "custom_routine_count", "daily_count", "trash_count", "token_count", "google_count", "slack_count"]
+      .reduce((sum, key) => sum + Number(duplicate?.[key] ?? 0), 0);
+    if (unsafeCount > 0) throw new Error("Duplicate personal workspace contains user data; automatic repair stopped.");
+    await permanentlyDeleteWorkspace(duplicateWorkspaceId);
+  }
+
+  await d1.batch([
+    d1.prepare("UPDATE workspaces SET kind = CASE WHEN id = owner_user_id THEN 'personal' ELSE 'team' END"),
+    d1.prepare(`INSERT OR IGNORE INTO users (id, email_normalized, display_name, created_at, updated_at)
+      SELECT
+        coalesce(max(CASE WHEN user_id LIKE 'google:%' THEN user_id END), min(user_id)),
+        lower(trim(email)), max(display_name), min(created_at), max(updated_at)
+      FROM workspace_members
+      WHERE status = 'active' AND user_id IS NOT NULL AND trim(coalesce(email, '')) <> ''
+      GROUP BY lower(trim(email))`),
+    d1.prepare(`INSERT OR IGNORE INTO auth_identities
+      (id, user_id, provider, provider_subject, email, created_at, last_used_at)
+      SELECT lower(hex(randomblob(16))), user_id, 'google', substr(user_id, 8), lower(trim(email)), created_at, updated_at
+      FROM workspace_members
+      WHERE status = 'active' AND user_id LIKE 'google:%' AND trim(coalesce(email, '')) <> ''`),
+    d1.prepare(`INSERT OR IGNORE INTO workspace_invitations
+      (id, workspace_id, email, display_name, role, token_hash, status, delivery_status,
+       invited_by_user_id, expires_at, created_at, updated_at)
+      SELECT id, workspace_id, lower(trim(email)), display_name, role, '', 'pending', 'not_sent',
+        coalesce(invited_by_user_id, (SELECT owner_user_id FROM workspaces WHERE workspaces.id = workspace_members.workspace_id), 'legacy'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+30 days'), created_at, updated_at
+      FROM workspace_members
+      WHERE status = 'invited' AND trim(coalesce(email, '')) <> ''`),
+    d1.prepare("DELETE FROM workspace_members WHERE status = 'invited'"),
+    d1.prepare(`DELETE FROM workspace_members
+      WHERE user_id = ? AND EXISTS (
+        SELECT 1 FROM workspace_members AS canonical
+        WHERE canonical.workspace_id = workspace_members.workspace_id
+          AND canonical.user_id = ?
+          AND canonical.status = 'active'
+      )`).bind(duplicateWorkspaceId, canonicalPodongUserId),
+    d1.prepare("UPDATE workspace_members SET user_id = ? WHERE user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE workspace_members SET invited_by_user_id = ? WHERE invited_by_user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE workspace_invitations SET invited_by_user_id = ? WHERE invited_by_user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE workspace_invitations SET accepted_by_user_id = ? WHERE accepted_by_user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE workspaces SET owner_user_id = ? WHERE owner_user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE workspaces SET deletion_requested_by_user_id = ? WHERE deletion_requested_by_user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE workspace_groups SET created_by_user_id = ? WHERE created_by_user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE items SET created_by_user_id = ? WHERE created_by_user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE kr_data_connections SET created_by_user_id = ? WHERE created_by_user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE project_templates SET created_by_user_id = ? WHERE created_by_user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE slack_automations SET created_by_user_id = ? WHERE created_by_user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE trash_records SET created_by_user_id = ? WHERE created_by_user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE integration_tokens SET user_id = ? WHERE user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE mcp_oauth_codes SET authorization_json = replace(authorization_json, ?, ?) WHERE instr(authorization_json, ?) > 0")
+      .bind(duplicateWorkspaceId, canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE ai_usage_events SET user_id = ? WHERE user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE google_connections SET user_id = ? WHERE user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE google_oauth_states SET user_id = ? WHERE user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE google_calendar_events SET user_id = ? WHERE user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE slack_connections SET user_id = ? WHERE user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("UPDATE slack_oauth_states SET user_id = ? WHERE user_id = ?").bind(canonicalPodongUserId, duplicateWorkspaceId),
+    d1.prepare("DELETE FROM user_workspace_preferences WHERE user_id = ?").bind(duplicateWorkspaceId),
+    d1.prepare(`INSERT INTO user_workspace_preferences (user_id, active_workspace_id, updated_at)
+      SELECT ?, ?, CURRENT_TIMESTAMP
+      WHERE EXISTS (
+        SELECT 1 FROM workspace_members
+        WHERE workspace_id = ? AND user_id = ? AND status = 'active'
+      )
+      ON CONFLICT(user_id) DO UPDATE SET active_workspace_id = excluded.active_workspace_id, updated_at = excluded.updated_at`)
+      .bind(canonicalPodongUserId, allVibeWorkspaceId, allVibeWorkspaceId, canonicalPodongUserId),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_personal_owner ON workspaces(owner_user_id) WHERE kind = 'personal'"),
+    d1.prepare("INSERT INTO app_migrations (id, applied_at) VALUES (?, CURRENT_TIMESTAMP)").bind(migrationId),
+    d1.prepare("PRAGMA optimize"),
+  ]);
 }
 
 export async function ensureWorkspace(ownerId: string) {
@@ -883,7 +1061,7 @@ async function migrateInboxTasksToGeneral(ownerId: string, routineId: string) {
 
 async function migratePersonalWorkspaceAssignments(ownerId: string) {
   const [workspace] = await getDb().select().from(workspaces).where(eq(workspaces.id, ownerId)).limit(1);
-  if (!workspace || workspace.ownerUserId !== ownerId) return;
+  if (!workspace || workspace.kind !== "personal") return;
   const members = await getDb().select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(
     eq(workspaceMembers.workspaceId, ownerId),
     eq(workspaceMembers.status, "active"),
@@ -2036,11 +2214,13 @@ export async function authorizeRequest(
   request: Request,
   options: { allowViewerWrite?: boolean } = {},
 ): Promise<RequestAuthorization | Response> {
-  const userId = request.headers.get("oai-authenticated-user-id");
+  // Run idempotent schema and account repairs before choosing an authentication
+  // mechanism. This lets the first post-deploy session check complete the repair
+  // without treating an unauthenticated request as a user or creating an account.
+  await ensureSchema();
   const configuredToken = (env as RuntimeEnv).OKRPTR_API_TOKEN ?? (env as RuntimeEnv).OKITA_API_TOKEN ?? (env as RuntimeEnv).PACE_API_TOKEN;
   const suppliedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (suppliedToken?.startsWith("okrptr_")) {
-    await ensureSchema();
     const [tokenRow] = await getDb()
       .select({ token: integrationTokens })
       .from(integrationTokens)
@@ -2084,36 +2264,14 @@ export async function authorizeRequest(
 
   const hostname = new URL(request.url).hostname;
   if (hostname === "localhost" || hostname === "127.0.0.1") {
-    await ensureSchema();
     const membership = await resolveWorkspaceMembership("local-user", "local@okrptr.com", "Local Owner", requestedWorkspaceId(request));
     return { ownerId: membership?.workspaceId ?? "local-user", userId: "local-user", email: "local@okrptr.com", displayName: "Local Owner", role: (membership?.role as TeamRole | undefined) ?? "owner", apiToken: false };
-  }
-
-  if (userId) {
-    try {
-      await ensureSchema();
-      const email = normalizeEmail(request.headers.get("oai-authenticated-user-email"));
-      const displayName = cleanDisplayName(authenticatedDisplayName(request)) || email?.split("@")[0] || "Member";
-      const membership = await resolveWorkspaceMembership(userId, email, displayName, requestedWorkspaceId(request));
-      if (!membership || membership.status !== "active") {
-        return Response.json({ error: "This account is not an active workspace member." }, { status: 403 });
-      }
-      const role = membership.role as TeamRole;
-      if (!options.allowViewerWrite && role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
-        return Response.json({ error: "Viewer access is read-only." }, { status: 403 });
-      }
-      return { ownerId: membership.workspaceId, userId, email, displayName: membership.displayName, role, apiToken: false };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to resolve workspace access.";
-      return Response.json({ error: message }, { status: 500 });
-    }
   }
 
   const googleSession = await readGoogleSession(request, (env as RuntimeEnv).GOOGLE_TOKEN_ENCRYPTION_KEY);
   if (googleSession) {
     try {
-      await ensureSchema();
-      const canonicalUserId = await canonicalUserIdForGoogle(googleSession.sub, googleSession.email);
+      const canonicalUserId = await canonicalUserIdForGoogle(googleSession.sub, googleSession.email, googleSession.name);
       const membership = await resolveWorkspaceMembership(canonicalUserId, googleSession.email, googleSession.name, requestedWorkspaceId(request));
       if (!membership || membership.status !== "active") {
         return Response.json({ error: "This Google account is not an active workspace member." }, { status: 403 });
@@ -2135,18 +2293,47 @@ export async function authorizeRequest(
   );
 }
 
-async function canonicalUserIdForGoogle(subject: string, email: string) {
-  const matches = await getDb().select().from(workspaceMembers).where(and(
-    sql`lower(${workspaceMembers.email}) = ${email.toLocaleLowerCase()}`,
-    eq(workspaceMembers.status, "active"),
-  )).orderBy(asc(workspaceMembers.createdAt));
-  return matches.find((entry) => entry.userId)?.userId ?? `google:${subject}`;
+async function canonicalUserIdForGoogle(subject: string, emailInput: string, displayNameInput: string) {
+  const email = normalizeEmail(emailInput);
+  if (!email) throw new Error("A verified Google email is required");
+  const now = new Date().toISOString();
+  const displayName = cleanDisplayName(displayNameInput) || email.split("@")[0];
+  const [identity] = await getDb().select().from(authIdentities).where(and(
+    eq(authIdentities.provider, "google"),
+    eq(authIdentities.providerSubject, subject),
+  )).limit(1);
+  if (identity) {
+    await getDb().update(authIdentities).set({ email, lastUsedAt: now }).where(eq(authIdentities.id, identity.id));
+    await getDb().update(users).set({ displayName, updatedAt: now }).where(eq(users.id, identity.userId));
+    return identity.userId;
+  }
+
+  const [emailUser] = await getDb().select().from(users).where(eq(users.emailNormalized, email)).limit(1);
+  const userId = emailUser?.id ?? crypto.randomUUID();
+  if (!emailUser) {
+    await getDb().insert(users).values({ id: userId, emailNormalized: email, displayName, createdAt: now, updatedAt: now }).onConflictDoNothing();
+  }
+  await getDb().insert(authIdentities).values({
+    id: crypto.randomUUID(),
+    userId,
+    provider: "google",
+    providerSubject: subject,
+    email,
+    createdAt: now,
+    lastUsedAt: now,
+  }).onConflictDoNothing();
+  const [linked] = await getDb().select().from(authIdentities).where(and(
+    eq(authIdentities.provider, "google"),
+    eq(authIdentities.providerSubject, subject),
+  )).limit(1);
+  if (!linked) throw new Error("Google identity could not be linked");
+  return linked.userId;
 }
 
 async function ensureWorkspaceShell(ownerId: string, email: string | null = null, displayName = "Workspace Owner") {
   const now = new Date().toISOString();
   const workspaceName = displayName && displayName !== "Workspace Owner" ? `${displayName}의 개인 워크스페이스` : "개인 워크스페이스";
-  await getDb().insert(workspaces).values({ id: ownerId, name: workspaceName, ownerUserId: ownerId, createdAt: now, updatedAt: now }).onConflictDoNothing();
+  await getDb().insert(workspaces).values({ id: ownerId, name: workspaceName, ownerUserId: ownerId, kind: "personal", createdAt: now, updatedAt: now }).onConflictDoNothing();
   const [personalWorkspace] = await getDb().select().from(workspaces).where(and(eq(workspaces.id, ownerId), eq(workspaces.ownerUserId, ownerId))).limit(1);
   if (personalWorkspace && (personalWorkspace.name === "OKRPTR Workspace" || personalWorkspace.name.endsWith(" Workspace"))) {
     await getDb().update(workspaces).set({ name: workspaceName, updatedAt: now }).where(eq(workspaces.id, ownerId));
@@ -2165,11 +2352,8 @@ async function ensureWorkspaceShell(ownerId: string, email: string | null = null
 }
 
 async function resolveWorkspaceMembership(userId: string, email: string | null, displayName: string, requestedId: string | null) {
-  const [initialMemberships, invitations, preferenceRows] = await Promise.all([
+  const [initialMemberships, preferenceRows] = await Promise.all([
     activeWorkspaceMemberships(userId),
-    email
-      ? getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.email, email), eq(workspaceMembers.status, "invited"))).orderBy(asc(workspaceMembers.createdAt))
-      : Promise.resolve([]),
     getDb().select().from(userWorkspacePreferences).where(eq(userWorkspacePreferences.userId, userId)).limit(1),
   ]);
   let memberships = initialMemberships;
@@ -2178,22 +2362,6 @@ async function resolveWorkspaceMembership(userId: string, email: string | null, 
     memberships = await activeWorkspaceMemberships(userId);
   }
 
-  const activatedWorkspaceIds: string[] = [];
-  if (email) {
-    for (const invitation of invitations) {
-      const [existingMembership] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, invitation.workspaceId), eq(workspaceMembers.userId, userId))).limit(1);
-      if (existingMembership) continue;
-      await getDb().update(workspaceMembers).set({
-        userId,
-        displayName: displayNameForExistingMember(invitation.displayName, displayName, email),
-        status: "active",
-        updatedAt: new Date().toISOString(),
-      }).where(eq(workspaceMembers.id, invitation.id));
-      activatedWorkspaceIds.push(invitation.workspaceId);
-    }
-  }
-
-  if (activatedWorkspaceIds.length) memberships = await activeWorkspaceMemberships(userId);
   const now = new Date().toISOString();
   const normalizedMemberships = memberships.map((membership) => ({
     ...membership,
@@ -2206,19 +2374,11 @@ async function resolveWorkspaceMembership(userId: string, email: string | null, 
     await getDb().update(workspaceMembers).set({ email: membership.email, displayName: membership.displayName, updatedAt: now }).where(eq(workspaceMembers.id, membership.id));
   }
   const [preference] = preferenceRows;
-  const newlyJoined = [...activatedWorkspaceIds].reverse().find((workspaceId) => normalizedMemberships.some((entry) => entry.workspaceId === workspaceId));
-  const selected = (newlyJoined ? normalizedMemberships.find((entry) => entry.workspaceId === newlyJoined) : null)
-    ?? normalizedMemberships.find((entry) => entry.workspaceId === requestedId)
+  const selected = normalizedMemberships.find((entry) => entry.workspaceId === requestedId)
     ?? normalizedMemberships.find((entry) => entry.workspaceId === preference?.activeWorkspaceId)
     ?? normalizedMemberships.find((entry) => entry.workspaceId === userId)
     ?? normalizedMemberships[0]
     ?? null;
-  if (newlyJoined && selected) {
-    await getDb().insert(userWorkspacePreferences).values({ userId, activeWorkspaceId: selected.workspaceId, updatedAt: now }).onConflictDoUpdate({
-      target: userWorkspacePreferences.userId,
-      set: { activeWorkspaceId: selected.workspaceId, updatedAt: now },
-    });
-  }
   return selected;
 }
 
@@ -2267,7 +2427,8 @@ export async function listUserWorkspaces(userId: string, currentWorkspaceId: str
     id: workspace.id,
     name: workspace.name,
     createdAt: workspace.createdAt,
-    personal: workspace.id === workspace.ownerUserId,
+    kind: workspace.kind as "personal" | "team",
+    personal: workspace.kind === "personal",
     role: membership.role as TeamRole,
     current: workspace.id === currentWorkspaceId && !workspace.scheduledDeletionAt,
     deletionRequestedAt: workspace.deletionRequestedAt,
@@ -2283,13 +2444,14 @@ export async function createWorkspaceForUser(userId: string, email: string | nul
   if (name.length > 80) throw new Error("Workspace name must be 80 characters or fewer");
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  await getDb().insert(workspaces).values({ id, name, ownerUserId: userId, createdAt: now, updatedAt: now });
+  await getDb().insert(workspaces).values({ id, name, ownerUserId: userId, kind: "team", createdAt: now, updatedAt: now });
   await getDb().insert(workspaceMembers).values({ id: crypto.randomUUID(), workspaceId: id, userId, email, displayName, role: "owner", status: "active", createdAt: now, updatedAt: now });
   await setActiveWorkspace(userId, id);
   return {
     id,
     name,
     createdAt: now,
+    kind: "team" as const,
     personal: false,
     role: "owner" as TeamRole,
     current: true,
@@ -2313,7 +2475,7 @@ export async function scheduleWorkspaceDeletionForUser(userId: string, workspace
     .limit(1);
   if (!row) throw new Error("Workspace not found or access denied");
   if (row.membership.role !== "owner") throw new Error("Only the workspace owner can delete a workspace");
-  if (row.workspace.id === row.workspace.ownerUserId) throw new Error("Personal workspace cannot be deleted");
+  if (row.workspace.kind === "personal") throw new Error("Personal workspace cannot be deleted");
 
   const remaining = (await listUserWorkspaces(userId, id)).filter((workspace) => workspace.id !== id && !workspace.scheduledDeletionAt);
   if (!remaining.length) throw new Error("Create or keep another workspace before deleting this one");
@@ -2366,6 +2528,7 @@ export async function restoreWorkspaceForUser(userId: string, workspaceId: strin
     workspace: {
       id: row.workspace.id,
       name: row.workspace.name,
+      kind: "team" as const,
       personal: false,
       role: "owner" as TeamRole,
       current: false,
@@ -2389,7 +2552,7 @@ export async function permanentlyDeleteWorkspaceForUser(userId: string, workspac
     .limit(1);
   if (!row) throw new Error("Workspace not found or access denied");
   if (row.membership.role !== "owner") throw new Error("Only the workspace owner can permanently delete a workspace");
-  if (row.workspace.id === row.workspace.ownerUserId) throw new Error("Personal workspace cannot be deleted");
+  if (row.workspace.kind === "personal") throw new Error("Personal workspace cannot be deleted");
   if (!row.workspace.scheduledDeletionAt) throw new Error("Workspace must be scheduled for deletion first");
   if (confirmationName !== row.workspace.name) throw new Error("Workspace name confirmation does not match");
 
@@ -2403,7 +2566,7 @@ export async function permanentlyDeleteWorkspaceForUser(userId: string, workspac
       isNull(workspaces.scheduledDeletionAt),
     ))
     .orderBy(asc(workspaces.createdAt));
-  const nextRow = remainingRows.find((entry) => entry.workspace.id === entry.workspace.ownerUserId) ?? remainingRows[0];
+  const nextRow = remainingRows.find((entry) => entry.workspace.kind === "personal") ?? remainingRows[0];
   if (!nextRow) throw new Error("Keep another workspace before permanently deleting this one");
 
   await permanentlyDeleteWorkspace(id);
@@ -2411,7 +2574,8 @@ export async function permanentlyDeleteWorkspaceForUser(userId: string, workspac
     id: nextRow.workspace.id,
     name: nextRow.workspace.name,
     createdAt: nextRow.workspace.createdAt,
-    personal: nextRow.workspace.id === nextRow.workspace.ownerUserId,
+    kind: nextRow.workspace.kind as "personal" | "team",
+    personal: nextRow.workspace.kind === "personal",
     role: nextRow.membership.role as TeamRole,
     current: true,
     deletionRequestedAt: null,
@@ -2464,6 +2628,7 @@ async function permanentlyDeleteWorkspace(id: string) {
   await getDb().delete(items).where(eq(items.ownerId, id));
   await getDb().delete(okrCycles).where(eq(okrCycles.ownerId, id));
   await getDb().delete(workspaceRules).where(eq(workspaceRules.workspaceId, id));
+  await getDb().delete(workspaceInvitations).where(eq(workspaceInvitations.workspaceId, id));
   await getDb().update(userWorkspacePreferences).set({ activeWorkspaceId: null, updatedAt: new Date().toISOString() }).where(eq(userWorkspacePreferences.activeWorkspaceId, id));
   await getDb().delete(workspaceGroups).where(eq(workspaceGroups.workspaceId, id));
   await getDb().delete(workspaceMembers).where(eq(workspaceMembers.workspaceId, id));
@@ -2500,17 +2665,6 @@ export async function setActiveWorkspace(userId: string, workspaceId: string) {
 function normalizeEmail(value: string | null) {
   const email = value?.trim().toLocaleLowerCase() ?? "";
   return email || null;
-}
-
-function authenticatedDisplayName(request: Request) {
-  const raw = request.headers.get("oai-authenticated-user-full-name")?.trim();
-  if (!raw) return "";
-  if (request.headers.get("oai-authenticated-user-full-name-encoding") !== "percent-encoded-utf-8") return raw;
-  try {
-    return decodeURIComponent(raw);
-  } catch {
-    return "";
-  }
 }
 
 function cleanDisplayName(value: string | null | undefined) {
@@ -2604,42 +2758,210 @@ export async function countAiUsageEvents(ownerId: string, userId: string, source
 }
 
 export async function getTeam(ownerId: string, currentUserId: string) {
+  const now = new Date().toISOString();
+  await getDb().update(workspaceInvitations).set({ status: "expired", updatedAt: now }).where(and(
+    eq(workspaceInvitations.workspaceId, ownerId),
+    eq(workspaceInvitations.status, "pending"),
+    lte(workspaceInvitations.expiresAt, now),
+  ));
   const [workspace] = await getDb().select().from(workspaces).where(eq(workspaces.id, ownerId)).limit(1);
   if (!workspace) throw new Error("Workspace not found");
-  const members = await getDb().select().from(workspaceMembers).where(eq(workspaceMembers.workspaceId, ownerId)).orderBy(asc(workspaceMembers.createdAt));
+  const [members, invitations] = await Promise.all([
+    getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, ownerId), eq(workspaceMembers.status, "active"))).orderBy(asc(workspaceMembers.createdAt)),
+    getDb().select().from(workspaceInvitations).where(eq(workspaceInvitations.workspaceId, ownerId)).orderBy(desc(workspaceInvitations.createdAt)),
+  ]);
   return {
     workspace: {
       id: workspace.id,
       name: workspace.name,
+      kind: workspace.kind as "personal" | "team",
       avatarUrl: workspaceAvatarUrl(workspace.id, workspace.avatarKey, workspace.avatarUpdatedAt),
       avatarUpdatedAt: workspace.avatarUpdatedAt,
     },
     members: members.map((member) => serializeTeamMember(member, currentUserId)),
+    invitations: invitations
+      .filter((invitation) => invitation.status === "pending" || invitation.status === "expired")
+      .map(serializeWorkspaceInvitation),
+    invitationEmailConfigured: invitationEmailConfigured(),
   };
 }
 
 export async function inviteTeamMember(ownerId: string, actorUserId: string, emailInput: string, role: Exclude<TeamRole, "owner">, displayNameInput = "") {
+  return createWorkspaceInvitation(ownerId, actorUserId, emailInput, role, displayNameInput);
+}
+
+export async function createWorkspaceInvitation(ownerId: string, actorUserId: string, emailInput: string, role: Exclude<TeamRole, "owner">, displayNameInput = "") {
   const email = normalizeEmail(emailInput);
   if (!email || !/^\S+@\S+\.\S+$/.test(email)) throw new Error("A valid email is required");
   if (!(["admin", "member", "viewer"] as TeamRole[]).includes(role)) throw new Error("Unsupported team role");
-  const [existing] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, ownerId), eq(workspaceMembers.email, email))).limit(1);
-  if (existing) throw new Error("This email is already a workspace member or invitation");
+  const [workspace] = await getDb().select({ kind: workspaces.kind }).from(workspaces).where(eq(workspaces.id, ownerId)).limit(1);
+  if (!workspace || workspace.kind !== "team") throw new Error("Members can only be invited to a team workspace");
+  const [existingMember] = await getDb().select().from(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, ownerId), sql`lower(${workspaceMembers.email}) = ${email}`)).limit(1);
+  if (existingMember) throw new Error("This email is already an active workspace member");
+  const [existingInvitation] = await getDb().select().from(workspaceInvitations).where(and(
+    eq(workspaceInvitations.workspaceId, ownerId),
+    eq(workspaceInvitations.email, email),
+    eq(workspaceInvitations.status, "pending"),
+  )).limit(1);
+  if (existingInvitation) throw new Error("This email already has a pending invitation");
   const now = new Date().toISOString();
   const displayName = cleanDisplayName(displayNameInput) || email.split("@")[0];
-  const member: WorkspaceMember = {
-    id: crypto.randomUUID(),
+  const id = crypto.randomUUID();
+  const expiresAt = invitationExpiry();
+  const token = await invitationTokenFor(id, email, expiresAt);
+  const invitation: WorkspaceInvitation = {
+    id,
     workspaceId: ownerId,
-    userId: null,
     email,
     displayName,
     role,
-    status: "invited",
+    tokenHash: await hashIntegrationToken(token),
+    status: "pending",
+    deliveryStatus: "not_sent",
+    providerMessageId: null,
     invitedByUserId: actorUserId,
+    acceptedByUserId: null,
+    expiresAt,
+    lastSentAt: null,
+    acceptedAt: null,
+    revokedAt: null,
     createdAt: now,
     updatedAt: now,
   };
-  await getDb().insert(workspaceMembers).values(member);
-  return serializeTeamMember(member, actorUserId);
+  await getDb().insert(workspaceInvitations).values(invitation);
+  const delivery = await deliverWorkspaceInvitation(invitation, token);
+  await logActivity(ownerId, invitation.id, "workspace_invitation_created", "web", {
+    email,
+    role,
+    deliveryStatus: delivery.values.deliveryStatus,
+    invitedByUserId: actorUserId,
+  });
+  return { invitation: serializeWorkspaceInvitation({ ...invitation, ...delivery.values }), inviteUrl: invitationUrl(token) };
+}
+
+export async function resendWorkspaceInvitation(ownerId: string, invitationId: string) {
+  const invitation = await getPendingWorkspaceInvitation(ownerId, invitationId);
+  if (invitation.lastSentAt && Date.now() - new Date(invitation.lastSentAt).getTime() < 60_000) {
+    throw new Error("Wait one minute before resending this invitation");
+  }
+  const expiresAt = invitationExpiry();
+  const token = await invitationTokenFor(invitation.id, invitation.email, expiresAt);
+  const now = new Date().toISOString();
+  const refreshed = { ...invitation, tokenHash: await hashIntegrationToken(token), expiresAt, updatedAt: now };
+  await getDb().update(workspaceInvitations).set({ tokenHash: refreshed.tokenHash, expiresAt: refreshed.expiresAt, status: "pending", updatedAt: now }).where(eq(workspaceInvitations.id, invitation.id));
+  const delivery = await deliverWorkspaceInvitation(refreshed, token);
+  await logActivity(ownerId, invitation.id, "workspace_invitation_resent", "web", {
+    email: invitation.email,
+    deliveryStatus: delivery.values.deliveryStatus,
+  });
+  return { invitation: serializeWorkspaceInvitation({ ...refreshed, ...delivery.values }), inviteUrl: invitationUrl(token) };
+}
+
+export async function rotateWorkspaceInvitationLink(ownerId: string, invitationId: string) {
+  const invitation = await getPendingWorkspaceInvitation(ownerId, invitationId);
+  const refresh = !invitation.tokenHash || effectiveInvitationStatus(invitation) === "expired";
+  const expiresAt = refresh ? invitationExpiry() : invitation.expiresAt;
+  const token = await invitationTokenFor(invitation.id, invitation.email, expiresAt);
+  const tokenHash = await hashIntegrationToken(token);
+  const now = new Date().toISOString();
+  const values = { tokenHash, expiresAt, status: "pending" as const, updatedAt: now };
+  if (refresh || invitation.tokenHash !== tokenHash) {
+    await getDb().update(workspaceInvitations).set(values).where(eq(workspaceInvitations.id, invitation.id));
+  }
+  return { invitation: serializeWorkspaceInvitation({ ...invitation, ...values }), inviteUrl: invitationUrl(token) };
+}
+
+export async function revokeWorkspaceInvitation(ownerId: string, invitationId: string) {
+  const invitation = await getPendingWorkspaceInvitation(ownerId, invitationId);
+  const now = new Date().toISOString();
+  await getDb().update(workspaceInvitations).set({ status: "revoked", revokedAt: now, updatedAt: now }).where(eq(workspaceInvitations.id, invitation.id));
+  await logActivity(ownerId, invitation.id, "workspace_invitation_revoked", "web", { email: invitation.email });
+  return { revoked: true, id: invitation.id };
+}
+
+export async function previewWorkspaceInvitation(token: string) {
+  await ensureSchema();
+  const invitation = await invitationByToken(token);
+  if (!invitation) throw new Error("Invitation not found");
+  const [workspace] = await getDb().select({ id: workspaces.id, name: workspaces.name }).from(workspaces).where(eq(workspaces.id, invitation.workspaceId)).limit(1);
+  if (!workspace) throw new Error("Workspace not found");
+  const [inviter] = await getDb().select({ displayName: workspaceMembers.displayName }).from(workspaceMembers).where(and(
+    eq(workspaceMembers.workspaceId, invitation.workspaceId),
+    eq(workspaceMembers.userId, invitation.invitedByUserId),
+  )).limit(1);
+  return {
+    workspace,
+    role: invitation.role as Exclude<TeamRole, "owner">,
+    inviterName: inviter?.displayName || "Workspace admin",
+    emailHint: maskEmail(invitation.email),
+    status: effectiveInvitationStatus(invitation),
+    expiresAt: invitation.expiresAt,
+  };
+}
+
+export async function acceptWorkspaceInvitation(authorization: RequestAuthorization, token: string) {
+  if (!authorization.email) throw new Error("A verified Google email is required");
+  const invitation = await invitationByToken(token);
+  if (!invitation) throw new Error("Invitation not found");
+  const status = effectiveInvitationStatus(invitation);
+  if (status === "accepted" && invitation.acceptedByUserId === authorization.userId) {
+    const [workspace] = await getDb().select().from(workspaces).where(eq(workspaces.id, invitation.workspaceId)).limit(1);
+    const [member] = await getDb().select().from(workspaceMembers).where(and(
+      eq(workspaceMembers.workspaceId, invitation.workspaceId),
+      eq(workspaceMembers.userId, authorization.userId),
+      eq(workspaceMembers.status, "active"),
+    )).limit(1);
+    if (!workspace || !member) throw new Error("Accepted workspace membership could not be found");
+    await setActiveWorkspace(authorization.userId, invitation.workspaceId);
+    return {
+      accepted: true,
+      workspaceId: workspace.id,
+      workspaceName: workspace.name,
+      member: serializeTeamMember(member, authorization.userId),
+    };
+  }
+  if (status !== "pending") throw new Error(status === "expired" ? "Invitation has expired" : "Invitation is no longer active");
+  if (normalizeEmail(authorization.email) !== invitation.email) throw new Error("Sign in with the Google account that matches the invited email");
+  const now = new Date().toISOString();
+  let [member] = await getDb().select().from(workspaceMembers).where(and(
+    eq(workspaceMembers.workspaceId, invitation.workspaceId),
+    or(eq(workspaceMembers.userId, authorization.userId), sql`lower(${workspaceMembers.email}) = ${invitation.email}`),
+  )).limit(1);
+  if (member && member.userId !== authorization.userId) throw new Error("This email is linked to another account");
+  if (!member) {
+    const [createdMember] = await getDb().insert(workspaceMembers).values({
+      id: crypto.randomUUID(),
+      workspaceId: invitation.workspaceId,
+      userId: authorization.userId,
+      email: invitation.email,
+      displayName: displayNameForExistingMember(invitation.displayName, authorization.displayName, invitation.email),
+      role: invitation.role,
+      status: "active",
+      invitedByUserId: invitation.invitedByUserId,
+      createdAt: now,
+      updatedAt: now,
+    }).returning();
+    member = createdMember;
+  }
+  await getDb().update(workspaceInvitations).set({
+    status: "accepted",
+    acceptedByUserId: authorization.userId,
+    acceptedAt: now,
+    updatedAt: now,
+  }).where(eq(workspaceInvitations.id, invitation.id));
+  await logActivity(invitation.workspaceId, invitation.id, "workspace_invitation_accepted", "web", {
+    email: invitation.email,
+    acceptedByUserId: authorization.userId,
+  });
+  await setActiveWorkspace(authorization.userId, invitation.workspaceId);
+  const [workspace] = await getDb().select().from(workspaces).where(eq(workspaces.id, invitation.workspaceId)).limit(1);
+  if (!workspace) throw new Error("Workspace not found");
+  return {
+    accepted: true,
+    workspaceId: workspace.id,
+    workspaceName: workspace.name,
+    member: serializeTeamMember(member, authorization.userId),
+  };
 }
 
 export async function updateTeamMember(ownerId: string, memberId: string, patch: { role?: Exclude<TeamRole, "owner">; displayName?: string }, currentUserId: string, canManage = false) {
@@ -2683,10 +3005,168 @@ function serializeTeamMember(member: WorkspaceMember, currentUserId: string) {
     email: member.email ?? "",
     displayName: member.displayName || member.email?.split("@")[0] || "Member",
     role: member.role as TeamRole,
-    status: member.status as "invited" | "active",
+    status: "active" as const,
     isCurrent: member.userId === currentUserId,
     createdAt: member.createdAt,
   };
+}
+
+function serializeWorkspaceInvitation(invitation: WorkspaceInvitation): WorkspaceInvitationSummary {
+  return {
+    id: invitation.id,
+    email: invitation.email,
+    displayName: invitation.displayName || invitation.email.split("@")[0],
+    role: invitation.role as Exclude<TeamRole, "owner">,
+    status: effectiveInvitationStatus(invitation),
+    deliveryStatus: invitation.deliveryStatus as InvitationDeliveryStatus,
+    expiresAt: invitation.expiresAt,
+    lastSentAt: invitation.lastSentAt,
+    createdAt: invitation.createdAt,
+  };
+}
+
+function effectiveInvitationStatus(invitation: WorkspaceInvitation): InvitationStatus {
+  if (invitation.status === "pending" && invitation.expiresAt <= new Date().toISOString()) return "expired";
+  return invitation.status as InvitationStatus;
+}
+
+function invitationExpiry() {
+  return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+}
+
+async function invitationTokenFor(id: string, email: string, expiresAt: string) {
+  const runtime = env as RuntimeEnv;
+  const secret = runtime.GOOGLE_TOKEN_ENCRYPTION_KEY || runtime.OKRPTR_API_TOKEN || runtime.PACE_API_TOKEN;
+  if (!secret) throw new Error("Invitation signing is not configured");
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${id}:${email}:${expiresAt}`));
+  return Array.from(new Uint8Array(signature), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function invitationEmailConfigured() {
+  const runtime = env as RuntimeEnv;
+  return Boolean(
+    runtime.RESEND_API_KEY
+    && runtime.OKRPTR_INVITE_FROM === "OKRPTR <invite@send.okrptr.com>"
+    && invitationDomainCache?.verified,
+  );
+}
+
+async function verifyInvitationEmailConfigured() {
+  const runtime = env as RuntimeEnv;
+  if (!runtime.RESEND_API_KEY || runtime.OKRPTR_INVITE_FROM !== "OKRPTR <invite@send.okrptr.com>") return false;
+  if (invitationDomainCache && Date.now() - invitationDomainCache.checkedAt < 5 * 60 * 1000) {
+    return invitationDomainCache.verified;
+  }
+  let verified = false;
+  try {
+    const response = await fetch("https://api.resend.com/domains", {
+      headers: { Authorization: `Bearer ${runtime.RESEND_API_KEY}`, "User-Agent": "OKRPTR/1.0" },
+    });
+    if (response.ok) {
+      const payload = await response.json() as { data?: Array<{ name?: string; status?: string; capabilities?: { sending?: string } }> };
+      verified = Boolean(payload.data?.some((domain) => domain.name === "send.okrptr.com" && domain.status === "verified" && domain.capabilities?.sending === "enabled"));
+    }
+  } catch {
+    verified = false;
+  }
+  invitationDomainCache = { verified, checkedAt: Date.now() };
+  return verified;
+}
+
+function invitationUrl(token: string) {
+  const base = (env as RuntimeEnv).OKRPTR_PUBLIC_URL?.trim() || "https://okrptr.com";
+  const url = new URL(base);
+  url.hash = `invite=${encodeURIComponent(token)}`;
+  return url.toString();
+}
+
+async function getPendingWorkspaceInvitation(ownerId: string, invitationId: string) {
+  const [invitation] = await getDb().select().from(workspaceInvitations).where(and(
+    eq(workspaceInvitations.workspaceId, ownerId),
+    eq(workspaceInvitations.id, invitationId),
+  )).limit(1);
+  if (!invitation) throw new Error("Invitation not found");
+  if (invitation.status === "accepted" || invitation.status === "revoked") throw new Error("Invitation is no longer pending");
+  return invitation;
+}
+
+async function invitationByToken(tokenInput: string) {
+  const token = tokenInput.trim();
+  if (!/^[a-f0-9]{64}$/.test(token)) return null;
+  const [invitation] = await getDb().select().from(workspaceInvitations).where(eq(
+    workspaceInvitations.tokenHash,
+    await hashIntegrationToken(token),
+  )).limit(1);
+  return invitation ?? null;
+}
+
+function maskEmail(email: string) {
+  const [local, domain] = email.split("@");
+  if (!domain) return email;
+  const visible = local.slice(0, Math.min(2, local.length));
+  return `${visible}${"*".repeat(Math.max(2, local.length - visible.length))}@${domain}`;
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
+}
+
+async function deliverWorkspaceInvitation(invitation: WorkspaceInvitation, token: string) {
+  const runtime = env as RuntimeEnv;
+  const now = new Date().toISOString();
+  if (!(await verifyInvitationEmailConfigured())) {
+    const values = { deliveryStatus: "unavailable" as const, providerMessageId: null, updatedAt: now };
+    await getDb().update(workspaceInvitations).set(values).where(eq(workspaceInvitations.id, invitation.id));
+    return { values };
+  }
+  const [[workspace], [inviter]] = await Promise.all([
+    getDb().select({ name: workspaces.name }).from(workspaces).where(eq(workspaces.id, invitation.workspaceId)).limit(1),
+    getDb().select({ displayName: workspaceMembers.displayName }).from(workspaceMembers).where(and(
+      eq(workspaceMembers.workspaceId, invitation.workspaceId),
+      eq(workspaceMembers.userId, invitation.invitedByUserId),
+    )).limit(1),
+  ]);
+  if (!workspace) throw new Error("Workspace not found");
+  const inviteUrl = invitationUrl(token);
+  const workspaceName = escapeHtml(workspace.name);
+  const inviterName = escapeHtml(inviter?.displayName || "워크스페이스 관리자");
+  const role = escapeHtml(invitation.role.slice(0, 1).toUpperCase() + invitation.role.slice(1));
+  let deliveryStatus: InvitationDeliveryStatus = "failed";
+  let providerMessageId: string | null = null;
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${runtime.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": `okrptr-invite-${invitation.id}-${invitation.tokenHash.slice(0, 16)}`,
+        "User-Agent": "OKRPTR/1.0",
+      },
+      body: JSON.stringify({
+        from: runtime.OKRPTR_INVITE_FROM,
+        to: [invitation.email],
+        subject: `${workspace.name} 워크스페이스 초대`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#252522"><h1 style="font-size:22px">${workspaceName}에 초대받았습니다</h1><p>${inviterName}님이 OKRPTR 워크스페이스에 <strong>${role}</strong> 역할로 초대했습니다.</p><p><a href="${escapeHtml(inviteUrl)}" style="display:inline-block;background:#252522;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none">워크스페이스 가입</a></p><p style="color:#6f6f69;font-size:13px">이 링크는 30일 동안 유효하며 초대받은 이메일과 같은 Google 계정으로 로그인해야 합니다.</p></div>`,
+      }),
+    });
+    if (response.ok) {
+      const payload = await response.json().catch(() => ({})) as { id?: string };
+      deliveryStatus = "sent";
+      providerMessageId = payload.id ?? null;
+    }
+  } catch {
+    deliveryStatus = "failed";
+  }
+  const values = { deliveryStatus, providerMessageId, lastSentAt: now, updatedAt: now };
+  await getDb().update(workspaceInvitations).set(values).where(eq(workspaceInvitations.id, invitation.id));
+  return { values };
 }
 
 export async function listGroups(authorization: RequestAuthorization, includeArchived = false) {
@@ -3704,7 +4184,7 @@ export async function trashItems(
   };
 }
 
-export async function restoreTrashedItems(ownerId: string, itemIds: string[]) {
+export async function restoreTrashedItems(ownerId: string, itemIds: string[], projectParentIds: Record<string, string> = {}) {
   const requestedIds = [...new Set(itemIds.map((id) => id.trim()).filter(Boolean))];
   if (!requestedIds.length) throw new Error("itemIds are required");
   const roots = await getDb().select().from(items).where(and(
@@ -3720,6 +4200,12 @@ export async function restoreTrashedItems(ownerId: string, itemIds: string[]) {
   let restoredCount = 0;
   for (const root of roots) {
     if (root.kind === "project") {
+      const requestedParentId = projectParentIds[root.id]?.trim() || null;
+      const currentParent = root.parentId ? await getItem(ownerId, root.parentId) : null;
+      const selectedParent = requestedParentId ? await getItem(ownerId, requestedParentId) : currentParent;
+      if (!selectedParent || selectedParent.kind !== "initiative" || selectedParent.archivedAt || !selectedParent.cycleId) {
+        throw new Error("Project restore requires a target Initiative");
+      }
       const [{ count }] = await getDb().select({ count: sql<number>`count(*)` }).from(items).where(and(
         eq(items.ownerId, ownerId),
         or(eq(items.id, root.id), eq(items.archiveRootId, root.id)),
@@ -3727,13 +4213,18 @@ export async function restoreTrashedItems(ownerId: string, itemIds: string[]) {
       restoredCount += Number(count ?? 0);
       statements.push(d1.prepare(`UPDATE items
         SET status = CASE
-              WHEN archived_from_status IS NULL OR archived_from_status = 'archived'
-                THEN CASE kind WHEN 'project' THEN 'backlog' ELSE 'todo' END
+              WHEN archived_from_status IS NULL OR archived_from_status = 'archived' THEN 'backlog'
               ELSE archived_from_status
             END,
+            parent_id = ?, cycle_id = ?,
             archived_at = NULL, archived_from_status = NULL, archive_root_id = NULL, updated_at = ?
-        WHERE owner_id = ? AND (id = ? OR archive_root_id = ?)`)
-        .bind(now, ownerId, root.id, root.id));
+        WHERE owner_id = ? AND id = ? AND kind = 'project'`)
+        .bind(selectedParent.id, selectedParent.cycleId, now, ownerId, root.id));
+      statements.push(d1.prepare(`UPDATE items
+        SET status = CASE WHEN archived_from_status IS NULL OR archived_from_status = 'archived' THEN 'todo' ELSE archived_from_status END,
+            cycle_id = ?, archived_at = NULL, archived_from_status = NULL, archive_root_id = NULL, updated_at = ?
+        WHERE owner_id = ? AND kind = 'task' AND (parent_id = ? OR archive_root_id = ?)`)
+        .bind(selectedParent.cycleId, now, ownerId, root.id, root.id));
     } else {
       let parentActive = false;
       if (root.parentId) {

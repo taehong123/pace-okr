@@ -10,11 +10,9 @@ import {
 import {
   clearGoogleSignInStateCookies,
   createGoogleSessionCookie,
-  GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX,
   GOOGLE_SIGN_IN_STATE_OWNER,
   GOOGLE_SIGN_IN_STATE_PREFIX,
   GOOGLE_SIGN_IN_STATE_USER,
-  readGoogleBrowserSignInState,
   readGoogleSignInState,
 } from "@/lib/google-session";
 
@@ -23,13 +21,10 @@ export async function GET(request: Request) {
   const stateValue = requestUrl.searchParams.get("state") ?? "";
   const runtime = env as GoogleRuntimeEnv;
   const serverStateSignIn = stateValue.startsWith(GOOGLE_SIGN_IN_STATE_PREFIX);
-  const browserStateSignIn = stateValue.startsWith(GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX);
-  const signingIn = serverStateSignIn || browserStateSignIn;
+  const signingIn = serverStateSignIn;
   const signInState = serverStateSignIn
     ? await readGoogleSignInState(request, stateValue, runtime.GOOGLE_TOKEN_ENCRYPTION_KEY)
-    : browserStateSignIn
-      ? readGoogleBrowserSignInState(request, stateValue)
-      : null;
+    : null;
   const savedState = signingIn ? null : await consumeStoredGoogleOAuthState(stateValue);
   const state = signInState
     ? { ownerId: GOOGLE_SIGN_IN_STATE_OWNER, userId: GOOGLE_SIGN_IN_STATE_USER, returnTo: signInState.returnTo }

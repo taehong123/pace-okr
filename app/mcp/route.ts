@@ -198,6 +198,18 @@ const teamMemberOutput = z.object({
   createdAt: z.string(),
 });
 
+const teamInvitationOutput = z.object({
+  id: z.string(),
+  email: z.string(),
+  displayName: z.string(),
+  role: z.string(),
+  status: z.string(),
+  deliveryStatus: z.string(),
+  expiresAt: z.string(),
+  lastSentAt: z.string().nullable(),
+  createdAt: z.string(),
+});
+
 const groupOutput = z.object({
   id: z.string(),
   name: z.string(),
@@ -1082,7 +1094,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       title: "List workspace team members",
       description: "List active members and pending invitations with their workspace roles.",
       inputSchema: {},
-      outputSchema: { workspace: z.object({ id: z.string(), name: z.string() }), members: z.array(teamMemberOutput), count: z.number() },
+      outputSchema: { workspace: z.object({ id: z.string(), name: z.string(), kind: z.string() }), members: z.array(teamMemberOutput), invitations: z.array(teamInvitationOutput), invitationEmailConfigured: z.boolean(), count: z.number() },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async () => {
@@ -1100,13 +1112,13 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       title: "Invite a workspace team member",
       description: "Create an email invitation with an Admin, Member, or Viewer role.",
       inputSchema: { email: z.string().email(), role: z.enum(["admin", "member", "viewer"]).default("member"), displayName: z.string().optional() },
-      outputSchema: { member: teamMemberOutput },
+      outputSchema: { invitation: teamInvitationOutput, inviteUrl: z.string() },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     async ({ email, role, displayName }) => {
       if (!canManageTeam(authorization)) throw new Error("Owner or Admin access is required.");
-      const member = await inviteTeamMember(ownerId, authorization.userId, email, role as Exclude<TeamRole, "owner">, displayName ?? "");
-      return { structuredContent: { member }, content: [{ type: "text", text: `Invited ${email} as ${role}.` }] };
+      const invitation = await inviteTeamMember(ownerId, authorization.userId, email, role as Exclude<TeamRole, "owner">, displayName ?? "");
+      return { structuredContent: invitation, content: [{ type: "text", text: `Created a pending invitation for ${email} as ${role}.` }] };
     },
   );
 
@@ -1114,7 +1126,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     "update_team_member",
     {
       title: "Update a team member",
-      description: "Change a non-owner team member or invitation role, or update a display name.",
+      description: "Change a non-owner active team member role or update a display name.",
       inputSchema: { id: z.string(), role: z.enum(["admin", "member", "viewer"]).optional(), displayName: z.string().optional() },
       outputSchema: { member: teamMemberOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -1129,8 +1141,8 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   server.registerTool(
     "remove_team_member",
     {
-      title: "Remove a team member or invitation",
-      description: "Remove a non-owner member or cancel a pending invitation.",
+      title: "Remove a team member",
+      description: "Remove a non-owner active member from the workspace.",
       inputSchema: { id: z.string() },
       outputSchema: { deleted: z.boolean(), id: z.string() },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },

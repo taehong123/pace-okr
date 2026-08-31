@@ -42,6 +42,7 @@ const bootstrap = {
     id: "workspace-1",
     name: "테스트 워크스페이스",
     createdAt: now,
+    kind: "personal",
     personal: true,
     role: "owner",
     current: true,
@@ -71,9 +72,11 @@ const bootstrap = {
     updatedAt: now,
   }],
   team: {
-    workspace: { id: "workspace-1", name: "테스트 워크스페이스" },
+    workspace: { id: "workspace-1", name: "테스트 워크스페이스", kind: "personal" },
     currentRole: "owner",
     canManage: true,
+    invitations: [],
+    invitationEmailConfigured: false,
     members: [{
       id: "member-1",
       email: "owner@example.com",
@@ -103,7 +106,7 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "platform_unavailable" | "workspace_disconnected" | "connected" | "reauthorization_required"; workspaceRole?: "owner" | "member" } = {}) {
+async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "platform_unavailable" | "workspace_disconnected" | "connected" | "reauthorization_required"; workspaceRole?: "owner" | "member" | "viewer" } = {}) {
   let krDataConnections: Array<Record<string, unknown>> = [];
   const baseBootstrapResponse = options.withoutTaskContainers
     ? { ...bootstrap, items: bootstrap.items.filter((entry) => entry.kind !== "project" && entry.kind !== "task") }
@@ -122,6 +125,56 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
     const request = route.request();
     const url = new URL(request.url());
     if (url.pathname === "/api/bootstrap") return json(route, bootstrapResponse);
+    if (url.pathname === "/api/okr-files/cycle-1" || url.pathname === "/api/okr-files" && request.method() === "POST") {
+      const objective = bootstrapResponse.items.find((entry) => entry.id === "objective-1")!;
+      const keyResult = bootstrapResponse.items.find((entry) => entry.id === "kr-1")!;
+      const initiatives = bootstrapResponse.items.filter((entry) => entry.kind === "initiative");
+      const project = bootstrapResponse.items.find((entry) => entry.id === "project-1")!;
+      return json(route, { file: {
+        cycle: url.pathname === "/api/okr-files" ? { ...bootstrapResponse.cycles[0], id: "cycle-new", name: "새 통합 OKR" } : bootstrapResponse.cycles[0],
+        revision: request.method() === "GET" ? "test-revision" : "saved-revision",
+        objectiveCount: 1,
+        needsSplit: false,
+        initiativeOptions: [],
+        objective: {
+          id: objective.id,
+          clientId: objective.id,
+          title: objective.title,
+          status: objective.status,
+          keyResults: [{
+            id: keyResult.id,
+            clientId: keyResult.id,
+            title: keyResult.title,
+            status: keyResult.status,
+            progress: keyResult.progress,
+            initiatives: initiatives.map((initiative) => ({
+              id: initiative.id,
+              clientId: initiative.id,
+              title: initiative.title,
+              status: initiative.status,
+              linkedProjects: initiative.id === "initiative-1" ? [{
+                id: project.id,
+                title: project.title,
+                parentId: initiative.id,
+                cycleId: project.cycleId,
+                taskCount: 1,
+                canTrash: true,
+                updatedAt: project.updatedAt,
+              }] : [],
+            })),
+          }],
+        },
+      } });
+    }
+    if (url.pathname === "/api/invitations/preview") return json(route, { invitation: {
+      workspace: { id: "workspace-invited", name: "초대받은 워크스페이스" },
+      role: "member",
+      inviterName: "관리자",
+      emailHint: "ow***@example.com",
+      status: "pending",
+      expiresAt: "2026-09-30T00:00:00.000Z",
+    } });
+    if (url.pathname === "/api/invitations/accept") return json(route, { accepted: true, workspaceId: "workspace-invited", workspaceName: "초대받은 워크스페이스" });
     if (url.pathname === "/api/google/status") return json(route, { google: { configured: true, connected: false, email: null, displayName: null, scope: "", connectedAt: null, updatedAt: null } });
     if (url.pathname === "/api/slack/status") {
       const state = options.slackState ?? "workspace_disconnected";
@@ -506,28 +559,77 @@ test("모바일 Project 기본 보기는 카드이며 페이지가 가로로 넘
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
+test("OKR 파일 정보와 O·KR·Initiative를 저장 한 번으로 수정한다", async ({ page }) => {
+  await installApiMocks(page);
+  await page.goto("/?view=okr");
+  await page.getByRole("button", { name: "파일 수정" }).click();
+  await page.getByLabel("파일명").fill("2026 통합 OKR");
+  await page.getByPlaceholder("이번 주기에 달성할 하나의 목표").fill("고객이 첫날 핵심 가치를 경험한다");
+  await page.getByPlaceholder("측정 가능한 핵심 결과").fill("첫날 활성화율을 60%로 높인다");
+  const saveRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/okr-files/cycle-1" && request.method() === "PUT");
+  await page.getByRole("button", { name: "전체 저장" }).click();
+  const payload = (await saveRequest).postDataJSON() as { expectedRevision: string; metadata: { name: string }; objective: { title: string; keyResults: Array<{ title: string }> } };
+  expect(payload.expectedRevision).toBe("test-revision");
+  expect(payload.metadata.name).toBe("2026 통합 OKR");
+  expect(payload.objective.title).toBe("고객이 첫날 핵심 가치를 경험한다");
+  expect(payload.objective.keyResults[0].title).toBe("첫날 활성화율을 60%로 높인다");
+});
+
+test("새 OKR 파일은 저장 전에는 서버에 생성하지 않는다", async ({ page }) => {
+  await installApiMocks(page);
+  const creates: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/okr-files" && request.method() === "POST") creates.push(request.method());
+  });
+  await page.goto("/?view=okr");
+  await page.getByRole("button", { name: "목록보기" }).click();
+  await page.getByRole("button", { name: "새로 만들기" }).click();
+  await page.getByLabel("파일명").fill("새 통합 OKR");
+  await page.getByPlaceholder("이번 주기에 달성할 하나의 목표").fill("신규 목표");
+  await page.getByPlaceholder("측정 가능한 핵심 결과").fill("신규 핵심 결과");
+  expect(creates).toEqual([]);
+  const createRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/okr-files" && request.method() === "POST");
+  await page.getByRole("button", { name: "전체 저장" }).click();
+  const payload = (await createRequest).postDataJSON() as { expectedRevision: null; objective: { keyResults: unknown[] } };
+  expect(payload.expectedRevision).toBeNull();
+  expect(payload.objective.keyResults).toHaveLength(1);
+  expect(creates).toEqual(["POST"]);
+});
+
+test("Initiative 삭제 저장 전에 연결 Project 처리 결정을 요구한다", async ({ page }) => {
+  await installApiMocks(page);
+  await page.goto("/?view=okr");
+  await page.getByRole("button", { name: "파일 수정" }).click();
+  const initiative = page.locator(".okr-file-initiative-editor").filter({ hasText: "핵심 흐름 개편" });
+  await initiative.getByRole("button", { name: "Initiative 삭제" }).click();
+  await expect(page.getByText("연결 Project 정리 필요")).toBeVisible();
+  await page.getByRole("button", { name: "전체 저장" }).click();
+  await expect(page.getByRole("alert")).toContainText("이동 또는 휴지통 처리를 선택");
+  await page.locator(".okr-project-resolutions label").filter({ hasText: "모바일 사용성 개선" }).locator("select").selectOption("move:initiative-2");
+  const saveRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/okr-files/cycle-1" && request.method() === "PUT");
+  await page.getByRole("button", { name: "전체 저장" }).click();
+  await page.getByRole("dialog", { name: "OKR 파일 변경사항 저장" }).getByRole("button", { name: "전체 변경 저장" }).click();
+  const payload = (await saveRequest).postDataJSON() as { projectResolutions: Array<{ projectId: string; action: string; targetInitiativeRef: string }> };
+  expect(payload.projectResolutions).toEqual([{ projectId: "project-1", action: "move", targetInitiativeRef: "initiative-2" }]);
+});
+
+test("Viewer는 OKR 파일 전체 편집을 열 수 없다", async ({ page }) => {
+  await installApiMocks(page, { workspaceRole: "viewer" });
+  await page.goto("/?view=okr");
+  await expect(page.getByRole("button", { name: "파일 수정" })).toHaveCount(0);
+  await expect(page.locator(".okr-file-read-surface")).toBeVisible();
+});
+
 test("KR과 Project 데이터는 각 대상 진행률만 갱신한다", async ({ page }) => {
   await installApiMocks(page);
   await page.goto("/?view=okr");
-  await expect(page.locator(".objective-row").filter({ hasText: "고객 경험 개선" })).not.toContainText("50%");
-  await expect(page.locator(".hierarchy-row:has(.type-initiative)").filter({ hasText: "핵심 흐름 개편" })).not.toContainText("40%");
-  await expect(page.locator(".hierarchy-row:has(.type-key_result)").filter({ hasText: "활성 사용자 20% 증가" })).toContainText("45%");
-  await expect(page.locator(".hierarchy-row:has(.type-project)")).toHaveCount(0);
-  await expect(page.locator(".hierarchy-row:has(.type-task)")).toHaveCount(0);
-  const executionToggle = page.getByRole("button", { name: "핵심 흐름 개편 Project·Task 2개 펼치기" });
-  await expect(executionToggle).toHaveAttribute("aria-expanded", "false");
-  await expect(page.locator(".hierarchy-row").filter({ hasText: "후속 실행 방향" }).locator(".initiative-disclosure-hit")).toHaveCount(0);
-  await executionToggle.press("Enter");
-  await expect(page.locator(".hierarchy-row:has(.type-project)").filter({ hasText: "모바일 사용성 개선" })).toBeVisible();
-  await expect(page.locator(".hierarchy-row:has(.type-task)").filter({ hasText: "오버레이 동작 점검" })).toBeVisible();
-  const collapseToggle = page.getByRole("button", { name: "핵심 흐름 개편 Project·Task 2개 접기" });
-  await expect(collapseToggle).toHaveAttribute("aria-expanded", "true");
-  await expect(collapseToggle).toHaveAttribute("aria-controls", "initiative-execution-initiative-1");
-  await collapseToggle.press("Space");
-  await expect(page.locator(".hierarchy-row:has(.type-project)")).toHaveCount(0);
-  await page.getByRole("button", { name: "핵심 흐름 개편 수정" }).click();
-  await expect(executionToggle).toHaveAttribute("aria-expanded", "false");
-  await page.keyboard.press("Escape");
+  const objectiveSurface = page.locator(".okr-file-read-objective");
+  const keyResultSurface = page.locator(".okr-file-read-kr").first();
+  await expect(objectiveSurface).not.toContainText("50%");
+  await expect(keyResultSurface.locator(":scope > header > b")).toHaveText("45%");
+  await expect(page.locator(".okr-file-read-initiative")).toHaveCount(2);
+  await expect(page.locator(".okr-file-read-surface")).not.toContainText("40%");
+  await expect(page.locator(".okr-file-read-surface")).not.toContainText("모바일 사용성 개선");
 
   await page.goto("/?view=data");
   await expect(page.getByRole("heading", { name: "데이터" })).toBeVisible();
@@ -570,4 +672,16 @@ test("핵심 화면은 axe 자동 접근성 검사에서 치명적 위반이 없
   await page.goto("/?view=work");
   const results = await new AxeBuilder({ page: page as never }).disableRules(["color-contrast"]).analyze();
   expect(results.violations.filter((violation) => violation.impact === "critical")).toEqual([]);
+});
+
+test("초대 링크에서 워크스페이스를 확인한 뒤 명시적으로 가입한다", async ({ page }) => {
+  await installApiMocks(page);
+  const token = "a".repeat(64);
+  await page.goto(`/#invite=${token}`);
+  const dialog = page.getByRole("dialog", { name: "워크스페이스 초대" });
+  await expect(dialog).toContainText("초대받은 워크스페이스");
+  await expect(dialog).toContainText("ow***@example.com");
+  const acceptRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/invitations/accept");
+  await dialog.getByRole("button", { name: "이 워크스페이스에 가입" }).click();
+  expect((await acceptRequest).postDataJSON()).toEqual({ token });
 });

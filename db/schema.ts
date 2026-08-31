@@ -7,6 +7,7 @@ export const workspaces = sqliteTable(
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     ownerUserId: text("owner_user_id").notNull(),
+    kind: text("kind").notNull().default("team"),
     deletionRequestedAt: text("deletion_requested_at"),
     scheduledDeletionAt: text("scheduled_deletion_at"),
     deletionRequestedByUserId: text("deletion_requested_by_user_id"),
@@ -17,7 +18,47 @@ export const workspaces = sqliteTable(
   },
   (table) => [
     index("idx_workspaces_owner").on(table.ownerUserId),
+    uniqueIndex("idx_workspaces_personal_owner")
+      .on(table.ownerUserId)
+      .where(sql`${table.kind} = 'personal'`),
     index("idx_workspaces_scheduled_deletion").on(table.scheduledDeletionAt),
+  ],
+);
+
+export const appMigrations = sqliteTable(
+  "app_migrations",
+  {
+    id: text("id").primaryKey(),
+    appliedAt: text("applied_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+);
+
+export const users = sqliteTable(
+  "users",
+  {
+    id: text("id").primaryKey(),
+    emailNormalized: text("email_normalized").notNull(),
+    displayName: text("display_name").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("idx_users_email_normalized").on(table.emailNormalized)],
+);
+
+export const authIdentities = sqliteTable(
+  "auth_identities",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    providerSubject: text("provider_subject").notNull(),
+    email: text("email").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    lastUsedAt: text("last_used_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_auth_identities_provider_subject").on(table.provider, table.providerSubject),
+    index("idx_auth_identities_user").on(table.userId),
   ],
 );
 
@@ -40,6 +81,39 @@ export const workspaceMembers = sqliteTable(
     index("idx_workspace_members_user_lookup").on(table.userId, table.status),
     uniqueIndex("idx_workspace_members_workspace_email").on(table.workspaceId, table.email),
     index("idx_workspace_members_workspace_status").on(table.workspaceId, table.status),
+  ],
+);
+
+export const workspaceInvitations = sqliteTable(
+  "workspace_invitations",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    displayName: text("display_name").notNull().default(""),
+    role: text("role").notNull().default("member"),
+    tokenHash: text("token_hash").notNull().default(""),
+    status: text("status").notNull().default("pending"),
+    deliveryStatus: text("delivery_status").notNull().default("not_sent"),
+    providerMessageId: text("provider_message_id"),
+    invitedByUserId: text("invited_by_user_id").notNull(),
+    acceptedByUserId: text("accepted_by_user_id"),
+    expiresAt: text("expires_at").notNull(),
+    lastSentAt: text("last_sent_at"),
+    acceptedAt: text("accepted_at"),
+    revokedAt: text("revoked_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_workspace_invitations_pending_email")
+      .on(table.workspaceId, table.email)
+      .where(sql`${table.status} = 'pending'`),
+    uniqueIndex("idx_workspace_invitations_token")
+      .on(table.tokenHash)
+      .where(sql`${table.tokenHash} <> ''`),
+    index("idx_workspace_invitations_workspace_status").on(table.workspaceId, table.status),
+    index("idx_workspace_invitations_email_status").on(table.email, table.status),
   ],
 );
 
@@ -853,7 +927,10 @@ export type DailyTaskSnapshot = typeof dailyTaskSnapshots.$inferSelect;
 export type Routine = typeof routines.$inferSelect;
 export type RoutineCompletion = typeof routineCompletions.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
+export type User = typeof users.$inferSelect;
+export type AuthIdentity = typeof authIdentities.$inferSelect;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
+export type WorkspaceInvitation = typeof workspaceInvitations.$inferSelect;
 export type UserWorkspacePreference = typeof userWorkspacePreferences.$inferSelect;
 export type WorkspaceRule = typeof workspaceRules.$inferSelect;
 export type IntegrationToken = typeof integrationTokens.$inferSelect;

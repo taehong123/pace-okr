@@ -61,6 +61,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { ConfirmationProvider, OverlayDialog, useAppConfirm } from "./overlay-dialog";
+import { OkrFileSurface, type OkrFileCycleSummary } from "./okr-file-surface";
 
 type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "data" | "scrum" | "recommendations" | "reviews" | "trash" | "integrations";
 const urlViews = new Set<View>(["my_work", "inbox", "work", "routines", "okr", "data", "scrum", "recommendations", "reviews", "trash", "integrations"]);
@@ -93,12 +94,9 @@ type GroupRole = "lead" | "member";
 type ProjectTab = "list" | "properties" | "templates";
 type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
 type ThemeMode = "beige" | "gray" | "dark";
-type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "openai" | "local" };
+type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "local" };
 type AuthState = { status: "loading" | "authenticated" | "unauthenticated"; user: AuthUser | null; reason: string | null };
 
-const GOOGLE_SIGN_IN_CLIENT_ID = "497784342268-ik1c65ff3co1s6qt0gga34gt1togmart.apps.googleusercontent.com";
-const GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX = "browser_signin_";
-const GOOGLE_BROWSER_SIGN_IN_STATE_COOKIE_NAME = "__Host-okrptr_google_signin_browser";
 const THEME_STORAGE_KEY = "okrptr.theme";
 
 function isThemeMode(value: string | null | undefined): value is ThemeMode {
@@ -193,7 +191,8 @@ type ProjectDataConnection = {
 type PropertyValueMap = Record<string, Record<string, PropertyValue>>;
 type ProjectHiddenPropertyMap = Record<string, string[]>;
 type ArchivedProject = OkrptrItem & { archivedTaskCount: number };
-type TrashedItem = OkrptrItem & { trashedTaskCount: number; canDelete: boolean };
+type TrashedItem = OkrptrItem & { trashedTaskCount: number; canDelete: boolean; restoreParentRequired: boolean };
+type TrashInitiativeOption = { id: string; title: string; cycleId: string };
 type ChecklistItem = { id: string; taskId: string; title: string; completed: boolean; sortOrder: number };
 type DailySkipReason = "workload" | "vacation" | "personal" | "other";
 type DailyTaskCandidate = { id: string; title: string; status: ItemStatus; dueDate: string | null; parentKind: "project" | "routine" | "general"; parentId: string | null; parentTitle: string };
@@ -361,9 +360,30 @@ type TeamMember = {
   email: string;
   displayName: string;
   role: TeamRole;
-  status: "invited" | "active";
+  status: "active";
   isCurrent: boolean;
   createdAt: string;
+};
+
+type TeamInvitation = {
+  id: string;
+  email: string;
+  displayName: string;
+  role: Exclude<TeamRole, "owner">;
+  status: "pending" | "expired";
+  deliveryStatus: "not_sent" | "sent" | "failed" | "unavailable";
+  expiresAt: string;
+  lastSentAt: string | null;
+  createdAt: string;
+};
+
+type InvitationPreview = {
+  workspace: { id: string; name: string };
+  role: Exclude<TeamRole, "owner">;
+  inviterName: string;
+  emailHint: string;
+  status: "pending" | "expired" | "accepted" | "revoked";
+  expiresAt: string;
 };
 
 type WorkspaceGroup = {
@@ -395,7 +415,7 @@ type GroupMember = {
   createdAt: string;
 };
 
-type TeamData = { workspace: { id: string; name: string; avatarUrl: string | null; avatarUpdatedAt: string | null }; members: TeamMember[]; currentRole: TeamRole; canManage: boolean };
+type TeamData = { workspace: { id: string; name: string; kind: "personal" | "team"; avatarUrl: string | null; avatarUpdatedAt: string | null }; members: TeamMember[]; invitations: TeamInvitation[]; invitationEmailConfigured: boolean; currentRole: TeamRole; canManage: boolean };
 type BootstrapShellData = {
   user: AuthUser;
   workspaces: WorkspaceSummary[];
@@ -468,6 +488,7 @@ type WorkspaceSummary = {
   id: string;
   name: string;
   createdAt: string;
+  kind: "personal" | "team";
   personal: boolean;
   role: TeamRole;
   current: boolean;
@@ -563,7 +584,7 @@ type TrashRecord = {
 
 const dailyScrumMemoryCache = new Map<string, DailyDashboard>();
 const recommendationMemoryCache = new Map<string, Recommendation[]>();
-let trashMemoryCache: { records: TrashRecord[]; items: TrashedItem[] } | null = null;
+let trashMemoryCache: { records: TrashRecord[]; items: TrashedItem[]; initiativeOptions: TrashInitiativeOption[] } | null = null;
 
 function scrumNotesSnapshot(scrum: DailyDashboard) {
   return JSON.stringify(scrum.draft);
@@ -724,10 +745,13 @@ function WorkspaceApp() {
   const [hiddenProperties, setHiddenProperties] = useState<ProjectHiddenPropertyMap>({});
   const [projectTab, setProjectTab] = useState<ProjectTab>("list");
   const [teamData, setTeamData] = useState<TeamData | null>(null);
+  const [inviteToken, setInviteToken] = useState<string | null>(() => invitationTokenFromLocation());
+  const [invitePreview, setInvitePreview] = useState<InvitationPreview | null>(null);
+  const [inviteLoadError, setInviteLoadError] = useState("");
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [okrCycles, setOkrCycles] = useState<OkrCycle[]>([]);
   const [selectedOkrCycleId, setSelectedOkrCycleId] = useState<string | null>(null);
-  const [visibleOkrCycleIds, setVisibleOkrCycleIds] = useState<string[]>([]);
+  const [, setVisibleOkrCycleIds] = useState<string[]>([]);
   const [activeView, setActiveView] = useState<View>(() => navigationFromLocation().view);
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [taskDisplay, setTaskDisplay] = useState<"cards" | "table" | "board">("table");
@@ -750,6 +774,8 @@ function WorkspaceApp() {
   const [routineCreateOpen, setRoutineCreateOpen] = useState(false);
   const [createItemKind, setCreateItemKind] = useState<ItemKind>("task");
   const [createItemCycleId, setCreateItemCycleId] = useState<string | null>(null);
+  const [okrCreating, setOkrCreating] = useState(false);
+  const [okrEditorDirty, setOkrEditorDirty] = useState(false);
   const [okrChatContext, setOkrChatContext] = useState<OkrChatContext | null>(null);
   const [deletingOkrCycleIds, setDeletingOkrCycleIds] = useState<Set<string>>(new Set());
   const [slowDeletingOkrCycleId, setSlowDeletingOkrCycleId] = useState<string | null>(null);
@@ -757,7 +783,6 @@ function WorkspaceApp() {
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() => navigationFromLocation().taskId);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => navigationFromLocation().projectId);
-  const [selectedOkrItemId, setSelectedOkrItemId] = useState<string | null>(null);
   const [selectedDeleteItemIds, setSelectedDeleteItemIds] = useState<Set<string>>(new Set());
   const [trashingItems, setTrashingItems] = useState(false);
   const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null);
@@ -877,6 +902,21 @@ function WorkspaceApp() {
   }, []);
 
   useEffect(() => {
+    if (authState.status !== "authenticated" || !inviteToken) return;
+    const controller = new AbortController();
+    void fetch(`/api/invitations/preview?token=${encodeURIComponent(inviteToken)}`, { signal: controller.signal, cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json() as { invitation?: InvitationPreview; error?: string };
+        if (!response.ok || !data.invitation) throw new Error(data.error ?? "초대를 불러오지 못했습니다.");
+        setInvitePreview(data.invitation);
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) setInviteLoadError(error instanceof Error ? error.message : "초대를 불러오지 못했습니다.");
+      });
+    return () => controller.abort();
+  }, [authState.status, inviteToken]);
+
+  useEffect(() => {
     if (authState.status !== "authenticated" || activeView !== "integrations" || integrationStatusesLoaded) return;
     let active = true;
     void Promise.all([
@@ -922,13 +962,27 @@ function WorkspaceApp() {
   useEffect(() => {
     function syncFromHistory() {
       const next = navigationFromLocation();
+      if (activeView === "okr" && next.view !== "okr" && okrEditorDirty) {
+        void confirmAction({ title: "OKR 수정 중", message: "저장하지 않은 OKR 변경사항을 버리고 이동할까요?", confirmLabel: "변경사항 버리기", danger: true }).then((confirmed) => {
+          if (!confirmed) {
+            window.history.forward();
+            return;
+          }
+          setOkrCreating(false);
+          setOkrEditorDirty(false);
+          setActiveView(next.view);
+          setSelectedProjectId(next.projectId);
+          setSelectedTaskId(next.taskId);
+        });
+        return;
+      }
       setActiveView(next.view);
       setSelectedProjectId(next.projectId);
       setSelectedTaskId(next.taskId);
     }
     window.addEventListener("popstate", syncFromHistory);
     return () => window.removeEventListener("popstate", syncFromHistory);
-  }, []);
+  }, [activeView, confirmAction, okrEditorDirty]);
 
   useEffect(() => {
     if (!workspaceMenuOpen) return;
@@ -955,12 +1009,9 @@ function WorkspaceApp() {
     ...executionItems.map((entry) => ({ id: entry.id, kind: "project" as const, title: entry.title })),
     ...routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => ({ id: entry.id, kind: "routine" as const, title: entry.title })),
   ];
-  const structuredItems = activeItems;
   const defaultOkrCycle = okrCycles.find((cycle) => cycle.status === "active") ?? okrCycles[0] ?? null;
   const selectedOkrCycle = okrCycles.find((cycle) => cycle.id === selectedOkrCycleId) ?? defaultOkrCycle;
   const createItemCycle = okrCycles.find((cycle) => cycle.id === createItemCycleId) ?? selectedOkrCycle;
-  const visibleOkrCycles = okrCycles.filter((cycle) => visibleOkrCycleIds.includes(cycle.id));
-  const displayedOkrCycles = visibleOkrCycles.length ? visibleOkrCycles : selectedOkrCycle ? [selectedOkrCycle] : [];
   const projectChatTargets: ProjectChatTarget[] = activeItems
     .filter((entry) => entry.kind === "initiative" && Boolean(entry.cycleId))
     .map((entry) => ({
@@ -969,19 +1020,11 @@ function WorkspaceApp() {
       initiativeId: entry.id,
       initiativeTitle: entry.title,
     }));
-  const okrViews = useMemo(() => {
-    const views: Record<string, { items: OkrptrItem[]; objective?: OkrptrItem; depths: Record<string, number> }> = {};
-    for (const cycle of okrCycles) {
-      const cycleItems = filterTreeItemsByCycle(structuredItems, cycle.id);
-      views[cycle.id] = { items: cycleItems, objective: cycleItems.find((entry) => entry.kind === "objective"), depths: buildDepths(cycleItems) };
-    }
-    return views;
-  }, [okrCycles, structuredItems]);
   const okrCycleItemCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const cycle of okrCycles) counts[cycle.id] = filterTreeItemsByCycle(structuredItems, cycle.id).length;
+    for (const cycle of okrCycles) counts[cycle.id] = activeItems.filter((entry) => entry.cycleId === cycle.id && ["objective", "key_result", "initiative"].includes(entry.kind)).length;
     return counts;
-  }, [okrCycles, structuredItems]);
+  }, [activeItems, okrCycles]);
   const periodItems = activeItems.filter(
     (entry) => cadence === "quarterly" || entry.cadence === cadence || entry.kind === "objective",
   );
@@ -993,7 +1036,6 @@ function WorkspaceApp() {
     : 0;
   const selectedTask = activeItems.find((entry) => entry.id === selectedTaskId && entry.kind === "task");
   const selectedProject = activeItems.find((entry) => entry.id === selectedProjectId && entry.kind === "project");
-  const selectedOkrItem = activeItems.find((entry) => entry.id === selectedOkrItemId && ["objective", "key_result", "initiative"].includes(entry.kind));
   const activeWorkspaces = workspaces.filter((entry) => !entry.scheduledDeletionAt);
   const scheduledWorkspaces = workspaces.filter((entry) => Boolean(entry.scheduledDeletionAt));
   const workspaceNameCounts = workspaces.reduce((counts, workspace) => {
@@ -1037,6 +1079,22 @@ function WorkspaceApp() {
   }
 
   function navigateView(view: View, mode: "push" | "replace" = "push") {
+    if (activeView === "okr" && view !== "okr" && okrEditorDirty) {
+      void confirmAction({ title: "OKR 수정 중", message: "저장하지 않은 OKR 변경사항을 버리고 이동할까요?", confirmLabel: "변경사항 버리기", danger: true }).then((confirmed) => {
+        if (!confirmed) return;
+        setOkrCreating(false);
+        setOkrEditorDirty(false);
+        setSelectedProjectId(null);
+        setSelectedTaskId(null);
+        setActiveView(view);
+        writeNavigation(view, null, null, mode);
+      });
+      return;
+    }
+    if (view !== "okr") {
+      setOkrCreating(false);
+      setOkrEditorDirty(false);
+    }
     setSelectedProjectId(null);
     setSelectedTaskId(null);
     setActiveView(view);
@@ -1486,66 +1544,55 @@ function WorkspaceApp() {
     showNotice(warning ?? `${kindLabel(created.kind)}를 만들었습니다.`, warning ? "error" : "success");
   }
 
-  async function createOkrFile() {
-    try {
-      const response = await fetch("/api/okr-cycles", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "새 OKR 파일", status: "planned" }),
+  function createOkrFile() {
+    if (okrEditorDirty) {
+      void confirmAction({ title: "새 OKR 파일", message: "저장하지 않은 변경사항을 버리고 새 OKR 파일을 만들까요?", confirmLabel: "변경사항 버리기", danger: true }).then((confirmed) => {
+        if (!confirmed) return;
+        setOkrListOpen(false);
+        setOkrEditorDirty(false);
+        setOkrCreating(true);
+        setActiveView("okr");
+        writeNavigation("okr", null, null);
       });
-      if (!response.ok) throw new Error("cycle");
-      const data = await response.json() as { cycle: OkrCycle };
-      setOkrCycles((current) => [data.cycle, ...current]);
-      setSelectedOkrCycleId(data.cycle.id);
-      setVisibleOkrCycleIds((current) => current.includes(data.cycle.id) ? current : [data.cycle.id, ...current]);
-      navigateView("okr");
-      showNotice("새 OKR 파일을 만들었습니다.");
-    } catch {
-      showNotice("OKR 파일을 만들지 못했습니다.");
+      return;
     }
+    setOkrListOpen(false);
+    setOkrCreating(true);
+    setActiveView("okr");
+    writeNavigation("okr", null, null);
   }
 
-  async function renameOkrFile(id: string, name: string) {
-    const previous = okrCycles;
-    setOkrCycles((current) => current.map((cycle) => cycle.id === id ? { ...cycle, name } : cycle));
-    try {
-      const response = await fetch("/api/okr-cycles", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, name }),
+  function selectOkrFile(id: string) {
+    if (okrEditorDirty) {
+      void confirmAction({ title: "다른 OKR 파일 열기", message: "저장하지 않은 변경사항을 버리고 다른 OKR 파일을 열까요?", confirmLabel: "변경사항 버리기", danger: true }).then((confirmed) => {
+        if (!confirmed) return;
+        setOkrCreating(false);
+        setOkrEditorDirty(false);
+        setSelectedOkrCycleId(id);
+        setVisibleOkrCycleIds([id]);
+        setOkrListOpen(false);
       });
-      if (!response.ok) throw new Error("cycle");
-      const data = await response.json() as { cycle: OkrCycle };
-      setOkrCycles((current) => current.map((cycle) => cycle.id === id ? data.cycle : cycle));
-      showNotice("OKR 파일 이름을 저장했습니다.");
-    } catch {
-      setOkrCycles(previous);
-      showNotice("OKR 파일 이름을 저장하지 못했습니다.");
+      return;
     }
-  }
-
-  async function setOkrFileDepartment(id: string, department: string) {
-    const previous = okrCycles;
-    setOkrCycles((current) => current.map((cycle) => cycle.id === id ? { ...cycle, department } : cycle));
-    try {
-      const response = await fetch("/api/okr-cycles", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, department }),
-      });
-      if (!response.ok) throw new Error("cycle");
-      const data = await response.json() as { cycle: OkrCycle };
-      setOkrCycles((current) => current.map((cycle) => cycle.id === id ? data.cycle : cycle));
-      showNotice("OKR 부서를 저장했습니다.");
-    } catch {
-      setOkrCycles(previous);
-      showNotice("OKR 부서를 저장하지 못했습니다.");
-    }
-  }
-
-  function toggleOkrFileVisible(id: string) {
+    setOkrCreating(false);
+    setOkrEditorDirty(false);
     setSelectedOkrCycleId(id);
-    setVisibleOkrCycleIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]);
+    setVisibleOkrCycleIds([id]);
+    setOkrListOpen(false);
+  }
+
+  function applySavedOkrFile(file: { cycle: OkrFileCycleSummary }) {
+    setOkrCreating(false);
+    setOkrEditorDirty(false);
+    setSelectedOkrCycleId(file.cycle.id);
+    setVisibleOkrCycleIds([file.cycle.id]);
+    setOkrCycles((current) => {
+      const found = current.some((cycle) => cycle.id === file.cycle.id);
+      const merged = found ? current.map((cycle) => cycle.id === file.cycle.id ? file.cycle : cycle) : [file.cycle, ...current];
+      return merged.map((cycle) => ({ ...cycle, status: file.cycle.status === "active" && cycle.id !== file.cycle.id && cycle.status === "active" ? "planned" : cycle.status }));
+    });
+    clearCachedBootstrap();
+    setWorkspaceDataAttempt((current) => current + 1);
   }
 
   async function setDefaultOkrFile(id: string) {
@@ -1653,7 +1700,8 @@ function WorkspaceApp() {
     }
   }
 
-  async function applyAssistantOkrPlan(plan: OnboardingPlan, cycleId: string, target: OkrPlanTarget | null, driMemberId: string | null) {
+  async function applyAssistantOkrPlan(plan: OnboardingPlan, cycleId: string, target: OkrPlanTarget | null, _driMemberId: string | null) {
+    void _driMemberId;
     try {
       const response = await fetch("/api/okr-plan", {
         method: "POST",
@@ -1670,8 +1718,8 @@ function WorkspaceApp() {
             })),
             targetInitiatives: plan.targetInitiatives.map((initiative) => ({ title: initiative.title })),
           },
-          project: plan.project,
-          driMemberId: driMemberId ?? currentTeamMember?.id ?? null,
+          project: "",
+          driMemberId: null,
         }),
       });
       const data = await response.json() as OkrPlanApplyResult & { error?: string };
@@ -1685,7 +1733,7 @@ function WorkspaceApp() {
       setVisibleOkrCycleIds((current) => current.includes(data.cycleId) ? current : [data.cycleId, ...current]);
       const krCount = data.keyResultIds?.length ?? 0;
       const initiativeCount = data.initiativeIds?.length ?? 0;
-      showNotice(data.projectId ? "첫 Project를 만들었습니다." : `KR ${krCount}개 · Initiative ${initiativeCount}개를 만들었습니다.`);
+      showNotice(`KR ${krCount}개 · Initiative ${initiativeCount}개를 만들었습니다. 실행 계획은 Project 탭에서 만들 수 있습니다.`);
       return data;
     } catch {
       showNotice("OKR 구성을 만들지 못했습니다.");
@@ -2093,16 +2141,23 @@ function WorkspaceApp() {
           {activeView === "okr" && (
             <section className="okr-workbench">
               <section className="okr-document">
-                {displayedOkrCycles.length ? displayedOkrCycles.map((cycle) => {
-                  const view = okrViews[cycle.id] ?? { items: [], depths: {} };
-                  const firstItemKind: ItemKind = view.objective ? "key_result" : "objective";
-                  return (
-                    <article className="okr-document-card" key={cycle.id}>
-                      <OkrCurrentFile key={`${cycle.id}-${cycle.name}-${cycle.department}`} cycle={cycle} addItemKind={firstItemKind} onRename={(id, name) => void renameOkrFile(id, name)} onDepartmentChange={(id, department) => void setOkrFileDepartment(id, department)} onAddItem={() => openCreateItem(firstItemKind, cycle.id)} />
-                      <TreeView objective={view.objective} items={view.items} depths={view.depths} canEdit={canWriteWorkspace} onEditOkrItem={setSelectedOkrItemId} onComplete={(id) => void patchItem(id, { status: "done" })} onOpenProject={openProjectPage} onOpenTask={openTaskDetail} onCreateObjective={() => openCreateItem("objective", cycle.id)} onCreateWithChat={() => openOkrCreationChat(cycle, "objective")} />
-                    </article>
-                  );
-                }) : <EmptyState icon={Archive} title="OKR 파일이 없습니다" />}
+                {okrCreating || selectedOkrCycle ? <OkrFileSurface
+                  key={`${okrCreating ? "new" : selectedOkrCycle?.id}-${workspaceDataAttempt}`}
+                  cycleId={okrCreating ? null : selectedOkrCycle?.id ?? null}
+                  creating={okrCreating}
+                  readOnly={!canWriteWorkspace}
+                  onSaved={applySavedOkrFile}
+                  onSplit={(cycles) => {
+                    setOkrCycles(cycles);
+                    clearCachedBootstrap();
+                    setWorkspaceDataAttempt((current) => current + 1);
+                  }}
+                  onCancelCreate={() => { setOkrCreating(false); setOkrEditorDirty(false); }}
+                  onNavigateProjects={() => navigateView("work")}
+                  onNotice={(message, tone) => showNotice(message, tone)}
+                  onDirtyChange={setOkrEditorDirty}
+                  onConfirm={(options) => confirmAction(options)}
+                /> : <div className="okr-file-empty"><Archive size={22} /><div><h2>OKR 파일이 없습니다</h2><p>Objective·KR·Initiative를 한 번에 작성해 첫 파일을 만드세요.</p></div>{canWriteWorkspace && <button onClick={createOkrFile}><Plus size={14} />새 OKR 파일</button>}</div>}
               </section>
             </section>
           )}
@@ -2131,20 +2186,13 @@ function WorkspaceApp() {
           <OkrFileManager
             cycles={okrCycles}
             selectedCycle={selectedOkrCycle}
-            visibleCycleIds={visibleOkrCycleIds}
             itemCounts={okrCycleItemCounts}
             deletingIds={deletingOkrCycleIds}
             slowDeletingId={slowDeletingOkrCycleId}
-            onSelect={(id) => {
-              setSelectedOkrCycleId(id);
-              setVisibleOkrCycleIds((current) => current.includes(id) ? current : [id]);
-            }}
-            onRename={(id, name) => void renameOkrFile(id, name)}
-            onDepartmentChange={(id, department) => void setOkrFileDepartment(id, department)}
-            onToggleVisible={toggleOkrFileVisible}
+            onSelect={selectOkrFile}
             onSetDefault={(id) => void setDefaultOkrFile(id)}
             onDelete={(id) => void deleteOkrFile(id)}
-            onCreate={() => void createOkrFile()}
+            onCreate={createOkrFile}
             onClose={() => requestClose("close-button")}
           />
           }
@@ -2168,6 +2216,22 @@ function WorkspaceApp() {
           }}
         />
       )}
+      {inviteToken && <InvitationDialog
+        token={inviteToken}
+        preview={invitePreview}
+        loadError={inviteLoadError}
+        onClose={() => {
+          window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}`);
+          setInviteToken(null);
+          setInvitePreview(null);
+          setInviteLoadError("");
+        }}
+        onAccepted={() => {
+          clearCachedBootstrap();
+          window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}`);
+          window.location.reload();
+        }}
+      />}
       {profilePromptMember && (
         <ProfileNamePrompt
           key={profilePromptMember.id}
@@ -2209,8 +2273,7 @@ function WorkspaceApp() {
           onNotice={showNotice}
         />
       )}
-      {teamPanelOpen && <TeamPanel initialTeam={teamData} initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onMembersChange={(members) => setTeamData((current) => current ? { ...current, members } : current)} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
-      {selectedOkrItem && <OkrItemEditPanel item={selectedOkrItem} items={activeItems} onClose={() => setSelectedOkrItemId(null)} onSave={(patch) => patchItem(selectedOkrItem.id, patch)} />}
+      {teamPanelOpen && <TeamPanel initialTeam={teamData} initialTab={teamPanelTab} initialGroupHandle={requestedGroupHandle} onTeamChange={setTeamData} onClose={() => setTeamPanelOpen(false)} onNotice={showNotice} />}
       {createItemOpen && <CreateItemPanel initialKind={createItemKind} cycleId={createItemCycle?.id ?? null} items={items} routines={routines} properties={properties} teamMembers={teamMembers} onClose={() => setCreateItemOpen(false)} onCreated={addCreatedItem} onCreateWithChat={activeView === "inbox" && createItemKind === "task" ? ({ title }) => openTaskCreationChat(title) : activeView === "work" && createItemKind === "project" ? ({ title }) => openProjectCreationChat(title) : activeView === "okr" && createItemCycle ? ({ kind, title }) => openOkrCreationChat(createItemCycle, kind, title) : undefined} />}
       {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setPropertyValues({}); setOkrCycles([cycle]); setVisibleOkrCycleIds([cycle.id]); setSelectedTaskId(null); navigateView("trash"); setCleanupOpen(false); showNotice("OKR 데이터를 휴지통에 보관하고 정리했습니다."); }} onNotice={showNotice} />}
       {selectedTask && (
@@ -2288,20 +2351,84 @@ function AuthScreen({ reason }: { reason: string | null }) {
 }
 
 function startGoogleSignIn() {
-  if (window.location.hostname !== "okrptr.com") {
-    window.location.assign("/api/auth/google?returnTo=%2F");
-    return;
+  const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  window.location.assign(`/api/auth/google?returnTo=${encodeURIComponent(returnTo)}`);
+}
+
+function invitationTokenFromLocation() {
+  if (typeof window === "undefined") return null;
+  const token = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("invite")?.trim() ?? "";
+  return /^[a-f0-9]{64}$/.test(token) ? token : null;
+}
+
+function InvitationDialog({ token, preview, loadError, onClose, onAccepted }: {
+  token: string;
+  preview: InvitationPreview | null;
+  loadError: string;
+  onClose: () => void;
+  onAccepted: () => void;
+}) {
+  const [accepting, setAccepting] = useState(false);
+  const [error, setError] = useState("");
+
+  async function accept() {
+    if (!preview || preview.status !== "pending" || accepting) return;
+    setAccepting(true);
+    setError("");
+    const response = await fetch("/api/invitations/accept", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    const data = await response.json() as { accepted?: boolean; workspaceName?: string; error?: string };
+    setAccepting(false);
+    if (!response.ok || !data.accepted) {
+      setError(data.error ?? "초대를 수락하지 못했습니다.");
+      return;
+    }
+    onAccepted();
   }
-  const state = `${GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX}${window.crypto.randomUUID()}`;
-  document.cookie = `${GOOGLE_BROWSER_SIGN_IN_STATE_COOKIE_NAME}=${state}; Path=/; Secure; SameSite=Lax; Max-Age=600`;
-  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  url.searchParams.set("client_id", GOOGLE_SIGN_IN_CLIENT_ID);
-  url.searchParams.set("redirect_uri", `${window.location.origin}/api/google/callback`);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "openid email profile");
-  url.searchParams.set("prompt", "select_account");
-  url.searchParams.set("state", state);
-  window.location.assign(url.toString());
+
+  const statusMessage = preview?.status === "expired"
+    ? "이 초대는 만료되었습니다. 워크스페이스 관리자에게 재전송을 요청해 주세요."
+    : preview?.status === "revoked"
+      ? "취소된 초대입니다."
+      : preview?.status === "accepted"
+        ? "이미 가입이 완료된 초대입니다."
+        : "초대받은 이메일과 같은 Google 계정으로 로그인한 경우에만 가입할 수 있습니다.";
+
+  return (
+    <OverlayDialog title="워크스페이스 초대" dismissPolicy="critical" onRequestClose={() => onClose()}>
+      {(requestClose) => <section className="invitation-dialog">
+        <header>
+          <div><span>OKRPTR 초대</span><h2>워크스페이스에 가입하기</h2></div>
+          <button className="icon-button" onClick={() => requestClose("close-button")} aria-label="초대 창 닫기" title="닫기"><X size={17} /></button>
+        </header>
+        {!preview && !loadError ? (
+          <div className="invitation-dialog-loading" role="status"><LoaderCircle className="spin" size={18} /><span>초대를 확인하고 있습니다.</span></div>
+        ) : loadError ? (
+          <div className="invitation-dialog-error" role="alert"><AlertTriangle size={18} /><div><b>초대를 확인할 수 없습니다.</b><p>{loadError}</p></div></div>
+        ) : preview ? (
+          <>
+            <div className="invitation-workspace-card">
+              <span className="brand-mark">{preview.workspace.name.slice(0, 1).toLocaleUpperCase()}</span>
+              <div><h3>{preview.workspace.name}</h3><p>{preview.inviterName} 님이 {teamRoleLabel(preview.role)} 역할로 초대했습니다.</p></div>
+            </div>
+            <dl className="invitation-details">
+              <div><dt>초대 계정</dt><dd>{preview.emailHint}</dd></div>
+              <div><dt>유효 기간</dt><dd>{new Date(preview.expiresAt).toLocaleDateString("ko-KR")}까지</dd></div>
+            </dl>
+            <p className={`invitation-status-copy status-${preview.status}`}>{statusMessage}</p>
+            {error && <p className="invitation-dialog-error-text" role="alert">{error}</p>}
+          </>
+        ) : null}
+        <footer>
+          <button type="button" onClick={() => requestClose("close-button")}>닫기</button>
+          {preview?.status === "pending" && <button type="button" className="primary" disabled={accepting} onClick={() => void accept()}>{accepting ? <><LoaderCircle className="spin" size={14} />가입 중</> : "이 워크스페이스에 가입"}</button>}
+        </footer>
+      </section>}
+    </OverlayDialog>
+  );
 }
 
 function WelcomeModal({ language, onLanguageChange, onClose, onOpenMcp }: {
@@ -3292,55 +3419,6 @@ function MemberMentionPicker({
   );
 }
 
-function OkrItemEditPanel({ item, items, onClose, onSave }: {
-  item: OkrptrItem;
-  items: OkrptrItem[];
-  onClose: () => void;
-  onSave: (patch: Partial<OkrptrItem>) => Promise<boolean>;
-}) {
-  const [title, setTitle] = useState(item.title);
-  const [parentId, setParentId] = useState(item.parentId ?? "");
-  const [status, setStatus] = useState(item.status);
-  const [progress, setProgress] = useState(item.progress);
-  const [saving, setSaving] = useState(false);
-  const parentKind = item.kind === "key_result" ? "objective" : item.kind === "initiative" ? "key_result" : null;
-  const parentOptions = parentKind
-    ? items.filter((entry) => entry.kind === parentKind && entry.cycleId === item.cycleId && !entry.archivedAt)
-    : [];
-  const tracksProgress = item.kind === "key_result";
-  const dirty = title.trim() !== item.title || parentId !== (item.parentId ?? "") || status !== item.status || (tracksProgress && progress !== item.progress);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!title.trim() || saving || (parentKind && !parentId)) return;
-    setSaving(true);
-    const saved = await onSave({
-      title: title.trim(),
-      parentId: parentKind ? parentId : null,
-      status,
-      ...(tracksProgress ? { progress } : {}),
-    });
-    setSaving(false);
-    if (saved) onClose();
-  }
-
-  return (
-    <OverlayDialog title={`${kindLabel(item.kind)} 수정`} variant="drawer" dirty={dirty} initialFocus="input" onRequestClose={() => onClose()}>
-      {(requestClose) => <aside className="property-panel okr-item-edit-panel">
-        <header><div><h2>{kindLabel(item.kind)} 수정</h2><p>문구와 상위 연결을 저장 후에도 변경할 수 있습니다.</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="OKR 항목 수정 닫기"><X size={17} /></button></header>
-        <form className="property-form" onSubmit={(event) => void submit(event)}>
-          <label><span>유형</span><input value={kindLabel(item.kind)} disabled /></label>
-          <label><span>이름</span><textarea rows={4} value={title} onChange={(event) => setTitle(event.target.value)} aria-label={`${kindLabel(item.kind)} 이름`} /></label>
-          {parentKind && <label><span>상위 {kindLabel(parentKind)}</span><select value={parentId} onChange={(event) => setParentId(event.target.value)} aria-label={`상위 ${kindLabel(parentKind)}`}><option value="">선택</option>{parentOptions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>}
-          <label><span>상태</span><select value={status} onChange={(event) => setStatus(event.target.value as ItemStatus)}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-          {tracksProgress && <label className="okr-item-progress-field"><span>KR 진행률</span><div><input type="range" min="0" max="100" step="5" value={progress} onChange={(event) => setProgress(Number(event.target.value))} /><b>{progress}%</b></div></label>}
-          <button disabled={!dirty || !title.trim() || saving || Boolean(parentKind && !parentId)}>{saving ? "저장 중" : "변경 저장"}</button>
-        </form>
-      </aside>}
-    </OverlayDialog>
-  );
-}
-
 function CreateItemPanel({ initialKind, cycleId, items, routines, properties, teamMembers, onClose, onCreated, onCreateWithChat }: {
   initialKind: ItemKind;
   cycleId: string | null;
@@ -3352,7 +3430,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
   onCreated: (item: OkrptrItem, initialValues?: Record<string, PropertyValue>, warning?: string) => void;
   onCreateWithChat?: (draft: { kind: ItemKind; title: string }) => void;
 }) {
-  const [kind, setKind] = useState<ItemKind>(initialKind);
+  const kind = initialKind;
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [parentId, setParentId] = useState("");
@@ -3446,7 +3524,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
       {(requestClose) => <aside className="property-panel">
         <header><div><h2>새 항목</h2><p>{kind === "project" ? "Project 속성을 지정해서 추가" : "OKR 실행 구조에 추가"}</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="새 항목 닫기" title="새 항목 닫기"><X size={17} /></button></header>
         <form className="property-form create-item-form" onSubmit={submit}>
-          <label><span>유형</span><select value={kind} onChange={(event) => { setKind(event.target.value as ItemKind); setParentId(""); setTaskContainer(""); }} disabled={initialKind === "project"}>{(["objective", "key_result", "initiative", "project", "task"] as ItemKind[]).map((entry) => <option value={entry} key={entry}>{kindLabel(entry)}</option>)}</select></label>
+          <label><span>유형</span><select value={kind} disabled><option value={initialKind}>{kindLabel(initialKind)}</option></select></label>
           <label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
           {onCreateWithChat && <div className="create-chat-nudge"><div><Bot size={15} /><span><b>대화로 정리할까요?</b><small>{kind === "task" ? "할 일을 다듬고, 연결 대상을 고르지 않으면 General에 저장합니다." : kind === "project" ? "결과와 범위를 말하면 Project 초안을 정리합니다." : "말로 설명하면 OKR 초안을 함께 정리해드려요."}</small></span></div><button type="button" onClick={() => onCreateWithChat({ kind, title })}>AI 대화로 추가<ChevronRight size={13} /></button></div>}
           {kind === "task" ? hasTaskContainerOptions ? (
@@ -4031,14 +4109,14 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   const saveLabel = mode === "task" ? `Task ${taskDraftCount}개 만들기` : mode === "routine" ? "Routine 만들기" : assistantFlow
     ? !okrTarget ? `Objective 1개 · KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`
       : okrTarget.kind === "objective" ? `KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`
-        : okrTarget.kind === "key_result" ? `Initiative ${plan.targetInitiatives.length}개 만들기` : "첫 Project 만들기"
+        : okrTarget.kind === "key_result" ? `Initiative ${plan.targetInitiatives.length}개 만들기` : "Project 탭에서 계속"
     : mode === "project" ? "Project 만들기" : `Objective 1개 · KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`;
   const hasDraft = hasPlanContent(plan);
   const canApplyDraft = mode === "task" ? Boolean(taskDraftCount) : assistantFlow
     ? !okrTarget ? treeReady
       : okrTarget.kind === "objective" ? Boolean(plan.keyResults.length && plan.keyResults.every((entry) => entry.title.trim() && entry.initiatives.every((initiative) => initiative.title.trim())) && !plan.unassignedInitiatives.length)
         : okrTarget.kind === "key_result" ? Boolean(plan.targetInitiatives.length && plan.targetInitiatives.every((entry) => entry.title.trim()))
-          : Boolean(plan.project.trim())
+          : false
     : mode === "project" ? Boolean(plan.project.trim() && projectTarget) : mode === "routine" ? Boolean(plan.routineTitle.trim()) : treeReady;
   function setAssistantResponse(value: string) {
     setConversationHistory((current) => [...current, { id: `assistant-${Date.now()}-${current.length}`, role: "assistant", content: value }]);
@@ -4206,32 +4284,17 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
       const cycleId = context?.cycleId ?? defaultCycleId;
       if (!cycleId) return;
       setSaving(true);
-      const result = await onApplyOkrPlan(plan, cycleId, okrTarget, plan.project.trim() ? projectDriMemberId || null : null);
+      const result = await onApplyOkrPlan(plan, cycleId, okrTarget, null);
       setSaving(false);
       if (!result) return;
       setPlan({ ...emptyPlan });
       setVisibleFields(new Set());
       setGuideQuestions([]);
       setTargetCandidates([]);
-      if (result.projectIds.length) {
-        setAssistantResponse("좋아요. 첫 Project까지 연결했습니다. 이제 OKR 화면에서 전체 구조를 확인할 수 있어요.");
-        onFinish();
-        return;
-      }
       const createdInitiatives = result.items.filter((entry) => result.initiativeIds.includes(entry.id));
-      if (createdInitiatives.length === 1) {
-        const initiative = createdInitiatives[0];
-        setOkrTarget({ id: initiative.id, kind: "initiative", title: initiative.title });
-        setMode("coach");
-        setAssistantResponse("Initiative를 만들었습니다. 이 방향을 실제로 움직일 첫 Project도 정해볼까요? 아직 생각나지 않았다면 지금은 건너뛰어도 됩니다.");
-        setGuideQuestions(["첫 Project를 정리할게요", "나중에 할게요"]);
-        return;
-      }
-      if (createdInitiatives.length > 1) {
-        setOkrTarget(null);
-        setTargetCandidates(createdInitiatives.map((entry) => ({ id: entry.id, kind: "initiative", title: entry.title })));
-        setMode("coach");
-        setAssistantResponse("OKR 트리를 만들었습니다. 첫 Project를 이어서 정리할 Initiative를 선택해 주세요.");
+      if (createdInitiatives.length) {
+        setAssistantResponse("OKR 구조를 저장했습니다. 실행 계획은 Project 탭에서 Initiative를 선택해 만들어 주세요.");
+        onFinish();
         return;
       }
       const createdKeyResults = result.items.filter((entry) => result.keyResultIds.includes(entry.id));
@@ -4296,19 +4359,8 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
       setGuideQuestions([]);
       setVisibleFields(new Set());
       setTargetCandidates([]);
-      const createdInitiatives = created.items.filter((entry) => created.initiativeIds.includes(entry.id));
-      if (createdInitiatives.length === 1 && !created.projectIds.length) {
-        const initiative = createdInitiatives[0];
-        setProjectTarget({ cycleId: created.cycleId, cycleName: context?.cycleName ?? "OKR", initiativeId: initiative.id, initiativeTitle: initiative.title });
-        setAssistantResponse("OKR 구조를 만들었습니다. 이 대화에서 첫 실행 Project도 이어서 정리할 수 있습니다.");
-      } else if (createdInitiatives.length > 1) {
-        setProjectTarget(null);
-        setTargetCandidates(createdInitiatives.map((entry) => ({ id: entry.id, kind: "initiative", title: entry.title })));
-        setAssistantResponse("OKR 트리를 만들었습니다. 첫 Project를 이어서 정리할 Initiative를 선택해 주세요.");
-      } else {
-        setProjectTarget(null);
-        setAssistantResponse("OKR 구조를 만들었습니다. 다음 목표도 이어서 이야기할 수 있습니다.");
-      }
+      setProjectTarget(null);
+      setAssistantResponse("OKR 구조를 저장했습니다. 실행 계획은 Project 탭에서 Initiative를 선택해 만들어 주세요.");
     }
   }
   function skipOptionalStep() {
@@ -4317,15 +4369,6 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
     setVisibleFields(new Set());
     setGuideQuestions([]);
     onFinish();
-  }
-  function startProjectConversation() {
-    if (!projectTarget) return;
-    setMode("project");
-    setPlan({ ...emptyPlan });
-    setVisibleFields(new Set());
-    setMessage("");
-    setAssistantResponse(`‘${projectTarget.initiativeTitle}’ 아래 첫 Project를 같이 정리해볼게요. 만들려는 결과와 범위를 편하게 말해 주세요.`);
-    setGuideQuestions(["이 Project가 끝났을 때 무엇이 달라져야 하나요?", "첫 Task로 바로 시작할 일은 무엇인가요?"]);
   }
   return (
     <section className="home-okr-chat" aria-labelledby="home-okr-chat-title">
@@ -4354,7 +4397,6 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
             {hasDraft && canWrite && <button className="welcome-primary" onClick={() => void save()} disabled={saving || !canApplyDraft}>{saving ? "생성 중" : saveLabel}<ChevronRight size={14} /></button>}
           </div>
           {assistantFlow && okrTarget && (okrTarget.kind === "key_result" || okrTarget.kind === "initiative") && <button className="assistant-skip" onClick={skipOptionalStep}>지금은 건너뛰기</button>}
-          {mode === "okr" && projectTarget && <button className="project-nudge-button" onClick={startProjectConversation}><Briefcase size={14} />첫 Project를 만들어볼까요?<ChevronRight size={14} /></button>}
         </div>
         {mode !== "task" && hasOkrDraft(plan) && <OkrDraftTree
           plan={plan}
@@ -4369,10 +4411,10 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
           onMoveInitiative={moveInitiative}
         />}
         {visibleFields.size > 0 && <div className="okr-setup-fields home-draft-fields">
-          {visibleFields.has("project") && <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="결과와 범위가 분명한 첫 Project" /></label>}
+          {mode === "project" && visibleFields.has("project") && <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="결과와 범위가 분명한 첫 Project" /></label>}
           {mode === "project" && visibleFields.has("project") && <label><span>상위 Initiative</span><select value={projectTarget?.initiativeId ?? ""} onChange={(event) => setProjectTarget(projectTargets.find((entry) => entry.initiativeId === event.target.value) ?? null)}><option value="">저장 전에 선택</option>{projectTargets.map((entry) => <option value={entry.initiativeId} key={entry.initiativeId}>{entry.cycleName} · {entry.initiativeTitle}</option>)}</select></label>}
-          {(assistantFlow || mode === "project") && visibleFields.has("project") && members.length > 0 && <label><span>Project DRI</span><select value={projectDriMemberId} onChange={(event) => setProjectDriMemberId(event.target.value)}>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
-          {visibleFields.has("tasks") && <label className="wide"><span>{mode === "task" ? "Task 초안" : plan.taskParent === "routine" || !plan.project.trim() && plan.routineTitle.trim() ? "첫 Task · Routine 아래" : plan.project.trim() ? "첫 Task · Project 아래" : "첫 Task"}</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder="한 줄에 하나씩 입력" /></label>}
+          {mode === "project" && visibleFields.has("project") && members.length > 0 && <label><span>Project DRI</span><select value={projectDriMemberId} onChange={(event) => setProjectDriMemberId(event.target.value)}>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
+          {(mode === "task" || mode === "project" || mode === "routine") && visibleFields.has("tasks") && <label className="wide"><span>{mode === "task" ? "Task 초안" : plan.taskParent === "routine" || !plan.project.trim() && plan.routineTitle.trim() ? "첫 Task · Routine 아래" : plan.project.trim() ? "첫 Task · Project 아래" : "첫 Task"}</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder="한 줄에 하나씩 입력" /></label>}
           {mode === "task" && visibleFields.has("tasks") && taskContainers.length > 0 && <label><span>연결 대상 · 선택 사항</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">선택 안 함 — General에 저장</option>{taskContainers.some((entry) => entry.kind === "project") && <optgroup label="Project">{taskContainers.filter((entry) => entry.kind === "project").map((entry) => <option key={entry.id} value={`project:${entry.id}`}>{entry.title}</option>)}</optgroup>}{taskContainers.some((entry) => entry.kind === "routine") && <optgroup label="Routine">{taskContainers.filter((entry) => entry.kind === "routine").map((entry) => <option key={entry.id} value={`routine:${entry.id}`}>{entry.title}</option>)}</optgroup>}</select></label>}
           {mode === "task" && visibleFields.has("tasks") && members.length > 0 && <label><span>담당자</span><select value={taskAssigneeMemberId} onChange={(event) => setTaskAssigneeMemberId(event.target.value)}><option value="">미지정</option>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
           {mode === "task" && visibleFields.has("tasks") && taskContainers.length === 0 && <p className="task-container-empty task-container-general">연결할 Project·Routine이 없어 General(기본)에 저장됩니다.</p>}
@@ -4586,14 +4628,10 @@ function aiLimitMessage(error: OrganizeError) {
 function OkrFileManager({
   cycles,
   selectedCycle,
-  visibleCycleIds,
   itemCounts,
   deletingIds,
   slowDeletingId,
   onSelect,
-  onRename,
-  onDepartmentChange,
-  onToggleVisible,
   onSetDefault,
   onDelete,
   onCreate,
@@ -4601,14 +4639,10 @@ function OkrFileManager({
 }: {
   cycles: OkrCycle[];
   selectedCycle: OkrCycle | null;
-  visibleCycleIds: string[];
   itemCounts: Record<string, number>;
   deletingIds: Set<string>;
   slowDeletingId: string | null;
   onSelect: (id: string) => void;
-  onRename: (id: string, name: string) => void;
-  onDepartmentChange: (id: string, department: string) => void;
-  onToggleVisible: (id: string) => void;
   onSetDefault: (id: string) => void;
   onDelete: (id: string) => void;
   onCreate: () => void;
@@ -4629,16 +4663,12 @@ function OkrFileManager({
             key={`${cycle.id}-${cycle.name}-${cycle.department}`}
             cycle={cycle}
             selected={cycle.id === selectedCycle?.id}
-            visible={visibleCycleIds.includes(cycle.id)}
             latest={index === 0}
             itemCount={itemCounts[cycle.id] ?? 0}
             canDelete={cycles.length > 1}
             deleting={deletingIds.has(cycle.id)}
             slowDeleting={slowDeletingId === cycle.id}
             onSelect={onSelect}
-            onRename={onRename}
-            onDepartmentChange={onDepartmentChange}
-            onToggleVisible={onToggleVisible}
             onSetDefault={onSetDefault}
             onDelete={onDelete}
           />
@@ -4652,226 +4682,37 @@ function OkrFileManager({
 function OkrFileRow({
   cycle,
   selected,
-  visible,
   latest,
   itemCount,
   canDelete,
   deleting,
   slowDeleting,
   onSelect,
-  onRename,
-  onDepartmentChange,
-  onToggleVisible,
   onSetDefault,
   onDelete,
 }: {
   cycle: OkrCycle;
   selected: boolean;
-  visible: boolean;
   latest: boolean;
   itemCount: number;
   canDelete: boolean;
   deleting: boolean;
   slowDeleting: boolean;
   onSelect: (id: string) => void;
-  onRename: (id: string, name: string) => void;
-  onDepartmentChange: (id: string, department: string) => void;
-  onToggleVisible: (id: string) => void;
   onSetDefault: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  const [nameDraft, setNameDraft] = useState(cycle.name);
-  const [departmentDraft, setDepartmentDraft] = useState(cycle.department);
-
-  function commitName() {
-    const name = nameDraft.trim();
-    if (!name) {
-      setNameDraft(cycle.name);
-      return;
-    }
-    if (name !== cycle.name) onRename(cycle.id, name);
-  }
-
-  function commitDepartment() {
-    const department = departmentDraft.trim();
-    if (department !== cycle.department) onDepartmentChange(cycle.id, department);
-  }
-
   return (
     <article className={`okr-file-row ${selected ? "active" : ""}`}>
-      <button className="okr-file-open" type="button" onClick={() => onSelect(cycle.id)} aria-label={`${cycle.name} 열기`}>
-        <Archive size={15} />
-      </button>
-      <div className="okr-file-row-main">
-        <input
-          value={nameDraft}
-          onFocus={() => onSelect(cycle.id)}
-          onChange={(event) => setNameDraft(event.target.value)}
-          onBlur={commitName}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
-            if (event.key === "Escape") {
-              setNameDraft(cycle.name);
-              event.currentTarget.blur();
-            }
-          }}
-          aria-label="OKR 파일 이름"
-        />
-        <small>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {itemCount}개 항목{slowDeleting ? " · 삭제 중" : ""}</small>
-        <label className="okr-department-input">
-          <span>부서</span>
-          <input
-            value={departmentDraft}
-            onFocus={() => onSelect(cycle.id)}
-            onChange={(event) => setDepartmentDraft(event.target.value)}
-            onBlur={commitDepartment}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") event.currentTarget.blur();
-              if (event.key === "Escape") {
-                setDepartmentDraft(cycle.department);
-                event.currentTarget.blur();
-              }
-            }}
-            placeholder="부서 미지정"
-            aria-label="OKR 담당 부서"
-          />
-        </label>
-      </div>
+      <button className="okr-file-open" type="button" onClick={() => onSelect(cycle.id)} aria-label={`${cycle.name} 열기`}><Archive size={15} /><span><b>{cycle.name}</b><small>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {cycle.department || "부서 미지정"} · {itemCount}개 항목{slowDeleting ? " · 삭제 중" : ""}</small></span></button>
       <div className="okr-file-row-actions">
-        <button type="button" className={visible ? "is-on" : ""} onClick={() => onToggleVisible(cycle.id)}>{visible ? "보는 중" : "보기"}</button>
+        {selected && <em>열림</em>}
         {cycle.status === "active" ? <em>기본</em> : <button type="button" onClick={() => onSetDefault(cycle.id)}>기본</button>}
         {latest && <em>최신</em>}
         <button type="button" className={deleting ? "is-loading" : ""} onClick={() => onDelete(cycle.id)} disabled={!canDelete || deleting} aria-label={`${cycle.name} 삭제`} title={deleting ? "삭제 중" : canDelete ? "삭제" : "마지막 파일은 삭제할 수 없습니다"}>{deleting ? <LoaderCircle size={12} /> : <Trash2 size={12} />}</button>
       </div>
     </article>
   );
-}
-
-function OkrCurrentFile({ cycle, addItemKind, onRename, onDepartmentChange, onAddItem }: { cycle: OkrCycle; addItemKind: ItemKind; onRename: (id: string, name: string) => void; onDepartmentChange: (id: string, department: string) => void; onAddItem: () => void }) {
-  const [nameDraft, setNameDraft] = useState(cycle.name);
-  const [departmentDraft, setDepartmentDraft] = useState(cycle.department);
-
-  function commitName() {
-    const name = nameDraft.trim();
-    if (!name) {
-      setNameDraft(cycle.name);
-      return;
-    }
-    if (name !== cycle.name) onRename(cycle.id, name);
-  }
-
-  function commitDepartment() {
-    const department = departmentDraft.trim();
-    if (department !== cycle.department) onDepartmentChange(cycle.id, department);
-  }
-
-  return (
-    <header className="okr-document-header">
-      <span className="okr-file-icon"><Archive size={17} /></span>
-      <div>
-      <label className="okr-file-title">
-        <span>열린 OKR 파일</span>
-        <input
-          value={nameDraft}
-          onChange={(event) => setNameDraft(event.target.value)}
-          onBlur={commitName}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
-            if (event.key === "Escape") {
-              setNameDraft(cycle.name);
-              event.currentTarget.blur();
-            }
-          }}
-          aria-label="OKR 파일 이름"
-        />
-      </label>
-      <p>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {cycleStatusLabel(cycle.status)} · {cycle.department || "부서 미지정"}</p>
-      <label className="okr-document-department">
-        <span>부서</span>
-        <input
-          value={departmentDraft}
-          onChange={(event) => setDepartmentDraft(event.target.value)}
-          onBlur={commitDepartment}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
-            if (event.key === "Escape") {
-              setDepartmentDraft(cycle.department);
-              event.currentTarget.blur();
-            }
-          }}
-          placeholder="부서 미지정"
-          aria-label="OKR 담당 부서"
-        />
-      </label>
-      </div>
-      <button type="button" onClick={onAddItem}><Plus size={13} />{addItemKind === "objective" ? "Objective 추가" : "항목 추가"}</button>
-    </header>
-  );
-}
-
-function TreeView({ objective, items, depths, canEdit, onEditOkrItem, onComplete, onOpenProject, onOpenTask, onCreateObjective, onCreateWithChat }: { objective?: OkrptrItem; items: OkrptrItem[]; depths: Record<string, number>; canEdit: boolean; onEditOkrItem: (id: string) => void; onComplete: (id: string) => void; onOpenProject: (id: string) => void; onOpenTask: (id: string) => void; onCreateObjective: () => void; onCreateWithChat: () => void }) {
-  const [expandedInitiatives, setExpandedInitiatives] = useState<Set<string>>(() => new Set());
-  if (!objective) return <OkrEmptyState onCreateObjective={onCreateObjective} onCreateWithChat={onCreateWithChat} />;
-  const byId = new Map(items.map((entry) => [entry.id, entry]));
-
-  function initiativeAncestorId(entry: OkrptrItem) {
-    let current: OkrptrItem | undefined = entry;
-    for (let depth = 0; current && depth < 6; depth += 1) {
-      if (current.kind === "initiative") return current.id;
-      current = current.parentId ? byId.get(current.parentId) : undefined;
-    }
-    return null;
-  }
-
-  const executionItemsByInitiative = new Map<string, OkrptrItem[]>();
-  for (const entry of items) {
-    if (entry.kind !== "project" && entry.kind !== "task") continue;
-    const initiativeId = initiativeAncestorId(entry);
-    if (!initiativeId) continue;
-    executionItemsByInitiative.set(initiativeId, [...(executionItemsByInitiative.get(initiativeId) ?? []), entry]);
-  }
-  const topLevelItems = items.filter((entry) => {
-    if (entry.id === objective.id) return false;
-    return (entry.kind !== "project" && entry.kind !== "task") || !initiativeAncestorId(entry);
-  });
-
-  function toggleInitiative(id: string) {
-    setExpandedInitiatives((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function renderRow(entry: OkrptrItem, executionCount = 0, expanded = false) {
-    const canOpen = entry.kind === "project" || entry.kind === "task";
-    const canEditNode = canEdit && (entry.kind === "key_result" || entry.kind === "initiative");
-    const canExpandInitiative = entry.kind === "initiative" && executionCount > 0;
-    const parent = entry.parentId ? byId.get(entry.parentId) : undefined;
-    const open = () => entry.kind === "project" ? onOpenProject(entry.id) : entry.kind === "task" ? onOpenTask(entry.id) : undefined;
-    const tracksProgress = entry.kind === "key_result" || entry.kind === "project" || entry.kind === "task";
-    return <div className={`hierarchy-row hierarchy-kind-${entry.kind} ${canOpen ? "interactive" : ""} ${canExpandInitiative ? "initiative-disclosure-row" : ""}`} role={canOpen ? "button" : undefined} tabIndex={canOpen ? 0 : undefined} aria-label={canOpen ? `${entry.title} 상세 열기` : undefined} onClick={canOpen ? open : undefined} onKeyDown={canOpen ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } } : undefined} key={entry.id} style={{ "--depth": Math.min(depths[entry.id] ?? 1, 4) } as CSSProperties}>
-      {canExpandInitiative && <button type="button" className={`initiative-disclosure-hit ${canEditNode ? "" : "full"}`} aria-expanded={expanded} aria-controls={`initiative-execution-${entry.id}`} aria-label={`${entry.title} Project·Task ${executionCount}개 ${expanded ? "접기" : "펼치기"}`} onClick={() => toggleInitiative(entry.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggleInitiative(entry.id); } }} />}
-      <span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span>
-      <span className="hierarchy-copy"><small title={parent?.title}>{kindLabel(entry.kind)}{entry.kind === "initiative" && parent ? ` · 상위 KR: ${parent.title}` : ""}</small><b>{entry.title}</b></span>
-      <span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span>
-      {tracksProgress ? <em>{entry.progress}%</em> : canExpandInitiative ? <span className="initiative-execution-summary" aria-hidden="true"><small>{executionCount}</small>{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span> : <span aria-hidden="true" />}
-      {canEditNode ? <button className="row-action okr-node-edit" aria-label={`${entry.title} 수정`} title={`${kindLabel(entry.kind)} 수정`} onClick={(event) => { event.stopPropagation(); onEditOkrItem(entry.id); }}><Pencil size={12} /></button> : canOpen && !isCompletedStatus(entry.status) ? <button className="row-action" aria-label={`${entry.title} 완료 처리`} title="완료 처리" onClick={(event) => { event.stopPropagation(); onComplete(entry.id); }}><Check size={13} /></button> : canOpen ? <ChevronRight className="row-chevron" size={15} /> : <span aria-hidden="true" />}
-    </div>;
-  }
-
-  return <section className="outline-section"><div className="objective-row"><Target size={18} /><div><span>Objective</span><h2>{objective.title}</h2></div><span className={`status-tag status-${objective.status}`}>{statusLabel(objective.status)}</span>{canEdit ? <button className="icon-button okr-node-edit" onClick={() => onEditOkrItem(objective.id)} aria-label={`${objective.title} 수정`} title="Objective 수정"><Pencil size={13} /></button> : <span aria-hidden="true" />}</div><div className="hierarchy">{topLevelItems.flatMap((entry) => {
-    const executionItems = entry.kind === "initiative" ? executionItemsByInitiative.get(entry.id) ?? [] : [];
-    const expanded = entry.kind === "initiative" && expandedInitiatives.has(entry.id);
-    const row = renderRow(entry, executionItems.length, expanded);
-    if (!executionItems.length || !expanded) return [row];
-    return [row, <div className="initiative-execution-group" id={`initiative-execution-${entry.id}`} role="group" aria-label={`${entry.title}의 Project·Task`} key={`${entry.id}-execution`}>{executionItems.map((executionItem) => renderRow(executionItem))}</div>];
-  })}</div></section>;
-}
-
-function OkrEmptyState({ onCreateObjective, onCreateWithChat }: { onCreateObjective: () => void; onCreateWithChat: () => void }) {
-  return <div className="okr-empty-state"><span className="okr-empty-icon"><Target size={22} /></span><div><h2>첫 Objective를 만들어보세요</h2><p>직접 한 문장으로 시작하거나, 생각을 말하면서 초안을 만들 수 있습니다.</p></div><div className="okr-empty-actions"><button className="primary" onClick={onCreateObjective}><Plus size={14} />Objective 직접 만들기</button><button onClick={onCreateWithChat}><Bot size={14} />AI 대화로 같이 만들기</button></div></div>;
 }
 
 function DeleteSelectCheckbox({ item, selected, onToggle }: { item: Pick<OkrptrItem, "id" | "kind" | "title">; selected: boolean; onToggle: (id: string) => void }) {
@@ -4950,6 +4791,8 @@ function TrashView({ onNotice, canDeleteRecords, canRestore }: { onNotice: (mess
   const confirmAction = useAppConfirm();
   const [records, setRecords] = useState<TrashRecord[] | null>(() => trashMemoryCache?.records ?? null);
   const [trashedItems, setTrashedItems] = useState<TrashedItem[] | null>(() => trashMemoryCache?.items ?? null);
+  const [initiativeOptions, setInitiativeOptions] = useState<TrashInitiativeOption[]>(() => trashMemoryCache?.initiativeOptions ?? []);
+  const [restoreParents, setRestoreParents] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   useEffect(() => {
@@ -4958,24 +4801,25 @@ function TrashView({ onNotice, canDeleteRecords, canRestore }: { onNotice: (mess
     Promise.all([fetch("/api/item-trash"), fetch("/api/trash")])
       .then(async ([itemResponse, recordResponse]) => {
         if (!itemResponse.ok || !recordResponse.ok) throw new Error("trash-load-failed");
-        const itemData = await itemResponse.json() as { items: TrashedItem[] };
+        const itemData = await itemResponse.json() as { items: TrashedItem[]; initiativeOptions: TrashInitiativeOption[] };
         const recordData = await recordResponse.json() as { trash: TrashRecord[] };
-        return { items: itemData.items, records: recordData.trash };
+        return { items: itemData.items, records: recordData.trash, initiativeOptions: itemData.initiativeOptions ?? [] };
       })
       .then((data) => {
         if (!active) return;
-        trashMemoryCache = { records: data.records, items: data.items };
+        trashMemoryCache = { records: data.records, items: data.items, initiativeOptions: data.initiativeOptions };
         setLoadError(false);
         setTrashedItems(data.items);
         setRecords(data.records);
+        setInitiativeOptions(data.initiativeOptions);
       })
       .catch(() => { if (active && !cached) setLoadError(true); });
     return () => { active = false; };
   }, [loadAttempt]);
 
   useEffect(() => {
-    if (records !== null && trashedItems !== null) trashMemoryCache = { records, items: trashedItems };
-  }, [records, trashedItems]);
+    if (records !== null && trashedItems !== null) trashMemoryCache = { records, items: trashedItems, initiativeOptions };
+  }, [initiativeOptions, records, trashedItems]);
 
   async function permanentlyDeleteRecord(record: TrashRecord) {
     if (!await confirmAction({ title: "휴지통 기록 영구 삭제", message: `'${record.title}' 기록은 복구할 수 없게 됩니다.`, confirmationText: "영구 삭제", confirmLabel: "영구 삭제", danger: true })) return;
@@ -5003,10 +4847,15 @@ function TrashView({ onNotice, canDeleteRecords, canRestore }: { onNotice: (mess
   }
 
   async function restoreItem(entry: TrashedItem) {
+    const restoreParentId = restoreParents[entry.id];
+    if (entry.kind === "project" && entry.restoreParentRequired && !restoreParentId) {
+      onNotice("복구할 Initiative를 먼저 선택해 주세요.");
+      return;
+    }
     const response = await fetch("/api/item-trash", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ itemIds: [entry.id], action: "restore" }),
+      body: JSON.stringify({ itemIds: [entry.id], action: "restore", projectParentIds: restoreParentId ? { [entry.id]: restoreParentId } : {} }),
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({})) as { error?: string };
@@ -5050,8 +4899,9 @@ function TrashView({ onNotice, canDeleteRecords, canRestore }: { onNotice: (mess
               <h3>{entry.title}</h3>
               <p>{entry.kind === "project" ? `Project · 하위 Task ${entry.trashedTaskCount}개` : "독립 삭제한 Task"}</p>
               <small>{entry.archivedAt ? formatDateTime(entry.archivedAt) : "삭제됨"}</small>
+              {canRestore && entry.restoreParentRequired && <label className="trash-restore-parent"><span>복구할 Initiative</span><select value={restoreParents[entry.id] ?? ""} onChange={(event) => setRestoreParents((current) => ({ ...current, [entry.id]: event.target.value }))}><option value="">Initiative 선택</option>{initiativeOptions.map((initiative) => <option value={initiative.id} key={initiative.id}>{initiative.title}</option>)}</select></label>}
             </div>
-            {(canRestore || entry.canDelete) && <div className="trash-actions">{canRestore && <button onClick={() => void restoreItem(entry)}><RotateCcw size={13} />복구</button>}{entry.canDelete && <button className="danger" onClick={() => void permanentlyDeleteItem(entry)}><Trash2 size={13} />영구 삭제</button>}</div>}
+            {(canRestore || entry.canDelete) && <div className="trash-actions">{canRestore && <button disabled={entry.restoreParentRequired && !restoreParents[entry.id]} onClick={() => void restoreItem(entry)}><RotateCcw size={13} />복구</button>}{entry.canDelete && <button className="danger" onClick={() => void permanentlyDeleteItem(entry)}><Trash2 size={13} />영구 삭제</button>}</div>}
           </article>
         ))}
       </section>}
@@ -5430,7 +5280,7 @@ function PropertyPanel({ currentWorkspace, workspaceCount, themeMode, onThemeMod
   return <OverlayDialog title="내 설정" variant="drawer" onRequestClose={() => onClose()}>{(requestClose) => <aside className="property-panel"><header><div><h2>내 설정</h2><p>화면, 워크스페이스와 팀 설정</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section appearance-settings"><h3>테마</h3><div className="theme-picker" role="group" aria-label="색상 테마">{themes.map(({ mode, label }) => <button className={themeMode === mode ? "active" : ""} aria-pressed={themeMode === mode} onClick={() => onThemeModeChange(mode)} key={mode}><i className={`theme-swatch theme-swatch-${mode}`} aria-hidden="true" /><span>{label}</span></button>)}</div><p>선택한 테마는 이 브라우저에 저장됩니다.</p></section><section className="settings-section"><h3>워크스페이스</h3><div className="settings-workspace-card"><WorkspaceAvatar workspace={currentWorkspace} /><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : `${teamRoleLabel(currentWorkspace?.role ?? "member")} · 전체 ${workspaceCount}개`}</small></div></div><div className="settings-action-grid">{canChangeAvatar && <button onClick={onOpenWorkspaceAvatar}><ImageIcon size={13} />워크스페이스 이미지</button>}<button onClick={onOpenWorkspaceMenu}><Columns3 size={13} />워크스페이스 관리</button><button onClick={onOpenTeamMembers}><Users size={13} />멤버 관리</button><button onClick={onOpenGroups}><AtSign size={13} />그룹 관리</button></div></section><section className="settings-hint"><Settings2 size={15} /><div><b>Project 속성</b><p>Project 화면의 속성 관리 탭에서 추가하거나 삭제할 수 있습니다.</p></div></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section>{canCleanup && <section className="settings-danger-zone"><div><b>OKR 데이터 정리</b><p>워크스페이스와 그룹은 남기고 OKR 실행 데이터를 휴지통으로 보냅니다.</p></div><button onClick={onCleanup}><Trash2 size={13} />클린업 열기</button></section>}</aside>}</OverlayDialog>;
 }
 
-function TeamPanel({ initialTeam, initialTab, initialGroupHandle, onMembersChange, onClose, onNotice }: { initialTeam: TeamData | null; initialTab: "members" | "groups"; initialGroupHandle: string | null; onMembersChange: (members: TeamMember[]) => void; onClose: () => void; onNotice: (message: string) => void }) {
+function TeamPanel({ initialTeam, initialTab, initialGroupHandle, onTeamChange, onClose, onNotice }: { initialTeam: TeamData | null; initialTab: "members" | "groups"; initialGroupHandle: string | null; onTeamChange: (team: TeamData | null) => void; onClose: () => void; onNotice: (message: string) => void }) {
   const [team, setTeam] = useState<TeamData | null>(initialTeam);
   const initialTeamRef = useRef(initialTeam);
   const [groups, setGroups] = useState<WorkspaceGroup[] | null>(null);
@@ -5500,8 +5350,17 @@ function TeamPanel({ initialTeam, initialTab, initialGroupHandle, onMembersChang
   }
 
   function applyMembers(members: TeamMember[]) {
-    setTeam((current) => current ? { ...current, members } : current);
-    onMembersChange(members);
+    if (!team) return;
+    const next = { ...team, members };
+    setTeam(next);
+    onTeamChange(next);
+  }
+
+  function applyInvitations(invitations: TeamInvitation[], emailConfigured = team?.invitationEmailConfigured ?? false) {
+    if (!team) return;
+    const next = { ...team, invitations, invitationEmailConfigured: emailConfigured };
+    setTeam(next);
+    onTeamChange(next);
   }
 
   function openGroup(id: string) {
@@ -5521,17 +5380,48 @@ function TeamPanel({ initialTeam, initialTab, initialGroupHandle, onMembersChang
     setSaving(true);
     setError("");
     const response = await fetch("/api/team", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, displayName: inviteDisplayName, role }) });
-    const data = await response.json() as { member?: TeamMember; error?: string };
+    const data = await response.json() as { invitation?: TeamInvitation; inviteUrl?: string; error?: string };
     setSaving(false);
-    if (!response.ok || !data.member) {
-      setError(data.error ?? "초대를 등록하지 못했습니다.");
+    if (!response.ok || !data.invitation) {
+      setError(data.error ?? "초대를 만들지 못했습니다.");
       return;
     }
-    applyMembers([...(team?.members ?? []), data.member]);
+    applyInvitations([data.invitation, ...(team?.invitations ?? [])], team?.invitationEmailConfigured || data.invitation.deliveryStatus === "sent");
     setEmail("");
     setInviteDisplayName("");
     setError("");
-    onNotice("팀 초대를 등록했습니다.");
+    onNotice(data.invitation.deliveryStatus === "sent" ? "초대메일을 보냈습니다." : "초대는 만들었지만 메일을 보내지 못했습니다. 링크를 복사해 전달해 주세요.");
+  }
+
+  async function invitationAction(invitation: TeamInvitation, action: "resend" | "link") {
+    setError("");
+    const response = await fetch("/api/team/invitations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: invitation.id, action }) });
+    const data = await response.json() as { invitation?: TeamInvitation; inviteUrl?: string; error?: string };
+    if (!response.ok || !data.invitation || !data.inviteUrl) {
+      setError(data.error ?? "초대 링크를 갱신하지 못했습니다.");
+      return;
+    }
+    applyInvitations(
+      (team?.invitations ?? []).map((entry) => entry.id === invitation.id ? data.invitation! : entry),
+      team?.invitationEmailConfigured || data.invitation.deliveryStatus === "sent",
+    );
+    if (action === "link") {
+      await navigator.clipboard.writeText(data.inviteUrl);
+      onNotice("30일 동안 유효한 새 초대 링크를 복사했습니다.");
+    } else {
+      onNotice(data.invitation.deliveryStatus === "sent" ? "초대메일을 다시 보냈습니다." : "메일 발송에 실패했습니다. 링크 복사를 이용해 주세요.");
+    }
+  }
+
+  async function revokeInvitation(invitation: TeamInvitation) {
+    const response = await fetch(`/api/team/invitations?id=${encodeURIComponent(invitation.id)}`, { method: "DELETE" });
+    if (!response.ok) {
+      const data = await response.json() as { error?: string };
+      setError(data.error ?? "초대를 취소하지 못했습니다.");
+      return;
+    }
+    applyInvitations((team?.invitations ?? []).filter((entry) => entry.id !== invitation.id));
+    onNotice("초대를 취소했습니다.");
   }
 
   async function changeRole(member: TeamMember, nextRole: Exclude<TeamRole, "owner">) {
@@ -5581,7 +5471,7 @@ function TeamPanel({ initialTeam, initialTab, initialGroupHandle, onMembersChang
     const response = await fetch(`/api/team?id=${encodeURIComponent(member.id)}`, { method: "DELETE" });
     if (!response.ok) return;
     applyMembers((team?.members ?? []).filter((entry) => entry.id !== member.id));
-    onNotice(member.status === "invited" ? "초대를 취소했습니다." : "팀에서 제거했습니다.");
+    onNotice("팀에서 제거했습니다.");
   }
 
   async function createWorkspaceGroup(event: FormEvent) {
@@ -5627,11 +5517,13 @@ function TeamPanel({ initialTeam, initialTab, initialGroupHandle, onMembersChang
         </div>
         {tab === "members" ? (
           <>
-            {team?.canManage && (
+            {team?.canManage && team.workspace.kind === "team" && (
               <form className="team-invite" onSubmit={invite}>
                 <label><span>실명과 이메일로 초대</span><div><input value={inviteDisplayName} onChange={(event) => setInviteDisplayName(event.target.value)} maxLength={80} placeholder="홍길동" aria-label="초대 실명" /><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.com" aria-label="초대 이메일" /><select value={role} onChange={(event) => setRole(event.target.value as Exclude<TeamRole, "owner">)} aria-label="초대 역할"><option value="admin">Admin</option><option value="member">Member</option><option value="viewer">Viewer</option></select><button disabled={!email.trim() || saving} aria-label="멤버 초대" title="멤버 초대"><UserPlus size={14} /></button></div></label>
+                {!team.invitationEmailConfigured && <p className="team-invite-warning">메일 발송 설정이 없어 초대 링크로만 전달할 수 있습니다.</p>}
               </form>
             )}
+            {team?.workspace.kind === "personal" && <p className="team-invite-warning personal">멤버 초대는 팀 워크스페이스에서 사용할 수 있습니다.</p>}
             {error && <p className="team-panel-error">{error}</p>}
             <div className="team-list">
               {team ? team.members.map((member) => {
@@ -5654,16 +5546,30 @@ function TeamPanel({ initialTeam, initialTab, initialGroupHandle, onMembersChang
                       ) : <b>{member.displayName}{member.isCurrent && <em>나</em>}</b>}
                       <small>{member.email || (member.role === "owner" ? "Workspace owner" : "이메일 없음")}</small>
                     </div>
-                    <span className={`member-status member-${member.status}`}>{member.status === "active" ? "활성" : "초대 대기"}</span>
+                    <span className="member-status member-active">활성</span>
                     {team.canManage && member.role !== "owner" ? <select value={member.role} onChange={(event) => void changeRole(member, event.target.value as Exclude<TeamRole, "owner">)} aria-label={`${member.displayName} 역할`}><option value="admin">Admin</option><option value="member">Member</option><option value="viewer">Viewer</option></select> : <span className="member-role">{teamRoleLabel(member.role)}</span>}
                     <div className="team-member-actions">
-                      {member.status === "invited" && <button className="icon-button" onClick={() => { void navigator.clipboard.writeText(window.location.origin); onNotice("워크스페이스 주소를 복사했습니다."); }} aria-label="초대 주소 복사" title="초대 주소 복사"><Copy size={13} /></button>}
-                      {team.canManage && member.role !== "owner" && !member.isCurrent && <button className="icon-button danger" onClick={() => void remove(member)} aria-label={member.status === "invited" ? "초대 취소" : "팀에서 제거"} title={member.status === "invited" ? "초대 취소" : "팀에서 제거"}><Trash2 size={13} /></button>}
+                      {team.canManage && member.role !== "owner" && !member.isCurrent && <button className="icon-button danger" onClick={() => void remove(member)} aria-label="팀에서 제거" title="팀에서 제거"><Trash2 size={13} /></button>}
                     </div>
                   </div>
                 );
               }) : !error ? <EmptyState icon={Users} title="팀 정보를 불러오는 중입니다" /> : <EmptyState icon={Users} title={error} />}
             </div>
+            {team && team.invitations.length > 0 && <section className="team-invitations">
+              <header><b>대기 중인 초대</b><span>{team.invitations.length}</span></header>
+              <div className="team-invitation-list">{team.invitations.map((invitation) => (
+                <div className="team-invitation" key={invitation.id}>
+                  <span className="team-avatar pending">{invitation.displayName.slice(0, 1).toLocaleUpperCase()}</span>
+                  <div><b>{invitation.displayName}</b><small>{invitation.email} · {teamRoleLabel(invitation.role)}</small></div>
+                  <span className={`invitation-delivery delivery-${invitation.deliveryStatus}`}>{invitation.status === "expired" ? "만료됨" : invitation.deliveryStatus === "sent" ? "메일 발송됨" : invitation.deliveryStatus === "failed" ? "발송 실패" : invitation.deliveryStatus === "unavailable" ? "링크 전달 필요" : "미발송"}</span>
+                  {team.canManage && <div className="team-member-actions">
+                    <button className="icon-button" onClick={() => void invitationAction(invitation, "link")} aria-label={`${invitation.displayName} 초대 링크 복사`} title="새 초대 링크 복사"><Copy size={13} /></button>
+                    <button className="icon-button" onClick={() => void invitationAction(invitation, "resend")} aria-label={`${invitation.displayName} 초대메일 재전송`} title="초대메일 재전송"><RotateCcw size={13} /></button>
+                    <button className="icon-button danger" onClick={() => void revokeInvitation(invitation)} aria-label={`${invitation.displayName} 초대 취소`} title="초대 취소"><Trash2 size={13} /></button>
+                  </div>}
+                </div>
+              ))}</div>
+            </section>}
           </>
         ) : selectedGroupId ? (
           groupDetail && team ? <GroupDetail detail={groupDetail} team={team} onBack={() => { setSelectedGroupId(null); clearGroupUrl(); }} onChange={setGroupDetail} onGroupChange={applyGroup} onDeleted={removeGroupFromState} onNotice={onNotice} /> : <EmptyState icon={Users} title="그룹 정보를 불러오는 중입니다" />
@@ -6270,37 +6176,10 @@ const statusLabels: Record<ItemStatus, string> = { backlog: "\uBC31\uB85C\uADF8"
 const priorityLabels: Record<Priority, string> = { low: "낮음", medium: "보통", high: "높음", urgent: "긴급" };
 const groupColors: GroupColor[] = ["gray", "blue", "green", "yellow", "orange", "red", "purple"];
 
-function buildDepths(items: OkrptrItem[]) { const byId = new Map(items.map((entry) => [entry.id, entry])); const result: Record<string, number> = {}; for (const entry of items) { let depth = 0; let current = entry; while (current.parentId && depth < 5) { depth += 1; const parent = byId.get(current.parentId); if (!parent) break; current = parent; } result[entry.id] = depth; } return result; }
-function filterTreeItemsByCycle(items: OkrptrItem[], cycleId: string | null) {
-  if (!cycleId) return items;
-  const sourceOrder = new Map(items.map((entry, index) => [entry.id, index]));
-  const byParent = new Map<string | null, OkrptrItem[]>();
-  for (const entry of items) byParent.set(entry.parentId, [...(byParent.get(entry.parentId) ?? []), entry]);
-  const sortSiblings = (left: OkrptrItem, right: OkrptrItem) => {
-    const leftOrder = Number.isFinite(left.sortOrder) ? left.sortOrder : sourceOrder.get(left.id) ?? 0;
-    const rightOrder = Number.isFinite(right.sortOrder) ? right.sortOrder : sourceOrder.get(right.id) ?? 0;
-    return leftOrder - rightOrder || left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
-  };
-  for (const children of byParent.values()) children.sort(sortSiblings);
-
-  const included = new Set<string>();
-  const ordered: OkrptrItem[] = [];
-  const visit = (entry: OkrptrItem) => {
-    if (included.has(entry.id)) return;
-    included.add(entry.id);
-    ordered.push(entry);
-    for (const child of byParent.get(entry.id) ?? []) visit(child);
-  };
-  const cycleNodes = items.filter((entry) => ["objective", "key_result", "initiative"].includes(entry.kind) && entry.cycleId === cycleId).sort(sortSiblings);
-  cycleNodes.filter((entry) => entry.kind === "objective").forEach(visit);
-  cycleNodes.forEach(visit);
-  return ordered;
-}
 function kindAbbr(kind: ItemKind) { return { objective: "O", key_result: "KR", initiative: "I", project: "P", task: "T" }[kind]; }
 function kindLabel(kind: ItemKind) { return { objective: "Objective", key_result: "Key Result", initiative: "Initiative", project: "Project", task: "Task" }[kind]; }
 function statusLabel(status: ItemStatus) { return statusLabels[status]; }
 function isCompletedStatus(status: ItemStatus) { return status === "done" || status === "development_done"; }
-function cycleStatusLabel(status: OkrCycle["status"]) { return { planned: "\uC608\uC815", active: "\uC9C4\uD589 \uC911", closed: "\uC885\uB8CC" }[status]; }
 function sourceLabel(source: string) { return { mcp: "MCP", codex: "Codex", slack: "Slack", discord: "Discord", telegram: "Telegram", web: "Web" }[source] ?? "Bot"; }
 function propertyTypeLabel(type: PropertyType) { return { text: "텍스트", number: "숫자", select: "선택", date: "날짜", checkbox: "체크박스", member: "멤버 1명", members: "멤버 여러 명" }[type]; }
 function propertySystemDefault(properties: PropertyDefinition[], systemKey: string, fallback: string) { const value = properties.find((property) => property.systemKey === systemKey && property.active)?.defaultValue; return typeof value === "string" ? value : fallback; }

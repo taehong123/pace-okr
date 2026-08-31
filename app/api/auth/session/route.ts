@@ -13,7 +13,7 @@ export async function GET(request: Request) {
       id: authorization.userId,
       email: authorization.email,
       displayName: authorization.displayName,
-      provider: googleSession ? "google" : hostname === "localhost" || hostname === "127.0.0.1" ? "local" : "openai",
+      provider: googleSession ? "google" : hostname === "localhost" || hostname === "127.0.0.1" ? "local" : "google",
     },
   }, { headers: { "Cache-Control": "no-store" } });
 }

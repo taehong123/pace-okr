@@ -187,10 +187,9 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /보내기/);
   assert.match(page, /Objective 1개.*KR/);
   assert.match(page, /useState<View>\(\(\) => navigationFromLocation\(\)\.view\)/);
-  assert.match(page, /Objective 직접 만들기/);
-  assert.match(page, /AI 대화로 같이 만들기/);
-  assert.match(page, /createItemCycleId/);
-  assert.match(page, /setCreateItemKind\(kind\)/);
+  assert.match(page, /OkrFileSurface/);
+  assert.match(page, /Objective·KR·Initiative를 한 번에 작성/);
+  assert.doesNotMatch(page, /AI 대화로 같이 만들기/);
   assert.match(page, /cycleId: targetCycleId/);
   assert.match(page, /context\?\.cycleId \?\? defaultCycleId/);
   assert.doesNotMatch(page, /첫 핵심 결과 정의|첫 실행 방향 정리/);
@@ -198,13 +197,10 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /OKR 트리 초안/);
   assert.match(page, /KR 미지정 Initiative/);
   assert.match(page, /onMoveInitiative/);
-  assert.match(page, /function OkrItemEditPanel/);
-  assert.match(page, /상위 KR:/);
-  assert.match(page, /for \(const child of byParent\.get\(entry\.id\) \?\? \[\]\) visit\(child\)/);
-  assert.match(page, /cycleNodes\.filter\(\(entry\) => entry\.kind === "objective"\)\.forEach\(visit\)/);
+  assert.doesNotMatch(page, /function OkrItemEditPanel|function TreeView/);
   assert.doesNotMatch(page, /organizeLocally/);
-  assert.match(page, /visibleFields\.has\("project"\)/);
-  assert.match(page, /첫 Project를 만들어볼까요\?/);
+  assert.match(page, /mode === "project" && visibleFields\.has\("project"\)/);
+  assert.doesNotMatch(page, /첫 Project를 만들어볼까요\?/);
   assert.match(page, /mode === "project"/);
   assert.match(page, /my_work: "내 업무"/);
   assert.match(layout, /okrptr\.theme/);
@@ -294,9 +290,9 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /Google 계정으로 계속/);
   assert.match(page, /Google로 이동 중/);
   assert.match(page, /AppLoadingScreen/);
-  assert.match(page, /GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX/);
-  assert.match(page, /accounts\.google\.com\/o\/oauth2\/v2\/auth/);
-  assert.match(page, /window\.location\.assign\(url\.toString\(\)\)/);
+  assert.doesNotMatch(page, /GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX/);
+  assert.doesNotMatch(page, /accounts\.google\.com\/o\/oauth2\/v2\/auth/);
+  assert.match(page, /\/api\/auth\/google\?returnTo=/);
   assert.match(page, /\/api\/bootstrap/);
   assert.match(page, /__OKRPTR_BOOTSTRAP_REQUEST__/);
   assert.match(page, /fetchBootstrapPayload/);
@@ -337,7 +333,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.doesNotMatch(bootstrapRoute, /scope ===|scope !==/);
   assert.match(itemRoute, /payload\.cycleId === undefined \? undefined : asNullableString/);
   assert.match(paceData, /workspaceReady/);
-  assert.match(paceData, /activatedWorkspaceIds/);
+  assert.doesNotMatch(paceData, /activatedWorkspaceIds/);
   assert.match(paceData, /createOkrPlan/);
   assert.match(paceData, /await d1\.batch\(statements\)/);
   assert.match(paceData, /Objective and at least one Key Result are required/);
@@ -362,20 +358,21 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(googleSession, /crypto\.subtle\.verify\("HMAC"/);
   assert.match(googleSession, /createGoogleSignInState/);
   assert.match(googleSession, /readGoogleSignInState/);
-  assert.match(googleSession, /readGoogleBrowserSignInState/);
+  assert.doesNotMatch(googleSession, /readGoogleBrowserSignInState/);
   assert.match(googleSignInRoute, /googleSignInAuthorizationUrl/);
   assert.match(googleSignInRoute, /createGoogleSignInState/);
   assert.doesNotMatch(googleSignInRoute, /createGoogleOAuthState/);
   assert.match(googleSignInRoute, /"Set-Cookie": signIn\.cookie/);
   assert.match(googleCallbackRoute, /createGoogleSessionCookie/);
   assert.match(googleCallbackRoute, /readGoogleSignInState/);
-  assert.match(googleCallbackRoute, /readGoogleBrowserSignInState/);
+  assert.doesNotMatch(googleCallbackRoute, /readGoogleBrowserSignInState/);
   assert.match(googleCallbackRoute, /await import\("@\/lib\/pace-data"\)/);
   assert.match(googleCallbackRoute, /"Set-Cookie": await createGoogleSessionCookie/);
   assert.match(googleCallbackRoute, /const headers = new Headers/);
   assert.match(googleCallbackRoute, /return new Response\(null, \{ status: 303, headers \}\)/);
   assert.match(logoutRoute, /"Set-Cookie": clearGoogleSessionCookie/);
   assert.match(paceData, /canonicalUserIdForGoogle/);
+  assert.doesNotMatch(paceData, /oai-authenticated-user/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("app/_sites-preview/SkeletonPreview.tsx", projectRoot)));
 });
@@ -425,6 +422,40 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   assert.match(generatedServiceWorker, /const CACHE_NAME = "okrptr-assets-[A-Za-z0-9_-]+"; \/\/ build:cache/);
 });
 
+test("ships atomic OKR file editing and safe Project recovery contracts", async () => {
+  const [surface, okrFiles, collectionRoute, fileRoute, splitRoute, trashRoute, paceData] = await Promise.all([
+    readFile(new URL("../app/okr-file-surface.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/okr-files.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/okr-files/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/okr-files/[id]/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/okr-files/[id]/split/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/item-trash/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(surface, /파일 전체 수정/);
+  assert.match(surface, /expectedRevision/);
+  assert.match(surface, /projectResolutions/);
+  assert.match(surface, /beforeunload/);
+  assert.match(surface, /KR은 한 개 이상 필요/);
+  assert.match(surface, /Project 탭/);
+  assert.doesNotMatch(surface, /onOpenProject|onOpenTask|완료 처리/);
+  assert.match(okrFiles, /calculateRevision/);
+  assert.match(okrFiles, /await d1\.batch\(statements\)/);
+  assert.match(okrFiles, /Project resolution is required/);
+  assert.match(okrFiles, /status = 'planned'.*status = 'active'/s);
+  assert.match(okrFiles, /completed\(status\) \? 100/);
+  assert.match(collectionRoute, /createOkrFile/);
+  assert.match(fileRoute, /getOkrFile/);
+  assert.match(fileRoute, /updateOkrFile/);
+  assert.match(fileRoute, /status: 409/);
+  assert.match(splitRoute, /splitOkrFile/);
+  assert.match(trashRoute, /projectParentIds/);
+  assert.match(trashRoute, /restoreParentRequired/);
+  assert.match(paceData, /Project restore requires a target Initiative/);
+  assert.match(paceData, /parent_id = \?, cycle_id = \?/);
+});
+
 test("serves hashed assets with immutable browser and edge caching", async () => {
   const staticHtml = await readFile(new URL("../dist/client/index.html", import.meta.url), "utf8");
   const assetPath = staticHtml.match(/\/_next\/static\/chunks\/index-[A-Za-z0-9_-]+\.js/)?.[0];
@@ -436,8 +467,9 @@ test("serves hashed assets with immutable browser and edge caching", async () =>
 });
 
 test("ships Project property, Task table, document, template, trash, and MCP surfaces", async () => {
-  const [page, editor, propertiesRoute, documentsRoute, templatesRoute, itemTrashRoute, mcpRoute, paceData] = await Promise.all([
+  const [page, okrFileSurface, editor, propertiesRoute, documentsRoute, templatesRoute, itemTrashRoute, mcpRoute, paceData] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/okr-file-surface.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/project-block-editor.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/properties/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/project-documents/route.ts", import.meta.url), "utf8"),
@@ -450,15 +482,12 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.match(page, /목록.*속성 관리.*템플릿 관리/s);
   assert.doesNotMatch(page, /setProjectTab\("archive"\)/);
   assert.doesNotMatch(page, /모든 Project·Task 선택|Project·Task 선택/);
-  const treeView = page.match(/function TreeView[\s\S]*?function OkrEmptyState/)?.[0] ?? "";
-  assert.doesNotMatch(treeView, /DeleteSelectCheckbox|onSelectItems|selectedItemIds/);
-  assert.match(treeView, /expandedInitiatives/);
-  assert.doesNotMatch(treeView, /okr-execution-disclosure|Project·Task.*?보기/);
-  assert.match(treeView, /initiative-disclosure-hit/);
-  assert.match(treeView, /aria-expanded=\{expanded\}/);
-  assert.match(treeView, /aria-controls=\{`initiative-execution-\$\{entry\.id\}`\}/);
-  assert.match(treeView, /event\.key === "Enter" \|\| event\.key === " "/);
-  assert.match(treeView, /executionItems\.length \|\| !expanded/);
+  assert.doesNotMatch(page, /function TreeView/);
+  assert.match(page, /<OkrFileSurface/);
+  assert.match(okrFileSurface, /okr-file-read-objective/);
+  assert.match(okrFileSurface, /okr-file-read-initiative/);
+  assert.match(okrFileSurface, /linkedProjects/);
+  assert.match(okrFileSurface, /Project 탭/);
   const myWorkView = page.match(/function MyWorkView[\s\S]*?function MyWorkSection/)?.[0] ?? "";
   assert.doesNotMatch(myWorkView, /DeleteSelectCheckbox|onSelectItems|selectedItemIds/);
   assert.match(page, /items=\{executionItems\}/);
@@ -623,9 +652,9 @@ test("connects API data independently to Key Results and Projects", async () => 
   assert.match(page, /id: "data", label: "데이터"/);
   assert.match(page, /rawView === "kr_data" \? "data"/);
   assert.match(page, /function ProjectDataSection/);
-  assert.match(page, /tracksProgress = item\.kind === "key_result"/);
+  assert.match(page, /tracksProgress = entry\.kind !== "objective" && entry\.kind !== "initiative"/);
   assert.doesNotMatch(page, /objective\.progress\}%/);
-  assert.match(page, /entry\.kind === "key_result" \|\| entry\.kind === "project" \|\| entry\.kind === "task"/);
+  assert.match(view, /item\.kind === "key_result" \|\| item\.kind === "project"/);
   assert.match(view, /API URL/);
   assert.match(view, /connectionMemoryCache\.get\(cacheKey\)/);
   assert.match(view, /\["project", "Project"\]/);
@@ -745,4 +774,38 @@ test("uses a restrained large-desktop density without scaling smaller viewports"
   assert.doesNotMatch(largeDesktop, /\bzoom\s*:|transform\s*:\s*scale/);
   assert.match(styles, /@media \(max-width: 700px\)/);
   assert.match(styles, /@media \(max-width: 980px\)/);
+});
+
+test("uses verified Google identities and explicit pending workspace invitations", async () => {
+  const [page, paceData, schema, teamRoute, invitationRoute, previewRoute, acceptRoute, googleSession] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/team/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/team/invitations/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/invitations/preview/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/invitations/accept/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/google-session.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.doesNotMatch(paceData, /oai-authenticated-user/);
+  assert.match(paceData, /canonicalUserIdForGoogle/);
+  assert.match(paceData, /authIdentities\.providerSubject/);
+  assert.match(schema, /export const users = sqliteTable/);
+  assert.match(schema, /export const authIdentities = sqliteTable/);
+  assert.match(schema, /export const workspaceInvitations = sqliteTable/);
+  assert.match(schema, /idx_workspaces_personal_owner/);
+  assert.match(teamRoute, /inviteTeamMember/);
+  assert.match(invitationRoute, /resendWorkspaceInvitation/);
+  assert.match(invitationRoute, /rotateWorkspaceInvitationLink/);
+  assert.match(invitationRoute, /revokeWorkspaceInvitation/);
+  assert.match(previewRoute, /previewWorkspaceInvitation/);
+  assert.match(acceptRoute, /acceptWorkspaceInvitation/);
+  assert.match(acceptRoute, /okrptr_workspace_id/);
+  assert.match(page, /function InvitationDialog/);
+  assert.match(page, /대기 중인 초대/);
+  assert.match(page, /재전송/);
+  assert.match(page, /초대 링크 복사/);
+  assert.match(googleSession, /emailVerified/);
+  assert.doesNotMatch(googleSession, /BrowserSignIn/);
 });

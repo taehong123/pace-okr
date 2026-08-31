@@ -30,11 +30,7 @@ export async function GET(request: Request) {
     await ensureWorkspace(authorization.ownerId);
     const workspaceReadyAt = Date.now();
     const hostname = url.hostname;
-    const provider = hostname === "localhost" || hostname === "127.0.0.1"
-      ? "local"
-      : request.headers.get("oai-authenticated-user-id")
-        ? "openai"
-        : "google";
+    const provider = hostname === "localhost" || hostname === "127.0.0.1" ? "local" : "google";
 
     const loadShell = async () => {
       const [workspaces, rules, cycles, team] = await Promise.all([

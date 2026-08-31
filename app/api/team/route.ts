@@ -36,8 +36,8 @@ export async function POST(request: Request) {
     const displayName = typeof payload.displayName === "string" ? payload.displayName : "";
     const role = asAssignableRole(payload.role);
     if (!role) return Response.json({ error: "supported role is required" }, { status: 400 });
-    const member = await inviteTeamMember(authorization.ownerId, authorization.userId, email, role, displayName);
-    return Response.json({ member }, { status: 201 });
+    const result = await inviteTeamMember(authorization.ownerId, authorization.userId, email, role, displayName);
+    return Response.json(result, { status: 201 });
   } catch (error) {
     return routeError(error);
   }
