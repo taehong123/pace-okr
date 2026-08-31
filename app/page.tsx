@@ -348,6 +348,23 @@ type OkrPlanApplyResult = {
 type ChatMessage = { id: string; role: "user" | "assistant"; content: string };
 type ConversationMode = "okr" | "project" | "routine" | "task" | "onboarding" | "coach";
 
+type AssistantConversationDraft = {
+  version: 1;
+  message: string;
+  plan: OnboardingPlan;
+  guideQuestions: string[];
+  conversationHistory: ChatMessage[];
+  visibleFields: StringPlanField[];
+  mode: ConversationMode;
+  okrTarget: OkrPlanTarget | null;
+  targetCandidates: OkrPlanTarget[];
+  projectTarget: ProjectChatTarget | null;
+  projectDriMemberId: string;
+  routineAssigneeMemberId: string;
+  taskContainer: string;
+  taskAssigneeMemberId: string;
+};
+
 type OrganizeError = {
   code?: string;
   error?: string;
@@ -1425,7 +1442,7 @@ function WorkspaceApp() {
     setSelectedOkrCycleId(cycle.id);
     setVisibleOkrCycleIds((current) => current.includes(cycle.id) ? current : [cycle.id, ...current]);
     setOkrChatContext({
-      key: `${currentWorkspace?.id ?? "workspace"}:create:${cycle.id}:${sourceKind}:${Date.now()}`,
+      key: `${currentWorkspace?.id ?? "workspace"}:create:${cycle.id}:${sourceKind}`,
       entry: "create",
       cycleId: cycle.id,
       cycleName: cycle.name,
@@ -1443,7 +1460,7 @@ function WorkspaceApp() {
   function openTaskCreationChat(initialMessage = "") {
     setCreateItemOpen(false);
     setOkrChatContext({
-      key: `${currentWorkspace?.id ?? "workspace"}:task:${Date.now()}`,
+      key: `${currentWorkspace?.id ?? "workspace"}:task`,
       entry: "task",
       cycleId: selectedOkrCycle?.id ?? "",
       cycleName: "Task",
@@ -1461,7 +1478,7 @@ function WorkspaceApp() {
   function openProjectCreationChat(initialMessage = "") {
     setCreateItemOpen(false);
     setOkrChatContext({
-      key: `${currentWorkspace?.id ?? "workspace"}:project:${Date.now()}`,
+      key: `${currentWorkspace?.id ?? "workspace"}:project`,
       entry: "project",
       cycleId: selectedOkrCycle?.id ?? "",
       cycleName: selectedOkrCycle?.name ?? "Project",
@@ -1479,7 +1496,7 @@ function WorkspaceApp() {
   function openRoutineCreationChat(initialMessage = "") {
     setRoutineCreateOpen(false);
     setOkrChatContext({
-      key: `${currentWorkspace?.id ?? "workspace"}:routine:${Date.now()}`,
+      key: `${currentWorkspace?.id ?? "workspace"}:routine`,
       entry: "routine",
       cycleId: "",
       cycleName: "Routine",
@@ -4055,6 +4072,26 @@ function HomeView({ onCreatePlan, onCreateProject, onCreateRoutine, onApplyOkrPl
   );
 }
 
+function isAssistantConversationDraft(value: unknown): value is AssistantConversationDraft {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const draft = value as Partial<AssistantConversationDraft>;
+  const plan = draft.plan as Partial<OnboardingPlan> | undefined;
+  return draft.version === 1
+    && typeof draft.message === "string"
+    && Boolean(plan)
+    && typeof plan?.objectiveTitle === "string"
+    && Array.isArray(plan?.keyResults)
+    && Array.isArray(plan?.targetInitiatives)
+    && Array.isArray(plan?.unassignedInitiatives)
+    && typeof plan?.project === "string"
+    && typeof plan?.tasks === "string"
+    && Array.isArray(draft.guideQuestions)
+    && Array.isArray(draft.conversationHistory)
+    && Array.isArray(draft.visibleFields)
+    && (["okr", "project", "routine", "task", "onboarding", "coach"] as unknown[]).includes(draft.mode)
+    && Array.isArray(draft.targetCandidates);
+}
+
 function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPlan, onCreateTasks, onFinish, onNavigateToOkr, context, workspaceContext, canWrite, members, taskContainers, projectTargets, defaultDriMemberId, defaultCycleId }: {
   onCreate: (plan: OnboardingPlan, cycleId: string | null) => Promise<PlanCreationResult | null>;
   onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget, driMemberId: string | null) => Promise<boolean>;
@@ -4102,6 +4139,10 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   const [taskContainer, setTaskContainer] = useState("");
   const [taskAssigneeMemberId, setTaskAssigneeMemberId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [draftHydrated, setDraftHydrated] = useState(false);
+  const [draftSaveState, setDraftSaveState] = useState<"loading" | "idle" | "saving" | "saved" | "error">("loading");
+  const draftSaveSequenceRef = useRef(0);
+  const draftKey = context?.key ?? `default:${defaultCycleId ?? "none"}`;
   const assistantFlow = mode === "onboarding" || mode === "coach";
   const draftCounts = countOkrDraft(plan);
   const taskDraftCount = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean).length;
@@ -4112,12 +4153,123 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
         : okrTarget.kind === "key_result" ? `Initiative ${plan.targetInitiatives.length}개 만들기` : "Project 탭에서 계속"
     : mode === "project" ? "Project 만들기" : `Objective 1개 · KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`;
   const hasDraft = hasPlanContent(plan);
+  const hasPersistableDraft = Boolean(message.trim() || hasDraft || conversationHistory.some((entry) => entry.role === "user"));
+  const assistantDraftPayload = useMemo<AssistantConversationDraft>(() => ({
+    version: 1,
+    message,
+    plan,
+    guideQuestions,
+    conversationHistory,
+    visibleFields: [...visibleFields],
+    mode,
+    okrTarget,
+    targetCandidates,
+    projectTarget,
+    projectDriMemberId,
+    routineAssigneeMemberId,
+    taskContainer,
+    taskAssigneeMemberId,
+  }), [conversationHistory, guideQuestions, message, mode, okrTarget, plan, projectDriMemberId, projectTarget, routineAssigneeMemberId, targetCandidates, taskAssigneeMemberId, taskContainer, visibleFields]);
   const canApplyDraft = mode === "task" ? Boolean(taskDraftCount) : assistantFlow
     ? !okrTarget ? treeReady
       : okrTarget.kind === "objective" ? Boolean(plan.keyResults.length && plan.keyResults.every((entry) => entry.title.trim() && entry.initiatives.every((initiative) => initiative.title.trim())) && !plan.unassignedInitiatives.length)
         : okrTarget.kind === "key_result" ? Boolean(plan.targetInitiatives.length && plan.targetInitiatives.every((entry) => entry.title.trim()))
           : false
     : mode === "project" ? Boolean(plan.project.trim() && projectTarget) : mode === "routine" ? Boolean(plan.routineTitle.trim()) : treeReady;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    const timeout = window.setTimeout(() => controller.abort(), 10_000);
+    void fetch(`/api/assistant-drafts?key=${encodeURIComponent(draftKey)}`, { signal: controller.signal, cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("draft load failed");
+        return response.json() as Promise<{ draft?: { payload?: AssistantConversationDraft } | null }>;
+      })
+      .then((data) => {
+        if (!active) return;
+        if (!isAssistantConversationDraft(data.draft?.payload)) {
+          setDraftSaveState("idle");
+          return;
+        }
+        const restored = data.draft.payload;
+        setMessage(restored.message);
+        setPlan(restored.plan);
+        setGuideQuestions(restored.guideQuestions);
+        setConversationHistory(restored.conversationHistory);
+        setVisibleFields(new Set(restored.visibleFields));
+        setMode(restored.mode);
+        setOkrTarget(restored.okrTarget);
+        setTargetCandidates(restored.targetCandidates);
+        setProjectTarget(restored.projectTarget && projectTargets.some((entry) => entry.initiativeId === restored.projectTarget?.initiativeId) ? restored.projectTarget : null);
+        setProjectDriMemberId(members.some((member) => member.id === restored.projectDriMemberId) ? restored.projectDriMemberId : defaultDriMemberId ?? members[0]?.id ?? "");
+        setRoutineAssigneeMemberId(members.some((member) => member.id === restored.routineAssigneeMemberId) ? restored.routineAssigneeMemberId : "");
+        setTaskContainer(taskContainers.some((entry) => `${entry.kind}:${entry.id}` === restored.taskContainer) ? restored.taskContainer : "");
+        setTaskAssigneeMemberId(members.some((member) => member.id === restored.taskAssigneeMemberId) ? restored.taskAssigneeMemberId : "");
+        setDraftSaveState("saved");
+      })
+      .catch(() => {
+        if (active && !controller.signal.aborted) setDraftSaveState("error");
+      })
+      .finally(() => {
+        window.clearTimeout(timeout);
+        if (active) setDraftHydrated(true);
+      });
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+    // The view is keyed by draft context, so restoring runs once for that context.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (!draftHydrated || !hasPersistableDraft) return;
+    const sequence = ++draftSaveSequenceRef.current;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      setDraftSaveState("saving");
+      void fetch(`/api/assistant-drafts?key=${encodeURIComponent(draftKey)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload: assistantDraftPayload }),
+        signal: controller.signal,
+      }).then((response) => {
+        if (!response.ok) throw new Error("draft save failed");
+        if (draftSaveSequenceRef.current === sequence) setDraftSaveState("saved");
+      }).catch(() => {
+        if (!controller.signal.aborted && draftSaveSequenceRef.current === sequence) setDraftSaveState("error");
+      });
+    }, 450);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [assistantDraftPayload, draftHydrated, draftKey, hasPersistableDraft]);
+
+  function clearAssistantDraft() {
+    draftSaveSequenceRef.current += 1;
+    setDraftSaveState("idle");
+    void fetch(`/api/assistant-drafts?key=${encodeURIComponent(draftKey)}`, { method: "DELETE", keepalive: true });
+  }
+
+  function resetConversationDraft() {
+    clearAssistantDraft();
+    setMessage("");
+    setPlan({ ...emptyPlan });
+    setGuideQuestions(assistantOpeningGuides(context));
+    setConversationHistory([{ id: "initial-reset", role: "assistant", content: assistantOpeningMessage(context, workspaceContext) }]);
+    setVisibleFields(new Set());
+    setMode(context?.entry === "onboarding" ? "onboarding" : context?.entry === "coach" ? "coach" : context?.entry === "project" ? "project" : context?.entry === "routine" ? "routine" : context?.entry === "task" ? "task" : "okr");
+    setOkrTarget(context?.target ?? null);
+    setTargetCandidates(context?.targetCandidates ?? []);
+    setProjectTarget(null);
+    setProjectDriMemberId(defaultDriMemberId ?? members[0]?.id ?? "");
+    setRoutineAssigneeMemberId("");
+    setTaskContainer("");
+    setTaskAssigneeMemberId("");
+  }
   function setAssistantResponse(value: string) {
     setConversationHistory((current) => [...current, { id: `assistant-${Date.now()}-${current.length}`, role: "assistant", content: value }]);
   }
@@ -4273,6 +4425,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
       const created = await onCreateTasks(plan.tasks, taskContainer, taskAssigneeMemberId || null);
       setSaving(false);
       if (created) {
+        clearAssistantDraft();
         setPlan({ ...emptyPlan });
         setVisibleFields(new Set());
         onFinish();
@@ -4293,6 +4446,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
       setTargetCandidates([]);
       const createdInitiatives = result.items.filter((entry) => result.initiativeIds.includes(entry.id));
       if (createdInitiatives.length) {
+        clearAssistantDraft();
         setAssistantResponse("OKR 구조를 저장했습니다. 실행 계획은 Project 탭에서 Initiative를 선택해 만들어 주세요.");
         onFinish();
         return;
@@ -4313,6 +4467,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
         setAssistantResponse("OKR을 만들었습니다. Initiative를 이어서 정리할 Key Result를 선택해 주세요.");
         return;
       }
+      clearAssistantDraft();
       onFinish();
       return;
     }
@@ -4326,6 +4481,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
       const created = await onCreateProject(plan, projectTarget, projectDriMemberId || null);
       setSaving(false);
       if (created) {
+        clearAssistantDraft();
         setPlan({ ...emptyPlan });
         setVisibleFields(new Set());
         setProjectTarget(null);
@@ -4341,6 +4497,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
       const created = await onCreateRoutine(plan, routineAssigneeMemberId || null);
       setSaving(false);
       if (created) {
+        clearAssistantDraft();
         setPlan({ ...emptyPlan });
         setVisibleFields(new Set());
       }
@@ -4354,6 +4511,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
     const created = await onCreate(plan, context?.cycleId ?? defaultCycleId);
     setSaving(false);
     if (created) {
+      clearAssistantDraft();
       setMessage("");
       setPlan({ ...emptyPlan });
       setGuideQuestions([]);
@@ -4364,6 +4522,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
     }
   }
   function skipOptionalStep() {
+    clearAssistantDraft();
     setAssistantResponse("좋아요. 지금은 여기까지 저장했습니다. Initiative나 Project가 떠오르면 언제든 OKR 도우미를 다시 불러 주세요.");
     setPlan({ ...emptyPlan });
     setVisibleFields(new Set());
@@ -4374,7 +4533,11 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
     <section className="home-okr-chat" aria-labelledby="home-okr-chat-title">
       <header>
         <div><Bot size={16} /><div><h2 id="home-okr-chat-title">{mode === "task" ? "Task 도우미" : mode === "project" ? "Project 도우미" : mode === "routine" ? "Routine 도우미" : "OKR 도우미"}</h2><p>{mode === "task" ? "할 일을 짧고 명확하게 다듬고, 미선택 시 General에 저장합니다." : mode === "project" ? "결과와 범위를 정리한 뒤 저장 전에 상위 Initiative를 선택합니다." : mode === "routine" ? "반복할 시점과 실행 방법을 독립된 Routine으로 정리합니다." : "현재 OKR과 실행 상황을 읽고, 필요한 다음 질문부터 이어갑니다."}</p></div></div>
-        {assistantFlow && okrTarget && <span className="assistant-stage">{kindLabel(okrTarget.kind)} 다음 단계</span>}
+        <div className="assistant-chat-header-actions">
+          <span className={`assistant-draft-status ${draftSaveState}`} aria-live="polite">{draftSaveState === "loading" ? <><LoaderCircle className="spin" size={12} />이전 초안 확인 중</> : draftSaveState === "saving" ? <><LoaderCircle className="spin" size={12} />임시저장 중</> : draftSaveState === "saved" ? <><CheckCircle2 size={12} />임시저장됨</> : draftSaveState === "error" ? <><AlertTriangle size={12} />임시저장 재시도 예정</> : null}</span>
+          {hasPersistableDraft && <button type="button" className="assistant-reset-draft" onClick={resetConversationDraft}>새로 시작</button>}
+          {assistantFlow && okrTarget && <span className="assistant-stage">{kindLabel(okrTarget.kind)} 다음 단계</span>}
+        </div>
       </header>
       <div className="home-chat-surface">
         <div className="chat-thread">

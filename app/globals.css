@@ -451,6 +451,12 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .home-okr-chat h2 { margin: 0; font-size: 14px; line-height: 1.3; }
 .home-okr-chat p { margin: 2px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .home-okr-chat > header svg { color: var(--blue); }
+.assistant-chat-header-actions { flex: 0 0 auto; justify-content: flex-end; }
+.assistant-draft-status { min-height: 28px; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.assistant-draft-status.saved { color: var(--green); }
+.assistant-draft-status.error { color: var(--red); }
+.assistant-reset-draft { min-height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }
+.assistant-reset-draft:hover { background: var(--surface-hover); color: var(--ink); }
 .assistant-stage { flex: 0 0 auto; padding: 4px 7px; border: 1px solid #c6dce7; border-radius: 4px; background: #edf6fa; color: #2c708e; font-size: 9px; font-weight: 700; }
 .home-chat-surface { display: grid; gap: 12px; }
 .chat-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
@@ -533,9 +539,10 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .okr-setup-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; align-content: start; }
 .okr-setup-fields label { min-width: 0; display: grid; gap: 4px; }
 .okr-setup-fields span { color: var(--muted); font-size: 10px; font-weight: 600; }
-.okr-setup-fields input, .okr-setup-fields textarea { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 4px; background: #fbfbfa; color: var(--ink); font-size: 11px; }
-.okr-setup-fields input { height: 30px; padding: 0 7px; }
+.okr-setup-fields input, .okr-setup-fields select, .okr-setup-fields textarea { width: 100%; min-width: 0; border: 1px solid var(--line-strong); border-radius: var(--radius-control); outline: 0; background: var(--raised); color: var(--ink); font: inherit; font-size: 11px; }
+.okr-setup-fields input, .okr-setup-fields select { height: 34px; padding: 0 8px; }
 .okr-setup-fields textarea { min-height: 72px; padding: 7px; resize: vertical; }
+.okr-setup-fields input:focus, .okr-setup-fields select:focus, .okr-setup-fields textarea:focus { border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 14%, transparent); }
 .okr-setup-fields .wide { grid-column: 1 / -1; }
 .setup-chat > footer { min-height: 52px; display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding: 0 14px; border-top: 1px solid var(--line); }
 
@@ -2077,6 +2084,8 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
 .okr-file-loading, .okr-file-load-error, .okr-file-repair, .okr-file-empty { min-height: 240px; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 28px; border: 1px solid var(--line); border-radius: var(--radius-container); background: var(--raised); color: var(--muted); text-align: left; }
 .okr-file-load-error, .okr-file-repair { color: var(--red); }
 .okr-file-load-error p, .okr-file-repair p, .okr-file-empty p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+.okr-file-load-error button { min-height: 34px; display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--raised); color: var(--ink); font-size: 11px; cursor: pointer; }
+.okr-file-load-error button:hover { background: var(--surface-hover); }
 .okr-file-repair h2, .okr-file-empty h2 { margin: 0; color: var(--ink); font-size: 14px; }
 .okr-file-open { width: 100%; min-width: 0; height: auto; min-height: 34px; display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
 .okr-file-open:hover { background: transparent; }
@@ -2212,6 +2221,9 @@ html[data-theme="dark"] .integration-state-message.error { background: color-mix
   .okr-empty-actions button, .create-chat-nudge > button { width: 100%; min-height: 44px; }
   .setup-chat { max-height: calc(100vh - 16px); }
   .setup-chat-body { grid-template-columns: 1fr; }
+  .home-okr-chat > header { align-items: flex-start; flex-direction: column; }
+  .assistant-chat-header-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .assistant-draft-status { margin-right: auto; }
   .assistant-stage { display: none; }
   .assistant-example { font-size: 9px; }
   .assistant-target-options button { grid-template-columns: 62px minmax(0, 1fr); }

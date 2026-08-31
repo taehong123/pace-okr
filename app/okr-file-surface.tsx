@@ -138,6 +138,7 @@ export function OkrFileSurface({
   const [loading, setLoading] = useState(!creating);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     if (creating) {
@@ -151,10 +152,21 @@ export function OkrFileSurface({
       setLoading(false);
       return;
     }
-    if (!cycleId) return;
+    if (!cycleId) {
+      setLoading(false);
+      setError("불러올 OKR 파일이 없습니다.");
+      return;
+    }
     const controller = new AbortController();
+    let active = true;
+    let timedOut = false;
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 12_000);
     setLoading(true);
     setError("");
+    setFile(null);
     void fetch(`/api/okr-files/${encodeURIComponent(cycleId)}`, { signal: controller.signal, cache: "no-store" })
       .then(async (response) => {
         const data = await response.json() as { file?: OkrFile; error?: string };
@@ -166,11 +178,20 @@ export function OkrFileSurface({
         setResolutions({});
       })
       .catch((loadError: unknown) => {
-        if (!(loadError instanceof DOMException && loadError.name === "AbortError")) setError(loadError instanceof Error ? loadError.message : "OKR 파일을 불러오지 못했습니다.");
+        if (!active) return;
+        if (timedOut) setError("응답이 오래 걸려 불러오기를 중단했습니다. 다시 시도해 주세요.");
+        else if (!(loadError instanceof DOMException && loadError.name === "AbortError")) setError(loadError instanceof Error ? loadError.message : "OKR 파일을 불러오지 못했습니다.");
       })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [creating, cycleId]);
+      .finally(() => {
+        window.clearTimeout(timeout);
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [creating, cycleId, loadAttempt]);
 
   const currentSnapshot = JSON.stringify({ draft, resolutions });
   const dirty = editing && currentSnapshot !== initialDraft;
@@ -312,7 +333,7 @@ export function OkrFileSurface({
   }
 
   if (loading) return <div className="okr-file-loading"><LoaderCircle className="spin" size={17} />OKR 파일을 불러오는 중</div>;
-  if (error && !file && !creating) return <div className="okr-file-load-error"><AlertTriangle size={18} /><div><b>파일을 열지 못했습니다.</b><p>{error}</p></div></div>;
+  if (error && !file && !creating) return <div className="okr-file-load-error"><AlertTriangle size={18} /><div><b>파일을 열지 못했습니다.</b><p>{error}</p><button type="button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}><RotateCcw size={13} />다시 시도</button></div></div>;
 
   if (editing) {
     return <section className="okr-file-editor" aria-label="OKR 파일 전체 수정">

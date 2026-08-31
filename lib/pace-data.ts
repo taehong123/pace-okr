@@ -211,6 +211,7 @@ async function ensureSchema() {
     schemaReady = (async () => {
       if (await schemaIsCurrent(d1)) {
         await migrateIdentityAndInvitations(d1);
+        await ensureAssistantDraftSchema(d1);
         return;
       }
       await d1.batch([
@@ -828,6 +829,7 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE daily_submissions ADD COLUMN skip_reason TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE daily_submissions ADD COLUMN skip_note TEXT NOT NULL DEFAULT ''");
       await migrateIdentityAndInvitations(d1);
+      await ensureAssistantDraftSchema(d1);
     })()
       .catch((error: unknown) => {
         schemaReady = null;
@@ -836,6 +838,22 @@ async function ensureSchema() {
   }
 
   await schemaReady;
+}
+
+async function ensureAssistantDraftSchema(d1: D1Database) {
+  await d1.batch([
+    d1.prepare(`CREATE TABLE IF NOT EXISTS assistant_drafts (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      draft_key TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_drafts_owner_user_key ON assistant_drafts(owner_id, user_id, draft_key)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS idx_assistant_drafts_owner_user_updated ON assistant_drafts(owner_id, user_id, updated_at)"),
+  ]);
 }
 
 async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {

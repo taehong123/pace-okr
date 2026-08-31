@@ -3,6 +3,24 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
+test("stores one assistant draft per workspace, user, and flow", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_user_id TEXT NOT NULL);
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
+  `);
+  const migration = await readFile(new URL("../drizzle/0031_assistant_drafts.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`INSERT INTO assistant_drafts (id, owner_id, user_id, draft_key, payload_json)
+    VALUES ('draft', 'workspace', 'user', 'workspace:project', '{"message":"first"}');`);
+  assert.throws(() => db.exec(`INSERT INTO assistant_drafts (id, owner_id, user_id, draft_key, payload_json)
+    VALUES ('duplicate', 'workspace', 'user', 'workspace:project', '{}');`), /UNIQUE constraint failed/);
+  db.exec("DELETE FROM workspaces WHERE id = 'workspace'");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM assistant_drafts").get().count, 0);
+  db.close();
+});
+
 test("migrates Action rows into checklists and Project-linked Tasks", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`

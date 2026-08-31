@@ -60,7 +60,7 @@ export function OverlayDialog({
   dirty = false,
   initialFocus,
   className = "",
-  history: useHistory = true,
+  history: useHistory = false,
   discardTitle = "변경사항을 버릴까요?",
   discardMessage = "저장하지 않은 변경사항이 있습니다. 닫으면 작성한 내용이 사라집니다.",
 }: OverlayDialogProps) {
@@ -87,8 +87,9 @@ export function OverlayDialog({
     }
     if (dismissPolicy === "critical" && reason === "backdrop") return;
     if (useHistory && reason !== "history" && window.history.state?.__okrptrOverlay === overlayId) {
-      window.history.back();
-      return;
+      const nextState = { ...window.history.state };
+      delete nextState.__okrptrOverlay;
+      window.history.replaceState(nextState, "", window.location.href);
     }
     finishClose(reason);
   }, [dirty, dismissPolicy, finishClose, overlayId, useHistory]);

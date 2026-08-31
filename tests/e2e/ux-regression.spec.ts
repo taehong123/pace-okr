@@ -108,6 +108,7 @@ async function json(route: Route, body: unknown, status = 200) {
 
 async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "platform_unavailable" | "workspace_disconnected" | "connected" | "reauthorization_required"; workspaceRole?: "owner" | "member" | "viewer" } = {}) {
   let krDataConnections: Array<Record<string, unknown>> = [];
+  const assistantDrafts = new Map<string, unknown>();
   const baseBootstrapResponse = options.withoutTaskContainers
     ? { ...bootstrap, items: bootstrap.items.filter((entry) => entry.kind !== "project" && entry.kind !== "task") }
     : bootstrap;
@@ -125,6 +126,16 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
     const request = route.request();
     const url = new URL(request.url());
     if (url.pathname === "/api/bootstrap") return json(route, bootstrapResponse);
+    if (url.pathname === "/api/assistant-drafts") {
+      const key = url.searchParams.get("key") ?? "";
+      if (request.method() === "GET") return json(route, { draft: assistantDrafts.has(key) ? { payload: assistantDrafts.get(key), updatedAt: now } : null });
+      if (request.method() === "PUT") {
+        assistantDrafts.set(key, (request.postDataJSON() as { payload: unknown }).payload);
+        return json(route, { updatedAt: now });
+      }
+      assistantDrafts.delete(key);
+      return json(route, { deleted: true });
+    }
     if (url.pathname === "/api/okr-files/cycle-1" || url.pathname === "/api/okr-files" && request.method() === "POST") {
       const objective = bootstrapResponse.items.find((entry) => entry.id === "objective-1")!;
       const keyResult = bootstrapResponse.items.find((entry) => entry.id === "kr-1")!;
@@ -223,17 +234,19 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
       }
     }
     if (url.pathname === "/api/okr-organize" && request.method() === "POST") {
+      const requestPayload = request.postDataJSON() as { mode?: string };
+      const projectMode = requestPayload.mode === "project";
       return json(route, {
         organized: {
-          assistantMessage: "말씀하신 Task를 정리했습니다.",
+          assistantMessage: projectMode ? "말씀하신 Project를 정리했습니다." : "말씀하신 Task를 정리했습니다.",
           questions: [],
           plan: {
             objectiveTitle: "",
             keyResults: [],
             targetInitiatives: [],
             unassignedInitiatives: [],
-            project: "",
-            tasks: "AI로 정리된 Task",
+            project: projectMode ? "셀러 쇼핑몰 전체 오더 플로우 안정화 개발" : "",
+            tasks: projectMode ? "" : "AI로 정리된 Task",
             taskParent: "",
             routineTitle: "",
             routineTrigger: "",
@@ -547,6 +560,50 @@ test("Project·Task·Routine 추가 진입과 AI 도우미를 같은 구조로 �
   await expect(routineDialog.getByText("Initiative", { exact: true })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(routineDialog).toBeHidden();
+});
+
+test("Project 생성창 닫기는 현재 화면을 유지하고 AI 대화 초안은 다시 열린다", async ({ page }) => {
+  await installApiMocks(page);
+  await page.goto("/?view=work");
+
+  await page.getByRole("button", { name: "직접 추가", exact: true }).click();
+  const createDialog = page.getByRole("dialog", { name: "새 항목" });
+  await createDialog.getByRole("button", { name: "새 항목 닫기" }).click();
+  await expect(createDialog).toBeHidden();
+  await expect(page).toHaveURL(/view=work/);
+
+  await page.getByRole("button", { name: "AI 대화로 추가", exact: true }).click();
+  const assistant = page.getByRole("region", { name: "Project 도우미" });
+  await assistant.getByLabel("메시지", { exact: true }).fill("셀러 쇼핑몰 전체 오더 플로우 안정화 개발");
+  await assistant.getByRole("button", { name: "메시지 보내기" }).click();
+  await expect(assistant.getByLabel("Project", { exact: true })).toHaveValue("셀러 쇼핑몰 전체 오더 플로우 안정화 개발");
+  await expect(assistant.getByText("임시저장됨")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  const fieldsFit = await assistant.locator(".home-draft-fields input, .home-draft-fields select, .home-draft-fields textarea").evaluateAll((fields) => fields.every((field) => {
+    const fieldBox = field.getBoundingClientRect();
+    const panelBox = field.closest(".home-draft-fields")?.getBoundingClientRect();
+    return Boolean(panelBox && fieldBox.left >= panelBox.left - 1 && fieldBox.right <= panelBox.right + 1);
+  }));
+  expect(fieldsFit).toBe(true);
+
+  await page.getByRole("button", { name: "Project", exact: true }).first().click();
+  await page.getByRole("button", { name: "AI 대화로 추가", exact: true }).click();
+  const restoredAssistant = page.getByRole("region", { name: "Project 도우미" });
+  await expect(restoredAssistant.getByLabel("Project", { exact: true })).toHaveValue("셀러 쇼핑몰 전체 오더 플로우 안정화 개발");
+  await expect(restoredAssistant.getByText("임시저장됨")).toBeVisible();
+});
+
+test("OKR 파일 요청 실패는 무한 로딩 대신 다시 시도를 제공한다", async ({ page }) => {
+  await installApiMocks(page);
+  let attempts = 0;
+  await page.route("**/api/okr-files/cycle-1", async (route) => {
+    attempts += 1;
+    await json(route, { error: "일시적인 연결 오류" }, 503);
+  });
+  await page.goto("/?view=okr");
+  await expect(page.getByText("파일을 열지 못했습니다.")).toBeVisible();
+  await page.getByRole("button", { name: "다시 시도" }).click();
+  await expect.poll(() => attempts).toBe(2);
 });
 
 test("모바일 Project 기본 보기는 카드이며 페이지가 가로로 넘치지 않는다", async ({ page, isMobile }) => {

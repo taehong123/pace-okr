@@ -162,6 +162,23 @@ export const integrationTokens = sqliteTable(
   ],
 );
 
+export const assistantDrafts = sqliteTable(
+  "assistant_drafts",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    draftKey: text("draft_key").notNull(),
+    payloadJson: text("payload_json").notNull().default("{}"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_assistant_drafts_owner_user_key").on(table.ownerId, table.userId, table.draftKey),
+    index("idx_assistant_drafts_owner_user_updated").on(table.ownerId, table.userId, table.updatedAt),
+  ],
+);
+
 export const mcpOAuthClients = sqliteTable(
   "mcp_oauth_clients",
   {
