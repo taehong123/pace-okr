@@ -629,7 +629,9 @@ test("limits Project and Task deletion to creators and accountable assignees", a
   assert.match(itemTrashRoute, /canDelete: deletePermissions/);
   assert.match(projectArchiveRoute, /authorization\.userId, projectId/);
   assert.match(page, /function canUserDeleteItem/);
-  assert.match(page, /삭제 가능 항목 선택/);
+  assert.match(page, /selectionMode.*선택 종료/s);
+  assert.match(page, /task-list-summary/);
+  assert.doesNotMatch(page, /project-card-open[^\n]*type-project/);
   assert.match(page, /entry\.canDelete && <button className="danger"/);
   assert.match(cleanupRoute, /authorization\.role !== "owner" && authorization\.role !== "admin"/);
 });

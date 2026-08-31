@@ -612,8 +612,28 @@ test("모바일 Project 기본 보기는 카드이며 페이지가 가로로 넘
   await page.goto("/?view=work");
   await expect(page.getByRole("tab", { name: "카드" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("list", { name: "Project 카드 목록" })).toBeVisible();
+  await expect(page.locator(".project-card .type-icon")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Project 필터" })).toContainText("필터");
+  await expect(page.getByRole("button", { name: "Project 정렬" })).toContainText("정렬");
+  await expect(page.getByRole("button", { name: "Project 속성 관리" })).toContainText("속성");
+  await expect(page.getByRole("checkbox", { name: /Project .* 삭제 선택/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "선택", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: /Project .* 삭제 선택/ })).toHaveCount(1);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test("모바일 Task 완료 체크는 작게 보이고 삭제 선택은 선택 모드에서만 나타난다", async ({ page, isMobile }) => {
+  test.skip(!isMobile);
+  await installApiMocks(page);
+  await page.goto("/?view=inbox");
+  const completion = page.getByRole("button", { name: "오버레이 동작 점검 완료" });
+  await expect(completion).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: /Task .* 삭제 선택/ })).toHaveCount(0);
+  const visualSize = await completion.evaluate((element) => getComputedStyle(element, "::before").width);
+  expect(visualSize).toBe("17px");
+  await page.getByRole("button", { name: "선택", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: /Task .* 삭제 선택/ })).toHaveCount(1);
 });
 
 test("OKR 파일 정보와 O·KR·Initiative를 저장 한 번으로 수정한다", async ({ page }) => {

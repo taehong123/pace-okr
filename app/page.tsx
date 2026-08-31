@@ -2142,6 +2142,7 @@ function WorkspaceApp() {
                 selectedItemIds={selectedDeleteItemIds}
                 onToggleSelect={toggleDeleteSelection}
                 onSelectItems={addDeleteItems}
+                onClearItems={removeDeleteItems}
               />}
               {projectTab === "properties" && <ProjectPropertyManager
                 properties={properties}
@@ -2602,7 +2603,7 @@ function CadenceSwitch({ value, onChange }: { value: Cadence; onChange: (value: 
   return <div className="cadence-switch">{(Object.keys(cadenceLabels) as Cadence[]).map((entry) => <button className={value === entry ? "selected" : ""} key={entry} onClick={() => onChange(entry)}>{cadenceLabels[entry]}</button>)}</div>;
 }
 
-function TaskDatabase({ items, allItems, properties, values, hiddenProperties, display, onDisplayChange, onPatch, onPropertyChange, onOpenProperties, onOpenTask, onOpenProject, canDeleteItem, selectedItemIds, onToggleSelect, onSelectItems }: {
+function TaskDatabase({ items, allItems, properties, values, hiddenProperties, display, onDisplayChange, onPatch, onPropertyChange, onOpenProperties, onOpenTask, onOpenProject, canDeleteItem, selectedItemIds, onToggleSelect, onSelectItems, onClearItems }: {
   items: OkrptrItem[];
   allItems: OkrptrItem[];
   properties: PropertyDefinition[];
@@ -2619,6 +2620,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
   selectedItemIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onSelectItems: (ids: string[]) => void;
+  onClearItems: (ids: string[]) => void;
 }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ItemStatus | "all">("all");
@@ -2628,6 +2630,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
   const [sort, setSort] = useState<"default" | "recent" | "due" | "priority" | "name">("default");
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const customProperties = properties.filter((property) => !property.systemKey && property.active);
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
@@ -2651,6 +2654,12 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
       : sort === "name" ? left.title.localeCompare(right.title, "ko")
       : items.indexOf(left) - items.indexOf(right));
   const deletableVisible = visible.filter(canDeleteItem);
+  const selectedVisibleCount = deletableVisible.filter((entry) => selectedItemIds.has(entry.id)).length;
+
+  function closeSelectionMode() {
+    onClearItems(deletableVisible.map((entry) => entry.id));
+    setSelectionMode(false);
+  }
 
   useEffect(() => {
     if (!filterOpen && !sortOpen) return;
@@ -2692,7 +2701,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
           <button role="tab" aria-selected={display === "board"} className={display === "board" ? "active" : ""} onClick={() => onDisplayChange("board")}><Columns3 size={13} />보드</button>
         </div>
         <div className="database-actions" ref={actionsRef}>
-          {deletableVisible.length > 0 && <button onClick={() => onSelectItems(deletableVisible.map((item) => item.id))}><ListChecks size={13} /><span>삭제 가능 항목 선택</span></button>}
+          {deletableVisible.length > 0 && <button className={selectionMode ? "active" : ""} aria-pressed={selectionMode} onClick={() => selectionMode ? closeSelectionMode() : setSelectionMode(true)}>{selectionMode ? <X size={13} /> : <ListChecks size={13} />}<span>{selectionMode ? "선택 종료" : "선택"}</span></button>}
           <label className="table-search"><Search size={13} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Project 검색" aria-label="Project 검색" /></label>
           <div className="toolbar-popover-wrap">
             <button aria-label="Project 필터" title="Project 필터" aria-haspopup="dialog" aria-expanded={filterOpen} onClick={() => { setFilterOpen((open) => !open); setSortOpen(false); }}><Filter size={13} /><span>필터</span>{activeFilterCount > 0 && <b>{activeFilterCount}</b>}</button>
@@ -2714,12 +2723,13 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
           <button onClick={onOpenProperties} aria-label="Project 속성 관리" title="Project 속성 관리"><Plus size={13} /><span>속성</span></button>
         </div>
       </div>
+      {selectionMode && <div className="project-selection-bar" role="region" aria-label="Project 선택 모드"><span>삭제할 Project를 선택하세요</span><b>{selectedVisibleCount}개 선택</b><button onClick={() => selectedVisibleCount === deletableVisible.length ? onClearItems(deletableVisible.map((entry) => entry.id)) : onSelectItems(deletableVisible.map((entry) => entry.id))}>{selectedVisibleCount === deletableVisible.length ? "전체 해제" : "현재 목록 전체 선택"}</button></div>}
       {display === "cards" ? <div className="project-card-list" role="list" aria-label="Project 카드 목록">{visible.map((entry) => {
         const previews = propertyPreview(entry);
-        return <article className="project-card" role="listitem" key={entry.id}>
-          {canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}
+        return <article className={`project-card ${selectionMode ? "selection-mode" : ""}`} role="listitem" key={entry.id}>
+          {selectionMode && canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}
           <button className="project-card-open" onClick={() => onOpenProject(entry.id)}>
-            <header><span className="type-icon type-project">P</span><b>{entry.title}</b><ChevronRight size={15} /></header>
+            <header><b>{entry.title}</b><ChevronRight size={15} /></header>
             <div className="project-card-meta"><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span><span className={`priority-${entry.priority}`}>{priorityLabels[entry.priority]}</span><span><CalendarDays size={12} />{dueLabel(entry.dueDate)}</span><span><Users size={12} />{assignmentLabel(entry, "project_dri")}</span></div>
             <div className="project-card-relation"><Link2 size={12} /><span>{entry.parentId ? byId.get(entry.parentId)?.title ?? "연결 없음" : "연결 없음"}</span></div>
             {previews.length > 0 && <div className="project-card-properties">{previews.map(({ property, value }) => <span key={property.id}><small>{property.name}</small><b>{Array.isArray(value) ? `${value.length}명` : typeof value === "boolean" ? value ? "예" : "아니오" : String(value)}</b></span>)}</div>}
@@ -2727,7 +2737,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
           </button>
         </article>;
       })}{!visible.length && <div className="table-empty">{activeFilterCount || query ? <><span>조건에 맞는 Project가 없습니다.</span><button onClick={() => { resetFilters(); setQuery(""); }}>검색·필터 초기화</button></> : "표시할 Project가 없습니다."}</div>}</div>
-      : display === "board" ? <BoardView items={visible} onOpenItem={(entry) => entry.kind === "project" ? onOpenProject(entry.id) : onOpenTask(entry.id)} canDeleteItem={canDeleteItem} selectedItemIds={selectedItemIds} onToggleSelect={onToggleSelect} /> : (
+      : display === "board" ? <BoardView items={visible} onOpenItem={(entry) => entry.kind === "project" ? onOpenProject(entry.id) : onOpenTask(entry.id)} canDeleteItem={canDeleteItem} selectedItemIds={selectedItemIds} onToggleSelect={onToggleSelect} selectionMode={selectionMode} /> : (
         <div className="database-scroll">
           <div className="task-table" role="table" aria-label="Project 표" style={{ "--custom-columns": customProperties.length } as CSSProperties}>
             <div className="task-table-row task-table-head" role="row">
@@ -2737,7 +2747,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
             </div>
             {visible.map((entry) => (
               <div className="task-table-row" role="row" key={entry.id}>
-                <div className="name-cell">{canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<span className={`type-icon type-${entry.kind}`}>{kindAbbr(entry.kind)}</span><button className={`task-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })}><Check size={12} /></button>{entry.kind === "project" ? <button className="name-open-button" onClick={() => onOpenProject(entry.id)}>{entry.title}</button> : <input defaultValue={entry.title} onBlur={(event) => event.target.value.trim() !== entry.title && void onPatch(entry.id, { title: event.target.value })} />}</div>
+                <div className="name-cell">{selectionMode && canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<button className={`task-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })}><Check size={12} /></button>{entry.kind === "project" ? <button className="name-open-button" onClick={() => onOpenProject(entry.id)}>{entry.title}</button> : <input defaultValue={entry.title} onBlur={(event) => event.target.value.trim() !== entry.title && void onPatch(entry.id, { title: event.target.value })} />}</div>
                 <select aria-label={`${entry.title} 상태`} className={`status-select status-${entry.status}`} value={entry.status} onChange={(event) => void onPatch(entry.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <select aria-label={`${entry.title} 우선순위`} className={`priority-${entry.priority}`} value={entry.priority} onChange={(event) => void onPatch(entry.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <input aria-label={`${entry.title} 기한`} className="date-cell" type="date" value={entry.dueDate ?? ""} onChange={(event) => void onPatch(entry.id, { dueDate: event.target.value || null })} />
@@ -4887,7 +4897,7 @@ function DeleteSelectCheckbox({ item, selected, onToggle }: { item: Pick<OkrptrI
   );
 }
 
-function BoardView({ items, onOpenItem, canDeleteItem, selectedItemIds, onToggleSelect }: { items: OkrptrItem[]; onOpenItem: (item: OkrptrItem) => void; canDeleteItem: (item: OkrptrItem) => boolean; selectedItemIds: Set<string>; onToggleSelect: (id: string) => void }) {
+function BoardView({ items, onOpenItem, canDeleteItem, selectedItemIds, onToggleSelect, selectionMode }: { items: OkrptrItem[]; onOpenItem: (item: OkrptrItem) => void; canDeleteItem: (item: OkrptrItem) => boolean; selectedItemIds: Set<string>; onToggleSelect: (id: string) => void; selectionMode: boolean }) {
   const columns: { status: ItemStatus; label: string }[] = [
     { status: "backlog", label: "백로그" },
     { status: "todo", label: "할 일" },
@@ -4897,10 +4907,11 @@ function BoardView({ items, onOpenItem, canDeleteItem, selectedItemIds, onToggle
     { status: "development_done", label: "개발 완료" },
     { status: "blocked", label: "막힘" },
   ];
-  return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <article className="board-selectable-item" key={entry.id}>{canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<button className="board-item" onClick={() => onOpenItem(entry)}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button></article>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
+  return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <article className={`board-selectable-item ${selectionMode ? "selection-mode" : ""}`} key={entry.id}>{selectionMode && canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<button className="board-item" onClick={() => onOpenItem(entry)}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button></article>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
 }
 
 function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDeleteItem, selectedItemIds, onToggleSelect, onSelectItems, onClearItems, onTrashSelected, trashing }: { items: OkrptrItem[]; allItems: OkrptrItem[]; routines: Routine[]; onOpenTask: (id: string) => void; onPatch: (id: string, patch: Partial<OkrptrItem>) => Promise<unknown>; canDeleteItem: (item: OkrptrItem) => boolean; selectedItemIds: Set<string>; onToggleSelect: (id: string) => void; onSelectItems: (ids: string[]) => void; onClearItems: (ids: string[]) => void; onTrashSelected: () => void; trashing: boolean }) {
+  const [selectionMode, setSelectionMode] = useState(false);
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
   const routineIds = new Set(routines.map((entry) => entry.id));
   const deletableItems = items.filter(canDeleteItem);
@@ -4913,7 +4924,8 @@ function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDelet
   if (!items.length) return <EmptyState icon={Inbox} title="Task가 없습니다" />;
   return (
     <section className="task-list" aria-label="Task 목록">
-      {deletableItems.length > 0 && <div className="task-selection-bar">
+      <div className="task-list-summary"><span>Task {items.length}개</span>{deletableItems.length > 0 && <button aria-pressed={selectionMode} onClick={() => { if (selectionMode) onClearItems(taskIds); setSelectionMode((current) => !current); }}>{selectionMode ? <X size={13} /> : <ListChecks size={13} />}{selectionMode ? "선택 종료" : "선택"}</button>}</div>
+      {selectionMode && deletableItems.length > 0 && <div className="task-selection-bar">
         <label><input type="checkbox" checked={allSelected} onChange={() => allSelected ? onClearItems(taskIds) : onSelectItems(taskIds)} /><span>{allSelected ? "전체 선택 해제" : "전체 선택"}</span></label>
         <b>{selectedTaskCount ? `${selectedTaskCount}개 선택` : `삭제 가능 ${deletableItems.length}개`}</b>
         {orphanedIds.length > 0 && <button className="orphan-task-select" onClick={() => onSelectItems(orphanedIds)}><AlertTriangle size={13} />연결 끊긴 Task {orphanedIds.length}개 선택</button>}
@@ -4925,8 +4937,8 @@ function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDelet
         const relation = routine?.systemKey === "general" ? "General 수집함" : routine ? `Routine · ${routine.title}` : project?.kind === "project" ? `Project · ${project.title}` : "연결 끊김";
         const assignee = assignmentLabel(entry, "task_assignee");
         return (
-          <article className={`task-list-row ${canDeleteItem(entry) ? "deletion-selectable" : ""} ${isCompletedStatus(entry.status) ? "completed" : ""}`} key={entry.id}>
-            {canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}
+          <article className={`task-list-row ${selectionMode && canDeleteItem(entry) ? "deletion-selectable" : ""} ${isCompletedStatus(entry.status) ? "completed" : ""}`} key={entry.id}>
+            {selectionMode && canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}
             <button className={`task-list-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })} aria-label={`${entry.title} ${isCompletedStatus(entry.status) ? "완료 취소" : "완료"}`}><Check size={13} /></button>
             <button className="task-list-open" onClick={() => onOpenTask(entry.id)}>
               <b>{entry.title}</b>
@@ -6339,7 +6351,6 @@ const statusLabels: Record<ItemStatus, string> = { backlog: "\uBC31\uB85C\uADF8"
 const priorityLabels: Record<Priority, string> = { low: "낮음", medium: "보통", high: "높음", urgent: "긴급" };
 const groupColors: GroupColor[] = ["gray", "blue", "green", "yellow", "orange", "red", "purple"];
 
-function kindAbbr(kind: ItemKind) { return { objective: "O", key_result: "KR", initiative: "I", project: "P", task: "T" }[kind]; }
 function kindLabel(kind: ItemKind) { return { objective: "Objective", key_result: "Key Result", initiative: "Initiative", project: "Project", task: "Task" }[kind]; }
 function statusLabel(status: ItemStatus) { return statusLabels[status]; }
 function isCompletedStatus(status: ItemStatus) { return status === "done" || status === "development_done"; }
