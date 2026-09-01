@@ -105,7 +105,7 @@ type GroupVisibility = "open" | "private";
 type GroupRole = "lead" | "member";
 type WorkspaceSettingsTab = "general" | "members" | "groups" | "projects" | "management" | "integrations" | "danger" | "scheduled";
 type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
-type ThemeMode = "beige" | "gray" | "dark";
+type ThemeMode = "white" | "beige" | "gray" | "dark";
 type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "local" };
 type AuthState = { status: "loading" | "authenticated" | "registration" | "unauthenticated"; user: AuthUser | null; reason: string | null };
 type RegistrationRequirement = { user: AuthUser; verificationConfigured: boolean; consentVersion: string };
@@ -114,7 +114,7 @@ type RegistrationRequiredPayload = { code: "registration_required"; registration
 const THEME_STORAGE_KEY = "okrptr.theme";
 
 function isThemeMode(value: string | null | undefined): value is ThemeMode {
-  return value === "beige" || value === "gray" || value === "dark";
+  return value === "white" || value === "beige" || value === "gray" || value === "dark";
 }
 
 type ItemAssignment = {
@@ -850,9 +850,9 @@ function WorkspaceApp() {
   const [freshWorkspaceDataReady, setFreshWorkspaceDataReady] = useState(false);
   const [workspaceDataAttempt, setWorkspaceDataAttempt] = useState(0);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
-    if (typeof document === "undefined") return "beige";
+    if (typeof document === "undefined") return "white";
     const preference = document.documentElement.dataset.themePreference;
-    return isThemeMode(preference) ? preference : "beige";
+    return isThemeMode(preference) ? preference : "white";
   });
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
   const assistantAutoHandledWorkspaceRef = useRef<string | null>(null);
@@ -5684,6 +5684,7 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
 
 function PropertyPanel({ user, displayName, themeMode, onThemeModeChange, onClose, onSignOut }: { user: AuthUser | null; displayName: string; themeMode: ThemeMode; onThemeModeChange: (mode: ThemeMode) => void; onClose: () => void; onSignOut: () => void }) {
   const themes: { mode: ThemeMode; label: string }[] = [
+    { mode: "white", label: "화이트" },
     { mode: "beige", label: "베이지" },
     { mode: "gray", label: "그레이" },
     { mode: "dark", label: "다크" },
