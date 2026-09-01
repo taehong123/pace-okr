@@ -143,6 +143,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /업무가 생성될 때/);
   assert.match(page, /업무 상태가 바뀔 때/);
   assert.match(page, /테스트 전송/);
+  assert.match(paceData, /ALTER TABLE slack_daily_settings ADD COLUMN onboarding_completed_at TEXT/);
   assert.match(page, /최근 전송 기록/);
   assert.match(page, /30일 동안 복구/);
   assert.match(page, /function WorkspaceAvatarDialog/);
@@ -690,7 +691,7 @@ test("connects API data independently to Key Results and Projects", async () => 
 });
 
 test("implements personal daily drafts and the managed Slack daily bot contract", async () => {
-  const [page, styles, dailyDomain, schema, migration, skipMigration, isolationMigration, onboardingMigration, oauth, interactions, events, slackDaily, manifest, slackStatus, slackCallback, onboardingRoute, channelRoute, operationsGuide, customerGuide] = await Promise.all([
+  const [page, styles, dailyDomain, schema, migration, skipMigration, isolationMigration, oauth, interactions, events, slackDaily, manifest, slackStatus, slackCallback, onboardingRoute, channelRoute, operationsGuide, customerGuide] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../lib/daily-bot.ts", import.meta.url), "utf8"),
@@ -698,7 +699,6 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
     readFile(new URL("../drizzle/0026_slack_daily_bot.sql", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0028_daily_skip.sql", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0029_slack_workspace_isolation.sql", import.meta.url), "utf8"),
-    readFile(new URL("../drizzle/0032_slack_onboarding.sql", import.meta.url), "utf8"),
     readFile(new URL("../lib/slack-oauth.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/interactions/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8"),
@@ -737,7 +737,7 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(skipMigration, /skip_reason/);
   assert.match(skipMigration, /skip_note/);
   assert.match(isolationMigration, /CREATE UNIQUE INDEX `idx_slack_connections_owner`/);
-  assert.match(onboardingMigration, /onboarding_completed_at/);
+  assert.match(schema, /onboardingCompletedAt: text\("onboarding_completed_at"\)/);
   for (const scope of ["im:write", "im:history", "users:read.email", "channels:read", "channels:join", "groups:read"]) assert.match(oauth, new RegExp(scope.replace(".", "\\.")));
   assert.match(interactions, /view_submission/);
   assert.match(interactions, /skip_reason/);

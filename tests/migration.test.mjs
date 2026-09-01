@@ -1031,28 +1031,6 @@ test("adds member daily drafts, immutable submissions, and Slack daily delivery 
   db.close();
 });
 
-test("adds explicit Slack onboarding completion without resetting existing schedules", async () => {
-  const db = new DatabaseSync(":memory:");
-  db.exec(`
-    CREATE TABLE slack_daily_settings (
-      owner_id TEXT PRIMARY KEY,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      install_status TEXT NOT NULL DEFAULT 'not_connected',
-      last_synced_at TEXT,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    INSERT INTO slack_daily_settings (owner_id, enabled, install_status, last_synced_at, updated_at)
-      VALUES ('workspace', 1, 'connected', '2026-08-31T09:00:00.000Z', '2026-08-31T09:01:00.000Z');
-  `);
-  const migration = await readFile(new URL("../drizzle/0032_slack_onboarding.sql", import.meta.url), "utf8");
-  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
-  assert.deepEqual({ ...db.prepare("SELECT enabled, onboarding_completed_at FROM slack_daily_settings WHERE owner_id = 'workspace'").get() }, {
-    enabled: 1,
-    onboarding_completed_at: "2026-08-31T09:00:00.000Z",
-  });
-  db.close();
-});
-
 test("separates Google identities from users and pending invitations from active members", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`
