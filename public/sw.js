@@ -19,14 +19,17 @@ self.addEventListener("activate", (event) => {
   ]));
 });
 
-async function staleWhileRevalidate(request, cacheKey = request) {
+async function networkFirst(request, cacheKey = request) {
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(cacheKey);
-  const network = fetch(request).then((response) => {
+  try {
+    const response = await fetch(request, { cache: "no-store" });
     if (response.ok) void cache.put(cacheKey, response.clone());
     return response;
-  }).catch(() => cached);
-  return cached ?? network;
+  } catch (error) {
+    const cached = await cache.match(cacheKey);
+    if (cached) return cached;
+    throw error;
+  }
 }
 
 async function cacheFirst(request) {
@@ -44,7 +47,7 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (event.request.mode === "navigate" && url.pathname === "/") {
-    event.respondWith(staleWhileRevalidate(event.request, "/"));
+    event.respondWith(networkFirst(event.request, "/"));
     return;
   }
 

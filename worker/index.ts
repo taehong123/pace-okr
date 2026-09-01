@@ -23,8 +23,8 @@ interface ExecutionContext {
 const STATIC_PAGE_PATHS = new Set(["/privacy", "/terms"]);
 const STATIC_PAGE_BROWSER_CACHE = "public, max-age=300, stale-while-revalidate=86400";
 const STATIC_PAGE_EDGE_CACHE = "public, max-age=31536000, stale-while-revalidate=86400";
-const APP_SHELL_BROWSER_CACHE = "public, max-age=0, stale-while-revalidate=86400";
-const APP_SHELL_EDGE_CACHE = "public, max-age=31536000, stale-while-revalidate=86400";
+const APP_SHELL_BROWSER_CACHE = "no-cache, must-revalidate";
+const APP_SHELL_EDGE_CACHE = "no-cache, must-revalidate";
 const HASHED_ASSET_CACHE = "public, max-age=31536000, immutable";
 const FAVICON_BROWSER_CACHE = "public, max-age=86400";
 const SERVICE_WORKER_CACHE = "no-cache";

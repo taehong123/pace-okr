@@ -48,8 +48,8 @@ test("server-renders the OKRPTR application loading shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-  assert.match(response.headers.get("cache-control") ?? "", /public, max-age=0, stale-while-revalidate=86400/);
-  assert.match(response.headers.get("cloudflare-cdn-cache-control") ?? "", /public, max-age=31536000, stale-while-revalidate=86400/);
+  assert.equal(response.headers.get("cache-control"), "no-cache, must-revalidate");
+  assert.equal(response.headers.get("cloudflare-cdn-cache-control"), "no-cache, must-revalidate");
 
   const html = await response.text();
   assert.match(html, /<title>OKRPTR - 목표를 오늘의 실행으로<\/title>/);
@@ -403,7 +403,7 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   assert.doesNotMatch(viteConfig, /run_worker_first:\s*\["\/"/);
   assert.match(assetHeaders, /max-age=31536000, immutable/);
   assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: public, max-age=31536000, immutable/);
-  assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: public, max-age=31536000, stale-while-revalidate=86400/);
+  assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: no-cache, must-revalidate/);
   assert.doesNotMatch(layout, /Geist_Mono|font-geist-mono/);
   assert.doesNotMatch(paceData, /LEFT JOIN workspace_members AS member ON 1 = 0/);
   assert.match(paceData, /deletion_requested_by_user_id[\s\S]*FROM workspaces[\s\S]*LIMIT 0/);
@@ -412,12 +412,14 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   assert.match(worker, /Cloudflare-CDN-Cache-Control/);
   assert.match(worker, /pathname\.startsWith\("\/_next\/static\/"\)/);
   assert.match(worker, /HASHED_ASSET_CACHE/);
-  assert.match(worker, /APP_SHELL_EDGE_CACHE = "public, max-age=31536000, stale-while-revalidate=86400"/);
+  assert.match(worker, /APP_SHELL_EDGE_CACHE = "no-cache, must-revalidate"/);
   assert.match(staticHtml, /serviceWorker\.register/);
   assert.match(publishScript, /build:cache/);
   assert.match(publishScript, /build:precache/);
   assert.match(serviceWorker, /PRECACHE_URLS/);
-  assert.match(serviceWorker, /staleWhileRevalidate/);
+  assert.match(serviceWorker, /networkFirst/);
+  assert.match(serviceWorker, /fetch\(request, \{ cache: "no-store" \}\)/);
+  assert.doesNotMatch(serviceWorker, /staleWhileRevalidate/);
   assert.match(serviceWorker, /event\.request\.mode === "navigate"/);
   assert.match(serviceWorker, /cacheFirst/);
   const indexAsset = staticHtml.match(/\/_next\/static\/chunks\/index-[A-Za-z0-9_-]+\.js/)?.[0];
