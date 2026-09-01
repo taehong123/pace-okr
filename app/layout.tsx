@@ -10,12 +10,17 @@ const geistSans = Geist({
 const bootstrapScript = `(() => {
   try {
     const savedTheme = window.localStorage.getItem("okrptr.theme");
-    const theme = savedTheme === "gray" || savedTheme === "dark" || savedTheme === "beige" ? savedTheme : "beige";
+    const migrationKey = "okrptr.theme-default-white-v1";
+    const needsDefaultMigration = window.localStorage.getItem(migrationKey) !== "1";
+    const validTheme = savedTheme === "white" || savedTheme === "gray" || savedTheme === "dark" || savedTheme === "beige";
+    const theme = needsDefaultMigration && savedTheme === "beige" ? "white" : validTheme ? savedTheme : "white";
+    window.localStorage.setItem(migrationKey, "1");
+    if (theme !== savedTheme) window.localStorage.setItem("okrptr.theme", theme);
     document.documentElement.dataset.themePreference = theme;
     document.documentElement.dataset.theme = theme;
   } catch {
-    document.documentElement.dataset.themePreference = "beige";
-    document.documentElement.dataset.theme = "beige";
+    document.documentElement.dataset.themePreference = "white";
+    document.documentElement.dataset.theme = "white";
   }
   const now = new Date();
   const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
