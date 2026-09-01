@@ -446,6 +446,10 @@ test("ships atomic OKR file editing and safe Project recovery contracts", async 
   assert.match(surface, /미완료 Project 없음/);
   assert.match(surface, /미완료 Task 없음/);
   assert.doesNotMatch(surface, /완료 처리/);
+  assert.match(surface, /buildBootstrapOkrFile/);
+  assert.match(surface, /fetchEditableOkrFile/);
+  assert.doesNotMatch(surface, /\?mode=read/);
+  assert.doesNotMatch(surface, /OKR 파일을 불러오는 중/);
   assert.match(okrFiles, /calculateRevision/);
   assert.match(okrFiles, /await d1\.batch\(statements\)/);
   assert.match(okrFiles, /Project resolution is required/);

@@ -613,7 +613,7 @@ test("Project 생성창 닫기는 현재 화면을 유지하고 AI 대화 초안
   await expect(restoredAssistant.getByText("임시저장됨")).toBeVisible();
 });
 
-test("OKR 파일 요청 실패는 무한 로딩 대신 다시 시도를 제공한다", async ({ page }) => {
+test("OKR 읽기 화면은 별도 파일 요청 없이 bootstrap 데이터로 즉시 열린다", async ({ page }) => {
   await installApiMocks(page);
   let attempts = 0;
   await page.route("**/api/okr-files/cycle-1**", async (route) => {
@@ -621,12 +621,12 @@ test("OKR 파일 요청 실패는 무한 로딩 대신 다시 시도를 제공�
     await json(route, { error: "일시적인 연결 오류" }, 503);
   });
   await page.goto("/?view=okr");
-  await expect(page.getByText("파일을 열지 못했습니다.")).toBeVisible();
-  await page.getByRole("button", { name: "다시 시도" }).click();
-  await expect.poll(() => attempts).toBe(2);
+  await expect(page.getByRole("heading", { name: "2026 하반기" })).toBeVisible();
+  await expect(page.getByText("OKR 파일을 불러오는 중")).toHaveCount(0);
+  expect(attempts).toBe(0);
 });
 
-test("OKR 파일은 30초 안에 다시 열면 캐시를 즉시 사용한다", async ({ page }) => {
+test("OKR 화면 재진입은 bootstrap 최신화 한 번만 공유하고 파일을 다시 요청하지 않는다", async ({ page }) => {
   await installApiMocks(page);
   let readRequests = 0;
   page.on("request", (request) => {
@@ -635,12 +635,12 @@ test("OKR 파일은 30초 안에 다시 열면 캐시를 즉시 사용한다", a
   });
   await page.goto("/?view=okr");
   await expect(page.getByRole("heading", { name: "2026 하반기" })).toBeVisible();
-  expect(readRequests).toBe(1);
+  expect(readRequests).toBe(0);
   await page.getByRole("button", { name: "Project", exact: true }).first().click();
   await page.getByRole("button", { name: "OKR", exact: true }).first().click();
   await expect(page.getByRole("heading", { name: "2026 하반기" })).toBeVisible();
   await expect(page.getByText("OKR 파일을 불러오는 중")).toHaveCount(0);
-  expect(readRequests).toBe(1);
+  expect(readRequests).toBe(0);
 });
 
 test("모바일 Project 기본 보기는 카드이며 페이지가 가로로 넘치지 않는다", async ({ page, isMobile }) => {
@@ -675,8 +675,14 @@ test("모바일 Task 완료 체크는 작게 보이고 삭제 선택은 선택 �
 
 test("OKR 파일 정보와 O·KR·Initiative를 저장 한 번으로 수정한다", async ({ page }) => {
   await installApiMocks(page);
+  let editRequests = 0;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/okr-files/cycle-1" && !url.search && request.method() === "GET") editRequests += 1;
+  });
   await page.goto("/?view=okr");
   await page.getByRole("button", { name: "파일 수정" }).click();
+  expect(editRequests).toBe(1);
   await page.getByLabel("파일명").fill("2026 통합 OKR");
   await page.getByPlaceholder("이번 주기에 달성할 하나의 목표").fill("고객이 첫날 핵심 가치를 경험한다");
   await page.getByPlaceholder("측정 가능한 핵심 결과").fill("첫날 활성화율을 60%로 높인다");

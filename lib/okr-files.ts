@@ -150,14 +150,17 @@ export async function getOkrFile(ownerId: string, userId: string, cycleId: strin
 }
 
 export async function getOkrFileRead(ownerId: string, cycleId: string): Promise<OkrFileResponse> {
-  const [cycle] = await getDb().select().from(okrCycles).where(and(eq(okrCycles.ownerId, ownerId), eq(okrCycles.id, cycleId))).limit(1);
+  const [cycleRows, okrItems] = await Promise.all([
+    getDb().select().from(okrCycles).where(and(eq(okrCycles.ownerId, ownerId), eq(okrCycles.id, cycleId))).limit(1),
+    getDb().select().from(items).where(and(
+      eq(items.ownerId, ownerId),
+      eq(items.cycleId, cycleId),
+      inArray(items.kind, ["objective", "key_result", "initiative"]),
+      isNull(items.archivedAt),
+    )).orderBy(asc(items.sortOrder), asc(items.createdAt)),
+  ]);
+  const [cycle] = cycleRows;
   if (!cycle) throw new Error("OKR file not found");
-  const okrItems = await getDb().select().from(items).where(and(
-    eq(items.ownerId, ownerId),
-    eq(items.cycleId, cycleId),
-    inArray(items.kind, ["objective", "key_result", "initiative"]),
-    isNull(items.archivedAt),
-  )).orderBy(asc(items.sortOrder), asc(items.createdAt));
   const revision = await calculateRevision(cycle, okrItems);
   return serializeOkrFileTree(cycle, okrItems, revision);
 }

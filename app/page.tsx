@@ -2193,9 +2193,9 @@ function WorkspaceApp() {
             <section className="okr-workbench">
               <section className="okr-document">
                 {okrCreating || selectedOkrCycle ? <OkrFileSurface
-                  key={`${okrCreating ? "new" : selectedOkrCycle?.id}-${workspaceDataAttempt}`}
+                  key={`${currentWorkspace?.id ?? ""}:${okrCreating ? "new" : selectedOkrCycle?.id}`}
                   workspaceId={currentWorkspace?.id ?? ""}
-                  cycleId={okrCreating ? null : selectedOkrCycle?.id ?? null}
+                  cycle={okrCreating ? null : selectedOkrCycle ?? null}
                   creating={okrCreating}
                   readOnly={!canWriteWorkspace}
                   executionItems={activeItems}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import {
   AlertTriangle,
   ArrowDown,
@@ -97,61 +97,34 @@ type ConfirmOptions = { title: string; message: string; confirmLabel: string; da
 export type OkrExecutionItem = {
   id: string;
   parentId: string | null;
+  cycleId: string | null;
   kind: "objective" | "key_result" | "initiative" | "project" | "task";
   title: string;
-  status: ItemStatus;
+  status: ItemStatus | "archived";
   progress: number;
   sortOrder: number;
   createdAt: string;
+  updatedAt: string;
   archivedAt: string | null;
 };
 
-type OkrCacheEntry = { file: OkrFile; etag: string | null; storedAt: number };
-type OkrLoadMode = "read" | "edit";
-
-const OKR_CACHE_FRESH_MS = 30_000;
-const okrFileCache = new Map<string, OkrCacheEntry>();
-const okrFileRequests = new Map<string, Promise<OkrFile>>();
+const editableOkrRequests = new Map<string, Promise<OkrFile>>();
 const okrExpandedRows = new Map<string, Set<string>>();
 
-function cacheKey(workspaceId: string, cycleId: string, mode: OkrLoadMode) {
-  return `${workspaceId}:${cycleId}:${mode}`;
-}
-
-function readCache(workspaceId: string, cycleId: string, mode: OkrLoadMode) {
-  return okrFileCache.get(cacheKey(workspaceId, cycleId, mode)) ?? null;
-}
-
-function cacheFile(workspaceId: string, file: OkrFile, mode: OkrLoadMode, etag: string | null = null) {
-  okrFileCache.set(cacheKey(workspaceId, file.cycle.id, mode), { file, etag, storedAt: Date.now() });
-  if (mode === "edit") okrFileCache.set(cacheKey(workspaceId, file.cycle.id, "read"), { file, etag: null, storedAt: Date.now() });
-}
-
-async function fetchOkrFile(workspaceId: string, cycleId: string, mode: OkrLoadMode, force = false) {
-  const key = cacheKey(workspaceId, cycleId, mode);
-  const cached = okrFileCache.get(key) ?? null;
-  if (!force && cached && Date.now() - cached.storedAt < OKR_CACHE_FRESH_MS) return cached.file;
-  const pending = okrFileRequests.get(key);
+async function fetchEditableOkrFile(workspaceId: string, cycleId: string) {
+  const key = `${workspaceId}:${cycleId}`;
+  const pending = editableOkrRequests.get(key);
   if (pending) return pending;
   const request = (async () => {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 12_000);
     try {
-      const headers = new Headers();
-      if (mode === "read" && cached?.etag) headers.set("If-None-Match", cached.etag);
-      const suffix = mode === "read" ? "?mode=read" : "";
-      const response = await fetch(`/api/okr-files/${encodeURIComponent(cycleId)}${suffix}`, {
+      const response = await fetch(`/api/okr-files/${encodeURIComponent(cycleId)}`, {
         signal: controller.signal,
-        cache: "no-cache",
-        headers,
+        cache: "no-store",
       });
-      if (response.status === 304 && cached) {
-        okrFileCache.set(key, { ...cached, storedAt: Date.now() });
-        return cached.file;
-      }
       const data = await response.json() as { file?: OkrFile; error?: string };
       if (!response.ok || !data.file) throw new Error(data.error ?? "OKR 파일을 불러오지 못했습니다.");
-      cacheFile(workspaceId, data.file, mode, response.headers.get("etag"));
       return data.file;
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") throw new Error("응답이 오래 걸려 불러오기를 중단했습니다. 다시 시도해 주세요.");
@@ -160,11 +133,55 @@ async function fetchOkrFile(workspaceId: string, cycleId: string, mode: OkrLoadM
       window.clearTimeout(timeout);
     }
   })();
-  okrFileRequests.set(key, request);
+  editableOkrRequests.set(key, request);
   void request.finally(() => {
-    if (okrFileRequests.get(key) === request) okrFileRequests.delete(key);
+    if (editableOkrRequests.get(key) === request) editableOkrRequests.delete(key);
   }).catch(() => undefined);
   return request;
+}
+
+function buildBootstrapOkrFile(cycle: OkrFileCycleSummary, items: OkrExecutionItem[]): OkrFile {
+  const rows = items
+    .filter((item): item is OkrExecutionItem & { status: ItemStatus } => item.cycleId === cycle.id && !item.archivedAt && item.status !== "archived" && ["objective", "key_result", "initiative"].includes(item.kind))
+    .sort(compareExecutionItems);
+  const objectives = rows.filter((item) => item.kind === "objective");
+  const objectiveRow = objectives[0] ?? null;
+  const keyResultRows = objectiveRow ? rows.filter((item) => item.kind === "key_result" && item.parentId === objectiveRow.id) : [];
+  const objective: Objective | null = objectiveRow ? {
+    id: objectiveRow.id,
+    clientId: objectiveRow.id,
+    title: objectiveRow.title,
+    status: objectiveRow.status,
+    updatedAt: objectiveRow.updatedAt,
+    keyResults: keyResultRows.map((keyResult) => ({
+      id: keyResult.id,
+      clientId: keyResult.id,
+      title: keyResult.title,
+      status: keyResult.status,
+      progress: keyResult.progress,
+      sortOrder: keyResult.sortOrder,
+      updatedAt: keyResult.updatedAt,
+      initiatives: rows
+        .filter((item) => item.kind === "initiative" && item.parentId === keyResult.id)
+        .map((initiative) => ({
+          id: initiative.id,
+          clientId: initiative.id,
+          title: initiative.title,
+          status: initiative.status,
+          sortOrder: initiative.sortOrder,
+          updatedAt: initiative.updatedAt,
+          linkedProjects: [],
+        })),
+    })),
+  } : null;
+  return {
+    cycle,
+    revision: `bootstrap:${cycle.updatedAt}:${rows.map((item) => `${item.id}:${item.updatedAt}`).join("|")}`,
+    objective,
+    objectiveCount: objectives.length,
+    needsSplit: objectives.length > 1,
+    initiativeOptions: [],
+  };
 }
 
 const statuses: Array<{ value: ItemStatus; label: string }> = [
@@ -186,7 +203,7 @@ const cycleStatuses: Array<{ value: CycleStatus; label: string }> = [
 
 export function OkrFileSurface({
   workspaceId,
-  cycleId,
+  cycle,
   creating = false,
   readOnly,
   executionItems,
@@ -201,7 +218,7 @@ export function OkrFileSurface({
   onConfirm,
 }: {
   workspaceId: string;
-  cycleId: string | null;
+  cycle: OkrFileCycleSummary | null;
   creating?: boolean;
   readOnly: boolean;
   executionItems: OkrExecutionItem[];
@@ -215,73 +232,19 @@ export function OkrFileSurface({
   onDirtyChange: (dirty: boolean) => void;
   onConfirm: (options: ConfirmOptions) => Promise<boolean>;
 }) {
+  const cycleId = cycle?.id ?? null;
   const fileCacheKey = cycleId ? `${workspaceId}:${cycleId}` : `${workspaceId}:new`;
-  const initialCachedFile = !creating && cycleId ? readCache(workspaceId, cycleId, "read")?.file ?? null : null;
-  const initialEditorDraft = initialCachedFile ? draftFromFile(initialCachedFile) : emptyDraft();
-  const [file, setFile] = useState<OkrFile | null>(initialCachedFile);
+  const readFile = useMemo(() => !creating && cycle ? buildBootstrapOkrFile(cycle, executionItems) : null, [creating, cycle, executionItems]);
+  const initialEditorDraft = readFile ? draftFromFile(readFile) : emptyDraft();
+  const [file, setFile] = useState<OkrFile | null>(null);
   const [draft, setDraft] = useState<Draft>(initialEditorDraft);
   const [initialDraft, setInitialDraft] = useState(() => JSON.stringify({ draft: initialEditorDraft, resolutions: {} }));
   const [editing, setEditing] = useState(creating);
   const [resolutions, setResolutions] = useState<Record<string, Resolution>>({});
-  const [loading, setLoading] = useState(!creating && !initialCachedFile);
-  const [refreshing, setRefreshing] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
-  const [refreshError, setRefreshError] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [loadAttempt, setLoadAttempt] = useState(0);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set(okrExpandedRows.get(fileCacheKey) ?? []));
-  const fileModeRef = useRef<OkrLoadMode>("read");
-
-  useEffect(() => {
-    if (creating) {
-      const next = emptyDraft();
-      // The component is keyed by creation context; reset its local editor snapshot on that boundary.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setFile(null);
-      setDraft(next);
-      setInitialDraft(JSON.stringify({ draft: next, resolutions: {} }));
-      setEditing(true);
-      setLoading(false);
-      return;
-    }
-    if (!cycleId) {
-      setLoading(false);
-      setError("불러올 OKR 파일이 없습니다.");
-      return;
-    }
-    let active = true;
-    const cached = readCache(workspaceId, cycleId, "read");
-    if (cached) setFile(cached.file);
-    setLoading(!cached);
-    setRefreshing(Boolean(cached));
-    setRefreshError("");
-    if (!cached) setError("");
-    void fetchOkrFile(workspaceId, cycleId, "read", loadAttempt > 0)
-      .then((nextFile) => {
-        if (!active || fileModeRef.current === "edit") return;
-        setFile(nextFile);
-        const next = draftFromFile(nextFile);
-        setDraft(next);
-        setInitialDraft(JSON.stringify({ draft: next, resolutions: {} }));
-        setResolutions({});
-      })
-      .catch((loadError: unknown) => {
-        if (!active) return;
-        const message = loadError instanceof Error ? loadError.message : "OKR 파일을 불러오지 못했습니다.";
-        if (cached) setRefreshError(message);
-        else setError(message);
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-          setRefreshing(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [creating, cycleId, loadAttempt, workspaceId]);
 
   const currentSnapshot = JSON.stringify({ draft, resolutions });
   const dirty = editing && currentSnapshot !== initialDraft;
@@ -312,7 +275,7 @@ export function OkrFileSurface({
     const completed = new Set<ItemStatus>(["done", "development_done"]);
     const tasksByProject = new Map<string, OkrExecutionItem[]>();
     const projectsByInitiative = new Map<string, OkrExecutionItem[]>();
-    const activeRows = executionItems.filter((item) => !item.archivedAt);
+    const activeRows = executionItems.filter((item): item is OkrExecutionItem & { status: ItemStatus } => !item.archivedAt && item.status !== "archived");
     for (const task of activeRows) {
       if (task.kind !== "task" || !task.parentId || completed.has(task.status)) continue;
       tasksByProject.set(task.parentId, [...(tasksByProject.get(task.parentId) ?? []), task]);
@@ -338,12 +301,11 @@ export function OkrFileSurface({
   }
 
   async function beginEdit() {
-    if (!file || !cycleId || editLoading) return;
+    if (!readFile || !cycleId || editLoading) return;
     setEditLoading(true);
     setError("");
-    fileModeRef.current = "edit";
     try {
-      const editableFile = await fetchOkrFile(workspaceId, cycleId, "edit");
+      const editableFile = await fetchEditableOkrFile(workspaceId, cycleId);
       setFile(editableFile);
       const next = draftFromFile(editableFile);
       setDraft(next);
@@ -351,7 +313,6 @@ export function OkrFileSurface({
       setInitialDraft(JSON.stringify({ draft: next, resolutions: {} }));
       setEditing(true);
     } catch (loadError) {
-      fileModeRef.current = "read";
       setError(loadError instanceof Error ? loadError.message : "편집 정보를 불러오지 못했습니다.");
     } finally {
       setEditLoading(false);
@@ -365,10 +326,10 @@ export function OkrFileSurface({
       onCancelCreate();
       return;
     }
-    if (file) setDraft(draftFromFile(file));
+    setFile(null);
+    if (readFile) setDraft(draftFromFile(readFile));
     setResolutions({});
     setEditing(false);
-    fileModeRef.current = "read";
     setError("");
   }
 
@@ -432,14 +393,12 @@ export function OkrFileSurface({
         if (response.status === 409) throw new Error("다른 사용자가 이 파일을 먼저 수정했습니다. 다시 불러온 뒤 변경해 주세요.");
         throw new Error(data.error ?? "OKR 파일을 저장하지 못했습니다.");
       }
-      setFile(data.file);
-      cacheFile(workspaceId, data.file, "edit", response.headers.get("etag"));
       const next = draftFromFile(data.file);
       setDraft(next);
+      setFile(null);
       setResolutions({});
       setInitialDraft(JSON.stringify({ draft: next, resolutions: {} }));
       setEditing(false);
-      fileModeRef.current = "read";
       onDirtyChange(false);
       onSaved(data.file);
       onNotice(creating ? "OKR 파일을 만들었습니다." : "OKR 파일 전체를 저장했습니다.");
@@ -451,23 +410,18 @@ export function OkrFileSurface({
   }
 
   async function splitFile() {
-    if (!file || !await onConfirm({ title: "Objective별 파일 분리", message: `이 파일의 Objective ${file.objectiveCount}개를 각각 별도 OKR 파일로 분리합니다. Project와 Task 연결은 그대로 유지됩니다.`, confirmLabel: "파일 분리" })) return;
+    if (!readFile || !await onConfirm({ title: "Objective별 파일 분리", message: `이 파일의 Objective ${readFile.objectiveCount}개를 각각 별도 OKR 파일로 분리합니다. Project와 Task 연결은 그대로 유지됩니다.`, confirmLabel: "파일 분리" })) return;
     setSaving(true);
-    const response = await fetch(`/api/okr-files/${encodeURIComponent(file.cycle.id)}/split`, { method: "POST" });
+    const response = await fetch(`/api/okr-files/${encodeURIComponent(readFile.cycle.id)}/split`, { method: "POST" });
     const data = await response.json() as { split?: boolean; cycles?: OkrFileCycleSummary[]; error?: string };
     setSaving(false);
     if (!response.ok || !data.cycles) {
       setError(data.error ?? "OKR 파일을 분리하지 못했습니다.");
       return;
     }
-    okrFileCache.delete(cacheKey(workspaceId, file.cycle.id, "read"));
-    okrFileCache.delete(cacheKey(workspaceId, file.cycle.id, "edit"));
     onSplit(data.cycles);
     onNotice("Objective별로 OKR 파일을 분리했습니다.");
   }
-
-  if (loading) return <div className="okr-file-loading"><LoaderCircle className="spin" size={17} />OKR 파일을 불러오는 중</div>;
-  if (error && !file && !creating) return <div className="okr-file-load-error"><AlertTriangle size={18} /><div><b>파일을 열지 못했습니다.</b><p>{error}</p><button type="button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}><RotateCcw size={13} />다시 시도</button></div></div>;
 
   if (editing) {
     return <section className="okr-file-editor" aria-label="OKR 파일 전체 수정">
@@ -524,15 +478,15 @@ export function OkrFileSurface({
     </section>;
   }
 
-  if (!file) return null;
-  if (file.needsSplit) return <section className="okr-file-repair"><AlertTriangle size={22} /><div><h2>Objective별 파일 분리가 필요합니다</h2><p>이 파일에는 Objective가 {file.objectiveCount}개 있습니다. 데이터는 자동으로 바꾸지 않았습니다.</p></div>{!readOnly && <button onClick={() => void splitFile()} disabled={saving}>{saving ? <LoaderCircle className="spin" size={14} /> : <RotateCcw size={14} />}Objective별 파일로 분리</button>}</section>;
+  if (!readFile) return null;
+  if (readFile.needsSplit) return <section className="okr-file-repair"><AlertTriangle size={22} /><div><h2>Objective별 파일 분리가 필요합니다</h2><p>이 파일에는 Objective가 {readFile.objectiveCount}개 있습니다. 데이터는 자동으로 바꾸지 않았습니다.</p></div>{!readOnly && <button onClick={() => void splitFile()} disabled={saving}>{saving ? <LoaderCircle className="spin" size={14} /> : <RotateCcw size={14} />}Objective별 파일로 분리</button>}</section>;
 
   return <article className="okr-file-read-surface">
-    <header className="okr-file-read-header"><div><small>OKR 파일 · v{file.cycle.version}</small><h2>{file.cycle.name}</h2><p>{file.cycle.startDate} – {file.cycle.endDate} · {cycleStatuses.find((status) => status.value === file.cycle.status)?.label} · {file.cycle.department || "부서 미지정"}</p></div><div>{!readOnly && <button className="primary" onClick={() => void beginEdit()} disabled={editLoading}>{editLoading ? <LoaderCircle className="spin" size={13} /> : <Pencil size={13} />}{editLoading ? "편집 준비 중" : "파일 수정"}</button>}<button onClick={onNavigateProjects}><Briefcase size={13} />Project 탭</button></div></header>
-    {(refreshing || refreshError || error) && <div className={`okr-file-refresh-state ${refreshError || error ? "error" : ""}`} role={refreshError || error ? "status" : undefined}>{refreshing ? <><LoaderCircle className="spin" size={12} />최신 내용을 확인하는 중</> : <><AlertTriangle size={12} />{error || "최신 내용을 확인하지 못했습니다. 현재 저장된 내용을 표시합니다."}<button type="button" onClick={() => { setError(""); setRefreshError(""); setLoadAttempt((attempt) => attempt + 1); }}><RotateCcw size={11} />다시 확인</button></>}</div>}
-    {file.objective ? <section className="okr-file-read-tree">
-      <div className="okr-file-read-objective"><span className="type-icon type-objective">O</span><div><small>Objective</small><h3>{file.objective.title}</h3></div></div>
-      {file.objective.keyResults.map((keyResult, keyResultIndex) => <OkrReadKeyResult
+    <header className="okr-file-read-header"><div><small>OKR 파일 · v{readFile.cycle.version}</small><h2>{readFile.cycle.name}</h2><p>{readFile.cycle.startDate} – {readFile.cycle.endDate} · {cycleStatuses.find((status) => status.value === readFile.cycle.status)?.label} · {readFile.cycle.department || "부서 미지정"}</p></div><div>{!readOnly && <button className="primary" onClick={() => void beginEdit()} disabled={editLoading}>{editLoading ? <LoaderCircle className="spin" size={13} /> : <Pencil size={13} />}{editLoading ? "편집 준비 중" : "파일 수정"}</button>}<button onClick={onNavigateProjects}><Briefcase size={13} />Project 탭</button></div></header>
+    {error && <div className="okr-file-refresh-state error" role="status"><AlertTriangle size={12} />{error}</div>}
+    {readFile.objective ? <section className="okr-file-read-tree">
+      <div className="okr-file-read-objective"><span className="type-icon type-objective">O</span><div><small>Objective</small><h3>{readFile.objective.title}</h3></div></div>
+      {readFile.objective.keyResults.map((keyResult, keyResultIndex) => <OkrReadKeyResult
         key={keyResult.id}
         keyResult={keyResult}
         keyResultIndex={keyResultIndex}

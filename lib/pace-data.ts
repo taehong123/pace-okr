@@ -210,8 +210,6 @@ async function ensureSchema() {
     const d1 = (env as RuntimeEnv).DB;
     schemaReady = (async () => {
       if (await schemaIsCurrent(d1)) {
-        await migrateIdentityAndInvitations(d1);
-        await ensureAssistantDraftSchema(d1);
         return;
       }
       await d1.batch([
@@ -886,6 +884,7 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       daily_submission.skip_reason,
       slack_daily_setting.reminder_time,
       slack_daily_setting.onboarding_completed_at
+      ,assistant_draft.updated_at
       ,app_migration.applied_at
     FROM workspaces AS workspace
     LEFT JOIN routines AS routine ON 1 = 0
@@ -899,6 +898,7 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
     LEFT JOIN users AS app_user ON 1 = 0
     LEFT JOIN auth_identities AS auth_identity ON 1 = 0
     LEFT JOIN workspace_invitations AS invitation ON 1 = 0
+    LEFT JOIN assistant_drafts AS assistant_draft ON 1 = 0
     LEFT JOIN app_migrations AS app_migration ON 1 = 0
     LIMIT 0`).first();
     return true;
@@ -1162,7 +1162,6 @@ async function workspaceInitializationIsCurrent(ownerId: string) {
 
 export async function listOkrCycles(ownerId: string) {
   await ensureSchema();
-  await ensureActiveOkrCycle(ownerId);
   const rows = await getDb()
     .select()
     .from(okrCycles)
@@ -2323,13 +2322,24 @@ async function canonicalUserIdForGoogle(subject: string, emailInput: string, dis
   if (!email) throw new Error("A verified Google email is required");
   const now = new Date().toISOString();
   const displayName = cleanDisplayName(displayNameInput) || email.split("@")[0];
-  const [identity] = await getDb().select().from(authIdentities).where(and(
-    eq(authIdentities.provider, "google"),
-    eq(authIdentities.providerSubject, subject),
-  )).limit(1);
-  if (identity) {
-    await getDb().update(authIdentities).set({ email, lastUsedAt: now }).where(eq(authIdentities.id, identity.id));
-    await getDb().update(users).set({ displayName, updatedAt: now }).where(eq(users.id, identity.userId));
+  const [linkedIdentity] = await getDb()
+    .select({ identity: authIdentities, user: users })
+    .from(authIdentities)
+    .innerJoin(users, eq(authIdentities.userId, users.id))
+    .where(and(
+      eq(authIdentities.provider, "google"),
+      eq(authIdentities.providerSubject, subject),
+    ))
+    .limit(1);
+  if (linkedIdentity) {
+    const { identity, user } = linkedIdentity;
+    const lastUsedAt = Date.parse(identity.lastUsedAt);
+    if (identity.email !== email || !Number.isFinite(lastUsedAt) || Date.now() - lastUsedAt >= 24 * 60 * 60 * 1_000) {
+      await getDb().update(authIdentities).set({ email, lastUsedAt: now }).where(eq(authIdentities.id, identity.id));
+    }
+    if (user.displayName !== displayName) {
+      await getDb().update(users).set({ displayName, updatedAt: now }).where(eq(users.id, identity.userId));
+    }
     return identity.userId;
   }
 

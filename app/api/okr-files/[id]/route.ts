@@ -26,11 +26,18 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       ].join(", "),
       Vary: "Cookie",
     };
-    if (readMode && request.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
+    if (readMode && etagMatches(request.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers });
     return Response.json({ file }, { headers });
   } catch (error) {
     return routeError(error);
   }
+}
+
+function etagMatches(requestValue: string | null, currentValue: string) {
+  if (!requestValue) return false;
+  const normalize = (value: string) => value.trim().replace(/^W\//i, "");
+  const current = normalize(currentValue);
+  return requestValue.split(",").some((candidate) => candidate.trim() === "*" || normalize(candidate) === current);
 }
 
 export async function PUT(request: Request, context: { params: Promise<{ id: string }> }) {
