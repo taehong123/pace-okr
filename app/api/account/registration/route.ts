@@ -1,31 +1,7 @@
-import { env } from "cloudflare:workers";
-import { getAccountRegistrationStatus, type AccountRegistrationRuntimeEnv } from "@/lib/account-registration";
-import { authorizeRequest } from "@/lib/pace-data";
+const retired = () => Response.json({
+  error: "가입은 인증된 Google 이메일로 즉시 완료됩니다. 마케팅 동의는 /api/account/marketing-consent에서 관리합니다.",
+  code: "account_registration_retired",
+}, { status: 410, headers: { "Cache-Control": "no-store" } });
 
-export async function GET(request: Request) {
-  const authorization = await authorizeRequest(request, { allowViewerWrite: true, allowIncompleteRegistration: true });
-  if (authorization instanceof Response) return authorization;
-  const registration = await getAccountRegistrationStatus(env as AccountRegistrationRuntimeEnv, authorization.userId);
-  return Response.json({ registration }, { headers: { "Cache-Control": "no-store" } });
-}
-
-export async function PATCH(request: Request) {
-  const authorization = await authorizeRequest(request);
-  if (authorization instanceof Response) return authorization;
-  const body = await request.json().catch(() => ({})) as { marketingDataConsent?: unknown; electronicMarketingConsent?: unknown };
-  if (typeof body.marketingDataConsent !== "boolean" || typeof body.electronicMarketingConsent !== "boolean") {
-    return Response.json({ error: "동의 값을 확인해 주세요." }, { status: 400 });
-  }
-  try {
-    const { updateMarketingConsents } = await import("@/lib/account-registration");
-    const registration = await updateMarketingConsents(
-      env as AccountRegistrationRuntimeEnv,
-      authorization.userId,
-      body.marketingDataConsent,
-      body.electronicMarketingConsent,
-    );
-    return Response.json({ registration }, { headers: { "Cache-Control": "no-store" } });
-  } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "동의 설정을 저장하지 못했습니다." }, { status: 400 });
-  }
-}
+export async function GET() { return retired(); }
+export async function PATCH() { return retired(); }

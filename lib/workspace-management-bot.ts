@@ -44,14 +44,16 @@ const completedStatuses = new Set(["done", "development_done"]);
 const inactiveStatuses = new Set([...completedStatuses, "archived"]);
 const defaultSignals = [...managementBotSignalIds];
 
-export async function getWorkspaceManagementBot(ownerId: string, options: { includeChannels?: boolean; date?: string } = {}) {
+export async function getWorkspaceManagementBot(ownerId: string, options: { includeChannels?: boolean; includeSnapshot?: boolean; date?: string; snapshotSignals?: ManagementBotSignal[] } = {}) {
   const settings = await readSettings(ownerId);
-  const snapshot = await collectWorkspaceManagementSnapshot(ownerId, options.date, settings.timezone, settings.signals);
+  const snapshot = options.includeSnapshot === false
+    ? undefined
+    : await collectWorkspaceManagementSnapshot(ownerId, options.date, settings.timezone, options.snapshotSignals ?? settings.signals);
   const connection = await getSlackConnection(ownerId);
   const channels = options.includeChannels && connection
     ? await listSlackChannels(ownerId, { includeJoinablePublic: true })
     : [];
-  return { settings, snapshot, slackConnected: Boolean(connection), channels };
+  return { settings, ...(snapshot ? { snapshot } : {}), slackConnected: Boolean(connection), channels };
 }
 
 export async function updateWorkspaceManagementBot(ownerId: string, input: Partial<{
@@ -61,7 +63,7 @@ export async function updateWorkspaceManagementBot(ownerId: string, input: Parti
   timezone: string;
   channelId: string;
   signals: ManagementBotSignal[];
-}>) {
+}>, options: { includeChannels?: boolean; includeSnapshot?: boolean } = { includeChannels: true, includeSnapshot: true }) {
   const current = await readSettings(ownerId);
   const enabled = input.enabled ?? current.enabled;
   const weekdays = input.weekdays === undefined ? current.weekdays : normalizeWeekdays(input.weekdays);
@@ -84,7 +86,7 @@ export async function updateWorkspaceManagementBot(ownerId: string, input: Parti
       report_time = excluded.report_time, timezone = excluded.timezone, channel_id = excluded.channel_id,
       channel_name = excluded.channel_name, signals = excluded.signals, last_error = '', updated_at = excluded.updated_at`)
     .bind(ownerId, enabled ? 1 : 0, JSON.stringify(weekdays), reportTime, timezone, channelId, channelName, JSON.stringify(signals), now).run();
-  return getWorkspaceManagementBot(ownerId, { includeChannels: true });
+  return getWorkspaceManagementBot(ownerId, options);
 }
 
 export async function testWorkspaceManagementBot(ownerId: string) {
@@ -202,7 +204,7 @@ async function sendReport(ownerId: string, settings: ManagementBotSettings, snap
   const body = selected.length
     ? selected.map((group) => `*${signalLabel(group.signal)} · ${group.count}개*\n${group.items.slice(0, 5).map((item) => `• ${escapeSlack(item.title)} _(${item.kind === "project" ? "Project" : "Task"})_`).join("\n")}${group.count > 5 ? `\n_외 ${group.count - 5}개_` : ""}`).join("\n\n")
     : "현재 선택한 관리 항목은 모두 정리되어 있습니다. ✅";
-  const appUrl = `${String((env as RuntimeEnv).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?settings=workspace&tab=management`;
+  const appUrl = `${String((env as RuntimeEnv).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?settings=workspace&tab=summary`;
   await slackApi(token, "chat.postMessage", {
     channel: settings.channelId,
     text: `${workspace?.name || "OKRPTR"} 워크스페이스 관리 리포트 · ${snapshot.date}`,

@@ -1,4 +1,5 @@
 import { acceptWorkspaceInvitation, authorizeRequest } from "@/lib/pace-data";
+import { BillingLimitError } from "@/lib/billing";
 
 export async function POST(request: Request) {
   const authorization = await authorizeRequest(request);
@@ -15,6 +16,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invitation could not be accepted";
+    if (error instanceof BillingLimitError) return Response.json({ error: message, code: error.code, ...error.details }, { status: 409 });
     const status = /matches|linked to another/i.test(message) ? 403 : /not found/i.test(message) ? 404 : 400;
     return Response.json({ error: message }, { status });
   }

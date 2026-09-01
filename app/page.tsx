@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 /* eslint-disable @next/next/no-img-element */
 
 import {
@@ -19,6 +19,7 @@ import {
   CircleHelp,
   Columns3,
   Copy,
+  CreditCard,
   Database,
   Eye,
   EyeOff,
@@ -63,9 +64,10 @@ import {
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { ConfirmationProvider, OverlayDialog, useAppConfirm } from "./overlay-dialog";
 import { OkrFileSurface, type OkrFileCycleSummary } from "./okr-file-surface";
+import BillingView, { ProjectQuotaBadge } from "./billing-view";
 
-type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "data" | "scrum" | "recommendations" | "reviews" | "trash" | "integrations";
-const urlViews = new Set<View>(["my_work", "inbox", "work", "routines", "okr", "data", "scrum", "recommendations", "reviews", "trash", "integrations"]);
+type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "data" | "scrum" | "recommendations" | "reviews" | "trash" | "integrations" | "billing";
+const urlViews = new Set<View>(["my_work", "inbox", "work", "routines", "okr", "data", "scrum", "recommendations", "reviews", "trash", "integrations", "billing"]);
 type NoticeTone = "success" | "error" | "info";
 type AppNotice = { id: number; message: string; tone: NoticeTone };
 
@@ -85,9 +87,9 @@ function navigationFromLocation() {
 function workspaceSettingsFromLocation() {
   if (typeof window === "undefined") return { open: false, tab: "general" as WorkspaceSettingsTab };
   const params = new URLSearchParams(window.location.search);
-  const rawTab = params.get("tab") as WorkspaceSettingsTab | null;
-  const normalizedTab = rawTab === "management" ? "integrations" : rawTab;
-  const supported = new Set<WorkspaceSettingsTab>(["general", "members", "groups", "projects", "integrations", "danger", "scheduled"]);
+  const rawTab = params.get("tab") as WorkspaceSettingsTab | "management" | null;
+  const normalizedTab = rawTab === "management" ? "summary" : rawTab;
+  const supported = new Set<WorkspaceSettingsTab>(["general", "members", "groups", "projects", "summary", "integrations", "danger", "scheduled"]);
   return {
     open: params.get("settings") === "workspace",
     tab: normalizedTab && supported.has(normalizedTab) ? normalizedTab : "general",
@@ -104,13 +106,11 @@ type TeamRole = "owner" | "admin" | "member" | "viewer";
 type GroupColor = "gray" | "blue" | "green" | "yellow" | "orange" | "red" | "purple";
 type GroupVisibility = "open" | "private";
 type GroupRole = "lead" | "member";
-type WorkspaceSettingsTab = "general" | "members" | "groups" | "projects" | "management" | "integrations" | "danger" | "scheduled";
+type WorkspaceSettingsTab = "general" | "members" | "groups" | "projects" | "summary" | "integrations" | "danger" | "scheduled";
 type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
 type ThemeMode = "beige" | "gray" | "dark";
 type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "local" };
-type AuthState = { status: "loading" | "authenticated" | "registration" | "unauthenticated"; user: AuthUser | null; reason: string | null };
-type RegistrationRequirement = { user: AuthUser; verificationConfigured: boolean; consentVersion: string };
-type RegistrationRequiredPayload = { code: "registration_required"; registration: RegistrationRequirement; error?: string };
+type AuthState = { status: "loading" | "authenticated" | "unauthenticated"; user: AuthUser | null; reason: string | null };
 
 const THEME_STORAGE_KEY = "okrptr.theme";
 
@@ -301,7 +301,7 @@ type OkrChatContext = {
 
 type OkrPlanTarget = {
   id: string;
-  kind: "objective" | "key_result" | "initiative";
+  kind: "objective" | "key_result" | "initiative" | "project";
   title: string;
 };
 
@@ -464,7 +464,7 @@ type BootstrapWorkspaceData = {
   routines: Routine[];
 };
 type BootstrapData = BootstrapShellData & BootstrapWorkspaceData;
-type BootstrapFetchResult = { ok: boolean; status: number; data: BootstrapData | RegistrationRequiredPayload | null };
+type BootstrapFetchResult = { ok: boolean; status: number; data: BootstrapData | null };
 
 declare global {
   interface Window {
@@ -472,6 +472,7 @@ declare global {
       path: string;
       request: Promise<BootstrapFetchResult>;
     };
+    PaypleCpayAuthCheck?: (options: Record<string, unknown>, environment?: string) => void;
   }
 }
 
@@ -480,7 +481,7 @@ async function fetchBootstrapPayload(path: string): Promise<BootstrapFetchResult
   return {
     ok: response.ok,
     status: response.status,
-    data: await response.json().catch(() => null) as BootstrapData | RegistrationRequiredPayload | null,
+    data: await response.json().catch(() => null) as BootstrapData | null,
   };
 }
 
@@ -559,9 +560,11 @@ type SlackConnectionStatus = {
 };
 type ManagementBotSignal = "missing_due_date" | "missing_owner" | "overdue" | "completed_yesterday" | "due_today";
 type ManagementBotItem = { id: string; kind: "project" | "task"; title: string; status: string; dueDate: string | null };
+type ManagementBotSettings = { enabled: boolean; weekdays: number[]; reportTime: string; timezone: string; channelId: string; channelName: string; signals: ManagementBotSignal[]; lastSentDate: string | null; lastSentAt: string | null; lastError: string; updatedAt: string | null };
+type ManagementBotSnapshot = { date: string; groups: Array<{ signal: ManagementBotSignal; count: number; items: ManagementBotItem[] }>; totalCount: number };
 type ManagementBotData = {
-  settings: { enabled: boolean; weekdays: number[]; reportTime: string; timezone: string; channelId: string; channelName: string; signals: ManagementBotSignal[]; lastSentDate: string | null; lastSentAt: string | null; lastError: string; updatedAt: string | null };
-  snapshot: { date: string; groups: Array<{ signal: ManagementBotSignal; count: number; items: ManagementBotItem[] }>; totalCount: number };
+  settings: ManagementBotSettings;
+  snapshot?: ManagementBotSnapshot;
   slackConnected: boolean;
   channels: Array<{ id: string; name: string; isPrivate: boolean; isMember: boolean }>;
 };
@@ -748,6 +751,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
 };
 
 const navItems: { id: View; label: string; icon: LucideIcon }[] = [
+  { id: "home", label: "AI 대화", icon: Bot },
   { id: "okr", label: "OKR", icon: Target },
   { id: "my_work", label: "내 업무", icon: Briefcase },
   { id: "work", label: "Project", icon: Table2 },
@@ -774,6 +778,7 @@ const viewTitles: Record<View, string> = {
   reviews: "리뷰",
   trash: "휴지통",
   integrations: "개인 앱 연동",
+  billing: "요금제 및 결제",
 };
 
 export default function Home() {
@@ -846,7 +851,6 @@ function WorkspaceApp() {
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [introLanguage, setIntroLanguage] = useState<IntroLanguage>("ko");
   const [authState, setAuthState] = useState<AuthState>({ status: "loading", user: null, reason: null });
-  const [registrationRequirement, setRegistrationRequirement] = useState<RegistrationRequirement | null>(null);
   const [workspaceDataState, setWorkspaceDataState] = useState<"loading" | "ready" | "error">("loading");
   const [freshWorkspaceDataReady, setFreshWorkspaceDataReady] = useState(false);
   const [workspaceDataAttempt, setWorkspaceDataAttempt] = useState(0);
@@ -925,14 +929,7 @@ function WorkspaceApp() {
 
     void request
       .then((result) => {
-        if (result.status === 428 && result.data && "code" in result.data && result.data.code === "registration_required") {
-          clearCachedBootstrap();
-          setRegistrationRequirement(result.data.registration);
-          setAuthState({ status: "registration", user: result.data.registration.user, reason: null });
-          setWorkspaceDataState("loading");
-          return;
-        }
-        if (!result.ok || !result.data || !("items" in result.data)) throw new Error(result.status === 401 || result.status === 403 ? "unauthenticated" : "workspace data unavailable");
+        if (!result.ok || !result.data) throw new Error(result.status === 401 || result.status === 403 ? "unauthenticated" : "workspace data unavailable");
         const data = result.data;
         workspaceRefreshAtRef.current = Date.now();
         writeCachedBootstrap(path, data);
@@ -1285,7 +1282,7 @@ function WorkspaceApp() {
     if (!cycle || !currentWorkspace) return;
     const entry: OkrChatContext["entry"] = currentWorkspace.role === "owner" && !hasActiveObjective ? "onboarding" : "coach";
     const key = `${currentWorkspace.id}:${entry}`;
-    const targeting = selectedProject ? { target: null, candidates: [] } : assistantTargeting;
+    const targeting = assistantTargeting;
     setOkrChatContext((current) => current?.key === key ? current : {
       key,
       entry,
@@ -1981,13 +1978,6 @@ function WorkspaceApp() {
 
   if (authState.status === "loading") return <AppLoadingScreen />;
   if (authState.status === "unauthenticated") return <AuthScreen reason={authState.reason} />;
-  if (authState.status === "registration" && registrationRequirement) return <RegistrationScreen requirement={registrationRequirement} onCompleted={() => {
-    clearCachedBootstrap();
-    setRegistrationRequirement(null);
-    setAuthState({ status: "loading", user: null, reason: null });
-    setWorkspaceDataAttempt((current) => current + 1);
-  }} />;
-
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -2064,28 +2054,27 @@ function WorkspaceApp() {
           {navItems.map((entry) => {
             const Icon = entry.icon;
             return (
-              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} aria-current={activeView === entry.id && !selectedProject && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => navigateView(entry.id)}>
+              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} aria-current={activeView === entry.id && !selectedProject && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => entry.id === "home" ? openAssistant() : navigateView(entry.id)}>
                 <Icon size={16} /><span>{entry.label}</span>
               </button>
             );
           })}
         </nav>
         <nav className="mobile-navigation" aria-label="주요 메뉴">
-          {navItems.slice(0, 4).map((entry) => {
+          {navItems.slice(0, 5).map((entry) => {
             const Icon = entry.icon;
             return (
-              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} aria-current={activeView === entry.id && !selectedProject && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => navigateView(entry.id)}>
+              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} aria-current={activeView === entry.id && !selectedProject && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => entry.id === "home" ? openAssistant() : navigateView(entry.id)}>
                 <Icon size={16} /><span>{entry.label}</span>
               </button>
             );
           })}
-          <button className={`nav-item assistant-mobile-tab ${activeView === "home" ? "active" : ""}`} onClick={openAssistant}><Bot size={16} /><span>도우미</span></button>
           <button className={`nav-item ${mobileMenuOpen ? "active" : ""}`} onClick={() => setMobileMenuOpen(true)}><Menu size={16} /><span>더보기</span></button>
         </nav>
         <div className="sidebar-bottom">
-          <button className={`nav-item assistant-sidebar-tab ${activeView === "home" ? "active" : ""}`} onClick={openAssistant}><Bot size={16} /><span>OKR 도우미</span></button>
           <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>ChatGPT 연동</span></button>
           <button className={`nav-item ${activeView === "integrations" && !selectedProject && !selectedTask ? "active" : ""}`} aria-current={activeView === "integrations" && !selectedProject && !selectedTask ? "page" : undefined} onClick={() => navigateView("integrations")}><Plug size={16} /><span>개인 앱 연동</span></button>
+          <button className={`nav-item ${activeView === "billing" && !selectedProject && !selectedTask ? "active" : ""}`} aria-current={activeView === "billing" && !selectedProject && !selectedTask ? "page" : undefined} onClick={() => navigateView("billing")}><CreditCard size={16} /><span>요금제 및 결제</span></button>
           <button className="profile-row" onClick={() => setPropertyPanelOpen(true)}><span className="avatar">{accountInitial}</span><span>{accountDisplayName}</span><MoreHorizontal size={15} /></button>
         </div>
       </aside>
@@ -2095,9 +2084,10 @@ function WorkspaceApp() {
           {(requestClose) => <aside className="mobile-menu-sheet">
             <header><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : "팀 워크스페이스"}</small></div><span className="mobile-menu-header-actions"><button className="icon-button" onClick={() => openWorkspaceSettings("general")} aria-label="워크스페이스 설정"><Settings size={17} /></button><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="닫기"><X size={17} /></button></span></header>
             <div className="mobile-menu-list">
-              {navItems.slice(4).map((entry) => { const Icon = entry.icon; return <button key={entry.id} onClick={() => { navigateView(entry.id); setMobileMenuOpen(false); }}><Icon size={16} /><span>{entry.label}</span><ChevronRight size={14} /></button>; })}
+              {navItems.slice(5).map((entry) => { const Icon = entry.icon; return <button key={entry.id} onClick={() => { navigateView(entry.id); setMobileMenuOpen(false); }}><Icon size={16} /><span>{entry.label}</span><ChevronRight size={14} /></button>; })}
               <button onClick={() => { setMobileMenuOpen(false); setIntegrationOpen(true); }}><Link2 size={16} /><span>ChatGPT 연동</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); navigateView("integrations"); }}><Plug size={16} /><span>개인 앱 연동</span><ChevronRight size={14} /></button>
+              <button onClick={() => { setMobileMenuOpen(false); navigateView("billing"); }}><CreditCard size={16} /><span>요금제 및 결제</span><ChevronRight size={14} /></button>
               <button className="mobile-account-entry" onClick={() => { setMobileMenuOpen(false); setPropertyPanelOpen(true); }}><span className="avatar">{accountInitial}</span><span><b>{accountDisplayName}</b><small>개인 설정</small></span><ChevronRight size={14} /></button>
             </div>
           </aside>}
@@ -2120,14 +2110,18 @@ function WorkspaceApp() {
           <div><button className="mobile-assistant-trigger" aria-label="AI 대화 열기" title="AI 대화 열기" onClick={openAssistant}><span aria-hidden="true">🤖</span></button><button aria-label="워크스페이스 설정" title="워크스페이스 설정" onClick={() => openWorkspaceSettings("general")}><Settings size={16} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
         </header>
         <div className="page-body">
-          {activeView !== "home" && !selectedProject && <header className={`page-header ${activeView === "okr" ? "okr-page-header" : ""}`}>
-            <div className="page-header-copy"><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
+          <MarketingConsentNudge
+            userId={authState.user?.id ?? ""}
+            onOpenSettings={() => setPropertyPanelOpen(true)}
+          />
+          {activeView !== "home" && !selectedProject && <header className="page-header">
+            <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setOkrListOpen(true)}><Archive size={14} />목록보기</button>
             ) : activeView === "inbox" ? (
               <div className="page-create-actions"><button onClick={() => openTaskCreationChat()}><Bot size={14} />AI 대화로 추가</button><button className="primary-action" onClick={() => openCreateItem("task", null)}><Plus size={14} />직접 추가</button></div>
             ) : activeView === "work" ? (
-              <div className="page-create-actions"><button onClick={() => openProjectCreationChat()}><Bot size={14} />AI 대화로 추가</button><button className="primary-action" onClick={() => openCreateItem("project")}><Plus size={14} />직접 추가</button></div>
+              <div className="page-create-actions"><ProjectQuotaBadge /><button onClick={() => openProjectCreationChat()}><Bot size={14} />AI 대화로 추가</button><button className="primary-action" onClick={() => openCreateItem("project")}><Plus size={14} />직접 추가</button></div>
             ) : activeView === "routines" ? (
               <div className="page-create-actions"><button onClick={() => openRoutineCreationChat()}><Bot size={14} />AI 대화로 추가</button><button className="primary-action" onClick={() => setRoutineCreateOpen(true)}><Plus size={14} />직접 추가</button></div>
             ) : activeView === "reviews" ? (
@@ -2247,6 +2241,7 @@ function WorkspaceApp() {
           )}
           {activeView === "scrum" && <DailyScrumView workspaceId={currentWorkspace?.id ?? ""} onOpenTask={openTaskDetail} onNotice={showNotice} />}
           {activeView === "integrations" && <AppIntegrationsView google={googleStatus} slack={slackStatus} loading={!integrationStatusesLoaded} loadError={integrationStatusError} onGoogleChange={setGoogleStatus} onRefresh={refreshIntegrationStatuses} onNotice={showNotice} />}
+          {activeView === "billing" && <BillingView onNotice={showNotice} />}
           {activeView === "recommendations" && <RecommendationsView workspaceId={currentWorkspace?.id ?? ""} items={activeItems} onOpenTask={openTaskDetail} onOpenProject={openProjectPage} onNavigate={navigateView} />}
           {activeView === "reviews" && <ReviewView items={periodItems} cadence={cadence} completed={completed} blocked={blocked} averageProgress={averageProgress} onOpenTask={openTaskDetail} onOpenProject={openProjectPage} />}
           {activeView === "trash" && <TrashView workspaceId={currentWorkspace?.id ?? ""} onNotice={showNotice} canDeleteRecords={canDeleteRecords} canRestore={Boolean(currentWorkspace && currentWorkspace.role !== "viewer")} />}
@@ -2444,7 +2439,7 @@ function AuthScreen({ reason }: { reason: string | null }) {
         <header><span className="brand-mark">O</span><div><b>OKRPTR</b><span>목표를 오늘의 실행으로</span></div></header>
         <div className="auth-content">
           <h1>로그인 또는 회원가입</h1>
-          <p>Google 계정으로 계속하세요. 신규 가입자는 휴대전화 소유 확인 후 바로 시작할 수 있습니다.</p>
+          <p>Google이 확인한 이메일로 바로 시작하세요. 휴대전화 번호나 별도 본인인증은 요구하지 않습니다.</p>
           {reason === "failed" && <p className="auth-error">Google 로그인을 완료하지 못했습니다. 다시 시도해 주세요.</p>}
           {unavailable && <p className="auth-error">Google 로그인 설정을 완료하는 중입니다.</p>}
           <button disabled={signingIn || unavailable} aria-busy={signingIn} onClick={() => { setSigningIn(true); startGoogleSignIn(); }}>
@@ -2461,83 +2456,6 @@ function startGoogleSignIn() {
   clearCachedBootstrap();
   const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
   window.location.assign(`/api/auth/google?returnTo=${encodeURIComponent(returnTo)}`);
-}
-
-function RegistrationScreen({ requirement, onCompleted }: { requirement: RegistrationRequirement; onCompleted: () => void }) {
-  const fieldId = useId();
-  const [phone, setPhone] = useState("");
-  const [code, setCode] = useState("");
-  const [requiredPrivacyConsent, setRequiredPrivacyConsent] = useState(false);
-  const [age14Confirmed, setAge14Confirmed] = useState(false);
-  const [marketingDataConsent, setMarketingDataConsent] = useState(false);
-  const [electronicMarketingConsent, setElectronicMarketingConsent] = useState(false);
-  const [sent, setSent] = useState(false);
-  const [busy, setBusy] = useState<"send" | "verify" | null>(null);
-  const [error, setError] = useState("");
-  const [developmentCode, setDevelopmentCode] = useState("");
-
-  async function sendCode(event: FormEvent) {
-    event.preventDefault();
-    if (busy || !requirement.verificationConfigured) return;
-    setBusy("send");
-    setError("");
-    const response = await fetch("/api/account/phone/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, requiredPrivacyConsent, age14Confirmed }),
-    });
-    const data = await response.json().catch(() => ({})) as { verification?: { developmentCode?: string }; error?: string };
-    setBusy(null);
-    if (!response.ok) {
-      setError(data.error ?? "인증번호를 보내지 못했습니다.");
-      return;
-    }
-    setSent(true);
-    setDevelopmentCode(data.verification?.developmentCode ?? "");
-  }
-
-  async function verify(event: FormEvent) {
-    event.preventDefault();
-    if (busy || !sent) return;
-    setBusy("verify");
-    setError("");
-    const response = await fetch("/api/account/phone/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, code, requiredPrivacyConsent, age14Confirmed, marketingDataConsent, electronicMarketingConsent }),
-    });
-    const data = await response.json().catch(() => ({})) as { error?: string };
-    setBusy(null);
-    if (!response.ok) {
-      setError(data.error ?? "가입 확인을 완료하지 못했습니다.");
-      return;
-    }
-    onCompleted();
-  }
-
-  return <main className="registration-shell">
-    <section className="registration-panel" aria-labelledby="registration-title">
-      <header><span className="brand-mark">O</span><div><b>OKRPTR</b><span>신규 계정 확인</span></div></header>
-      <div className="registration-content">
-        <div className="registration-intro"><span>마지막 한 단계</span><h1 id="registration-title">휴대전화 소유 확인</h1><p>{requirement.user.email} 계정으로 가입합니다. 이 확인은 실명·PASS 인증이 아니라 입력한 휴대전화의 소유 여부를 확인하는 절차입니다.</p></div>
-        {!requirement.verificationConfigured && <div className="registration-unavailable" role="alert"><AlertTriangle size={17} /><div><b>신규 가입 인증을 준비하고 있습니다.</b><p>인증 서비스 설정이 끝난 뒤 다시 시도해 주세요. 기존 회원 이용에는 영향이 없습니다.</p></div></div>}
-        <form className="registration-form" onSubmit={sent ? verify : sendCode}>
-          <label className="registration-field"><span>휴대전화 번호</span><div><input type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(event) => { setPhone(event.target.value); if (sent) { setSent(false); setCode(""); } }} placeholder="010-1234-5678" required disabled={Boolean(busy)} />{!sent && <button type="submit" disabled={Boolean(busy) || !requirement.verificationConfigured || !requiredPrivacyConsent || !age14Confirmed}>{busy === "send" ? "전송 중" : "인증번호 받기"}</button>}</div></label>
-          {sent && <label className="registration-field"><span>문자로 받은 인증번호</span><div><input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]*" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="인증번호" required /><button type="submit" disabled={Boolean(busy) || code.length < 4}>{busy === "verify" ? "확인 중" : "가입 완료"}</button></div>{developmentCode && <small>로컬 개발용 인증번호: {developmentCode}</small>}</label>}
-          <fieldset className="registration-consents"><legend>필수 확인</legend>
-            <label htmlFor={`${fieldId}-privacy`} aria-label="필수 전화번호 수집 및 이용 동의"><input id={`${fieldId}-privacy`} type="checkbox" checked={requiredPrivacyConsent} onChange={(event) => setRequiredPrivacyConsent(event.target.checked)} /><span><b>[필수] 계정 확인을 위한 전화번호 수집·이용 동의</b><small>계정 보호와 가입 확인 목적으로 이용하며 자세한 내용은 <a href="/privacy" target="_blank" rel="noreferrer">개인정보처리방침</a>에서 확인할 수 있습니다.</small></span></label>
-            <label htmlFor={`${fieldId}-age`} aria-label="필수 만 14세 이상 확인"><input id={`${fieldId}-age`} type="checkbox" checked={age14Confirmed} onChange={(event) => setAge14Confirmed(event.target.checked)} /><span><b>[필수] 만 14세 이상입니다</b><small>만 14세 미만은 법정대리인 동의 절차가 준비되기 전까지 가입할 수 없습니다.</small></span></label>
-          </fieldset>
-          <fieldset className="registration-consents optional"><legend>선택 동의 · 동의하지 않아도 가입 가능</legend>
-            <label htmlFor={`${fieldId}-marketing-data`} aria-label="선택 마케팅 목적 개인정보 이용 동의"><input id={`${fieldId}-marketing-data`} type="checkbox" checked={marketingDataConsent} onChange={(event) => setMarketingDataConsent(event.target.checked)} /><span><b>[선택] 마케팅 목적 개인정보 이용 동의</b><small>기능 소식, 혜택과 프로모션 안내 대상을 정하는 데 전화번호를 이용합니다.</small></span></label>
-            <label htmlFor={`${fieldId}-marketing-message`} aria-label="선택 광고성 정보 문자 수신 동의"><input id={`${fieldId}-marketing-message`} type="checkbox" checked={electronicMarketingConsent} onChange={(event) => setElectronicMarketingConsent(event.target.checked)} /><span><b>[선택] 광고성 정보 문자 수신 동의</b><small>동의한 경우에만 문자로 광고성 정보를 보냅니다. 내 설정에서 언제든 철회할 수 있습니다.</small></span></label>
-          </fieldset>
-          {error && <p className="registration-error" role="alert">{error}</p>}
-          <p className="registration-policy-note">선택 동의는 기본 체크되지 않으며 서비스 이용 조건이 아닙니다. 광고 연락 대상은 두 선택 동의를 모두 유지한 계정으로 제한됩니다.</p>
-        </form>
-      </div>
-    </section>
-  </main>;
 }
 
 function invitationTokenFromLocation() {
@@ -3718,6 +3636,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
       {(requestClose) => <aside className="property-panel">
         <header><div><h2>새 항목</h2><p>{kind === "project" ? "Project 속성을 지정해서 추가" : "OKR 실행 구조에 추가"}</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="새 항목 닫기" title="새 항목 닫기"><X size={17} /></button></header>
         <form className="property-form create-item-form" onSubmit={submit}>
+          {kind === "project" && <ProjectQuotaBadge />}
           <label><span>유형</span><select value={kind} disabled><option value={initialKind}>{kindLabel(initialKind)}</option></select></label>
           <label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
           {onCreateWithChat && <div className="create-chat-nudge"><div><Bot size={15} /><span><b>대화로 정리할까요?</b><small>{kind === "task" ? "할 일을 다듬고, 연결 대상을 고르지 않으면 General에 저장합니다." : kind === "project" ? "결과와 범위를 말하면 Project 초안을 정리합니다." : "말로 설명하면 OKR 초안을 함께 정리해드려요."}</small></span></div><button type="button" onClick={() => onCreateWithChat({ kind, title })}>AI 대화로 추가<ChevronRight size={13} /></button></div>}
@@ -4325,6 +4244,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   const [mode, setMode] = useState<ConversationMode>(context?.entry === "onboarding" ? "onboarding" : context?.entry === "coach" ? "coach" : context?.entry === "project" ? "project" : context?.entry === "routine" ? "routine" : context?.entry === "task" ? "task" : "okr");
   const [okrTarget, setOkrTarget] = useState<OkrPlanTarget | null>(context?.target ?? null);
   const [targetCandidates, setTargetCandidates] = useState<OkrPlanTarget[]>(context?.targetCandidates ?? []);
+  const [targetSearch, setTargetSearch] = useState("");
   const [projectTarget, setProjectTarget] = useState<ProjectChatTarget | null>(null);
   const [projectDriMemberId, setProjectDriMemberId] = useState(defaultDriMemberId ?? members[0]?.id ?? "");
   const [routineAssigneeMemberId, setRoutineAssigneeMemberId] = useState("");
@@ -4339,6 +4259,12 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   const draftCounts = countOkrDraft(plan);
   const taskDraftCount = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean).length;
   const treeReady = Boolean(plan.objectiveTitle.trim() && plan.keyResults.length && plan.keyResults.every((entry) => entry.title.trim() && entry.initiatives.every((initiative) => initiative.title.trim())) && !plan.unassignedInitiatives.length);
+  const visibleTargetCandidates = useMemo(() => {
+    const query = targetSearch.trim().toLocaleLowerCase();
+    const candidates = targetCandidates.filter((target) => target.id !== okrTarget?.id);
+    if (!query) return candidates.slice(0, 12);
+    return candidates.filter((target) => `${kindLabel(target.kind)} ${target.title}`.toLocaleLowerCase().includes(query)).slice(0, 12);
+  }, [okrTarget?.id, targetCandidates, targetSearch]);
   const saveLabel = mode === "task" ? `Task ${taskDraftCount}개 만들기` : mode === "routine" ? "Routine 만들기" : assistantFlow
     ? !okrTarget ? `Objective 1개 · KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`
       : okrTarget.kind === "objective" ? `KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`
@@ -4456,6 +4382,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
     setMode(context?.entry === "onboarding" ? "onboarding" : context?.entry === "coach" ? "coach" : context?.entry === "project" ? "project" : context?.entry === "routine" ? "routine" : context?.entry === "task" ? "task" : "okr");
     setOkrTarget(context?.target ?? null);
     setTargetCandidates(context?.targetCandidates ?? []);
+    setTargetSearch("");
     setProjectTarget(null);
     setProjectDriMemberId(defaultDriMemberId ?? members[0]?.id ?? "");
     setRoutineAssigneeMemberId("");
@@ -4574,7 +4501,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   }
   function chooseTarget(target: OkrPlanTarget) {
     setOkrTarget(target);
-    setTargetCandidates([]);
+    setTargetSearch("");
     setPlan({ ...emptyPlan });
     setVisibleFields(new Set());
     setMode("coach");
@@ -4724,7 +4651,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   return (
     <section className="home-okr-chat" aria-labelledby="home-okr-chat-title">
       <header>
-        <div><Bot size={16} /><div><h2 id="home-okr-chat-title">{mode === "task" ? "Task 도우미" : mode === "project" ? "Project 도우미" : mode === "routine" ? "Routine 도우미" : "OKR 도우미"}</h2><p>{mode === "task" ? "할 일을 짧고 명확하게 다듬고, 미선택 시 General에 저장합니다." : mode === "project" ? "결과와 범위를 정리한 뒤 저장 전에 상위 Initiative를 선택합니다." : mode === "routine" ? "반복할 시점과 실행 방법을 독립된 Routine으로 정리합니다." : "현재 OKR과 실행 상황을 읽고, 필요한 다음 질문부터 이어갑니다."}</p></div></div>
+        <div><Bot size={16} /><div><h2 id="home-okr-chat-title">{mode === "task" ? "Task 도우미" : mode === "project" ? "Project 도우미" : mode === "routine" ? "Routine 도우미" : "AI 대화"}</h2><p>{mode === "task" ? "할 일을 짧고 명확하게 다듬고, 미선택 시 General에 저장합니다." : mode === "project" ? "결과와 범위를 정리한 뒤 저장 전에 상위 Initiative를 선택합니다." : mode === "routine" ? "반복할 시점과 실행 방법을 독립된 Routine으로 정리합니다." : "현재 OKR과 실행 상황을 읽고, 필요한 다음 질문부터 이어갑니다."}</p></div></div>
         <div className="assistant-chat-header-actions">
           <span className={`assistant-draft-status ${draftSaveState}`} aria-live="polite">{draftSaveState === "loading" ? <><LoaderCircle className="spin" size={12} />이전 초안 확인 중</> : draftSaveState === "saving" ? <><LoaderCircle className="spin" size={12} />임시저장 중</> : draftSaveState === "saved" ? <><CheckCircle2 size={12} />임시저장됨</> : draftSaveState === "error" ? <><AlertTriangle size={12} />임시저장 재시도 예정</> : null}</span>
           {hasPersistableDraft && <button type="button" className="assistant-reset-draft" onClick={resetConversationDraft}>새로 시작</button>}
@@ -4735,11 +4662,23 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
         <div className="chat-thread">
           {context && mode !== "task" && mode !== "project" && mode !== "routine" && <div className="chat-okr-context"><Target size={14} /><span><b>{context.cycleName}</b>{context.entry === "onboarding" ? " 첫 OKR 온보딩" : " 상황 기반 대화"}</span></div>}
           {mode === "task" && <div className="chat-okr-context"><ListChecks size={14} /><span><b>Task 추가</b> Project·Routine 미선택 시 General</span></div>}
-          {mode === "project" && <div className="chat-okr-context"><Briefcase size={14} /><span><b>{projectTarget?.initiativeTitle ?? "상위 Initiative 미선택"}</b> · 저장 전에 선택</span></div>}
+          {mode === "project" && <><div className="chat-okr-context"><Briefcase size={14} /><span><b>{projectTarget?.initiativeTitle ?? "상위 Initiative 미선택"}</b> · 저장 전에 선택</span></div><ProjectQuotaBadge /></>}
           {mode === "routine" && <div className="chat-okr-context"><Repeat2 size={14} /><span><b>독립 Routine</b> · Initiative 연결 없음</span></div>}
           {context?.entry === "onboarding" && <div className="assistant-example"><b>간단한 예시</b><span>Objective · 신규 사용자가 제품 가치를 더 빨리 경험하게 한다</span><span>Key Result · 가입 후 7일 내 핵심 기능 사용률을 35%에서 55%로 높인다</span></div>}
           {conversationHistory.map((entry) => <p className={entry.role === "user" ? "user-message" : "assistant-message"} key={entry.id}>{entry.content}</p>)}
-          {targetCandidates.length > 1 && <div className="assistant-target-options" aria-label="대화 대상 선택">{targetCandidates.map((target) => <button key={target.id} onClick={() => chooseTarget(target)}><span>{kindLabel(target.kind)}</span>{target.title}</button>)}</div>}
+          {mode === "coach" && targetCandidates.length > 0 && <div className="assistant-target-picker" aria-label="대화 대상 선택">
+            <header>
+              <div><Search size={13} /><b>대화 대상</b></div>
+              {okrTarget ? <span>{kindLabel(okrTarget.kind)} · {okrTarget.title}</span> : <span>전체 OKR 문맥</span>}
+            </header>
+            <label>
+              <span className="sr-only">Objective, Key Result, Initiative, Project 검색</span>
+              <input value={targetSearch} onChange={(event) => setTargetSearch(event.target.value)} placeholder="Objective, KR, Initiative, Project 검색" />
+            </label>
+            {visibleTargetCandidates.length > 0 && <div className="assistant-target-options">
+              {visibleTargetCandidates.map((target) => <button key={target.id} onClick={() => chooseTarget(target)}><span>{kindLabel(target.kind)}</span>{target.title}</button>)}
+            </div>}
+          </div>}
           {guideQuestions.length > 0 && <div className="assistant-followups">{guideQuestions.map((question) => <button className="followup-message" onClick={() => chooseQuickReply(question)} key={question}>{question}</button>)}</div>}
           {!canWrite && <div className="assistant-readonly"><Eye size={14} /><span>Viewer는 대화와 분석을 이용할 수 있지만 항목을 생성할 수 없습니다.</span></div>}
           <div className="chat-input"><label htmlFor="assistant-message">메시지</label><div className="chat-composer"><textarea id="assistant-message" value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void organizeMessage(); }} rows={4} placeholder={mode === "task" ? "해야 할 일을 편하게 설명해 주세요" : mode === "project" ? "만들 Project의 결과와 범위를 설명해 주세요" : mode === "routine" ? "언제 무엇을 반복할지 설명해 주세요" : "지금 이루고 싶은 목표나 막힌 일을 편하게 적어 주세요"} /><button type="button" className="chat-send-button" onClick={() => void organizeMessage()} disabled={saving || !message.trim()} aria-label={saving ? "답변 생성 중" : "메시지 보내기"}>{saving ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}<span>{saving ? "답변 중" : "보내기"}</span></button></div></div>
@@ -4916,17 +4855,11 @@ function buildAssistantWorkspaceContext(activeItems: OkrptrItem[], cycle: OkrCyc
 }
 
 function deriveAssistantTargeting(context: AssistantWorkspaceContext) {
-  const childrenByParent = new Map<string, AssistantWorkspaceContext["items"]>();
-  for (const item of context.items) {
-    if (!item.parentId) continue;
-    childrenByParent.set(item.parentId, [...(childrenByParent.get(item.parentId) ?? []), item]);
-  }
-  const objectivesMissingKr = context.items.filter((item) => item.kind === "objective" && !(childrenByParent.get(item.id) ?? []).some((child) => child.kind === "key_result"));
-  const keyResultsMissingInitiative = context.items.filter((item) => item.kind === "key_result" && !(childrenByParent.get(item.id) ?? []).some((child) => child.kind === "initiative"));
-  const initiativesMissingProject = context.items.filter((item) => item.kind === "initiative" && !(childrenByParent.get(item.id) ?? []).some((child) => child.kind === "project"));
-  const source = objectivesMissingKr.length ? objectivesMissingKr : keyResultsMissingInitiative.length ? keyResultsMissingInitiative : initiativesMissingProject;
-  const candidates = source.map((item) => ({ id: item.id, kind: item.kind as OkrPlanTarget["kind"], title: item.title }));
-  return { target: candidates.length === 1 ? candidates[0] : null, candidates };
+  const candidates = context.items
+    .filter((item) => item.kind === "objective" || item.kind === "key_result" || item.kind === "initiative" || item.kind === "project")
+    .map((item) => ({ id: item.id, kind: item.kind as OkrPlanTarget["kind"], title: item.title }));
+  const focused = candidates.find((item) => item.id === context.focusedItemId) ?? null;
+  return { target: focused, candidates };
 }
 
 function assistantOpeningMessage(context: OkrChatContext | null, workspace: AssistantWorkspaceContext) {
@@ -4946,7 +4879,7 @@ function assistantOpeningMessage(context: OkrChatContext | null, workspace: Assi
     return `‘${context.cycleName}’에 ${kindLabel(context.sourceKind ?? "objective")}부터 같이 만들어볼게요. 이번 주기 끝에 어떤 상태가 달라져야 하는지 편하게 적어 주세요.`;
   }
   if (context?.target) return targetPrompt(context.target);
-  if ((context?.targetCandidates?.length ?? 0) > 1) return "이어갈 수 있는 OKR이 여러 개 있습니다. 먼저 어느 항목을 다듬을지 선택해 주세요.";
+  if ((context?.targetCandidates?.length ?? 0) > 1) return "현재 OKR과 Project 전체를 함께 볼 수 있습니다. 특정 항목을 기준으로 이야기하고 싶으면 아래에서 검색해 선택해 주세요.";
   const focused = workspace.items.find((item) => item.id === workspace.focusedItemId);
   if (focused?.kind === "project") {
     return `‘${focused.title}’ Project는 현재 ${statusLabel(focused.status)} 상태입니다. 지금 막힌 점이나 다음으로 정리할 일을 말씀해 주세요.`;
@@ -4966,9 +4899,10 @@ function assistantOpeningGuides(context: OkrChatContext | null) {
 }
 
 function targetPrompt(target: OkrPlanTarget) {
-  if (target.kind === "objective") return `‘${target.title}’ Objective의 달성 여부를 확인할 수 있는 측정 가능한 Key Result는 무엇인가요?`;
-  if (target.kind === "key_result") return `‘${target.title}’ Key Result를 움직일 실행 방향인 Initiative는 무엇인가요? 아직 생각나지 않았다면 건너뛸 수 있습니다.`;
-  return `‘${target.title}’ Initiative를 실제로 움직일 첫 Project는 무엇인가요? 결과, 범위, 시기 또는 DRI를 편하게 말해 주세요.`;
+  if (target.kind === "objective") return `${target.title} Objective를 기준으로 이야기하겠습니다. 이 목표의 성공을 확인할 Key Result부터 정리할까요?`;
+  if (target.kind === "key_result") return `${target.title} Key Result를 기준으로 이야기하겠습니다. 이 결과를 움직일 Initiative를 정리할까요?`;
+  if (target.kind === "project") return `${target.title} Project를 기준으로 이야기하겠습니다. 진행 상황, 막힌 일, 다음 Task 중 무엇부터 정리할까요?`;
+  return `${target.title} Initiative를 기준으로 이야기하겠습니다. 이 실행 방향을 실제로 움직일 Project를 정리할까요?`;
 }
 
 function aiLimitMessage(error: OrganizeError) {
@@ -5657,6 +5591,7 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
     { id: "members", label: "멤버", icon: Users, visible: !currentWorkspace.personal, count: teamData?.members.length },
     { id: "groups", label: "그룹", icon: AtSign, visible: !currentWorkspace.personal },
     { id: "projects", label: "Project 설정", icon: Briefcase, visible: true },
+    { id: "summary", label: "관리 요약", icon: Activity, visible: !currentWorkspace.personal },
     { id: "integrations", label: "봇 연동", icon: Bot, visible: !currentWorkspace.personal },
     { id: "danger", label: "위험 구역", icon: AlertTriangle, visible: canManageWorkspace },
     { id: "scheduled", label: "삭제 예정", icon: Trash2, visible: scheduledWorkspaces.length > 0, count: scheduledWorkspaces.length },
@@ -5673,7 +5608,8 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
         {activeTab === "members" && <div className="workspace-settings-section team-settings-section"><header><span>ORGANIZATION</span><h3>멤버</h3><p>초대, 역할과 워크스페이스 구성원을 관리합니다.</p></header><TeamPanel key={`${currentWorkspace.id}:members`} initialTeam={teamData} initialTab="members" initialGroupHandle={null} embedded onTeamChange={onTeamChange} onClose={onClose} onNotice={onNotice} /></div>}
         {activeTab === "groups" && <div className="workspace-settings-section team-settings-section"><header><span>ORGANIZATION</span><h3>그룹</h3><p>조직 그룹과 구성원, Lead 권한을 관리합니다.</p></header><TeamPanel key={`${currentWorkspace.id}:groups`} initialTeam={teamData} initialTab="groups" initialGroupHandle={requestedGroupHandle} embedded onTeamChange={onTeamChange} onClose={onClose} onNotice={onNotice} /></div>}
         {activeTab === "projects" && <div className="workspace-project-settings"><header className="workspace-settings-section-header"><div><span>WORKSPACE DATA</span><h3>Project 설정</h3><p>모든 Project에서 함께 사용하는 속성과 본문 템플릿입니다.</p></div><div className="workspace-project-tabs" role="tablist" aria-label="Project 설정"><button role="tab" aria-selected={projectSettingsTab === "properties"} className={projectSettingsTab === "properties" ? "active" : ""} onClick={() => setProjectSettingsTab("properties")}><Settings2 size={14} />속성</button><button role="tab" aria-selected={projectSettingsTab === "templates"} className={projectSettingsTab === "templates" ? "active" : ""} onClick={() => setProjectSettingsTab("templates")}><BookTemplate size={14} />템플릿</button></div></header>{projectSettingsTab === "properties" ? <ProjectPropertyManager workspaceId={currentWorkspace.id} properties={properties} teamMembers={teamMembers} readOnly={!canManageWorkspace} onChanged={(next) => onPropertiesChanged([...next].sort((left, right) => left.sortOrder - right.sortOrder))} onNotice={onNotice} /> : <ProjectTemplateManager workspaceId={currentWorkspace.id} readOnly={!canManageWorkspace} onNotice={onNotice} />}</div>}
-        {activeTab === "integrations" && <WorkspaceSlackIntegration slack={slack} slackOAuthIssue={slackOAuthIssue} loading={integrationLoading} loadError={integrationLoadError} workspaceName={currentWorkspace.name} canManageSlack={canManageWorkspace} onSlackChange={onSlackChange} onRefresh={onRefreshIntegrations} onNotice={onNotice} />}
+        {activeTab === "summary" && <WorkspaceManagementSummary key={`${currentWorkspace.id}:summary`} />}
+        {activeTab === "integrations" && <WorkspaceSlackIntegration key={`${currentWorkspace.id}:bots`} slack={slack} slackOAuthIssue={slackOAuthIssue} loading={integrationLoading} loadError={integrationLoadError} workspaceName={currentWorkspace.name} canManageSlack={canManageWorkspace} onSlackChange={onSlackChange} onRefresh={onRefreshIntegrations} onNotice={onNotice} />}
         {activeTab === "danger" && <div className="workspace-settings-section danger-settings"><header><span>WORKSPACE CONTROL</span><h3>위험 구역</h3><p>현재 워크스페이스의 실행 데이터와 워크스페이스 자체를 정리합니다.</p></header><article><div><b>OKR 실행 데이터 클린업</b><p>워크스페이스와 그룹은 유지하고 OKR·Project·Task를 휴지통으로 이동합니다.</p></div><button onClick={onCleanup}><Trash2 size={14} />클린업 열기</button></article>{!currentWorkspace.personal && currentWorkspace.role === "owner" && <article><div><b>워크스페이스 삭제 예약</b><p>즉시 접근을 중단하고 30일 동안 복구할 수 있도록 삭제 예약합니다.</p></div><button onClick={() => onDeleteWorkspace(currentWorkspace)} disabled={workspaceSaving}><Trash2 size={14} />삭제 예약</button></article>}</div>}
         {activeTab === "scheduled" && <div className="workspace-settings-section scheduled-settings"><header><span>RECOVERY</span><h3>삭제 예정 워크스페이스</h3><p>삭제 예약된 워크스페이스를 복구하거나 즉시 영구삭제합니다.</p></header><div className="scheduled-workspace-list">{scheduledWorkspaces.map((workspace) => <article key={workspace.id}><WorkspaceAvatar workspace={workspace} /><div><b>{workspace.name}</b><small>{workspaceDeletionLabel(workspace.scheduledDeletionAt)}</small></div><button onClick={() => onRestoreWorkspace(workspace)} disabled={workspaceSaving}><RotateCcw size={14} />복구</button><button className="danger" onClick={() => onPermanentlyDeleteWorkspace(workspace)} disabled={workspaceSaving}><Trash2 size={14} />영구삭제</button></article>)}</div></div>}
       </section>
@@ -5687,36 +5623,73 @@ function PropertyPanel({ user, displayName, themeMode, onThemeModeChange, onClos
     { mode: "gray", label: "그레이" },
     { mode: "dark", label: "다크" },
   ];
-  return <OverlayDialog title="내 설정" variant="drawer" onRequestClose={() => onClose()}>{(requestClose) => <aside className="property-panel"><header><div><h2>내 설정</h2><p>내 계정과 화면 설정</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section"><h3>내 계정</h3><div className="settings-account-card"><span className="avatar">{displayName.slice(0, 1).toLocaleUpperCase()}</span><div><b>{displayName}</b><small>{user?.email || "로그인 계정"}</small></div></div></section><MarketingConsentSettings /><section className="settings-section appearance-settings"><h3>테마</h3><div className="theme-picker" role="group" aria-label="색상 테마">{themes.map(({ mode, label }) => <button className={themeMode === mode ? "active" : ""} aria-pressed={themeMode === mode} onClick={() => onThemeModeChange(mode)} key={mode}><i className={`theme-swatch theme-swatch-${mode}`} aria-hidden="true" /><span>{label}</span></button>)}</div><p>선택한 테마는 이 브라우저에 저장됩니다.</p></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section></aside>}</OverlayDialog>;
+  return <OverlayDialog title="내 설정" variant="drawer" onRequestClose={() => onClose()}>{(requestClose) => <aside className="property-panel"><header><div><h2>내 설정</h2><p>내 계정과 화면 설정</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section"><h3>내 계정</h3><div className="settings-account-card"><span className="avatar">{displayName.slice(0, 1).toLocaleUpperCase()}</span><div><b>{displayName}</b><small>{user?.email || "로그인 계정"}</small></div></div></section><MarketingConsentSettings email={user?.email ?? ""} /><section className="settings-section appearance-settings"><h3>테마</h3><div className="theme-picker" role="group" aria-label="색상 테마">{themes.map(({ mode, label }) => <button className={themeMode === mode ? "active" : ""} aria-pressed={themeMode === mode} onClick={() => onThemeModeChange(mode)} key={mode}><i className={`theme-swatch theme-swatch-${mode}`} aria-hidden="true" /><span>{label}</span></button>)}</div><p>선택한 테마는 이 브라우저에 저장됩니다.</p></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section></aside>}</OverlayDialog>;
 }
 
-type AccountRegistrationSettings = {
-  completed: boolean;
-  legacy: boolean;
-  maskedPhone: string | null;
-  phoneVerifiedAt: string | null;
+type EmailMarketingConsentSettings = {
   marketingDataConsent: boolean;
-  electronicMarketingConsent: boolean;
+  advertisingEmailConsent: boolean;
   marketingEligible: boolean;
+  needsReaffirmation: boolean;
+  reaffirmAfter: string | null;
 };
 
-function MarketingConsentSettings() {
+function MarketingConsentNudge({ userId, onOpenSettings }: { userId: string; onOpenSettings: () => void }) {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    const storageKey = `okrptr:marketing-consent-nudge:${userId}`;
+    try {
+      if (window.localStorage.getItem(storageKey)) return;
+    } catch {
+      // Storage is optional; the notice still works when it is unavailable.
+    }
+    const controller = new AbortController();
+    void fetch("/api/account/marketing-consent", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const data = await response.json() as { consent?: EmailMarketingConsentSettings };
+        if (data.consent && !data.consent.marketingDataConsent && !data.consent.advertisingEmailConsent) setVisible(true);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [userId]);
+
+  function dismiss(openSettings: boolean) {
+    try {
+      window.localStorage.setItem(`okrptr:marketing-consent-nudge:${userId}`, new Date().toISOString());
+    } catch {
+      // Dismissing for this render is enough when storage is unavailable.
+    }
+    setVisible(false);
+    if (openSettings) onOpenSettings();
+  }
+
+  if (!visible) return null;
+  return <aside className="marketing-consent-nudge" aria-labelledby="marketing-consent-nudge-title">
+    <div><b id="marketing-consent-nudge-title">이메일 혜택 안내를 받을까요?</b><p>선택 동의이며 거절해도 모든 기능을 그대로 이용할 수 있습니다. 휴대전화 번호는 수집하지 않습니다.</p></div>
+    <div><button type="button" onClick={() => dismiss(true)}>동의 설정 보기</button><button type="button" className="secondary" onClick={() => dismiss(false)}>나중에</button></div>
+  </aside>;
+}
+
+function MarketingConsentSettings({ email }: { email: string }) {
   const fieldId = useId();
-  const [registration, setRegistration] = useState<AccountRegistrationSettings | null>(null);
+  const [consent, setConsent] = useState<EmailMarketingConsentSettings | null>(null);
   const [marketingDataConsent, setMarketingDataConsent] = useState(false);
-  const [electronicMarketingConsent, setElectronicMarketingConsent] = useState(false);
+  const [advertisingEmailConsent, setAdvertisingEmailConsent] = useState(false);
   const [state, setState] = useState<"loading" | "ready" | "saving" | "saved" | "error">("loading");
   const [message, setMessage] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/account/registration", { cache: "no-store", signal: controller.signal })
+    void fetch("/api/account/marketing-consent", { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
-        const data = await response.json() as { registration?: AccountRegistrationSettings; error?: string };
-        if (!response.ok || !data.registration) throw new Error(data.error ?? "동의 설정을 불러오지 못했습니다.");
-        setRegistration(data.registration);
-        setMarketingDataConsent(data.registration.marketingDataConsent);
-        setElectronicMarketingConsent(data.registration.electronicMarketingConsent);
+        const data = await response.json() as { consent?: EmailMarketingConsentSettings; error?: string };
+        if (!response.ok || !data.consent) throw new Error(data.error ?? "동의 설정을 불러오지 못했습니다.");
+        setConsent(data.consent);
+        setMarketingDataConsent(data.consent.marketingDataConsent);
+        setAdvertisingEmailConsent(data.consent.advertisingEmailConsent);
         setState("ready");
       })
       .catch((error: unknown) => {
@@ -5728,34 +5701,35 @@ function MarketingConsentSettings() {
   }, []);
 
   async function save() {
-    if (!registration?.completed || state === "saving") return;
+    if (!consent || state === "saving") return;
     setState("saving");
     setMessage("");
-    const response = await fetch("/api/account/registration", {
+    const response = await fetch("/api/account/marketing-consent", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ marketingDataConsent, electronicMarketingConsent }),
+      body: JSON.stringify({ marketingDataConsent, advertisingEmailConsent }),
     });
-    const data = await response.json().catch(() => ({})) as { registration?: AccountRegistrationSettings; error?: string };
-    if (!response.ok || !data.registration) {
+    const data = await response.json().catch(() => ({})) as { consent?: EmailMarketingConsentSettings; error?: string };
+    if (!response.ok || !data.consent) {
       setMessage(data.error ?? "동의 설정을 저장하지 못했습니다.");
       setState("error");
       return;
     }
-    setRegistration(data.registration);
+    setConsent(data.consent);
     setMessage("동의 설정을 저장했습니다.");
     setState("saved");
   }
 
   return <section className="settings-section marketing-settings">
-    <h3>연락처와 마케팅 동의</h3>
+    <h3>이메일 마케팅 동의</h3>
     {state === "loading" ? <p className="marketing-settings-state" role="status"><LoaderCircle className="spin" size={13} />불러오는 중</p>
-      : !registration ? <p className="marketing-settings-state error" role="alert">{message}</p>
+      : !consent ? <p className="marketing-settings-state error" role="alert">{message}</p>
       : <>
-        <div className="marketing-phone-summary"><div><b>{registration.maskedPhone ?? (registration.legacy ? "기존 가입 계정" : "확인된 번호 없음")}</b><small>{registration.phoneVerifiedAt ? `휴대전화 확인 ${formatDateTime(registration.phoneVerifiedAt)}` : "기존 회원은 추가 인증 없이 유지됩니다."}</small></div></div>
-        <label className="marketing-setting-row" htmlFor={`${fieldId}-marketing-data`} aria-label="마케팅 목적 개인정보 이용 설정"><input id={`${fieldId}-marketing-data`} type="checkbox" checked={marketingDataConsent} onChange={(event) => { setMarketingDataConsent(event.target.checked); setState("ready"); setMessage(""); }} /><span><b>마케팅 목적 개인정보 이용</b><small>혜택과 프로모션 안내 대상을 정하는 데 연락처를 이용합니다.</small></span></label>
-        <label className="marketing-setting-row" htmlFor={`${fieldId}-marketing-message`} aria-label="광고성 정보 문자 수신 설정"><input id={`${fieldId}-marketing-message`} type="checkbox" checked={electronicMarketingConsent} onChange={(event) => { setElectronicMarketingConsent(event.target.checked); setState("ready"); setMessage(""); }} /><span><b>광고성 정보 문자 수신</b><small>동의한 경우에만 광고성 문자를 받을 수 있습니다.</small></span></label>
-        <div className="marketing-settings-actions"><button type="button" onClick={() => void save()} disabled={state === "saving" || !registration.completed}>{state === "saving" ? "저장 중" : "동의 설정 저장"}</button><small>{marketingDataConsent && electronicMarketingConsent ? "두 동의를 모두 선택하면 광고 안내 대상이 됩니다." : "동의하지 않아도 서비스 이용에는 영향이 없습니다."}</small></div>
+        <div className="marketing-email-summary"><div><b>{email || "Google에서 확인된 이메일"}</b><small>Google에서 확인된 이메일입니다. 휴대전화 번호는 수집하지 않으며, 초대·결제·보안 안내는 아래 선택 동의와 별개입니다.</small></div></div>
+        <label className="marketing-setting-row" htmlFor={`${fieldId}-marketing-data`} aria-label="마케팅 목적 개인정보 이용 설정"><input id={`${fieldId}-marketing-data`} type="checkbox" checked={marketingDataConsent} onChange={(event) => { setMarketingDataConsent(event.target.checked); setState("ready"); setMessage(""); }} /><span><b>마케팅 목적 개인정보 이용</b><small>혜택과 프로모션 대상을 정하는 데 가입 이메일과 서비스 이용 정보를 사용합니다.</small></span></label>
+        <label className="marketing-setting-row" htmlFor={`${fieldId}-marketing-email`} aria-label="광고성 이메일 수신 설정"><input id={`${fieldId}-marketing-email`} type="checkbox" checked={advertisingEmailConsent} onChange={(event) => { setAdvertisingEmailConsent(event.target.checked); setState("ready"); setMessage(""); }} /><span><b>광고성 이메일 수신</b><small>동의한 경우에만 혜택과 프로모션 이메일을 보냅니다. 메일의 수신거부 링크로도 즉시 철회할 수 있습니다.</small></span></label>
+        <div className="marketing-settings-actions"><button type="button" onClick={() => void save()} disabled={state === "saving"}>{state === "saving" ? "저장 중" : "동의 설정 저장"}</button><small>{marketingDataConsent && advertisingEmailConsent ? "두 동의가 모두 유효할 때만 광고 이메일 발송 대상이 됩니다." : "동의하지 않아도 서비스 이용에는 영향이 없습니다."}</small></div>
+        {consent.needsReaffirmation && <p className="marketing-settings-message error" role="status">동의 후 2년이 지나 재확인이 필요합니다. 다시 저장하기 전까지 광고 이메일을 보내지 않습니다.</p>}
         {message && <p className={`marketing-settings-message ${state === "error" ? "error" : ""}`} role={state === "error" ? "alert" : "status"}>{message}</p>}
       </>}
   </section>;
@@ -6345,21 +6319,72 @@ const managementBotSignalMeta: Record<ManagementBotSignal, { label: string; deta
   due_today: { label: "오늘 마감", detail: "오늘까지 완료해야 하는 활성 Project·Task", tone: "urgent" },
 };
 
-function WorkspaceManagementBot({ canManage, onNotice }: { canManage: boolean; onNotice: (message: string) => void }) {
-  const [data, setData] = useState<ManagementBotData | null>(null);
-  const [draft, setDraft] = useState<ManagementBotData["settings"] | null>(null);
+function managementScheduleSummary(settings: Pick<ManagementBotSettings, "weekdays" | "reportTime" | "channelId" | "channelName" | "signals">) {
+  const weekdays = settings.weekdays.join(",") === "1,2,3,4,5" ? "평일" : settings.weekdays.map((day) => ["일", "월", "화", "수", "목", "금", "토"][day]).join("·");
+  const channel = settings.channelId ? `#${settings.channelName || settings.channelId}` : "채널 미선택";
+  return `${weekdays} ${settings.reportTime} · ${channel} · ${settings.signals.length}개 점검`;
+}
+
+function WorkspaceManagementSummary() {
+  const [date, setDate] = useState(() => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date()));
+  const [snapshot, setSnapshot] = useState<ManagementBotSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/workspace-management-bot", { signal: controller.signal })
+    void fetch(`/api/workspace-management-bot?mode=summary&date=${encodeURIComponent(date)}`, { signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json() as { snapshot?: ManagementBotSnapshot; error?: string };
+        if (!response.ok || !payload.snapshot) throw new Error(payload.error || "관리 요약을 불러오지 못했습니다.");
+        setSnapshot(payload.snapshot);
+      })
+      .catch((loadError: unknown) => {
+        if (loadError instanceof DOMException && loadError.name === "AbortError") return;
+        setError(loadError instanceof Error ? loadError.message : "관리 요약을 불러오지 못했습니다.");
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [attempt, date]);
+
+  function reload(nextDate?: string) {
+    setLoading(true);
+    setError("");
+    if (nextDate !== undefined) setDate(nextDate);
+    else setAttempt((current) => current + 1);
+  }
+
+  return <section className="workspace-management-summary-pane">
+    <header className="workspace-settings-section-header management-summary-header"><div><span>WORKSPACE HEALTH</span><h3>관리 요약</h3><p>정보가 부족하거나 지금 대응해야 할 Project·Task를 봇 설정과 분리해 확인합니다.</p></div><div className="management-summary-controls"><label><span>기준일</span><input aria-label="관리 요약 기준일" type="date" value={date} onChange={(event) => reload(event.target.value)} /></label><button type="button" onClick={() => reload()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={14} />새로고침</button></div></header>
+    {loading && !snapshot ? <div className="workspace-management-loading"><LoaderCircle className="spin" size={16} />관리 항목을 정리하고 있습니다.</div> : error && !snapshot ? <div className="workspace-management-error" role="alert"><AlertTriangle size={17} /><div><b>관리 요약을 불러오지 못했습니다</b><p>{error}</p><button type="button" onClick={() => reload()}>다시 시도</button></div></div> : snapshot && <div className="management-summary-content">
+      <div className="management-summary-total"><span>{snapshot.date} 기준</span><b>{snapshot.totalCount}개</b><small>중복 항목은 각 관리 기준에 각각 집계됩니다.</small></div>
+      {error && <p className="management-summary-refresh-error">최신 정보를 갱신하지 못해 이전 결과를 표시합니다.</p>}
+      <div className="management-summary-groups">{snapshot.groups.map((group) => { const meta = managementBotSignalMeta[group.signal]; return <details className={meta.tone} key={group.signal}><summary><span><b>{meta.label}</b><small>{meta.detail}</small></span><em>{group.count}</em><ChevronDown size={15} /></summary><div>{group.items.length ? <ul>{group.items.map((item) => <li key={item.id}><a href={item.kind === "project" ? `/?project=${encodeURIComponent(item.id)}` : `/?task=${encodeURIComponent(item.id)}`}><span>{item.title}</span><small>{item.kind === "project" ? "Project" : "Task"}{item.dueDate ? ` · ${item.dueDate}` : ""}</small><ChevronRight size={14} /></a></li>)}</ul> : <p>해당 항목이 없습니다.</p>}</div></details>; })}</div>
+    </div>}
+  </section>;
+}
+
+function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { active: boolean; canManage: boolean; onSummary: (status: string, summary: string) => void; onNotice: (message: string) => void }) {
+  const [data, setData] = useState<ManagementBotData | null>(null);
+  const [draft, setDraft] = useState<ManagementBotSettings | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const loadedRef = useRef(false);
+
+  useEffect(() => {
+    if (!active || loadedRef.current) return;
+    loadedRef.current = true;
+    const controller = new AbortController();
+    setLoading(true);
+    void fetch("/api/workspace-management-bot?mode=settings", { signal: controller.signal })
       .then(async (response) => {
         const payload = await response.json() as ManagementBotData & { error?: string };
         if (!response.ok || !payload.settings) throw new Error(payload.error || "관리 봇 정보를 불러오지 못했습니다.");
         setData(payload);
         setDraft(payload.settings);
+        onSummary(payload.settings.enabled ? "사용 중" : "중지", managementScheduleSummary(payload.settings));
         setError("");
       })
       .catch((loadError: unknown) => {
@@ -6368,14 +6393,14 @@ function WorkspaceManagementBot({ canManage, onNotice }: { canManage: boolean; o
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, []);
+  }, [active, onSummary]);
 
   async function save(sendTest = false) {
     if (!draft || saving || !canManage) return;
     setSaving(true);
     setError("");
     try {
-      const response = await fetch("/api/workspace-management-bot", {
+      const response = await fetch("/api/workspace-management-bot?mode=settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: draft.enabled, weekdays: draft.weekdays, reportTime: draft.reportTime, timezone: draft.timezone, channelId: draft.channelId, signals: draft.signals }),
@@ -6384,11 +6409,11 @@ function WorkspaceManagementBot({ canManage, onNotice }: { canManage: boolean; o
       if (!response.ok || !next.settings) throw new Error(next.error || "관리 봇 설정을 저장하지 못했습니다.");
       setData(next);
       setDraft(next.settings);
+      onSummary(next.settings.enabled ? "사용 중" : "중지", managementScheduleSummary(next.settings));
       if (sendTest) {
         const testResponse = await fetch("/api/workspace-management-bot", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "test" }) });
-        const testData = await testResponse.json() as { sent?: boolean; snapshot?: ManagementBotData["snapshot"]; error?: string };
+        const testData = await testResponse.json() as { sent?: boolean; snapshot?: ManagementBotSnapshot; error?: string };
         if (!testResponse.ok || !testData.sent) throw new Error(testData.error || "테스트 리포트를 보내지 못했습니다.");
-        if (testData.snapshot) setData((current) => current ? { ...current, snapshot: testData.snapshot! } : current);
         onNotice("선택한 Slack 채널로 관리 리포트 테스트를 보냈습니다.");
       } else {
         onNotice(next.settings.enabled ? "워크스페이스 관리 봇을 저장했습니다." : "워크스페이스 관리 봇을 껐습니다.");
@@ -6410,38 +6435,78 @@ function WorkspaceManagementBot({ canManage, onNotice }: { canManage: boolean; o
     setDraft({ ...draft, signals: draft.signals.includes(signal) ? draft.signals.filter((entry) => entry !== signal) : [...draft.signals, signal] });
   }
 
-  if (loading) return <section className="workspace-management-pane embedded"><div className="workspace-management-loading"><LoaderCircle className="spin" size={16} />워크스페이스 관리 항목을 확인하고 있습니다.</div></section>;
+  if (!active && !data) return null;
+  if (loading) return <section className="workspace-management-pane embedded"><div className="workspace-management-loading"><LoaderCircle className="spin" size={16} />관리 봇 설정을 확인하고 있습니다.</div></section>;
   if (!data || !draft) return <section className="workspace-management-pane embedded"><div className="workspace-management-error" role="alert"><AlertTriangle size={17} /><div><b>관리 봇을 불러오지 못했습니다</b><p>{error || "잠시 후 다시 확인해 주세요."}</p></div></div></section>;
   const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 
   return <section className="workspace-management-pane embedded">
-    <header className="workspace-management-heading"><div><span>WORKSPACE CONTROL BOT</span><h3>관리 봇</h3><p>정보가 비어 있거나 지금 대응해야 할 Project·Task를 매일 한 번 정리해 팀에 알려줍니다.</p></div><span className={`management-bot-state ${draft.enabled ? "active" : ""}`}><i />{draft.enabled ? "작동 중" : "꺼짐"}</span></header>
     {!data.slackConnected && <div className="workspace-settings-note management-slack-note"><Hash size={16} /><div><b>Slack 연결 후 관리 봇을 설정할 수 있습니다</b><p>관리 봇은 워크스페이스 공용 채널로 리포트를 보냅니다. 위의 Slack 연결을 먼저 완료해 주세요.</p></div></div>}
     {!canManage && <div className="workspace-settings-note"><Eye size={16} /><p>관리 봇 설정은 읽기 전용입니다. Owner 또는 Admin이 발송 항목과 시간을 변경할 수 있습니다.</p></div>}
 
-    <div className="management-bot-grid">
-      <section className="management-bot-config">
-        <div className="management-bot-toggle"><div><b>매일 워크스페이스 관리 리포트</b><p>선택한 요일과 시간에 최신 데이터를 다시 계산합니다.</p></div><label><input type="checkbox" aria-label="워크스페이스 관리 봇 사용" checked={draft.enabled} disabled={!canManage || !data.slackConnected} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /><span /></label></div>
-        <fieldset className="management-signal-picker"><legend>정리할 정보와 Urgency</legend>{(Object.keys(managementBotSignalMeta) as ManagementBotSignal[]).map((signal) => { const meta = managementBotSignalMeta[signal]; const group = data.snapshot.groups.find((entry) => entry.signal === signal); return <label key={signal} className={meta.tone}><input type="checkbox" checked={draft.signals.includes(signal)} disabled={!canManage} onChange={() => toggleSignal(signal)} /><span><b>{meta.label}</b><small>{meta.detail}</small></span><em>{group?.count ?? 0}</em></label>; })}</fieldset>
-        <div className="management-schedule-grid"><label><span>발송 시간</span><input type="time" step="900" value={draft.reportTime} disabled={!canManage} onChange={(event) => setDraft({ ...draft, reportTime: event.target.value })} /></label><label><span>시간대</span><select value={draft.timezone} disabled={!canManage} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label></div>
+    <div className="management-bot-config compact">
+        <div className="management-bot-toggle"><div><b>매일 워크스페이스 관리 리포트</b><p>선택한 요일과 시간에 최신 데이터를 다시 계산합니다.</p></div><label><input type="checkbox" aria-label="워크스페이스 관리 봇 사용" checked={draft.enabled} disabled={!canManage || !data.slackConnected} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /><span aria-hidden="true" /><span className="sr-only">워크스페이스 관리 봇 사용</span></label></div>
+        <div className="management-schedule-grid core"><label><span>발송 시간</span><input type="time" step="900" value={draft.reportTime} disabled={!canManage} onChange={(event) => setDraft({ ...draft, reportTime: event.target.value })} /></label><label className="management-channel-field"><span>Slack 발송 대상</span><select aria-label="Slack 발송 채널" value={draft.channelId} disabled={!canManage || !data.slackConnected} onChange={(event) => setDraft({ ...draft, channelId: event.target.value })}><option value="">채널 선택</option>{draft.channelId && !data.channels.some((channel) => channel.id === draft.channelId) && <option value={draft.channelId}>#{draft.channelName || draft.channelId}</option>}{data.channels.map((channel) => <option value={channel.id} key={channel.id}>#{channel.name}{channel.isPrivate ? " · 비공개" : ""}</option>)}</select></label></div>
         <div className="management-weekdays" aria-label="관리 리포트 발송 요일">{weekdayLabels.map((label, day) => <button type="button" className={draft.weekdays.includes(day) ? "active" : ""} aria-pressed={draft.weekdays.includes(day)} disabled={!canManage} onClick={() => toggleDay(day)} key={label}>{label}</button>)}</div>
-        <label className="management-channel-field"><span>Slack 발송 채널</span><select value={draft.channelId} disabled={!canManage || !data.slackConnected} onChange={(event) => setDraft({ ...draft, channelId: event.target.value })}><option value="">채널 선택</option>{draft.channelId && !data.channels.some((channel) => channel.id === draft.channelId) && <option value={draft.channelId}>#{draft.channelName || draft.channelId}</option>}{data.channels.map((channel) => <option value={channel.id} key={channel.id}>#{channel.name}{channel.isPrivate ? " · 비공개" : ""}</option>)}</select></label>
+        <details className="bot-advanced-settings"><summary>고급 설정 <ChevronDown size={14} /></summary><div><label className="management-timezone-field"><span>시간대</span><select value={draft.timezone} disabled={!canManage} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label><fieldset className="management-signal-picker"><legend>정리할 정보와 Urgency</legend>{(Object.keys(managementBotSignalMeta) as ManagementBotSignal[]).map((signal) => { const meta = managementBotSignalMeta[signal]; return <label key={signal} className={meta.tone}><input type="checkbox" checked={draft.signals.includes(signal)} disabled={!canManage} onChange={() => toggleSignal(signal)} /><span><b>{meta.label}</b><small>{meta.detail}</small></span><span className="sr-only">관리 리포트 정리 항목 선택</span></label>; })}</fieldset>{(draft.lastSentAt || draft.lastError) && <p className={`management-bot-last ${draft.lastError ? "error" : ""}`}>{draft.lastError ? `최근 전송 실패 · ${draft.lastError}` : `최근 전송 · ${formatDateTime(draft.lastSentAt!)}`}</p>}</div></details>
         {error && <p className="management-bot-error" role="alert">{error}</p>}
         {canManage && <div className="management-bot-actions"><button onClick={() => void save(false)} disabled={saving || draft.signals.length === 0 || draft.weekdays.length === 0}>{saving ? "저장 중" : "설정 저장"}</button><button onClick={() => void save(true)} disabled={saving || !draft.channelId || draft.signals.length === 0}>테스트 보내기</button></div>}
-        {(draft.lastSentAt || draft.lastError) && <p className={`management-bot-last ${draft.lastError ? "error" : ""}`}>{draft.lastError ? `최근 전송 실패 · ${draft.lastError}` : `최근 전송 · ${formatDateTime(draft.lastSentAt!)}`}</p>}
-      </section>
-
-      <section className="management-bot-preview"><header><div><span>LIVE PREVIEW</span><h4>{data.snapshot.date} 관리 요약</h4></div><b>{data.snapshot.totalCount}개</b></header><div>{data.snapshot.groups.map((group) => { const meta = managementBotSignalMeta[group.signal]; return <article className={meta.tone} key={group.signal}><header><span>{meta.label}</span><b>{group.count}</b></header>{group.items.length ? <ul>{group.items.slice(0, 5).map((item) => <li key={item.id}><a href={item.kind === "project" ? `/?project=${encodeURIComponent(item.id)}` : `/?task=${encodeURIComponent(item.id)}`}><span>{item.title}</span><small>{item.kind === "project" ? "Project" : "Task"}{item.dueDate ? ` · ${item.dueDate}` : ""}</small></a></li>)}</ul> : <p>해당 항목이 없습니다.</p>}{group.count > 5 && <small>외 {group.count - 5}개</small>}</article>; })}</div></section>
     </div>
+  </section>;
+}
+
+type WorkspaceBotId = "daily" | "management" | "automation";
+
+function BotAccordionRow({ id, icon: Icon, title, description, status, summary, expanded, onToggle, children }: { id: WorkspaceBotId; icon: LucideIcon; title: string; description: string; status: string; summary: string; expanded: boolean; onToggle: (id: WorkspaceBotId) => void; children: ReactNode }) {
+  const panelId = `workspace-bot-panel-${id}`;
+  return <section className={`bot-accordion-row ${expanded ? "open" : ""}`}>
+    <button type="button" className="bot-accordion-trigger" aria-expanded={expanded} aria-controls={panelId} onClick={() => onToggle(id)}><span className="bot-accordion-icon"><Icon size={17} /></span><span className="bot-accordion-copy"><b>{title}</b><small>{description}</small><em>{summary}</em></span><span className={`bot-accordion-status ${status === "사용 중" || status === "설정 완료" ? "active" : ""}`}>{status}</span><ChevronDown className="bot-accordion-chevron" size={16} /></button>
+    <div id={panelId} className="bot-accordion-panel" hidden={!expanded}>{children}</div>
   </section>;
 }
 
 function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError, workspaceName, canManageSlack, onSlackChange, onRefresh, onNotice }: { slack: SlackConnectionStatus | null; slackOAuthIssue: SlackOAuthIssue | null; loading: boolean; loadError: boolean; workspaceName: string; canManageSlack: boolean; onSlackChange: (status: SlackConnectionStatus | null) => void; onRefresh: () => void; onNotice: (message: string) => void }) {
   const [disconnectingSlack, setDisconnectingSlack] = useState(false);
+  const [openBot, setOpenBot] = useState<WorkspaceBotId | null>(() => {
+    if (typeof window === "undefined") return null;
+    const value = new URLSearchParams(window.location.search).get("bot");
+    return value === "daily" || value === "management" || value === "automation" ? value : null;
+  });
+  const [botSummaries, setBotSummaries] = useState<Record<WorkspaceBotId, { status: string; summary: string }>>({
+    daily: { status: "설정 확인", summary: "시간과 대상 멤버를 설정합니다" },
+    management: { status: "설정 확인", summary: "시간과 발송 채널을 설정합니다" },
+    automation: { status: "설정 확인", summary: "추천 규칙 또는 직접 규칙을 만듭니다" },
+  });
   const slackState = loadError ? "error" : slack?.state ?? "service_unavailable";
   const slackConnected = Boolean(slack?.connected && slackState !== "service_unavailable" && slackState !== "error");
   const connectedSlackName = slack?.connectedTeam?.name || slack?.teamName || "Slack";
   const slackAction = slackState === "connected" ? "연결 완료" : slackState === "setup_required" ? "초기 설정 필요" : slackState === "reauthorization_required" ? "권한 업데이트 필요" : slackState === "workspace_disconnected" ? "연결 필요" : "잠시 사용 불가";
+  const displayedBotSummaries = slackConnected ? botSummaries : {
+    daily: { status: "연결 필요", summary: "Slack 연결 후 설정할 수 있습니다" },
+    management: { status: "연결 필요", summary: "Slack 연결 후 설정할 수 있습니다" },
+    automation: { status: "연결 필요", summary: "Slack 연결 후 설정할 수 있습니다" },
+  };
+
+  useEffect(() => {
+    function syncBotFromHistory() {
+      const value = new URLSearchParams(window.location.search).get("bot");
+      setOpenBot(value === "daily" || value === "management" || value === "automation" ? value : null);
+    }
+    window.addEventListener("popstate", syncBotFromHistory);
+    return () => window.removeEventListener("popstate", syncBotFromHistory);
+  }, []);
+
+  const updateDailySummary = useCallback((status: string, summary: string) => setBotSummaries((current) => ({ ...current, daily: { status, summary } })), []);
+  const updateManagementSummary = useCallback((status: string, summary: string) => setBotSummaries((current) => ({ ...current, management: { status, summary } })), []);
+  const updateAutomationSummary = useCallback((status: string, summary: string) => setBotSummaries((current) => ({ ...current, automation: { status, summary } })), []);
+
+  function toggleBot(id: WorkspaceBotId) {
+    const next = openBot === id ? null : id;
+    setOpenBot(next);
+    const url = new URL(window.location.href);
+    if (next) url.searchParams.set("bot", next); else url.searchParams.delete("bot");
+    window.history.pushState(window.history.state, "", url);
+  }
 
   function connectSlack() {
     if (!canManageSlack || !slack || !["workspace_disconnected", "reauthorization_required"].includes(slack.state)) return;
@@ -6474,12 +6539,14 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
           : slackState === "reauthorization_required" && canManageSlack ? <button className="slack-primary-action" onClick={connectSlack}>권한 업데이트</button>
           : <span className="integration-role-note">관리자가 권한을 업데이트해야 합니다.</span>}
       </section>}
-      <SlackDailySettingsPanel connected={slackConnected} canManage={canManageSlack} teamName={connectedSlackName} onNotice={onNotice} />
-      <WorkspaceManagementBot canManage={canManageSlack} onNotice={onNotice} />
-      <SlackAutomationManager connected={slackConnected} canManage={canManageSlack} workspaceName={workspaceName} onNotice={onNotice} />
       {slackState === "reauthorization_required" && <div className="integration-state-message warning"><AlertTriangle size={17} /><div><b>새 봇 기능 권한이 필요합니다</b><p>권한 업데이트 전까지 일부 DM·채널 기능이 작동하지 않을 수 있습니다.</p></div></div>}
       {slackConnected && canManageSlack && <details className="slack-advanced-settings"><summary>Slack 연결 관리 <ChevronDown size={14} /></summary><div><button className="secondary-danger" onClick={() => void disconnectSlack()} disabled={disconnectingSlack}>{disconnectingSlack ? "연결 해제 중" : "Slack 연결 해제"}</button></div></details>}
     </section>
+    <div className="bot-accordion" aria-label="워크스페이스 봇 목록">
+      <BotAccordionRow id="daily" icon={Bot} title="데일리 봇" description="멤버별 데일리 DM과 선택한 공유 채널에 알립니다." status={displayedBotSummaries.daily.status} summary={displayedBotSummaries.daily.summary} expanded={openBot === "daily"} onToggle={toggleBot}><SlackDailySettingsPanel active={openBot === "daily"} connected={slackConnected} canManage={canManageSlack} teamName={connectedSlackName} onSummary={updateDailySummary} onNotice={onNotice} /></BotAccordionRow>
+      <BotAccordionRow id="management" icon={Activity} title="관리 봇" description="정보 부족과 긴급 업무를 정해진 시간에 정리합니다." status={displayedBotSummaries.management.status} summary={displayedBotSummaries.management.summary} expanded={openBot === "management"} onToggle={toggleBot}><WorkspaceManagementBot active={openBot === "management"} canManage={canManageSlack} onSummary={updateManagementSummary} onNotice={onNotice} /></BotAccordionRow>
+      <BotAccordionRow id="automation" icon={Zap} title="업무 자동화 봇" description="Task 생성과 상태 변경을 조건에 맞춰 알립니다." status={displayedBotSummaries.automation.status} summary={displayedBotSummaries.automation.summary} expanded={openBot === "automation"} onToggle={toggleBot}><SlackAutomationManager active={openBot === "automation"} connected={slackConnected} canManage={canManageSlack} workspaceName={workspaceName} onSummary={updateAutomationSummary} onNotice={onNotice} /></BotAccordionRow>
+    </div>
   </section>;
 }
 
@@ -6502,7 +6569,7 @@ type SlackOnboardingResult = {
   schedules: Array<{ memberId: string; status: "scheduled" | "failed"; postAt: number | null; error?: string }>;
 };
 
-function SlackDailySettingsPanel({ connected, canManage, teamName, onNotice }: { connected: boolean; canManage: boolean; teamName: string; onNotice: (message: string) => void }) {
+function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSummary, onNotice }: { active: boolean; connected: boolean; canManage: boolean; teamName: string; onSummary: (status: string, summary: string) => void; onNotice: (message: string) => void }) {
   const [admin, setAdmin] = useState<SlackDailyAdminData | null>(null);
   const [channels, setChannels] = useState<Array<{ id: string; name: string; isPrivate: boolean; isMember: boolean }>>([]);
   const [editing, setEditing] = useState(false);
@@ -6511,12 +6578,12 @@ function SlackDailySettingsPanel({ connected, canManage, teamName, onNotice }: {
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [result, setResult] = useState<SlackOnboardingResult | null>(null);
-  const dailyBotStatus = !connected ? "Slack 연결 필요" : loadError ? "불러오기 실패" : !admin ? "확인 중" : admin.setupComplete ? "설정 완료" : "초기 설정 필요";
-  const dailyBotHeading = <header className="workspace-daily-bot-heading"><span><Bot size={17} /></span><div><small>DAILY BOT</small><h4>데일리 봇</h4><p>멤버별 데일리 DM과 팀 공유 채널의 발송 요일·시간을 관리합니다.</p></div><em>{dailyBotStatus}</em></header>;
+  const loadedRef = useRef(false);
 
   useEffect(() => {
-    if (!connected || !canManage) return;
-    let active = true;
+    if (!active || !connected || !canManage || loadedRef.current) return;
+    loadedRef.current = true;
+    let mounted = true;
     void Promise.all([
       fetch("/api/slack/daily/settings").then(async (response) => {
         const data = await response.json() as SlackDailyAdminData & { error?: string };
@@ -6529,13 +6596,21 @@ function SlackDailySettingsPanel({ connected, canManage, teamName, onNotice }: {
         return data.channels ?? [];
       }),
     ]).then(([nextAdmin, nextChannels]) => {
-      if (!active) return;
+      if (!mounted) return;
       setAdmin(nextAdmin);
       setChannels(nextChannels);
+      const targetCount = nextAdmin.members.filter((member) => member.linked && member.preference.enabled).length;
+      const days = nextAdmin.settings.weekdays.join(",") === "1,2,3,4,5" ? "평일" : nextAdmin.settings.weekdays.map((day) => ["일", "월", "화", "수", "목", "금", "토"][day]).join("·");
+      onSummary(nextAdmin.setupComplete ? "설정 완료" : "설정 필요", `${days} ${nextAdmin.settings.reminderTime} · ${targetCount}명 · ${nextAdmin.channels.length ? nextAdmin.channels.map((channel) => `#${channel.name}`).join(", ") : "DM 전용"}`);
       setLoadError(false);
-    }).catch(() => { if (active) setLoadError(true); });
-    return () => { active = false; };
-  }, [connected, canManage, loadAttempt]);
+    }).catch(() => { if (mounted) { setLoadError(true); onSummary("불러오기 실패", "설정을 다시 확인해 주세요"); } });
+    return () => { mounted = false; };
+  }, [active, connected, canManage, loadAttempt, onSummary]);
+
+  useEffect(() => {
+    if (connected || !active) return;
+    onSummary("연결 필요", "Slack 연결 후 설정할 수 있습니다");
+  }, [active, connected, onSummary]);
 
   async function completeSetup() {
     if (!admin) return;
@@ -6559,6 +6634,9 @@ function SlackDailySettingsPanel({ connected, canManage, teamName, onNotice }: {
       setAdmin(data.admin);
       setResult(data);
       setEditing(false);
+      const targetCount = data.admin.members.filter((member) => member.linked && member.preference.enabled).length;
+      const days = data.admin.settings.weekdays.join(",") === "1,2,3,4,5" ? "평일" : data.admin.settings.weekdays.map((day) => ["일", "월", "화", "수", "목", "금", "토"][day]).join("·");
+      onSummary("설정 완료", `${days} ${data.admin.settings.reminderTime} · ${targetCount}명 · ${data.admin.channels.length ? data.admin.channels.map((channel) => `#${channel.name}`).join(", ") : "DM 전용"}`);
       const failed = data.schedules.some((entry) => entry.status === "failed") || data.tests.dm.status === "failed" || data.tests.channels.some((entry) => entry.status === "failed");
       onNotice(failed ? "설정은 저장했습니다. 실패한 테스트만 고급 설정에서 다시 시도해 주세요." : "Slack 연결과 데일리 테스트를 완료했습니다.");
     } catch (error) {
@@ -6592,34 +6670,34 @@ function SlackDailySettingsPanel({ connected, canManage, teamName, onNotice }: {
     }
   }
 
-  if (!connected) return <section className="workspace-daily-bot-section">{dailyBotHeading}<div className="slack-daily-locked"><LockKeyhole size={18} /><div><b>Slack 연결 후 데일리 봇을 설정할 수 있습니다</b><p>발송 요일·시간·대상 멤버·공유 채널 설정은 그대로 유지되며, 위의 Slack 연결을 완료하면 바로 활성화됩니다.</p></div></div></section>;
-  if (!canManage) return <section className="workspace-daily-bot-section">{dailyBotHeading}<section className="slack-connected-summary"><div><CheckCircle2 size={18} /><p><b>{teamName} 연결 완료</b><span>관리자가 설정한 시간에 내 Slack DM으로 데일리를 받을 수 있습니다.</span></p></div></section></section>;
-  if (loadError) return <section className="workspace-daily-bot-section">{dailyBotHeading}<section className="integration-state-message error"><AlertTriangle size={17} /><div><b>Slack 설정을 불러오지 못했습니다</b><p>연결은 유지됩니다. 잠시 후 다시 확인해 주세요.</p></div><button onClick={() => { setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }}>다시 불러오기</button></section></section>;
-  if (!admin) return <section className="workspace-daily-bot-section">{dailyBotHeading}<div className="slack-daily-loading"><LoaderCircle className="spin" size={15} />Slack 사용자와 채널을 자동으로 확인하고 있습니다.</div></section>;
+  if (!active && !admin) return null;
+  if (!connected) return <div className="slack-daily-locked"><LockKeyhole size={18} /><div><b>Slack 연결 후 데일리 봇을 설정할 수 있습니다</b><p>기존 설정은 그대로 유지되며 Slack 연결을 완료하면 다시 사용할 수 있습니다.</p></div></div>;
+  if (!canManage) return <section className="slack-connected-summary"><div><CheckCircle2 size={18} /><p><b>{teamName} 연결 완료</b><span>관리자가 설정한 시간에 내 Slack DM으로 데일리를 받을 수 있습니다.</span></p></div></section>;
+  if (loadError) return <section className="integration-state-message error"><AlertTriangle size={17} /><div><b>Slack 설정을 불러오지 못했습니다</b><p>연결은 유지됩니다. 잠시 후 다시 확인해 주세요.</p></div><button onClick={() => { loadedRef.current = false; setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }}>다시 불러오기</button></section>;
+  if (!admin) return <div className="slack-daily-loading"><LoaderCircle className="spin" size={15} />Slack 사용자와 채널을 자동으로 확인하고 있습니다.</div>;
 
   const showSetup = !admin.setupComplete || editing;
   const targetMembers = admin.members.filter((member) => member.linked && member.preference.enabled);
   const nextReminder = targetMembers.flatMap((member) => member.reminder?.postAt ? [member.reminder.postAt] : []).sort((a, b) => a - b)[0];
   const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 
-  return <section className="workspace-daily-bot-section">{dailyBotHeading}<div className="slack-one-button-flow">
+  return <div className="slack-one-button-flow">
     {showSetup ? <section className="slack-onboarding-card" aria-labelledby="slack-onboarding-title">
       <header><div><span>{admin.setupComplete ? "SETTINGS" : "ONE-TIME SETUP"}</span><h4 id="slack-onboarding-title">{admin.setupComplete ? "Slack 데일리 설정 변경" : "Slack 초기 설정"}</h4><p>요일·시간·대상·공유 채널만 정하면 예약과 테스트까지 한 번에 처리합니다.</p></div>{admin.setupComplete && <button type="button" onClick={() => setEditing(false)}>취소</button>}</header>
-      <div className="slack-onboarding-grid">
+      <div className="slack-onboarding-grid single">
         <label><span>발송 시간</span><input aria-label="Slack 데일리 발송 시간" type="time" value={admin.settings.reminderTime} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, reminderTime: event.target.value } })} /></label>
-        <label><span>시간대</span><select aria-label="Slack 데일리 시간대" value={admin.settings.timezone} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, timezone: event.target.value } })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label>
       </div>
       <fieldset className="slack-onboarding-weekdays"><legend>발송 요일</legend><div>{weekdayLabels.map((label, day) => <label key={label}><input type="checkbox" checked={admin.settings.weekdays.includes(day)} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, weekdays: event.target.checked ? [...admin.settings.weekdays, day].sort() : admin.settings.weekdays.filter((entry) => entry !== day) } })} /><span>{label}</span></label>)}</div></fieldset>
-      <fieldset className="slack-onboarding-members"><legend>알림 받을 멤버</legend><p>OKRPTR와 Slack 이메일이 같은 멤버는 자동 연결했습니다.</p><div>{admin.members.map((member) => <label key={member.memberId} className={member.linked ? "" : "disabled"}><input aria-label={`${member.displayName} Slack 알림 대상`} type="checkbox" disabled={!member.linked} checked={member.linked && member.preference.enabled} onChange={(event) => setAdmin({ ...admin, members: admin.members.map((entry) => entry.memberId === member.memberId ? { ...entry, preference: { ...entry.preference, enabled: event.target.checked } } : entry) })} /><span><b>{member.displayName}</b><small>{member.linked ? member.slackDisplayName || member.email : "Slack 이메일이 일치하지 않아 미연결"}</small></span></label>)}</div></fieldset>
+      <fieldset className="slack-onboarding-members"><legend>알림 받을 멤버</legend><div className="bot-target-shortcut"><p>OKRPTR와 Slack 이메일이 같은 멤버는 자동 연결했습니다.</p><button type="button" onClick={() => setAdmin({ ...admin, members: admin.members.map((member) => member.linked ? { ...member, preference: { ...member.preference, enabled: true } } : member) })}>연결된 멤버 전체 선택</button></div><div>{admin.members.map((member) => <label key={member.memberId} className={member.linked ? "" : "disabled"}><input aria-label={`${member.displayName} Slack 알림 대상`} type="checkbox" disabled={!member.linked} checked={member.linked && member.preference.enabled} onChange={(event) => setAdmin({ ...admin, members: admin.members.map((entry) => entry.memberId === member.memberId ? { ...entry, preference: { ...entry.preference, enabled: event.target.checked } } : entry) })} /><span><b>{member.displayName}</b><small>{member.linked ? member.slackDisplayName || member.email : "Slack 이메일이 일치하지 않아 미연결"}</small></span></label>)}</div></fieldset>
       <fieldset className="slack-onboarding-channels"><legend>데일리 공유 채널</legend><label className="slack-no-channel"><input aria-label="채널 공유 안 함" type="radio" name="slack-channel-sharing" checked={admin.channels.length === 0} onChange={() => setAdmin({ ...admin, channels: [] })} /><span><b>채널 공유 안 함</b><small>개인 DM만 사용합니다.</small></span></label>{channels.map((channel) => <label key={channel.id}><input aria-label={`${channel.name} Slack 공유 채널`} type="checkbox" checked={admin.channels.some((entry) => entry.id === channel.id)} onChange={(event) => setAdmin({ ...admin, channels: event.target.checked ? [...admin.channels, channel] : admin.channels.filter((entry) => entry.id !== channel.id) })} /><span><b>#{channel.name}</b><small>{channel.isPrivate ? "비공개 · 봇 참여 중" : channel.isMember ? "공개 · 봇 참여 중" : "공개 · 선택 시 봇 자동 참여"}</small></span></label>)}</fieldset>
-      <footer><button className="slack-primary-action" type="button" disabled={busy || admin.settings.weekdays.length === 0} onClick={() => void completeSetup()}>{busy ? <LoaderCircle className="spin" size={14} /> : <CheckCircle2 size={14} />}{busy ? "설정·테스트 중" : "설정 완료"}</button></footer>
+      <details className="bot-advanced-settings"><summary>고급 설정 <ChevronDown size={14} /></summary><div><label className="daily-timezone-field"><span>시간대</span><select aria-label="Slack 데일리 시간대" value={admin.settings.timezone} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, timezone: event.target.value } })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label></div></details><footer><button className="slack-primary-action" type="button" disabled={busy || admin.settings.weekdays.length === 0} onClick={() => void completeSetup()}>{busy ? <LoaderCircle className="spin" size={14} /> : <CheckCircle2 size={14} />}{busy ? "설정·테스트 중" : "설정 완료"}</button></footer>
     </section> : <section className="slack-connected-summary">
       <div className="slack-connected-title"><CheckCircle2 size={19} /><p><b>{teamName} 연결 완료</b><span>Slack 승인부터 데일리 예약까지 준비되었습니다.</span></p><button type="button" onClick={() => setEditing(true)}>설정 변경</button></div>
       <dl><div><dt>대상</dt><dd>{targetMembers.length}명</dd></div><div><dt>다음 발송</dt><dd>{nextReminder ? new Date(nextReminder * 1000).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "예약 확인 필요"}</dd></div><div><dt>공유 채널</dt><dd>{admin.channels.length ? admin.channels.map((channel) => `#${channel.name}`).join(", ") : "공유 안 함"}</dd></div></dl>
       {result && <div className="slack-test-results" role="status"><p className={result.tests.dm.status}><span>{result.tests.dm.status === "sent" ? "설치자 테스트 DM 성공" : result.tests.dm.status === "skipped" ? "설치자 DM 테스트 생략" : `테스트 DM 실패 · ${result.tests.dm.error || "다시 시도 필요"}`}</span>{result.tests.dm.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("dm", result.tests.dm.memberId)}>재시도</button>}</p>{result.tests.channels.map((channel) => <p key={channel.channelId} className={channel.status}><span>{channel.status === "sent" ? `#${channel.channelName} 테스트 성공` : `#${channel.channelName} 실패 · ${channel.error || "다시 시도 필요"}`}</span>{channel.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("channel", channel.channelId)}>재시도</button>}</p>)}{result.schedules.filter((entry) => entry.status === "failed").map((entry) => <p key={entry.memberId} className="failed"><span>예약 실패 · {admin.members.find((member) => member.memberId === entry.memberId)?.displayName || entry.memberId}</span><button disabled={busy} onClick={() => void retrySetupResult("schedule", null)}>재시도</button></p>)}</div>}
     </section>}
     {admin.setupComplete && <details className="slack-advanced-settings" onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}><summary>멤버 연결·실패 기록 <ChevronDown size={14} /></summary>{advancedOpen && <SlackDailyAdvancedSettings connected canManage mode="workspace" onNotice={onNotice} />}</details>}
-  </div></section>;
+  </div>;
 }
 
 function SlackDailyAdvancedSettings({ connected, canManage, mode = "workspace", onNotice }: { connected: boolean; canManage: boolean; mode?: "personal" | "workspace"; onNotice: (message: string) => void }) {
@@ -6725,30 +6803,56 @@ async function fetchSlackAutomationData() {
   return { automations: data.automations ?? [], deliveries: data.deliveries ?? [] };
 }
 
-function SlackAutomationManager({ connected, canManage, workspaceName, onNotice }: { connected: boolean; canManage: boolean; workspaceName: string; onNotice: (message: string) => void }) {
+const slackAutomationRecommendations = [
+  { id: "blocked", name: "막힘 상태 알림", description: "Task가 막힘 상태가 되면 바로 알립니다.", triggerType: "task_status_changed" as const, triggerStatus: "blocked", messageTemplate: "업무가 막힘 상태로 변경되었습니다.\n*{{title}}*\n우선순위: {{priority}} · {{workspace}}" },
+  { id: "created", name: "새 Task 알림", description: "새 Task가 만들어지면 담당 채널에 알립니다.", triggerType: "task_created" as const, triggerStatus: "", messageTemplate: slackAutomationDefaults.task_created },
+] as const;
+
+function SlackAutomationManager({ active, connected, canManage, workspaceName, onSummary, onNotice }: { active: boolean; connected: boolean; canManage: boolean; workspaceName: string; onSummary: (status: string, summary: string) => void; onNotice: (message: string) => void }) {
   const confirmAction = useAppConfirm();
   const [automations, setAutomations] = useState<SlackAutomation[]>([]);
   const [deliveries, setDeliveries] = useState<SlackAutomationDelivery[]>([]);
-  const [loading, setLoading] = useState(connected);
+  const [channels, setChannels] = useState<Array<{ id: string; name: string; isPrivate: boolean; isMember: boolean }>>([]);
+  const [recommendedChannels, setRecommendedChannels] = useState<Record<string, string>>({ blocked: "", created: "" });
+  const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<SlackAutomationDraft>(emptySlackAutomationDraft());
   const [formOpen, setFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const loadedRef = useRef(false);
 
   useEffect(() => {
-    if (!connected) return;
-    let active = true;
-    void fetchSlackAutomationData()
-      .then((data) => {
-        if (!active) return;
+    if (!active || !connected || loadedRef.current) return;
+    loadedRef.current = true;
+    let mounted = true;
+    setLoading(true);
+    void Promise.all([
+      fetchSlackAutomationData(),
+      fetch("/api/slack/channels?joinable=1").then(async (response) => {
+        const data = await response.json() as { channels?: Array<{ id: string; name: string; isPrivate: boolean; isMember: boolean }>; error?: string };
+        if (!response.ok) throw new Error(data.error || "Slack 채널을 불러오지 못했습니다.");
+        return data.channels ?? [];
+      }),
+    ])
+      .then(([data, nextChannels]) => {
+        if (!mounted) return;
         setAutomations(data.automations);
         setDeliveries(data.deliveries);
+        setChannels(nextChannels);
+        const activeCount = data.automations.filter((entry) => entry.active).length;
+        onSummary(activeCount ? "사용 중" : data.automations.length ? "중지" : "설정 필요", `활성 규칙 ${activeCount}개 · 전체 ${data.automations.length}개`);
       })
-      .catch((error: unknown) => { if (active) onNotice(error instanceof Error ? error.message : "자동화를 불러오지 못했습니다."); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [connected, onNotice]);
+      .catch((error: unknown) => { if (mounted) { onSummary("불러오기 실패", "설정을 다시 확인해 주세요"); onNotice(error instanceof Error ? error.message : "자동화를 불러오지 못했습니다."); } })
+      .finally(() => { if (mounted) { setLoading(false); setLoaded(true); } });
+    return () => { mounted = false; };
+  }, [active, connected, onNotice, onSummary]);
+
+  useEffect(() => {
+    if (connected || !active) return;
+    onSummary("연결 필요", "Slack 연결 후 설정할 수 있습니다");
+  }, [active, connected, onSummary]);
 
   async function loadAutomations(showLoading = true) {
     if (showLoading) setLoading(true);
@@ -6756,6 +6860,8 @@ function SlackAutomationManager({ connected, canManage, workspaceName, onNotice 
       const data = await fetchSlackAutomationData();
       setAutomations(data.automations);
       setDeliveries(data.deliveries);
+      const activeCount = data.automations.filter((entry) => entry.active).length;
+      onSummary(activeCount ? "사용 중" : data.automations.length ? "중지" : "설정 필요", `활성 규칙 ${activeCount}개 · 전체 ${data.automations.length}개`);
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "자동화를 불러오지 못했습니다.");
     } finally {
@@ -6775,6 +6881,27 @@ function SlackAutomationManager({ connected, canManage, workspaceName, onNotice 
     setFormOpen(true);
   }
 
+  async function createRecommendedAutomation(recommendation: (typeof slackAutomationRecommendations)[number]) {
+    const channelId = recommendedChannels[recommendation.id];
+    if (!channelId) { onNotice("추천 자동화를 보낼 Slack 채널을 선택해 주세요."); return; }
+    const duplicate = automations.find((entry) => entry.channelId === channelId && entry.triggerType === recommendation.triggerType && entry.triggerStatus === recommendation.triggerStatus);
+    if (duplicate) { onNotice(`같은 채널에 '${duplicate.name}' 규칙이 이미 있습니다.`); return; }
+    setBusyId(`recommended:${recommendation.id}`);
+    try {
+      const response = await fetch("/api/slack/automations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: recommendation.name, triggerType: recommendation.triggerType, triggerStatus: recommendation.triggerStatus, channelId, messageTemplate: recommendation.messageTemplate, active: true }) });
+      const data = await response.json() as { automation?: SlackAutomation; error?: string };
+      if (!response.ok || !data.automation) throw new Error(data.error || "추천 자동화를 만들지 못했습니다.");
+      const next = [data.automation, ...automations];
+      setAutomations(next);
+      onSummary("사용 중", `활성 규칙 ${next.filter((entry) => entry.active).length}개 · 전체 ${next.length}개`);
+      onNotice(`'${recommendation.name}' 추천 자동화를 만들었습니다.`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "추천 자동화를 만들지 못했습니다.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function saveAutomation(event: FormEvent) {
     event.preventDefault();
     if (!draft.name.trim() || !draft.channelId.trim() || !draft.messageTemplate.trim()) { onNotice("이름, 채널 ID, 메시지를 모두 입력해 주세요."); return; }
@@ -6787,7 +6914,12 @@ function SlackAutomationManager({ connected, canManage, workspaceName, onNotice 
       });
       const data = await response.json() as { automation?: SlackAutomation; error?: string };
       if (!response.ok || !data.automation) throw new Error(data.error || "자동화를 저장하지 못했습니다.");
-      setAutomations((current) => editingId ? current.map((entry) => entry.id === editingId ? data.automation! : entry) : [data.automation!, ...current]);
+      setAutomations((current) => {
+        const next = editingId ? current.map((entry) => entry.id === editingId ? data.automation! : entry) : [data.automation!, ...current];
+        const activeCount = next.filter((entry) => entry.active).length;
+        onSummary(activeCount ? "사용 중" : next.length ? "중지" : "설정 필요", `활성 규칙 ${activeCount}개 · 전체 ${next.length}개`);
+        return next;
+      });
       setFormOpen(false);
       setEditingId(null);
       onNotice(editingId ? "Slack 자동화를 수정했습니다." : "Slack 자동화를 만들었습니다. 테스트 전송으로 확인해 보세요.");
@@ -6804,7 +6936,12 @@ function SlackAutomationManager({ connected, canManage, workspaceName, onNotice 
       const response = await fetch("/api/slack/automations", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: automation.id, active: !automation.active }) });
       const data = await response.json() as { automation?: SlackAutomation; error?: string };
       if (!response.ok || !data.automation) throw new Error(data.error || "상태를 바꾸지 못했습니다.");
-      setAutomations((current) => current.map((entry) => entry.id === automation.id ? data.automation! : entry));
+      setAutomations((current) => {
+        const next = current.map((entry) => entry.id === automation.id ? data.automation! : entry);
+        const activeCount = next.filter((entry) => entry.active).length;
+        onSummary(activeCount ? "사용 중" : next.length ? "중지" : "설정 필요", `활성 규칙 ${activeCount}개 · 전체 ${next.length}개`);
+        return next;
+      });
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "상태를 바꾸지 못했습니다.");
     } finally {
@@ -6834,7 +6971,12 @@ function SlackAutomationManager({ connected, canManage, workspaceName, onNotice 
       const response = await fetch(`/api/slack/automations?id=${encodeURIComponent(automation.id)}`, { method: "DELETE" });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error || "자동화를 삭제하지 못했습니다.");
-      setAutomations((current) => current.filter((entry) => entry.id !== automation.id));
+      setAutomations((current) => {
+        const next = current.filter((entry) => entry.id !== automation.id);
+        const activeCount = next.filter((entry) => entry.active).length;
+        onSummary(activeCount ? "사용 중" : next.length ? "중지" : "설정 필요", `활성 규칙 ${activeCount}개 · 전체 ${next.length}개`);
+        return next;
+      });
       setDeliveries((current) => current.filter((entry) => entry.automationId !== automation.id));
       onNotice("Slack 자동화를 삭제했습니다.");
     } catch (error) {
@@ -6844,23 +6986,24 @@ function SlackAutomationManager({ connected, canManage, workspaceName, onNotice 
     }
   }
 
-  const automationHeading = <header className="workspace-daily-bot-heading"><span><Zap size={17} /></span><div><small>AUTOMATION BOT</small><h4>업무 자동화 봇</h4><p>Task 생성과 상태 변경을 조건에 맞춰 Slack 채널로 알려줍니다.</p></div><em>{connected ? "설정 가능" : "Slack 연결 필요"}</em></header>;
-  if (!connected) return <section className="workspace-automation-bot-section">{automationHeading}<div className="slack-automation-locked"><Zap size={16} /><div><b>Slack 연결 후 업무 자동화 봇을 설정할 수 있습니다</b><p>연결을 완료하면 업무 생성과 상태 변경을 채널로 자동 전송할 수 있습니다.</p></div></div></section>;
+  if (!active && !loaded) return null;
+  if (!connected) return <div className="slack-automation-locked"><Zap size={16} /><div><b>Slack 연결 후 업무 자동화 봇을 설정할 수 있습니다</b><p>연결을 완료하면 업무 생성과 상태 변경을 채널로 자동 전송할 수 있습니다.</p></div></div>;
 
-  return <section className="workspace-automation-bot-section">{automationHeading}<div className="slack-automation-manager">
-    <div className="slack-automation-heading"><div><span>AUTOMATION RULES</span><h3>자동화 규칙</h3><p>{workspaceName}의 업무 트리거마다 채널과 메시지를 정합니다.</p></div>{canManage && <button type="button" onClick={startCreate}><Plus size={14} />새 자동화</button>}</div>
+  return <div className="slack-automation-manager">
+    {canManage && <section className="automation-recommendations"><header><span>RECOMMENDED</span><h3>추천 자동화</h3><p>발송 채널만 고르면 추천 조건과 메시지로 바로 시작합니다.</p></header><div>{slackAutomationRecommendations.map((recommendation) => <article key={recommendation.id}><div><b>{recommendation.name}</b><p>{recommendation.description}</p></div><select aria-label={`${recommendation.name} Slack 채널`} value={recommendedChannels[recommendation.id]} onChange={(event) => setRecommendedChannels((current) => ({ ...current, [recommendation.id]: event.target.value }))}><option value="">채널 선택</option>{channels.map((channel) => <option value={channel.id} key={channel.id}>#{channel.name}{channel.isPrivate ? " · 비공개" : ""}</option>)}</select><button type="button" disabled={busyId === `recommended:${recommendation.id}`} onClick={() => void createRecommendedAutomation(recommendation)}>{busyId === `recommended:${recommendation.id}` ? <LoaderCircle className="spin" size={13} /> : <Plus size={13} />}추가</button></article>)}</div></section>}
+    <div className="slack-automation-heading"><div><span>CURRENT RULES</span><h3>현재 자동화</h3><p>{workspaceName}에서 작동하는 규칙입니다.</p></div>{canManage && <button type="button" onClick={startCreate}><Plus size={14} />직접 규칙 만들기</button>}</div>
     <div className="slack-bot-note"><Bot size={15} /><p>각 자동화는 독립된 규칙으로 작동하며, 메시지는 연결된 <b>OKRPTR 봇</b> 이름으로 전송됩니다.</p></div>
     {formOpen && <form className="slack-automation-form" onSubmit={(event) => void saveAutomation(event)}>
       <div className="slack-form-title"><b>{editingId ? "자동화 수정" : "새 자동화"}</b><button type="button" className="icon-button" onClick={() => setFormOpen(false)} aria-label="작성 취소"><X size={14} /></button></div>
       <div className="slack-form-grid">
         <label><span>자동화 이름</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="예: 새 업무 알림" maxLength={80} /></label>
-        <label><span>Slack 채널 ID</span><input value={draft.channelId} onChange={(event) => setDraft({ ...draft, channelId: event.target.value.toUpperCase() })} placeholder="C0123456789" maxLength={32} /></label>
+        <label><span>Slack 발송 채널</span><select value={draft.channelId} onChange={(event) => setDraft({ ...draft, channelId: event.target.value })}><option value="">채널 선택</option>{draft.channelId && !channels.some((channel) => channel.id === draft.channelId) && <option value={draft.channelId}>#{draft.channelId}</option>}{channels.map((channel) => <option value={channel.id} key={channel.id}>#{channel.name}{channel.isPrivate ? " · 비공개" : ""}</option>)}</select></label>
         <label><span>트리거</span><select value={draft.triggerType} onChange={(event) => { const triggerType = event.target.value as SlackAutomationTrigger; setDraft({ ...draft, triggerType, triggerStatus: "", messageTemplate: slackAutomationDefaults[triggerType] }); }}><option value="task_created">업무가 생성될 때</option><option value="task_status_changed">업무 상태가 바뀔 때</option></select></label>
         {draft.triggerType === "task_status_changed" && <label><span>바뀐 상태</span><select value={draft.triggerStatus} onChange={(event) => setDraft({ ...draft, triggerStatus: event.target.value })}><option value="">모든 상태</option>{(["backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked"] as ItemStatus[]).map((status) => <option value={status} key={status}>{statusLabel(status)}</option>)}</select></label>}
       </div>
       <label className="slack-message-field"><span>보낼 메시지</span><textarea value={draft.messageTemplate} onChange={(event) => setDraft({ ...draft, messageTemplate: event.target.value })} maxLength={3000} rows={4} /></label>
       <div className="slack-variable-row"><span>변수</span>{["{{title}}", "{{status}}", "{{from_status}}", "{{priority}}", "{{workspace}}"].map((variable) => <button type="button" key={variable} onClick={() => setDraft({ ...draft, messageTemplate: `${draft.messageTemplate}${draft.messageTemplate.endsWith(" ") || draft.messageTemplate.endsWith("\n") ? "" : " "}${variable}` })}>{variable}</button>)}</div>
-      <p className="slack-channel-help">채널 상세정보에서 채널 ID를 복사하세요. 비공개 채널은 OKRPTR 봇을 먼저 초대해야 합니다.</p>
+      <p className="slack-channel-help">비공개 채널은 OKRPTR 봇이 참여한 채널만 선택할 수 있습니다.</p>
       <div className="slack-form-actions"><label><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /><span>저장 즉시 활성화</span></label><div><button type="button" onClick={() => setFormOpen(false)}>취소</button><button type="submit" disabled={saving}>{saving ? <LoaderCircle className="spin" size={13} /> : <Check size={13} />}{saving ? "저장 중" : "저장"}</button></div></div>
     </form>}
     {loading ? <div className="slack-automation-loading"><LoaderCircle className="spin" size={16} />자동화를 불러오는 중</div> : automations.length === 0 ? <div className="slack-automation-empty"><Zap size={18} /><b>아직 자동화가 없습니다.</b><p>{canManage ? "새 자동화를 만들어 첫 Slack 알림을 보내보세요." : "워크스페이스 관리자가 자동화를 만들 수 있습니다."}</p></div> : <div className="slack-automation-list">{automations.map((automation) => <article key={automation.id} className={automation.active ? "" : "inactive"}>
@@ -6869,7 +7012,7 @@ function SlackAutomationManager({ connected, canManage, workspaceName, onNotice 
       {canManage && <div className="slack-automation-actions"><button type="button" onClick={() => void testSend(automation)} disabled={busyId === automation.id}>{busyId === automation.id ? <LoaderCircle className="spin" size={12} /> : <Send size={12} />}테스트</button><button type="button" onClick={() => void toggleAutomation(automation)} disabled={busyId === automation.id}>{automation.active ? "중지" : "활성화"}</button><button type="button" onClick={() => startEdit(automation)}><Pencil size={12} />수정</button><button type="button" className="danger" onClick={() => void removeAutomation(automation)} disabled={busyId === automation.id} aria-label={`${automation.name} 삭제`}><Trash2 size={12} /></button></div>}
     </article>)}</div>}
     {deliveries.length > 0 && <details className="slack-delivery-history"><summary>최근 전송 기록 <span>{deliveries.length}</span><ChevronDown size={13} /></summary><div>{deliveries.slice(0, 8).map((delivery) => <div key={delivery.id}><span className={`slack-delivery-dot ${delivery.status}`} /><p><b>{delivery.status === "sent" ? "전송 성공" : delivery.status === "failed" ? "전송 실패" : "전송 중"}</b><small>#{delivery.channelId} · {formatSlackAutomationTime(delivery.sentAt || delivery.createdAt)}</small>{delivery.error && <em>{delivery.error}</em>}</p></div>)}</div></details>}
-  </div></section>;
+  </div>;
 }
 
 function slackTriggerLabel(automation: SlackAutomation) {
@@ -6923,6 +7066,6 @@ function preferredIntroLanguage(): IntroLanguage {
   if (language.startsWith("es")) return "es";
   return "en";
 }
-function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", data: "Key Result와 Project에 외부 API 수치 연결", scrum: "내 Task를 기준으로 어제, 오늘, 막힘 정리", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "삭제한 Project·Task와 전체 데이터 정리 기록", integrations: "내 Google Calendar와 개인 Slack DM 연결" }[view]; }
+function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", data: "Key Result와 Project에 외부 API 수치 연결", scrum: "내 Task를 기준으로 어제, 오늘, 막힘 정리", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "삭제한 Project·Task와 전체 데이터 정리 기록", integrations: "내 Google Calendar와 개인 Slack DM 연결", billing: "워크스페이스 플랜, 사용량, 카드와 결제 기록 관리" }[view]; }
 function routineCadenceLabel(cadence: RoutineCadence) { return { daily: "매일", weekly: "매주", monthly: "매월" }[cadence]; }
 function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "due_soon") return "3"; return "P"; }

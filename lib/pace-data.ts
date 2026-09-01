@@ -57,12 +57,6 @@ import {
 import { decryptSlackSecret } from "@/lib/slack-oauth";
 import { syncDueKrDataConnectionsWithDb, syncKrDataConnectionWithDb } from "@/lib/kr-data-sync";
 import {
-  ACCOUNT_CONSENT_VERSION,
-  accountRegistrationRequired,
-  getAccountRegistrationStatus,
-  type AccountRegistrationRuntimeEnv,
-} from "@/lib/account-registration";
-import {
   defaultSlackAutomationTemplate,
   isSlackAutomationTrigger,
   normalizeSlackChannelId,
@@ -72,6 +66,14 @@ import {
   type SlackAutomationContext,
   type SlackAutomationTrigger,
 } from "@/lib/slack-automation";
+import {
+  ensureBillingSchema,
+  memberCanWrite,
+  releaseEditorSeat,
+  releaseProjectCreation,
+  reserveEditorSeat,
+  reserveProjectCreation,
+} from "@/lib/billing";
 
 export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "task"] as const;
 export const ITEM_STATUSES = ["backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked", "archived"] as const;
@@ -2332,12 +2334,13 @@ async function hashIntegrationToken(token: string) {
 
 export async function authorizeRequest(
   request: Request,
-  options: { allowViewerWrite?: boolean; allowIncompleteRegistration?: boolean } = {},
+  options: { allowViewerWrite?: boolean } = {},
 ): Promise<RequestAuthorization | Response> {
   // Run idempotent schema and account repairs before choosing an authentication
   // mechanism. This lets the first post-deploy session check complete the repair
   // without treating an unauthenticated request as a user or creating an account.
   await ensureSchema();
+  await ensureBillingSchema();
   const configuredToken = (env as RuntimeEnv).OKRPTR_API_TOKEN ?? (env as RuntimeEnv).OKITA_API_TOKEN ?? (env as RuntimeEnv).PACE_API_TOKEN;
   const suppliedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (suppliedToken?.startsWith("okrptr_")) {
@@ -2365,6 +2368,9 @@ export async function authorizeRequest(
       const role = membership.role as TeamRole;
       if (!options.allowViewerWrite && role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
         return Response.json({ error: "Viewer access is read-only." }, { status: 403 });
+      }
+      if (!options.allowViewerWrite && !["GET", "HEAD", "OPTIONS"].includes(request.method) && !(await memberCanWrite(token.workspaceId, token.userId, role))) {
+        return Response.json({ error: "플랜에서 선택된 활성 편집자가 아니므로 읽기 전용입니다.", code: "editor_read_only", upgradeUrl: "/?view=billing" }, { status: 403 });
       }
       return {
         ownerId: token.workspaceId,
@@ -2400,20 +2406,8 @@ export async function authorizeRequest(
       if (!options.allowViewerWrite && role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
         return Response.json({ error: "Viewer access is read-only." }, { status: 403 });
       }
-      const runtime = env as RuntimeEnv & AccountRegistrationRuntimeEnv;
-      if (!options.allowIncompleteRegistration && accountRegistrationRequired(runtime)) {
-        const registration = await getAccountRegistrationStatus(runtime, canonicalUserId);
-        if (!registration.completed) {
-          return Response.json({
-            error: "가입 확인을 완료해 주세요.",
-            code: "registration_required",
-            registration: {
-              user: { id: canonicalUserId, email: googleSession.email, displayName: membership.displayName, provider: "google" },
-              verificationConfigured: registration.verificationConfigured,
-              consentVersion: ACCOUNT_CONSENT_VERSION,
-            },
-          }, { status: 428, headers: { "Cache-Control": "no-store" } });
-        }
+      if (!options.allowViewerWrite && !["GET", "HEAD", "OPTIONS"].includes(request.method) && !(await memberCanWrite(membership.workspaceId, canonicalUserId, role))) {
+        return Response.json({ error: "플랜에서 선택된 활성 편집자가 아니므로 읽기 전용입니다.", code: "editor_read_only", upgradeUrl: "/?view=billing" }, { status: 403 });
       }
       return { ownerId: membership.workspaceId, userId: canonicalUserId, email: googleSession.email, displayName: membership.displayName, role, apiToken: false };
     } catch (error) {
@@ -3075,19 +3069,24 @@ export async function acceptWorkspaceInvitation(authorization: RequestAuthorizat
   )).limit(1);
   if (member && member.userId !== authorization.userId) throw new Error("This email is linked to another account");
   if (!member) {
-    const [createdMember] = await getDb().insert(workspaceMembers).values({
-      id: crypto.randomUUID(),
-      workspaceId: invitation.workspaceId,
-      userId: authorization.userId,
-      email: invitation.email,
-      displayName: displayNameForExistingMember(invitation.displayName, authorization.displayName, invitation.email),
-      role: invitation.role,
-      status: "active",
-      invitedByUserId: invitation.invitedByUserId,
-      createdAt: now,
-      updatedAt: now,
-    }).returning();
-    member = createdMember;
+    const editorReservation = await reserveEditorSeat(invitation.workspaceId, invitation.role);
+    try {
+      const [createdMember] = await getDb().insert(workspaceMembers).values({
+        id: crypto.randomUUID(),
+        workspaceId: invitation.workspaceId,
+        userId: authorization.userId,
+        email: invitation.email,
+        displayName: displayNameForExistingMember(invitation.displayName, authorization.displayName, invitation.email),
+        role: invitation.role,
+        status: "active",
+        invitedByUserId: invitation.invitedByUserId,
+        createdAt: now,
+        updatedAt: now,
+      }).returning();
+      member = createdMember;
+    } finally {
+      await releaseEditorSeat(editorReservation);
+    }
   }
   await getDb().update(workspaceInvitations).set({
     status: "accepted",
@@ -3113,6 +3112,7 @@ export async function acceptWorkspaceInvitation(authorization: RequestAuthorizat
 export async function updateTeamMember(ownerId: string, memberId: string, patch: { role?: Exclude<TeamRole, "owner">; displayName?: string }, currentUserId: string, canManage = false) {
   const member = await getWorkspaceMember(ownerId, memberId);
   const values: { role?: Exclude<TeamRole, "owner">; displayName?: string } = {};
+  let editorReservation: string | null = null;
   if (patch.role !== undefined) {
     if (!canManage) throw new Error("Owner or Admin access is required.");
     if (!(["admin", "member", "viewer"] as TeamRole[]).includes(patch.role)) throw new Error("Unsupported team role");
@@ -3126,8 +3126,13 @@ export async function updateTeamMember(ownerId: string, memberId: string, patch:
     values.displayName = displayName;
   }
   if (!Object.keys(values).length) throw new Error("No supported team member changes were provided");
+  if (member.role === "viewer" && values.role && values.role !== "viewer") editorReservation = await reserveEditorSeat(ownerId, values.role);
   const updated = { ...member, ...values, updatedAt: new Date().toISOString() };
-  await getDb().update(workspaceMembers).set({ ...values, updatedAt: updated.updatedAt }).where(eq(workspaceMembers.id, member.id));
+  try {
+    await getDb().update(workspaceMembers).set({ ...values, updatedAt: updated.updatedAt }).where(eq(workspaceMembers.id, member.id));
+  } finally {
+    await releaseEditorSeat(editorReservation);
+  }
   return serializeTeamMember(updated, currentUserId);
 }
 
@@ -3719,6 +3724,7 @@ export async function createOkrPlan(ownerId: string, userId: string, input: OkrP
   if (!specs.length) throw new Error("No OKR plan content to create");
 
   const projectSpec = specs.find((entry) => entry.kind === "project");
+  const projectQuotaReservation = projectSpec ? await reserveProjectCreation(ownerId) : null;
   let driMemberId = input.driMemberId?.trim() || null;
   if (projectSpec) {
     if (!driMemberId) {
@@ -3755,7 +3761,12 @@ export async function createOkrPlan(ownerId: string, userId: string, input: OkrP
       .bind(crypto.randomUUID(), ownerId, projectSpec.id, driMemberId, createdAt, createdAt));
   }
   statements.push(d1.prepare("UPDATE workspace_rules SET configured = 1, updated_at = ? WHERE workspace_id = ?").bind(createdAt, ownerId));
-  await d1.batch(statements);
+  try {
+    await d1.batch(statements);
+  } catch (error) {
+    await releaseProjectCreation(projectQuotaReservation);
+    throw error;
+  }
 
   const rows = await getDb().select().from(items).where(and(eq(items.ownerId, ownerId), inArray(items.id, specs.map((entry) => entry.id))));
   const byId = new Map(rows.map((row) => [row.id, row]));
@@ -3940,9 +3951,12 @@ export async function createItem(
   }
 
   const id = crypto.randomUUID();
-  const [created] = await getDb()
-    .insert(items)
-    .values({
+  const quotaReservation = kind === "project" ? await reserveProjectCreation(ownerId) : null;
+  let created: PaceItem;
+  try {
+    [created] = await getDb()
+      .insert(items)
+      .values({
       id,
       ownerId,
       cycleId,
@@ -3959,8 +3973,12 @@ export async function createItem(
       source,
       sourceRef: input.sourceRef ?? null,
       createdByUserId: input.createdByUserId ?? null,
-    })
-    .returning();
+      })
+      .returning();
+  } catch (error) {
+    await releaseProjectCreation(quotaReservation);
+    throw error;
+  }
 
   if (kind === "project") {
     for (const property of projectProperties.filter((entry) => !entry.systemKey)) {

@@ -9,6 +9,7 @@ import {
   updateTeamMember,
   type TeamRole,
 } from "@/lib/pace-data";
+import { BillingLimitError } from "@/lib/billing";
 
 export async function GET(request: Request) {
   const authorization = await authorizeRequest(request);
@@ -88,6 +89,7 @@ function forbidden() {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
+  if (error instanceof BillingLimitError) return Response.json({ error: message, code: error.code, ...error.details }, { status: 409 });
   const status = /already/i.test(message)
     ? 409
     : /owner or admin|access|only update your own/i.test(message)

@@ -126,8 +126,12 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /goToMobileHome/);
   assert.match(page, /aria-label="홈으로 이동"/);
   assert.match(page, /home: "AI 대화"/);
-  assert.match(page, /assistant-sidebar-tab/);
-  assert.match(page, /OKR 도우미/);
+  assert.doesNotMatch(page, /assistant-sidebar-tab/);
+  assert.match(page, /\{ id: "home", label: "AI 대화", icon: Bot \}/);
+  assert.match(page, /id="home-okr-chat-title".*AI 대화/);
+  assert.match(page, /assistant-target-picker/);
+  assert.match(page, /Objective, KR, Initiative, Project 검색/);
+  assert.match(page, /Project를 기준으로 이야기하겠습니다/);
   assert.match(page, /aria-label="AI 대화 열기"/);
   assert.match(page, /currentWorkspace\.role !== "owner"/);
   assert.match(page, /freshWorkspaceDataReady/);
@@ -141,8 +145,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /내 계정에 연결된 앱/);
   assert.match(page, /workspace-settings-trigger/);
   assert.match(page, /Slack 연결 후 데일리 봇을 설정할 수 있습니다/);
-  assert.match(page, /workspace-daily-bot-heading/);
-  assert.match(page, /워크스페이스 설정.*일반.*멤버.*그룹.*Project 설정.*봇 연동.*위험 구역/s);
+  assert.match(page, /bot-accordion-trigger/);
+  assert.match(page, /워크스페이스 설정.*일반.*멤버.*그룹.*Project 설정.*관리 요약.*봇 연동.*위험 구역/s);
   assert.match(page, /settings=workspace&tab=integrations/);
   assert.match(page, /자동화 봇/);
   assert.match(page, /업무가 생성될 때/);
@@ -477,34 +481,70 @@ test("ships atomic OKR file editing and safe Project recovery contracts", async 
   assert.match(paceData, /parent_id = \?, cycle_id = \?/);
 });
 
-test("separates required phone verification from optional marketing consent", async () => {
-  const [page, paceData, registration, phoneVerification, sendRoute, verifyRoute, privacy, terms, migration] = await Promise.all([
+test("uses Google verified email and separates optional email marketing consent", async () => {
+  const [page, paceData, marketing, marketingRoute, retiredRegistrationRoute, sendRoute, verifyRoute, privacy, terms, migration] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
-    readFile(new URL("../lib/account-registration.ts", import.meta.url), "utf8"),
-    readFile(new URL("../lib/phone-verification.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/marketing-consent.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/account/marketing-consent/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/account/registration/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/account/phone/send/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/account/phone/verify/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/privacy/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/terms/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../drizzle/0032_account_registration.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0034_billing_email.sql", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /선택 동의 · 동의하지 않아도 가입 가능/);
-  assert.match(page, /marketingDataConsent, electronicMarketingConsent/);
-  assert.match(page, /내 설정에서 언제든 철회/);
-  assert.match(page, /실명·PASS 인증이 아니라/);
-  assert.match(paceData, /ACCOUNT_REGISTRATION_REQUIRED/);
-  assert.match(paceData, /allowIncompleteRegistration/);
-  assert.match(registration, /marketingEligible: marketingDataConsent && electronicMarketingConsent && withinTwoYears/);
-  assert.match(registration, /phone_verification_requests/);
-  assert.match(phoneVerification, /VerificationCheck/);
-  assert.match(phoneVerification, /Channel: "sms"/);
-  assert.match(sendRoute, /requiredPrivacyConsent !== true \|\| body\.age14Confirmed !== true/);
-  assert.match(verifyRoute, /body\.marketingDataConsent === true/);
-  assert.match(privacy, /광고성 문자는 두 동의를 모두 유지한 사용자/);
+  assert.match(page, /Google이 확인한 이메일로 바로 시작하세요/);
+  assert.doesNotMatch(page, /function RegistrationScreen|\/api\/account\/phone\/send|휴대전화 소유 확인/);
+  assert.doesNotMatch(paceData, /registration_required|allowIncompleteRegistration/);
+  assert.match(page, /\/api\/account\/marketing-consent/);
+  assert.match(page, /마케팅 목적 개인정보 이용 설정/);
+  assert.match(page, /광고성 이메일 수신 설정/);
+  assert.match(marketing, /marketingEligible: marketingDataConsent && advertisingEmailConsent && !needsReaffirmation/);
+  assert.match(marketing, /2 \* 365 \* 24 \* 60 \* 60_000/);
+  assert.match(marketingRoute, /typeof payload\.marketingDataConsent !== "boolean"/);
+  assert.match(retiredRegistrationRoute, /account_registration_retired/);
+  assert.match(sendRoute, /phone_verification_retired/);
+  assert.match(verifyRoute, /phone_verification_retired/);
+  assert.match(privacy, /광고성 이메일은 두 동의를 모두 유지/);
+  assert.match(privacy, /전화번호와 원본 응답 전체는 저장하지 않습니다/);
   assert.match(terms, /서비스 이용 대가나 가입 조건이 아닙니다/);
-  assert.match(migration, /verification_provider.*legacy/s);
-  assert.match(migration, /account_consent_events/);
+  assert.match(migration, /email_marketing_consents/);
+  assert.match(migration, /UPDATE `account_registrations` SET `encrypted_phone` = ''/);
+  assert.match(migration, /DELETE FROM `phone_verification_requests`/);
+});
+
+test("ships workspace plans, fail-closed Payple billing, and one billing screen", async () => {
+  const [page, billingView, billing, statusRoute, sessionRoute, internalRoute, workflow, terms] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/billing-view.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/billing.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/billing/status/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/billing/payple/session/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/internal/billing/run/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/billing-hourly.yml", import.meta.url), "utf8"),
+    readFile(new URL("../app/terms/page.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /view=\{?"billing"\}?|navigateView\("billing"\)/);
+  assert.match(page, /<BillingView onNotice=\{showNotice\}/);
+  assert.match(billingView, /안전한 사전 배포 상태/);
+  assert.match(billingView, /Payple 실결제·이메일·예약 청구·환불 검증이 끝날 때까지/);
+  assert.match(billingView, /Project·AI는 한국시간 매월 1일 초기화/);
+  assert.match(billing, /free: \{ label: "Free", priceWon: 0, projectLimit: 10, editorLimit: 3, aiBudgetWon: 500 \}/);
+  assert.match(billing, /team: \{ label: "Team", priceWon: 11_000, projectLimit: 100, editorLimit: 10, aiBudgetWon: 2_000 \}/);
+  assert.match(billing, /business: \{ label: "Business", priceWon: 55_000, projectLimit: null, editorLimit: null, aiBudgetWon: 10_000 \}/);
+  assert.match(billing, /BILLING_ENFORCEMENT_ENABLED\?\.toLocaleLowerCase\(\) === "true"/);
+  assert.match(billing, /priorClaim.*billing_trial_claims/s);
+  assert.match(billing, /\[1, 3, 5, 7\]/);
+  assert.match(billing, /UPDATE billing_sessions SET used_at = \?/);
+  assert.match(billing, /okrptr-reactivate-.*stableTimestamp/s);
+  assert.match(billing, /BILLING_ENFORCEMENT_STARTED_AT/);
+  assert.match(statusRoute, /getBillingStatus/);
+  assert.match(sessionRoute, /payload\?\.contractAccepted === true/);
+  assert.match(internalRoute, /verifyInternalBillingRequest/);
+  assert.match(workflow, /schedule:/);
+  assert.match(workflow, /x-okrptr-signature/);
+  assert.match(terms, /Free 0원, Team 11,000원, Business 55,000원/);
 });
 
 test("serves hashed assets with immutable browser and edge caching", async () => {
@@ -832,17 +872,6 @@ test("uses warm-neutral KR and Initiative hierarchy surfaces", async () => {
   assert.doesNotMatch(styles, /--kr-soft|--initiative-soft|#42627a|#426653|#e8eff4|#e8f0eb/);
 });
 
-test("keeps the mobile OKR list header and KR rows aligned", async () => {
-  const [page, css] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
-  ]);
-  assert.match(page, /activeView === "okr" \? "okr-page-header"/);
-  assert.match(css, /\.okr-page-header \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto/);
-  assert.match(css, /\.okr-page-header > \.primary-action \{[^}]*min-width: max-content[^}]*white-space: nowrap/);
-  assert.match(css, /\.okr-tree-kr-row \{[^}]*grid-template-areas: "chevron badge copy progress" "\. \. count progress"/);
-});
-
 test("uses a restrained large-desktop density without scaling smaller viewports", async () => {
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   const largeDesktop = styles.match(/@media \(min-width: 1800px\) \{([\s\S]*)\}\s*$/)?.[1] ?? "";
@@ -912,15 +941,21 @@ test("implements a workspace management bot for data quality and urgency reporti
   for (const signal of ["missing_due_date", "missing_owner", "overdue", "completed_yesterday", "due_today"]) {
     assert.match(domain, new RegExp(signal));
   }
-  assert.doesNotMatch(page, /id: "management", label: "관리 봇"/);
+  assert.match(page, /id: "summary", label: "관리 요약"/);
   assert.match(page, /id: "integrations", label: "봇 연동"/);
-  assert.match(page, /rawTab === "management" \? "integrations"/);
+  assert.match(page, /rawTab === "management" \? "summary"/);
+  assert.match(page, /function WorkspaceManagementSummary/);
   assert.match(page, /function WorkspaceManagementBot/);
-  assert.match(page, /<WorkspaceManagementBot canManage=\{canManageSlack\}/);
+  assert.match(page, /<WorkspaceManagementBot active=\{openBot === "management"\}/);
   assert.match(page, /업무 자동화 봇/);
   assert.match(page, /워크스페이스 관리 봇 사용/);
-  assert.match(page, /LIVE PREVIEW/);
-  assert.match(styles, /\.management-bot-grid/);
+  assert.doesNotMatch(page, /LIVE PREVIEW/);
+  assert.match(page, /막힘 상태 알림/);
+  assert.match(page, /새 Task 알림/);
+  assert.match(styles, /\.bot-accordion/);
+  assert.match(styles, /\.management-summary-groups/);
+  assert.match(route, /mode === "settings"/);
+  assert.match(route, /mode === "summary"/);
   assert.match(route, /canManageTeam/);
   assert.match(route, /testWorkspaceManagementBot/);
   assert.match(domain, /activity_log/);

@@ -18,6 +18,7 @@ import {
   type ItemPriority,
   type ItemStatus,
 } from "@/lib/pace-data";
+import { BillingLimitError } from "@/lib/billing";
 
 export async function GET(request: Request) {
   const authorization = await authorizeRequest(request);
@@ -179,6 +180,7 @@ function asNullableString(value: unknown) {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
+  if (error instanceof BillingLimitError) return Response.json({ error: message, code: error.code, ...error.details }, { status: 409 });
   const status = /required|requires|must be|cannot have|not found|only an|archive|restore|active workspace|assignment/i.test(
     message,
   )

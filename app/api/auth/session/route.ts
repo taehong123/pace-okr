@@ -4,7 +4,7 @@ import { readGoogleSession } from "@/lib/google-session";
 import type { GoogleRuntimeEnv } from "@/lib/google-oauth";
 
 export async function GET(request: Request) {
-  const authorization = await authorizeRequest(request, { allowViewerWrite: true, allowIncompleteRegistration: true });
+  const authorization = await authorizeRequest(request, { allowViewerWrite: true });
   if (authorization instanceof Response) return authorization;
   const googleSession = await readGoogleSession(request, (env as GoogleRuntimeEnv).GOOGLE_TOKEN_ENCRYPTION_KEY);
   const hostname = new URL(request.url).hostname;

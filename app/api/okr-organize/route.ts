@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { authorizeRequest, ensureWorkspace, getAiUsageSummary, recordAiUsageEvent } from "@/lib/pace-data";
+import { BillingLimitError, assertAiBudget } from "@/lib/billing";
 
 type RuntimeEnv = typeof env & {
   OPENAI_API_KEY?: string;
@@ -312,17 +313,24 @@ function systemInstruction(mode: ConversationMode) {
     return `${common} Teach OKR through a short guided conversation. Organize exactly one Objective with every distinct supported Key Result, and attach every Initiative only to the Key Result it clearly supports. If the user gives multiple Objective candidates, do not combine them: leave the OKR tree unchanged and ask which single Objective to use. Initiative is optional. Project is a later step and must stay empty until one Initiative is selected after this tree is saved.`;
   }
   if (mode === "coach") {
-    return `${common} Act as a context-aware OKR coach. Inspect the supplied hierarchy and focus item. Continue from the earliest useful gap: missing Key Result, missing Initiative, missing first Project, or an active blocker. For an Objective target, return every new Key Result in keyResults with its clearly attached Initiatives. For a Key Result target, return every new Initiative in targetInitiatives. For an Initiative target, only return Project details. When multiple parents are plausible, ask the user to choose instead of guessing.`;
+    return `${common} Act as a context-aware OKR coach. Inspect the supplied hierarchy and focus item. Continue from the earliest useful gap: missing Key Result, missing Initiative, missing first Project, or an active blocker. For an Objective target, return every new Key Result in keyResults with its clearly attached Initiatives. For a Key Result target, return every new Initiative in targetInitiatives. For an Initiative target, only return Project details. For a Project target, discuss progress, blockers, and next Tasks without creating or moving Objective, Key Result, or Initiative nodes. When multiple parents are plausible, ask the user to choose instead of guessing.`;
   }
   return `${common} Respond to greetings, product questions, general work questions, and factual questions directly. For casual or informational messages, leave every plan field empty and usually leave questions empty. When the user gives a real goal, organize exactly one Objective with every distinct Key Result and each Key Result's clearly related Initiatives. If an Initiative's parent is ambiguous, keep it in unassignedInitiatives rather than guessing. Project, Task, and Routine are separate later creation flows.`;
 }
 
 async function checkAiUsageLimit(runtime: RuntimeEnv, ownerId: string, userId: string, inputChars: number) {
-  const budgetWon = envNumber(runtime.OKRPTR_AI_FREE_BUDGET_WON, 500);
   const dailyLimit = Math.max(1, Math.round(envNumber(runtime.OKRPTR_AI_MAX_REQUESTS_PER_DAY, 40)));
   const minuteLimit = Math.max(1, Math.round(envNumber(runtime.OKRPTR_AI_MAX_REQUESTS_PER_MINUTE, 5)));
-  const budgetWonMicros = Math.round(budgetWon * 1_000_000);
   const summary = await getAiUsageSummary(ownerId, userId);
+  let planBudget: Awaited<ReturnType<typeof assertAiBudget>>;
+  try {
+    planBudget = await assertAiBudget(ownerId, userId);
+  } catch (error) {
+    if (error instanceof BillingLimitError) {
+      return Response.json({ error: error.message, code: error.code, ...error.details, options: limitOptions() }, { status: 402 });
+    }
+    throw error;
+  }
 
   if (summary.requestsThisMinute >= minuteLimit) {
     return Response.json({
@@ -335,7 +343,7 @@ async function checkAiUsageLimit(runtime: RuntimeEnv, ownerId: string, userId: s
     return Response.json({
       error: "오늘의 무료 AI 정리 횟수를 모두 사용했습니다.",
       code: "ai_daily_limit_reached",
-      usage: usagePayload(summary.spentWonMicros, budgetWonMicros, summary.requestsToday),
+      usage: planBudget.limitWon === null ? undefined : usagePayload(planBudget.spentWonMicros, planBudget.limitWon * 1_000_000, summary.requestsToday),
       options: limitOptions(),
     }, { status: 429 });
   }
@@ -345,11 +353,12 @@ async function checkAiUsageLimit(runtime: RuntimeEnv, ownerId: string, userId: s
     estimateTokensFromChars(inputChars) + 200,
     maxOutputTokens,
   );
-  if (summary.spentWonMicros + reservedCostWonMicros > budgetWonMicros) {
+  const budgetWonMicros = planBudget.limitWon === null ? null : planBudget.limitWon * 1_000_000;
+  if (budgetWonMicros !== null && planBudget.spentWonMicros + reservedCostWonMicros > budgetWonMicros) {
     return Response.json({
       error: "무료 AI 정리 예산을 모두 사용했습니다.",
       code: "ai_free_limit_reached",
-      usage: usagePayload(summary.spentWonMicros, budgetWonMicros, summary.requestsToday),
+      usage: usagePayload(planBudget.spentWonMicros, budgetWonMicros, summary.requestsToday),
       options: limitOptions(),
     }, { status: 402 });
   }

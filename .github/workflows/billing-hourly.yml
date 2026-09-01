@@ -1,0 +1,29 @@
+name: OKRPTR hourly billing
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: okrptr-hourly-billing
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call signed billing runner
+        env:
+          BILLING_RUN_URL: ${{ secrets.OKRPTR_BILLING_RUN_URL }}
+          BILLING_RUN_SECRET: ${{ secrets.OKRPTR_INTERNAL_BILLING_SECRET }}
+        run: |
+          test -n "$BILLING_RUN_URL"
+          test -n "$BILLING_RUN_SECRET"
+          timestamp="$(date +%s)000"
+          signature="$(printf '%s' "$timestamp" | openssl dgst -sha256 -hmac "$BILLING_RUN_SECRET" -binary | xxd -p -c 256)"
+          curl --fail-with-body --silent --show-error --retry 2 \
+            -X POST "$BILLING_RUN_URL" \
+            -H "x-okrptr-timestamp: $timestamp" \
+            -H "x-okrptr-signature: $signature"

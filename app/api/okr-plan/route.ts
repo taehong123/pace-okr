@@ -4,6 +4,7 @@ import {
   ensureWorkspace,
   type OkrPlanInput,
 } from "@/lib/pace-data";
+import { BillingLimitError } from "@/lib/billing";
 
 const targetKinds = new Set(["objective", "key_result", "initiative"]);
 
@@ -35,6 +36,7 @@ export async function POST(request: Request) {
     return Response.json(result, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
+    if (error instanceof BillingLimitError) return Response.json({ error: message, code: error.code, ...error.details }, { status: 409 });
     const status = /required|not found|must belong|does not match|already exists|active workspace member|at most|only accepts|supports|selected Initiative/i.test(message) ? 400 : 500;
     return Response.json({ error: message }, { status });
   }

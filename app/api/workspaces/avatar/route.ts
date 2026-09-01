@@ -10,6 +10,7 @@ import {
   saveWorkspaceAvatar,
   type RequestAuthorization,
 } from "@/lib/pace-data";
+import { BillingLimitError, assertAiBudget } from "@/lib/billing";
 
 type AvatarRuntimeEnv = typeof env & {
   WORKSPACE_AVATARS?: R2Bucket;
@@ -224,9 +225,14 @@ async function checkImageUsageLimit(runtime: AvatarRuntimeEnv, authorization: Re
   if (imageRequestsToday >= positiveNumber(runtime.OKRPTR_AI_MAX_IMAGE_REQUESTS_PER_DAY, 5)) {
     return Response.json({ error: "오늘의 워크스페이스 이미지 생성 횟수를 모두 사용했습니다." }, { status: 429 });
   }
-  const budgetWonMicros = positiveNumber(runtime.OKRPTR_AI_FREE_BUDGET_WON, 500) * 1_000_000;
-  if (summary.spentWonMicros + imageCostWonMicros(runtime) > budgetWonMicros) {
-    return Response.json({ error: "무료 AI 생성 예산을 모두 사용했습니다." }, { status: 429 });
+  try {
+    const planBudget = await assertAiBudget(authorization.ownerId, authorization.userId);
+    if (planBudget.limitWon !== null && planBudget.spentWonMicros + imageCostWonMicros(runtime) > planBudget.limitWon * 1_000_000) {
+      return Response.json({ error: "이번 달 AI 안전 한도에 도달했습니다.", code: "ai_budget_exceeded", resetsAt: planBudget.resetsAt }, { status: 402 });
+    }
+  } catch (error) {
+    if (error instanceof BillingLimitError) return Response.json({ error: error.message, code: error.code, ...error.details }, { status: 402 });
+    throw error;
   }
   return null;
 }

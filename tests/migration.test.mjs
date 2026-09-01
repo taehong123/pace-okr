@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-test("grandfathers existing users but requires registration for users created after the migration", async () => {
+test("preserves the historical registration migration for legacy database compatibility", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`
     PRAGMA foreign_keys = ON;
@@ -1134,5 +1134,78 @@ test("separates Google identities from users and pending invitations from active
     (id, workspace_id, email, role, expires_at, invited_by_user_id)
     VALUES ('duplicate-invite', 'team', 'new@example.com', 'viewer', '2026-09-30T00:00:00.000Z', 'owner')`), /UNIQUE/i);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM workspace_members").get().count, 0);
+  db.close();
+});
+
+test("adds isolated workspace billing and email consent records while scrubbing phone data", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE users (id TEXT PRIMARY KEY, email_normalized TEXT NOT NULL);
+    CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_user_id TEXT NOT NULL);
+    CREATE TABLE workspace_members (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      user_id TEXT, role TEXT NOT NULL DEFAULT 'member', status TEXT NOT NULL DEFAULT 'active'
+    );
+    CREATE TABLE account_registrations (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      encrypted_phone TEXT NOT NULL DEFAULT '', phone_hash TEXT NOT NULL DEFAULT '',
+      phone_last_four TEXT NOT NULL DEFAULT '', verification_provider TEXT NOT NULL DEFAULT '',
+      phone_verified_at TEXT
+    );
+    CREATE TABLE phone_verification_requests (id TEXT PRIMARY KEY, user_id TEXT NOT NULL);
+    CREATE TABLE app_migrations (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    INSERT INTO users (id, email_normalized) VALUES ('owner-a', 'owner-a@example.com'), ('owner-b', 'owner-b@example.com');
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace-a', 'A', 'owner-a'), ('workspace-b', 'B', 'owner-b');
+    INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('member-a', 'workspace-a', 'owner-a', 'owner');
+    INSERT INTO account_registrations
+      (user_id, encrypted_phone, phone_hash, phone_last_four, verification_provider, phone_verified_at)
+      VALUES ('owner-a', 'encrypted', 'hash', '1234', 'twilio_verify', CURRENT_TIMESTAMP);
+    INSERT INTO phone_verification_requests (id, user_id) VALUES ('request', 'owner-a');
+  `);
+  const migration = await readFile(new URL("../drizzle/0034_billing_email.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+
+  assert.deepEqual({ ...db.prepare(`SELECT encrypted_phone, phone_hash, phone_last_four, verification_provider, phone_verified_at
+    FROM account_registrations WHERE user_id = 'owner-a'`).get() }, {
+    encrypted_phone: "", phone_hash: "", phone_last_four: "", verification_provider: "", phone_verified_at: null,
+  });
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM phone_verification_requests").get().count, 0);
+
+  db.exec(`
+    INSERT INTO email_marketing_consents
+      (user_id, marketing_data_consent, advertising_email_consent, policy_version, reaffirm_after)
+      VALUES ('owner-a', 1, 0, '2026-09-01', '2028-09-01T00:00:00.000Z');
+    INSERT INTO email_marketing_consent_events
+      (id, user_id, consent_type, granted, policy_version)
+      VALUES ('consent-event', 'owner-a', 'marketing_data', 1, '2026-09-01');
+    INSERT INTO workspace_subscriptions (workspace_id, billing_owner_user_id)
+      VALUES ('workspace-a', 'owner-a'), ('workspace-b', 'owner-b');
+    INSERT INTO billing_trial_claims (id, billing_owner_user_id, payer_hash, workspace_id)
+      VALUES ('trial-claim', 'owner-a', 'payer-hash', 'workspace-a');
+    INSERT INTO billing_transactions
+      (id, workspace_id, order_id, idempotency_key, kind, plan, price_won, status, retained_until)
+      VALUES ('transaction', 'workspace-a', 'order', 'idempotency', 'charge', 'team', 11000, 'paid', '2031-09-01T00:00:00.000Z');
+    INSERT INTO project_monthly_usage (workspace_id, period_key, created_count)
+      VALUES ('workspace-a', '2026-09', 1), ('workspace-b', '2026-09', 2);
+    INSERT INTO workspace_editor_selections (workspace_id, member_id)
+      VALUES ('workspace-a', 'member-a');
+  `);
+  assert.deepEqual({ ...db.prepare("SELECT plan, status FROM workspace_subscriptions WHERE workspace_id = 'workspace-a'").get() }, {
+    plan: "free", status: "free",
+  });
+  assert.throws(() => db.exec("INSERT INTO project_monthly_usage (workspace_id, period_key) VALUES ('workspace-a', '2026-09')"), /UNIQUE/i);
+  assert.equal(db.prepare("SELECT advertising_email_consent FROM email_marketing_consents WHERE user_id = 'owner-a'").get().advertising_email_consent, 0);
+
+  db.exec("DELETE FROM workspaces WHERE id = 'workspace-a'");
+  for (const table of ["workspace_subscriptions", "project_monthly_usage", "workspace_editor_selections"]) {
+    assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE workspace_id = 'workspace-a'`).get().count, 0, `${table} should cascade with workspace deletion`);
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM billing_trial_claims WHERE billing_owner_user_id = 'owner-a'").get().count, 1, "trial claims must survive workspace deletion to prevent repeated trials");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM billing_transactions WHERE workspace_id = 'workspace-a'").get().count, 1, "billing transactions must survive for the five-year retention period");
+  db.exec("DELETE FROM users WHERE id = 'owner-a'");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM email_marketing_consents").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM email_marketing_consent_events").get().count, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM billing_trial_claims WHERE billing_owner_user_id = 'owner-a'").get().count, 1);
   db.close();
 });

@@ -985,6 +985,195 @@ export const slackLinkTokens = sqliteTable(
   (table) => [index("idx_slack_link_tokens_expires").on(table.expiresAt)],
 );
 
+export const emailMarketingConsents = sqliteTable(
+  "email_marketing_consents",
+  {
+    userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+    marketingDataConsent: integer("marketing_data_consent", { mode: "boolean" }).notNull().default(false),
+    marketingDataConsentAt: text("marketing_data_consent_at"),
+    advertisingEmailConsent: integer("advertising_email_consent", { mode: "boolean" }).notNull().default(false),
+    advertisingEmailConsentAt: text("advertising_email_consent_at"),
+    policyVersion: text("policy_version").notNull().default("2026-09-01"),
+    reaffirmAfter: text("reaffirm_after"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("idx_email_marketing_consents_eligibility").on(table.marketingDataConsent, table.advertisingEmailConsent, table.reaffirmAfter)],
+);
+
+export const emailMarketingConsentEvents = sqliteTable(
+  "email_marketing_consent_events",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    consentType: text("consent_type").notNull(),
+    granted: integer("granted", { mode: "boolean" }).notNull(),
+    policyVersion: text("policy_version").notNull(),
+    source: text("source").notNull().default("settings"),
+    occurredAt: text("occurred_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("idx_email_marketing_consent_events_user_time").on(table.userId, table.occurredAt)],
+);
+
+export const workspaceSubscriptions = sqliteTable(
+  "workspace_subscriptions",
+  {
+    workspaceId: text("workspace_id").primaryKey().references(() => workspaces.id, { onDelete: "cascade" }),
+    plan: text("plan").notNull().default("free"),
+    status: text("status").notNull().default("free"),
+    billingOwnerUserId: text("billing_owner_user_id").notNull(),
+    nextPlan: text("next_plan"),
+    trialStartedAt: text("trial_started_at"),
+    trialEndsAt: text("trial_ends_at"),
+    currentPeriodStartedAt: text("current_period_started_at"),
+    currentPeriodEndsAt: text("current_period_ends_at"),
+    nextBillingAt: text("next_billing_at"),
+    cancelAtPeriodEnd: integer("cancel_at_period_end", { mode: "boolean" }).notNull().default(false),
+    graceEndsAt: text("grace_ends_at"),
+    retryCount: integer("retry_count").notNull().default(0),
+    firstPaidAt: text("first_paid_at"),
+    lastPaidAt: text("last_paid_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_workspace_subscriptions_billing_due").on(table.status, table.nextBillingAt),
+    index("idx_workspace_subscriptions_billing_owner").on(table.billingOwnerUserId),
+  ],
+);
+
+export const billingPaymentMethods = sqliteTable(
+  "billing_payment_methods",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    encryptedBillingKey: text("encrypted_billing_key").notNull(),
+    payerHash: text("payer_hash").notNull(),
+    cardCompany: text("card_company").notNull().default(""),
+    maskedCard: text("masked_card").notNull().default(""),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    revokedAt: text("revoked_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_billing_payment_methods_active_workspace").on(table.workspaceId).where(sql`${table.active} = 1`),
+    index("idx_billing_payment_methods_payer").on(table.payerHash),
+  ],
+);
+
+export const billingSessions = sqliteTable(
+  "billing_sessions",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    plan: text("plan").notNull(),
+    priceWon: integer("price_won").notNull(),
+    consentedAt: text("consented_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    usedAt: text("used_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("idx_billing_sessions_expiry").on(table.expiresAt)],
+);
+
+export const billingTransactions = sqliteTable(
+  "billing_transactions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    orderId: text("order_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    kind: text("kind").notNull(),
+    plan: text("plan").notNull(),
+    priceWon: integer("price_won").notNull(),
+    status: text("status").notNull(),
+    paypleTransactionId: text("payple_transaction_id"),
+    receiptUrl: text("receipt_url"),
+    errorCode: text("error_code"),
+    periodStartedAt: text("period_started_at"),
+    periodEndsAt: text("period_ends_at"),
+    retainedUntil: text("retained_until").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_billing_transactions_order").on(table.orderId),
+    uniqueIndex("idx_billing_transactions_idempotency").on(table.idempotencyKey),
+    index("idx_billing_transactions_workspace_time").on(table.workspaceId, table.createdAt),
+  ],
+);
+
+export const projectMonthlyUsage = sqliteTable(
+  "project_monthly_usage",
+  {
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    periodKey: text("period_key").notNull(),
+    createdCount: integer("created_count").notNull().default(0),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_project_monthly_usage_workspace_period").on(table.workspaceId, table.periodKey),
+    index("idx_project_monthly_usage_period").on(table.periodKey),
+  ],
+);
+
+export const workspaceEditorSelections = sqliteTable(
+  "workspace_editor_selections",
+  {
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    memberId: text("member_id").notNull().references(() => workspaceMembers.id, { onDelete: "cascade" }),
+    selected: integer("selected", { mode: "boolean" }).notNull().default(true),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("idx_workspace_editor_selections_workspace_member").on(table.workspaceId, table.memberId)],
+);
+
+export const billingTrialClaims = sqliteTable(
+  "billing_trial_claims",
+  {
+    id: text("id").primaryKey(),
+    billingOwnerUserId: text("billing_owner_user_id").notNull(),
+    payerHash: text("payer_hash").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    claimedAt: text("claimed_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_billing_trial_claims_owner").on(table.billingOwnerUserId),
+    uniqueIndex("idx_billing_trial_claims_payer").on(table.payerHash),
+  ],
+);
+
+export const billingLeases = sqliteTable(
+  "billing_leases",
+  {
+    leaseKey: text("lease_key").primaryKey(),
+    holderId: text("holder_id").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+);
+
+export const billingNotifications = sqliteTable(
+  "billing_notifications",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    kind: text("kind").notNull(),
+    scheduledFor: text("scheduled_for").notNull(),
+    status: text("status").notNull().default("pending"),
+    providerMessageId: text("provider_message_id"),
+    lastError: text("last_error"),
+    sentAt: text("sent_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_billing_notifications_workspace_kind_schedule").on(table.workspaceId, table.kind, table.scheduledFor),
+    index("idx_billing_notifications_due").on(table.status, table.scheduledFor),
+  ],
+);
+
 export const trashRecords = sqliteTable(
   "trash_records",
   {
@@ -1048,4 +1237,8 @@ export type SlackMemberLink = typeof slackMemberLinks.$inferSelect;
 export type SlackDailySettings = typeof slackDailySettings.$inferSelect;
 export type SlackDailyReminder = typeof slackDailyReminders.$inferSelect;
 export type SlackDailyPublication = typeof slackDailyPublications.$inferSelect;
+export type EmailMarketingConsent = typeof emailMarketingConsents.$inferSelect;
+export type WorkspaceSubscription = typeof workspaceSubscriptions.$inferSelect;
+export type BillingPaymentMethod = typeof billingPaymentMethods.$inferSelect;
+export type BillingTransaction = typeof billingTransactions.$inferSelect;
 export type TrashRecord = typeof trashRecords.$inferSelect;
