@@ -225,12 +225,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 @keyframes loading-pulse { 0%, 100% { opacity: .48; } 50% { opacity: .92; } }
 
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 238px minmax(0, 1fr); background: var(--paper); }
-.sidebar { height: 100vh; position: sticky; top: 0; display: flex; flex-direction: column; padding: 9px 8px 10px; background: var(--sidebar); border-right: 1px solid var(--line); }
-.workspace-control { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 32px; gap: 2px; }
+.sidebar { position: sticky; z-index: 20; top: 0; height: 100vh; display: flex; flex-direction: column; padding: 9px 8px 10px; background: var(--sidebar); border-right: 1px solid var(--line); }
+.workspace-control { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 34px; gap: 3px; }
 .workspace-switcher { width: 100%; height: 42px; display: grid; grid-template-columns: 28px minmax(0, 1fr) 16px; align-items: center; gap: 9px; padding: 4px 7px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
 .workspace-switcher:hover, .workspace-switcher[aria-expanded="true"] { background: var(--hover); }
-.workspace-settings-trigger { width: 32px; height: 42px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
-.workspace-settings-trigger:hover { background: var(--hover); color: var(--ink); }
+.workspace-settings-trigger { width: 34px; height: 34px; align-self: center; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--ink); cursor: pointer; box-shadow: var(--shadow-raised); }
+.workspace-settings-trigger:hover { border-color: var(--line-strong); background: var(--hover); }
+.workspace-settings-trigger:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .brand-mark { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 4px; background: var(--ink); color: white; font-size: 13px; font-weight: 700; }
 .workspace-switcher > span:nth-child(2) { min-width: 0; display: grid; gap: 1px; }
 .workspace-switcher strong, .workspace-switcher small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -45,6 +45,7 @@ import {
   RotateCcw,
   Search,
   Send,
+  Settings,
   Settings2,
   Sparkles,
   Table2,
@@ -2009,7 +2010,7 @@ function WorkspaceApp() {
             <span><strong>{currentWorkspace?.name || "개인 워크스페이스"}</strong><small>{currentWorkspace?.personal ? "개인 워크스페이스" : "팀 워크스페이스"}</small></span>
             <ChevronDown size={14} />
           </button>
-          <button className="workspace-settings-trigger" onClick={() => openWorkspaceSettings("general")} aria-label="워크스페이스 설정" title="워크스페이스 설정"><Settings2 size={15} /></button>
+          <button className="workspace-settings-trigger" onClick={() => openWorkspaceSettings("general")} aria-label="워크스페이스 설정" title="워크스페이스 설정"><Settings size={17} /></button>
           {workspaceMenuOpen && (
             <div className="workspace-menu" role="menu" aria-label="워크스페이스 선택">
               <header><b>워크스페이스</b><span>{activeWorkspaces.length}</span></header>
@@ -2091,7 +2092,7 @@ function WorkspaceApp() {
       {mobileMenuOpen && (
         <OverlayDialog title="더보기 메뉴" variant="sheet" className="mobile-menu-backdrop" onRequestClose={() => setMobileMenuOpen(false)}>
           {(requestClose) => <aside className="mobile-menu-sheet">
-            <header><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : "팀 워크스페이스"}</small></div><span className="mobile-menu-header-actions"><button className="icon-button" onClick={() => openWorkspaceSettings("general")} aria-label="워크스페이스 설정"><Settings2 size={17} /></button><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="닫기"><X size={17} /></button></span></header>
+            <header><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : "팀 워크스페이스"}</small></div><span className="mobile-menu-header-actions"><button className="icon-button" onClick={() => openWorkspaceSettings("general")} aria-label="워크스페이스 설정"><Settings size={17} /></button><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="닫기"><X size={17} /></button></span></header>
             <div className="mobile-menu-list">
               {navItems.slice(4).map((entry) => { const Icon = entry.icon; return <button key={entry.id} onClick={() => { navigateView(entry.id); setMobileMenuOpen(false); }}><Icon size={16} /><span>{entry.label}</span><ChevronRight size={14} /></button>; })}
               <button onClick={() => { setMobileMenuOpen(false); setIntegrationOpen(true); }}><Link2 size={16} /><span>ChatGPT 연동</span><ChevronRight size={14} /></button>
@@ -2115,7 +2116,7 @@ function WorkspaceApp() {
             <House size={15} /><span>홈</span>
           </button>
           <ChevronRight size={13} /><b>{selectedProject ? "Project" : viewTitles[activeView]}</b>
-          <div><button className="mobile-assistant-trigger" aria-label="AI 대화 열기" title="AI 대화 열기" onClick={openAssistant}><span aria-hidden="true">🤖</span></button><button aria-label="워크스페이스 설정" title="워크스페이스 설정" onClick={() => openWorkspaceSettings("general")}><Settings2 size={15} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
+          <div><button className="mobile-assistant-trigger" aria-label="AI 대화 열기" title="AI 대화 열기" onClick={openAssistant}><span aria-hidden="true">🤖</span></button><button aria-label="워크스페이스 설정" title="워크스페이스 설정" onClick={() => openWorkspaceSettings("general")}><Settings size={16} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
         </header>
         <div className="page-body">
           {activeView !== "home" && !selectedProject && <header className="page-header">

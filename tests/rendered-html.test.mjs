@@ -925,3 +925,15 @@ test("keeps completion checkboxes visually compact while preserving mobile touch
   assert.match(styles, /\.task-check::before \{[^}]*width: 17px;[^}]*height: 17px/s);
   assert.match(styles, /\.workspace-topbar button, \.icon-button, \.task-check,[^}]*min-width: 44px; min-height: 44px/s);
 });
+
+test("keeps workspace controls visible above project checkboxes", async () => {
+  const [page, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /workspace-settings-trigger[\s\S]*?<Settings size=\{17\}/);
+  assert.match(styles, /\.sidebar \{[^}]*position: sticky;[^}]*z-index: 20;/s);
+  assert.match(styles, /\.workspace-settings-trigger \{[^}]*width: 34px;[^}]*height: 34px;[^}]*border: 1px solid var\(--line\)/s);
+  assert.match(styles, /\.workspace-menu \{[^}]*z-index: 50;/s);
+});
