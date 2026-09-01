@@ -1,12 +1,15 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const externalBaseUrl = process.env.OKRPTR_E2E_BASE_URL;
+const requestedWorkers = Number(process.env.OKRPTR_E2E_WORKERS ?? "1");
+const workers = Number.isInteger(requestedWorkers) && requestedWorkers > 0 ? requestedWorkers : 1;
 
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30_000,
   expect: { timeout: 8_000 },
-  fullyParallel: true,
+  fullyParallel: false,
+  workers,
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "github" : "list",
   use: {
