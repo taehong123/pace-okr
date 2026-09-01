@@ -708,8 +708,8 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .hierarchy-row.interactive { cursor: pointer; }
 .hierarchy-row.interactive:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--focus); outline-offset: -2px; }
 .type-icon { width: 23px; height: 23px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: 6px; background: var(--surface-muted); color: var(--muted); font-size: 8px; font-weight: 750; }
-.hierarchy .type-key_result { background: var(--kr-badge-bg); color: var(--kr-badge-text); }
-.hierarchy .type-initiative { background: var(--initiative-badge-bg); color: var(--initiative-badge-text); }
+.type-key_result { background: var(--kr-badge-bg); color: var(--kr-badge-text); }
+.type-initiative { background: var(--initiative-badge-bg); color: var(--initiative-badge-text); }
 .type-task { background: #edf3ec; color: #448361; }
 .type-project { background: #f3eeee; color: #9065b0; }
 .hierarchy-kind-key_result { border-color: var(--okr-card-border); border-left: 2px solid var(--kr-rail); background: var(--okr-card-bg); box-shadow: none; }
@@ -2427,7 +2427,7 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
 .assistant-example b, .assistant-target-options button span, .create-chat-nudge > div, .create-chat-nudge > button { color: var(--accent-strong); }
 .create-chat-nudge > button { border-color: color-mix(in srgb, var(--accent) 36%, var(--line)); background: var(--raised); }
 .okr-document-department input:focus, .okr-department-input input:focus { box-shadow: inset 0 0 0 1px var(--focus); }
-.okr-empty-icon, .type-key_result, .welcome-points > div:first-child > span, .team-avatar, .general-routine-icon { background: var(--accent-soft); color: var(--accent-strong); }
+.okr-empty-icon, .welcome-points > div:first-child > span, .team-avatar, .general-routine-icon { background: var(--accent-soft); color: var(--accent-strong); }
 .status-todo, .priority-medium { color: var(--accent) !important; }
 .settings-hint { background: color-mix(in srgb, var(--accent-soft) 64%, var(--raised)); }
 .settings-hint svg { color: var(--accent); }
@@ -2453,7 +2453,7 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
 .okr-file-read-objective { min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 10px; padding: 4px 2px 18px; border-bottom: 1px solid var(--line); }
 .okr-file-read-objective small, .okr-file-read-kr small, .okr-file-read-initiative small { display: block; margin-bottom: 3px; color: var(--muted); font-size: 9px; font-weight: 650; }
 .okr-file-read-objective h3 { margin: 0; font-size: 14px; line-height: 1.45; }
-.okr-file-read-kr { margin: 10px 0 0 14px; border-left: 2px solid var(--kr-rail); border-radius: 0 var(--radius-control) var(--radius-control) 0; background: color-mix(in srgb, var(--kr-badge-bg) 48%, var(--raised)); }
+.okr-file-read-kr { margin: 10px 0 0 14px; border-left: 2px solid var(--kr-rail); border-radius: 0 var(--radius-control) var(--radius-control) 0; background: var(--raised); }
 .okr-tree-row { width: 100%; min-width: 0; min-height: 50px; display: grid; align-items: center; gap: 9px; padding: 7px 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--ink); font: inherit; text-align: left; }
 button.okr-tree-row { cursor: pointer; }
 button.okr-tree-row:hover { background: color-mix(in srgb, var(--surface-hover) 72%, transparent); }
@@ -2468,7 +2468,7 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
 .okr-tree-count.empty { color: var(--faint); font-weight: 500; }
 .okr-tree-progress { color: var(--accent-strong); font-size: 11px; text-align: right; }
 .okr-tree-initiatives { padding: 0 8px 8px 28px; }
-.okr-file-read-initiative { margin-top: 6px; border-left: 1px solid var(--initiative-rail); background: color-mix(in srgb, var(--initiative-badge-bg) 32%, var(--raised)); }
+.okr-file-read-initiative { margin-top: 6px; border-left: 1px solid var(--initiative-rail); background: var(--raised); }
 .okr-tree-initiative-row { grid-template-columns: 14px 25px minmax(0, 1fr) auto; min-height: 46px; }
 .okr-tree-projects { padding: 0 7px 7px 28px; }
 .okr-tree-project { margin-top: 6px; border: 1px solid color-mix(in srgb, var(--line) 75%, transparent); border-radius: var(--radius-control); background: var(--raised); }
@@ -2505,16 +2505,16 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
 .okr-file-objective-editor textarea { min-height: 48px; padding: 8px; font-size: 12px; font-weight: 620; line-height: 1.45; resize: vertical; }
 .okr-file-key-results { display: grid; gap: 10px; padding: 12px; }
 .okr-file-key-result-editor { overflow: hidden; border: 1px solid var(--line); border-left: 2px solid var(--kr-rail); border-radius: var(--radius-control); background: var(--raised); }
-.okr-file-key-result-editor > header { grid-template-columns: 28px minmax(0, 1fr) auto; padding: 11px; background: color-mix(in srgb, var(--kr-badge-bg) 42%, var(--raised)); }
+.okr-file-key-result-editor > header { grid-template-columns: 28px minmax(0, 1fr) auto; padding: 11px; background: var(--raised); }
 .okr-file-row-tools { display: flex; align-items: center; gap: 3px; }
 .okr-file-row-tools button { width: 27px; min-height: 27px; padding: 0; }
 .okr-file-row-tools button.danger { color: var(--red); }
-.okr-file-kr-metrics { display: flex; align-items: center; gap: 12px; padding: 0 11px 10px 49px; background: color-mix(in srgb, var(--kr-badge-bg) 42%, var(--raised)); }
+.okr-file-kr-metrics { display: flex; align-items: center; gap: 12px; padding: 0 11px 10px 49px; background: var(--raised); }
 .okr-file-kr-metrics label { min-width: 180px; display: grid; grid-template-columns: auto minmax(90px, 1fr) 36px; align-items: center; gap: 7px; }
 .okr-file-kr-metrics input { width: 100%; accent-color: var(--accent); }
 .okr-file-kr-metrics b { color: var(--muted); font-size: 9px; text-align: right; }
 .okr-file-initiatives { display: grid; gap: 5px; padding: 9px 10px 10px 38px; }
-.okr-file-initiative-editor { min-width: 0; display: grid; grid-template-columns: 26px minmax(180px, 1fr) 92px 112px auto; align-items: start; gap: 7px; padding: 8px; border-left: 2px solid var(--initiative-rail); background: color-mix(in srgb, var(--initiative-badge-bg) 34%, var(--raised)); }
+.okr-file-initiative-editor { min-width: 0; display: grid; grid-template-columns: 26px minmax(180px, 1fr) 92px 112px auto; align-items: start; gap: 7px; padding: 8px; border-left: 2px solid var(--initiative-rail); background: var(--raised); }
 .okr-file-initiative-editor textarea { min-height: 40px; font-size: 11px; }
 .okr-file-initiative-editor > select { height: 28px; padding: 0 6px; }
 .okr-file-add-row, .okr-file-add-kr { justify-self: start; border-style: dashed !important; color: var(--muted) !important; }

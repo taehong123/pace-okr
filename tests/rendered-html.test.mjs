@@ -872,6 +872,11 @@ test("uses warm-neutral KR and Initiative hierarchy surfaces", async () => {
   assert.match(styles, /\.hierarchy-kind-key_result \{[^}]*border-left: 2px solid var\(--kr-rail\)[^}]*box-shadow: none/);
   assert.match(styles, /\.hierarchy-kind-initiative \{[^}]*border-left: 2px solid var\(--initiative-rail\)[^}]*box-shadow: none/);
   assert.match(styles, /\.hierarchy-kind-initiative \.initiative-execution-summary \{ color: var\(--muted\); \}/);
+  assert.match(styles, /\.type-key_result \{ background: var\(--kr-badge-bg\); color: var\(--kr-badge-text\); \}/);
+  assert.match(styles, /\.type-initiative \{ background: var\(--initiative-badge-bg\); color: var\(--initiative-badge-text\); \}/);
+  assert.match(styles, /\.okr-file-read-kr \{[^}]*background: var\(--raised\)/);
+  assert.match(styles, /\.okr-file-read-initiative \{[^}]*background: var\(--raised\)/);
+  assert.doesNotMatch(styles, /\.okr-file-read-(?:kr|initiative) \{[^}]*color-mix/);
   assert.match(styles, /--kr-badge-bg: #43302b/);
   assert.match(styles, /--initiative-badge-bg: #30322e/);
   assert.doesNotMatch(styles, /--kr-soft|--initiative-soft|#42627a|#426653|#e8eff4|#e8f0eb/);
