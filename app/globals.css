@@ -311,6 +311,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .mobile-assistant-trigger { display: none !important; }
 .page-body { width: min(1480px, 100%); min-height: calc(100vh - 45px); margin: 0 auto; padding: 36px 52px 64px; background: var(--paper); }
 .page-header { min-height: 72px; display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
+.page-header-copy { min-width: 0; }
 .page-header h1 { margin: 0; font-size: 30px; line-height: 1.25; font-weight: 700; }
 .page-header p { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
 .page-create-actions { display: flex; align-items: center; gap: 7px; }
@@ -2509,6 +2510,11 @@ html[data-theme="dark"] .integration-state-message.error { background: color-mix
   .toast { bottom: calc(72px + env(safe-area-inset-bottom)); }
   .page-header { min-height: 58px; }
   .page-header h1 { font-size: 24px; }
+  .okr-page-header { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: 12px; row-gap: 7px; margin-bottom: 18px; }
+  .okr-page-header > .page-header-copy { display: contents; }
+  .okr-page-header h1 { grid-column: 1; grid-row: 1; align-self: center; }
+  .okr-page-header p { grid-column: 1 / -1; grid-row: 2; margin: 0; line-height: 1.55; }
+  .okr-page-header > .primary-action { grid-column: 2; grid-row: 1; min-width: max-content; min-height: 44px; padding-inline: 13px; white-space: nowrap; }
   .page-header:has(.page-create-actions) { align-items: stretch; flex-direction: column; gap: 12px; }
   .page-create-actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .page-create-actions > button { min-height: 44px; }
@@ -2532,12 +2538,18 @@ html[data-theme="dark"] .integration-state-message.error { background: color-mix
   .okr-file-read-tree, .okr-file-editor-body { padding: 12px; }
   .okr-file-metadata-editor { grid-template-columns: 1fr 1fr; }
   .okr-file-metadata-editor .wide { grid-column: 1 / -1; }
-  .okr-file-read-objective { grid-template-columns: 25px minmax(0, 1fr); }
+  .okr-file-read-objective { grid-template-columns: 25px minmax(0, 1fr); align-items: start; column-gap: 11px; }
+  .okr-file-read-objective > .type-icon { margin-top: 16px; }
+  .okr-file-read-objective > div { min-width: 0; }
+  .okr-file-read-objective h3 { overflow-wrap: anywhere; }
   .okr-file-read-kr { margin-left: 2px; }
-  .okr-tree-row { min-height: 48px; gap: 7px; padding: 7px 8px; }
-  .okr-tree-kr-row { grid-template-columns: 14px 25px minmax(0, 1fr) 34px; }
-  .okr-tree-kr-row .okr-tree-count { grid-column: 3; }
-  .okr-tree-progress { grid-column: 4; grid-row: 1; }
+  .okr-tree-row { min-height: 48px; gap: 7px; padding: 8px; }
+  .okr-tree-kr-row { grid-template-columns: 18px 25px minmax(0, 1fr) minmax(32px, auto); grid-template-areas: "chevron badge copy progress" ". . count progress"; align-items: start; column-gap: 8px; row-gap: 3px; }
+  .okr-tree-kr-row > .okr-tree-chevron, .okr-tree-kr-row > .okr-tree-chevron-placeholder { grid-area: chevron; justify-self: center; margin-top: 16px; }
+  .okr-tree-kr-row > .type-icon { grid-area: badge; margin-top: 11px; }
+  .okr-tree-kr-row > .okr-tree-copy { grid-area: copy; }
+  .okr-tree-kr-row .okr-tree-count { grid-area: count; }
+  .okr-tree-progress { grid-area: progress; align-self: start; margin-top: 16px; }
   .okr-tree-copy strong { font-size: 11px; white-space: normal; }
   .okr-tree-initiatives { padding: 0 5px 7px 12px; }
   .okr-tree-initiative-row { grid-template-columns: 14px 24px minmax(0, 1fr); }

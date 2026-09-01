@@ -2120,8 +2120,8 @@ function WorkspaceApp() {
           <div><button className="mobile-assistant-trigger" aria-label="AI 대화 열기" title="AI 대화 열기" onClick={openAssistant}><span aria-hidden="true">🤖</span></button><button aria-label="워크스페이스 설정" title="워크스페이스 설정" onClick={() => openWorkspaceSettings("general")}><Settings size={16} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
         </header>
         <div className="page-body">
-          {activeView !== "home" && !selectedProject && <header className="page-header">
-            <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
+          {activeView !== "home" && !selectedProject && <header className={`page-header ${activeView === "okr" ? "okr-page-header" : ""}`}>
+            <div className="page-header-copy"><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setOkrListOpen(true)}><Archive size={14} />목록보기</button>
             ) : activeView === "inbox" ? (
