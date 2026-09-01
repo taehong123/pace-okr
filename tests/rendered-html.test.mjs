@@ -837,6 +837,9 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(slackCallback, /setup_required/);
   assert.match(slackCallback, /hasWorkspaceAdminAccess/);
   assert.match(slackCallback, /x-okrptr-workspace-id/);
+  assert.match(slackCallback, /new Request\(request\.url, \{ method: "GET", headers: callbackHeaders \}\)/);
+  assert.doesNotMatch(slackCallback, /new Request\(request, \{ headers: callbackHeaders \}\)/);
+  assert.match(slackCallback, /Slack OAuth callback failed/);
   assert.match(paceData, /hasWorkspaceAdminAccess/);
   assert.doesNotMatch(page, /slack\?\.configured/);
   assert.doesNotMatch(paceData, /serializeSlackConnection\(connection: SlackConnection \| null, configured/);

@@ -4,6 +4,17 @@ import { classifySlackOAuthError, decryptSlackSecret, encryptSlackSecret, exchan
 import { disconnectSlackDaily, syncSlackDailyInstallation } from "@/lib/slack-daily";
 
 export async function GET(request: Request) {
+  try {
+    return await handleSlackCallback(request);
+  } catch (error) {
+    console.error("Slack OAuth callback failed", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+    return redirectWithSlackStatus(request, "/?settings=workspace&tab=integrations", "oauth_exchange_failed");
+  }
+}
+
+async function handleSlackCallback(request: Request) {
   const requestUrl = new URL(request.url);
   const stateValue = requestUrl.searchParams.get("state") ?? "";
   const state = await consumeSlackOAuthState(stateValue);
@@ -12,7 +23,8 @@ export async function GET(request: Request) {
   if (!state) return redirectWithSlackStatus(request, returnTo, "oauth_exchange_failed");
   const callbackHeaders = new Headers(request.headers);
   callbackHeaders.set("x-okrptr-workspace-id", state.ownerId);
-  const callbackAuthorization = await authorizeRequest(new Request(request, { headers: callbackHeaders }), { allowViewerWrite: true });
+  const callbackRequest = new Request(request.url, { method: "GET", headers: callbackHeaders });
+  const callbackAuthorization = await authorizeRequest(callbackRequest, { allowViewerWrite: true });
   const stateStillAuthorized = await hasWorkspaceAdminAccess(state.ownerId, state.userId);
   if (
     callbackAuthorization instanceof Response
