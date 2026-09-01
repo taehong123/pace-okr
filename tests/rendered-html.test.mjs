@@ -877,6 +877,17 @@ test("uses warm-neutral KR and Initiative hierarchy surfaces", async () => {
   assert.doesNotMatch(styles, /--kr-soft|--initiative-soft|#42627a|#426653|#e8eff4|#e8f0eb/);
 });
 
+test("keeps the mobile OKR list header and KR rows aligned", async () => {
+  const [page, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /activeView === "okr" \? "okr-page-header"/);
+  assert.match(css, /\.okr-page-header \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto/);
+  assert.match(css, /\.okr-page-header > \.primary-action \{[^}]*min-width: max-content[^}]*white-space: nowrap/);
+  assert.match(css, /\.okr-tree-kr-row \{[^}]*grid-template-areas: "chevron badge copy progress" "\. \. count progress"/);
+});
+
 test("uses a restrained large-desktop density without scaling smaller viewports", async () => {
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   const largeDesktop = styles.match(/@media \(min-width: 1800px\) \{([\s\S]*)\}\s*$/)?.[1] ?? "";

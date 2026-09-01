@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 /* eslint-disable @next/next/no-img-element */
 
 import {
@@ -2114,8 +2114,8 @@ function WorkspaceApp() {
             userId={authState.user?.id ?? ""}
             onOpenSettings={() => setPropertyPanelOpen(true)}
           />
-          {activeView !== "home" && !selectedProject && <header className="page-header">
-            <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
+          {activeView !== "home" && !selectedProject && <header className={`page-header ${activeView === "okr" ? "okr-page-header" : ""}`}>
+            <div className="page-header-copy"><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setOkrListOpen(true)}><Archive size={14} />목록보기</button>
             ) : activeView === "inbox" ? (
