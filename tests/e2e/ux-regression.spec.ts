@@ -385,9 +385,10 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
     await workspaceSettings.click();
     const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
     await expect(settingsDialog).toBeVisible();
-    for (const tab of ["일반", "멤버", "그룹", "Project 설정", "관리 봇", "팀 연동", "위험 구역"]) {
+    for (const tab of ["일반", "멤버", "그룹", "Project 설정", "봇 연동", "위험 구역"]) {
       await expect(settingsDialog.getByRole("button", { name: new RegExp(`^${tab}`) })).toBeVisible();
     }
+    await expect(settingsDialog.getByRole("button", { name: /^관리 봇/ })).toHaveCount(0);
     await expect(page).toHaveURL(/settings=workspace/);
     await settingsDialog.getByRole("button", { name: "워크스페이스 설정 닫기" }).click();
     await expect(page).not.toHaveURL(/settings=workspace/);
@@ -432,9 +433,8 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
 
     await settingsDialog.getByRole("button", { name: /^멤버/ }).click();
     await expect(settingsDialog.getByRole("button", { name: "멤버 초대" })).toHaveCount(0);
-    await settingsDialog.getByRole("button", { name: /^팀 연동/ }).click();
+    await settingsDialog.getByRole("button", { name: /^봇 연동/ }).click();
     await expect(settingsDialog.getByRole("button", { name: "Slack 연결 해제" })).toHaveCount(0);
-    await settingsDialog.getByRole("button", { name: /^관리 봇/ }).click();
     await expect(settingsDialog.getByText(/관리 봇 설정은 읽기 전용/)).toBeVisible();
     await expect(settingsDialog.getByRole("button", { name: "설정 저장" })).toHaveCount(0);
     await expect(settingsDialog.getByRole("button", { name: "테스트 보내기" })).toHaveCount(0);
@@ -452,7 +452,10 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
 
     const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
     await expect(settingsDialog).toBeVisible();
+    await expect(settingsDialog.getByRole("heading", { name: "봇 연동" })).toBeVisible();
     await expect(settingsDialog.getByRole("heading", { name: "관리 봇" })).toBeVisible();
+    await expect(settingsDialog.getByRole("heading", { name: "데일리 봇" })).toBeVisible();
+    await expect(settingsDialog.getByRole("heading", { name: "업무 자동화 봇" })).toBeVisible();
     for (const signal of ["기한 없음", "DRI·담당자 없음", "기한 초과", "어제 완료", "오늘 마감"]) {
       await expect(settingsDialog.getByText(signal, { exact: true }).first()).toBeVisible();
     }
@@ -477,6 +480,7 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
     await page.goto("/?settings=workspace&tab=general");
     const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
     await expect(settingsDialog.getByRole("button", { name: /^관리 봇/ })).toHaveCount(0);
+    await expect(settingsDialog.getByRole("button", { name: /^봇 연동/ })).toHaveCount(0);
   });
 });
 
@@ -551,7 +555,7 @@ test.describe("개인 데일리와 팀 롤업", () => {
   });
 });
 
-test.describe("개인 앱 연동과 워크스페이스 팀 연동", () => {
+test.describe("개인 앱 연동과 워크스페이스 봇 연동", () => {
   test("개인 앱 연동에는 개인 Slack 설정만 표시한다", async ({ page }) => {
     await installApiMocks(page, { slackState: "workspace_disconnected", teamWorkspace: true });
     await page.goto("/?view=integrations");
@@ -559,7 +563,7 @@ test.describe("개인 앱 연동과 워크스페이스 팀 연동", () => {
     await expect(page.getByRole("heading", { name: "개인 앱 연동" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Slack 개인 DM" })).toBeVisible();
     await expect(page.getByText("팀 연결 필요", { exact: true })).toBeVisible();
-    await expect(page.getByText(/워크스페이스 설정의 팀 연동/)).toBeVisible();
+    await expect(page.getByText(/워크스페이스 설정의 봇 연동/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Slack 연결" })).toHaveCount(0);
     await expect(page.getByRole("dialog", { name: "개인 앱 연동" })).toHaveCount(0);
   });
@@ -597,9 +601,10 @@ test.describe("개인 앱 연동과 워크스페이스 팀 연동", () => {
     await installApiMocks(page, { slackState: "connected", teamWorkspace: true });
     await page.goto("/?settings=workspace&tab=integrations");
     await expect(page.getByRole("dialog", { name: "워크스페이스 설정" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "봇 연동" })).toBeVisible();
     await expect(page.getByText("고객 Slack A 연결 완료")).toBeVisible();
     await expect(page.getByText("1명", { exact: true })).toBeVisible();
-    await expect(page.getByText("#daily", { exact: true })).toBeVisible();
+    await expect(page.locator(".slack-connected-summary dd", { hasText: "#daily" })).toBeVisible();
     await expect(page.getByRole("button", { name: "설정 변경" })).toBeVisible();
     await expect(page.getByText("멤버 연결·실패 기록")).toBeVisible();
     await expect(page.getByRole("heading", { name: "팀 공유 채널" })).toHaveCount(0);

@@ -142,7 +142,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /workspace-settings-trigger/);
   assert.match(page, /Slack 연결 후 데일리 봇을 설정할 수 있습니다/);
   assert.match(page, /workspace-daily-bot-heading/);
-  assert.match(page, /워크스페이스 설정.*일반.*멤버.*그룹.*Project 설정.*팀 연동.*위험 구역/s);
+  assert.match(page, /워크스페이스 설정.*일반.*멤버.*그룹.*Project 설정.*봇 연동.*위험 구역/s);
   assert.match(page, /settings=workspace&tab=integrations/);
   assert.match(page, /자동화 봇/);
   assert.match(page, /업무가 생성될 때/);
@@ -210,16 +210,11 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /mode === "project"/);
   assert.match(page, /my_work: "내 업무"/);
   assert.match(layout, /okrptr\.theme/);
-  assert.match(page, /type ThemeMode = "white" \| "beige" \| "gray" \| "dark"/);
-  assert.match(page, /mode: "white", label: "화이트"[\s\S]*mode: "beige"[\s\S]*mode: "gray"[\s\S]*mode: "dark"/);
+  assert.match(page, /type ThemeMode = "beige" \| "gray" \| "dark"/);
+  assert.match(page, /베이지.*그레이.*다크/s);
   assert.match(page, /theme-picker/);
   assert.match(page, /chat-send-button/);
   assert.match(page, /메시지 보내기/);
-  assert.match(layout, /okrptr\.theme-default-white-v1/);
-  assert.match(layout, /validTheme \? savedTheme : "white"/);
-  assert.match(globals, /html\[data-theme="white"\]/);
-  assert.match(globals, /--paper: #ffffff/);
-  assert.match(globals, /html\[data-theme="beige"\]/);
   assert.match(globals, /--paper: #f3f2ee/);
   assert.match(globals, /html\[data-theme="gray"\]/);
   assert.match(globals, /html\[data-theme="dark"\]/);
@@ -906,8 +901,12 @@ test("implements a workspace management bot for data quality and urgency reporti
   for (const signal of ["missing_due_date", "missing_owner", "overdue", "completed_yesterday", "due_today"]) {
     assert.match(domain, new RegExp(signal));
   }
-  assert.match(page, /id: "management", label: "관리 봇"/);
+  assert.doesNotMatch(page, /id: "management", label: "관리 봇"/);
+  assert.match(page, /id: "integrations", label: "봇 연동"/);
+  assert.match(page, /rawTab === "management" \? "integrations"/);
   assert.match(page, /function WorkspaceManagementBot/);
+  assert.match(page, /<WorkspaceManagementBot canManage=\{canManageSlack\}/);
+  assert.match(page, /업무 자동화 봇/);
   assert.match(page, /워크스페이스 관리 봇 사용/);
   assert.match(page, /LIVE PREVIEW/);
   assert.match(styles, /\.management-bot-grid/);

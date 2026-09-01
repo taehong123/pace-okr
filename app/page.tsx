@@ -86,10 +86,11 @@ function workspaceSettingsFromLocation() {
   if (typeof window === "undefined") return { open: false, tab: "general" as WorkspaceSettingsTab };
   const params = new URLSearchParams(window.location.search);
   const rawTab = params.get("tab") as WorkspaceSettingsTab | null;
-  const supported = new Set<WorkspaceSettingsTab>(["general", "members", "groups", "projects", "management", "integrations", "danger", "scheduled"]);
+  const normalizedTab = rawTab === "management" ? "integrations" : rawTab;
+  const supported = new Set<WorkspaceSettingsTab>(["general", "members", "groups", "projects", "integrations", "danger", "scheduled"]);
   return {
     open: params.get("settings") === "workspace",
-    tab: rawTab && supported.has(rawTab) ? rawTab : "general",
+    tab: normalizedTab && supported.has(normalizedTab) ? normalizedTab : "general",
   };
 }
 type Cadence = "daily" | "weekly" | "monthly" | "quarterly";
@@ -105,7 +106,7 @@ type GroupVisibility = "open" | "private";
 type GroupRole = "lead" | "member";
 type WorkspaceSettingsTab = "general" | "members" | "groups" | "projects" | "management" | "integrations" | "danger" | "scheduled";
 type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
-type ThemeMode = "white" | "beige" | "gray" | "dark";
+type ThemeMode = "beige" | "gray" | "dark";
 type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "local" };
 type AuthState = { status: "loading" | "authenticated" | "registration" | "unauthenticated"; user: AuthUser | null; reason: string | null };
 type RegistrationRequirement = { user: AuthUser; verificationConfigured: boolean; consentVersion: string };
@@ -114,7 +115,7 @@ type RegistrationRequiredPayload = { code: "registration_required"; registration
 const THEME_STORAGE_KEY = "okrptr.theme";
 
 function isThemeMode(value: string | null | undefined): value is ThemeMode {
-  return value === "white" || value === "beige" || value === "gray" || value === "dark";
+  return value === "beige" || value === "gray" || value === "dark";
 }
 
 type ItemAssignment = {
@@ -850,9 +851,9 @@ function WorkspaceApp() {
   const [freshWorkspaceDataReady, setFreshWorkspaceDataReady] = useState(false);
   const [workspaceDataAttempt, setWorkspaceDataAttempt] = useState(0);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
-    if (typeof document === "undefined") return "white";
+    if (typeof document === "undefined") return "beige";
     const preference = document.documentElement.dataset.themePreference;
-    return isThemeMode(preference) ? preference : "white";
+    return isThemeMode(preference) ? preference : "beige";
   });
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
   const assistantAutoHandledWorkspaceRef = useRef<string | null>(null);
@@ -5656,8 +5657,7 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
     { id: "members", label: "멤버", icon: Users, visible: !currentWorkspace.personal, count: teamData?.members.length },
     { id: "groups", label: "그룹", icon: AtSign, visible: !currentWorkspace.personal },
     { id: "projects", label: "Project 설정", icon: Briefcase, visible: true },
-    { id: "management", label: "관리 봇", icon: Bot, visible: !currentWorkspace.personal },
-    { id: "integrations", label: "팀 연동", icon: Hash, visible: !currentWorkspace.personal },
+    { id: "integrations", label: "봇 연동", icon: Bot, visible: !currentWorkspace.personal },
     { id: "danger", label: "위험 구역", icon: AlertTriangle, visible: canManageWorkspace },
     { id: "scheduled", label: "삭제 예정", icon: Trash2, visible: scheduledWorkspaces.length > 0, count: scheduledWorkspaces.length },
   ];
@@ -5673,7 +5673,6 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
         {activeTab === "members" && <div className="workspace-settings-section team-settings-section"><header><span>ORGANIZATION</span><h3>멤버</h3><p>초대, 역할과 워크스페이스 구성원을 관리합니다.</p></header><TeamPanel key={`${currentWorkspace.id}:members`} initialTeam={teamData} initialTab="members" initialGroupHandle={null} embedded onTeamChange={onTeamChange} onClose={onClose} onNotice={onNotice} /></div>}
         {activeTab === "groups" && <div className="workspace-settings-section team-settings-section"><header><span>ORGANIZATION</span><h3>그룹</h3><p>조직 그룹과 구성원, Lead 권한을 관리합니다.</p></header><TeamPanel key={`${currentWorkspace.id}:groups`} initialTeam={teamData} initialTab="groups" initialGroupHandle={requestedGroupHandle} embedded onTeamChange={onTeamChange} onClose={onClose} onNotice={onNotice} /></div>}
         {activeTab === "projects" && <div className="workspace-project-settings"><header className="workspace-settings-section-header"><div><span>WORKSPACE DATA</span><h3>Project 설정</h3><p>모든 Project에서 함께 사용하는 속성과 본문 템플릿입니다.</p></div><div className="workspace-project-tabs" role="tablist" aria-label="Project 설정"><button role="tab" aria-selected={projectSettingsTab === "properties"} className={projectSettingsTab === "properties" ? "active" : ""} onClick={() => setProjectSettingsTab("properties")}><Settings2 size={14} />속성</button><button role="tab" aria-selected={projectSettingsTab === "templates"} className={projectSettingsTab === "templates" ? "active" : ""} onClick={() => setProjectSettingsTab("templates")}><BookTemplate size={14} />템플릿</button></div></header>{projectSettingsTab === "properties" ? <ProjectPropertyManager workspaceId={currentWorkspace.id} properties={properties} teamMembers={teamMembers} readOnly={!canManageWorkspace} onChanged={(next) => onPropertiesChanged([...next].sort((left, right) => left.sortOrder - right.sortOrder))} onNotice={onNotice} /> : <ProjectTemplateManager workspaceId={currentWorkspace.id} readOnly={!canManageWorkspace} onNotice={onNotice} />}</div>}
-        {activeTab === "management" && <WorkspaceManagementBot canManage={canManageWorkspace} onOpenTeamIntegration={() => onTabChange("integrations")} onNotice={onNotice} />}
         {activeTab === "integrations" && <WorkspaceSlackIntegration slack={slack} slackOAuthIssue={slackOAuthIssue} loading={integrationLoading} loadError={integrationLoadError} workspaceName={currentWorkspace.name} canManageSlack={canManageWorkspace} onSlackChange={onSlackChange} onRefresh={onRefreshIntegrations} onNotice={onNotice} />}
         {activeTab === "danger" && <div className="workspace-settings-section danger-settings"><header><span>WORKSPACE CONTROL</span><h3>위험 구역</h3><p>현재 워크스페이스의 실행 데이터와 워크스페이스 자체를 정리합니다.</p></header><article><div><b>OKR 실행 데이터 클린업</b><p>워크스페이스와 그룹은 유지하고 OKR·Project·Task를 휴지통으로 이동합니다.</p></div><button onClick={onCleanup}><Trash2 size={14} />클린업 열기</button></article>{!currentWorkspace.personal && currentWorkspace.role === "owner" && <article><div><b>워크스페이스 삭제 예약</b><p>즉시 접근을 중단하고 30일 동안 복구할 수 있도록 삭제 예약합니다.</p></div><button onClick={() => onDeleteWorkspace(currentWorkspace)} disabled={workspaceSaving}><Trash2 size={14} />삭제 예약</button></article>}</div>}
         {activeTab === "scheduled" && <div className="workspace-settings-section scheduled-settings"><header><span>RECOVERY</span><h3>삭제 예정 워크스페이스</h3><p>삭제 예약된 워크스페이스를 복구하거나 즉시 영구삭제합니다.</p></header><div className="scheduled-workspace-list">{scheduledWorkspaces.map((workspace) => <article key={workspace.id}><WorkspaceAvatar workspace={workspace} /><div><b>{workspace.name}</b><small>{workspaceDeletionLabel(workspace.scheduledDeletionAt)}</small></div><button onClick={() => onRestoreWorkspace(workspace)} disabled={workspaceSaving}><RotateCcw size={14} />복구</button><button className="danger" onClick={() => onPermanentlyDeleteWorkspace(workspace)} disabled={workspaceSaving}><Trash2 size={14} />영구삭제</button></article>)}</div></div>}
@@ -5684,7 +5683,6 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
 
 function PropertyPanel({ user, displayName, themeMode, onThemeModeChange, onClose, onSignOut }: { user: AuthUser | null; displayName: string; themeMode: ThemeMode; onThemeModeChange: (mode: ThemeMode) => void; onClose: () => void; onSignOut: () => void }) {
   const themes: { mode: ThemeMode; label: string }[] = [
-    { mode: "white", label: "화이트" },
     { mode: "beige", label: "베이지" },
     { mode: "gray", label: "그레이" },
     { mode: "dark", label: "다크" },
@@ -6334,7 +6332,7 @@ function AppIntegrationsView({ google, slack, loading, loadError, onGoogleChange
 
     <section className="integration-service-card slack-service-card" aria-labelledby="personal-slack-heading">
       <header><span className="integration-service-icon slack"><Hash size={20} /></span><div><h3 id="personal-slack-heading">Slack 개인 DM</h3><p>내 데일리 알림 사용 여부와 수신 시간을 설정합니다. 팀 설치·채널·자동화는 워크스페이스 설정에서 관리합니다.</p></div><strong className={`integration-status-badge ${slackConnected ? "connected" : slackState}`}>{loading ? "확인 중" : slackConnected ? "사용 가능" : "팀 연결 필요"}</strong></header>
-      {loading ? <div className="integration-loading"><LoaderCircle className="spin" size={16} />개인 Slack 설정을 확인하고 있습니다.</div> : slackConnected ? <SlackDailyAdvancedSettings connected canManage={false} mode="personal" onNotice={onNotice} /> : <div className="integration-state-message warning"><AlertTriangle size={17} /><div><b>워크스페이스 Slack 연결이 필요합니다</b><p>{loadError ? "연결 상태를 불러오지 못했습니다." : "Owner 또는 Admin이 워크스페이스 설정의 팀 연동에서 Slack을 연결하면 개인 DM 설정을 사용할 수 있습니다."}</p></div></div>}
+      {loading ? <div className="integration-loading"><LoaderCircle className="spin" size={16} />개인 Slack 설정을 확인하고 있습니다.</div> : slackConnected ? <SlackDailyAdvancedSettings connected canManage={false} mode="personal" onNotice={onNotice} /> : <div className="integration-state-message warning"><AlertTriangle size={17} /><div><b>워크스페이스 Slack 연결이 필요합니다</b><p>{loadError ? "연결 상태를 불러오지 못했습니다." : "Owner 또는 Admin이 워크스페이스 설정의 봇 연동에서 Slack을 연결하면 개인 DM 설정을 사용할 수 있습니다."}</p></div></div>}
     </section>
   </section>;
 }
@@ -6347,7 +6345,7 @@ const managementBotSignalMeta: Record<ManagementBotSignal, { label: string; deta
   due_today: { label: "오늘 마감", detail: "오늘까지 완료해야 하는 활성 Project·Task", tone: "urgent" },
 };
 
-function WorkspaceManagementBot({ canManage, onOpenTeamIntegration, onNotice }: { canManage: boolean; onOpenTeamIntegration: () => void; onNotice: (message: string) => void }) {
+function WorkspaceManagementBot({ canManage, onNotice }: { canManage: boolean; onNotice: (message: string) => void }) {
   const [data, setData] = useState<ManagementBotData | null>(null);
   const [draft, setDraft] = useState<ManagementBotData["settings"] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -6412,13 +6410,13 @@ function WorkspaceManagementBot({ canManage, onOpenTeamIntegration, onNotice }: 
     setDraft({ ...draft, signals: draft.signals.includes(signal) ? draft.signals.filter((entry) => entry !== signal) : [...draft.signals, signal] });
   }
 
-  if (loading) return <div className="workspace-management-loading"><LoaderCircle className="spin" size={16} />워크스페이스 관리 항목을 확인하고 있습니다.</div>;
-  if (!data || !draft) return <div className="workspace-management-error" role="alert"><AlertTriangle size={17} /><div><b>관리 봇을 불러오지 못했습니다</b><p>{error || "잠시 후 다시 확인해 주세요."}</p></div></div>;
+  if (loading) return <section className="workspace-management-pane embedded"><div className="workspace-management-loading"><LoaderCircle className="spin" size={16} />워크스페이스 관리 항목을 확인하고 있습니다.</div></section>;
+  if (!data || !draft) return <section className="workspace-management-pane embedded"><div className="workspace-management-error" role="alert"><AlertTriangle size={17} /><div><b>관리 봇을 불러오지 못했습니다</b><p>{error || "잠시 후 다시 확인해 주세요."}</p></div></div></section>;
   const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 
-  return <section className="workspace-management-pane">
+  return <section className="workspace-management-pane embedded">
     <header className="workspace-management-heading"><div><span>WORKSPACE CONTROL BOT</span><h3>관리 봇</h3><p>정보가 비어 있거나 지금 대응해야 할 Project·Task를 매일 한 번 정리해 팀에 알려줍니다.</p></div><span className={`management-bot-state ${draft.enabled ? "active" : ""}`}><i />{draft.enabled ? "작동 중" : "꺼짐"}</span></header>
-    {!data.slackConnected && <div className="workspace-settings-note management-slack-note"><Hash size={16} /><div><b>팀 Slack 연결이 필요합니다</b><p>관리 봇은 워크스페이스 공용 채널로 리포트를 보냅니다.</p>{canManage && <button onClick={onOpenTeamIntegration}>팀 연동 열기</button>}</div></div>}
+    {!data.slackConnected && <div className="workspace-settings-note management-slack-note"><Hash size={16} /><div><b>Slack 연결 후 관리 봇을 설정할 수 있습니다</b><p>관리 봇은 워크스페이스 공용 채널로 리포트를 보냅니다. 위의 Slack 연결을 먼저 완료해 주세요.</p></div></div>}
     {!canManage && <div className="workspace-settings-note"><Eye size={16} /><p>관리 봇 설정은 읽기 전용입니다. Owner 또는 Admin이 발송 항목과 시간을 변경할 수 있습니다.</p></div>}
 
     <div className="management-bot-grid">
@@ -6461,11 +6459,11 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
 
   return <section className="workspace-integration-pane">
     <section className="integration-intro compact">
-      <div><span>TEAM CONNECTIONS</span><h2>팀 연동</h2><p>현재 워크스페이스의 Slack 설치, 공용 데일리 정책, 공유 채널과 자동화를 관리합니다.</p></div>
+      <div><span>BOT CONNECTIONS</span><h2>봇 연동</h2><p>워크스페이스의 데일리 봇, 관리 봇과 업무 자동화 봇을 한곳에서 관리합니다.</p></div>
       <button type="button" onClick={onRefresh} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={15} />{loading ? "상태 확인 중" : "연결 상태 새로고침"}</button>
     </section>
     <section className="integration-service-card slack-service-card" aria-labelledby="workspace-slack-heading">
-      <header><span className="integration-service-icon slack"><Hash size={20} /></span><div><h3 id="workspace-slack-heading">Slack 데일리·자동화</h3><p>{slackConnected ? `${connectedSlackName} 워크스페이스가 연결되어 있습니다.` : `${workspaceName}에서 사용할 Slack을 관리자가 연결합니다.`}</p></div><strong className={`integration-status-badge ${slackState}`}>{loading ? "확인 중" : slackAction}</strong></header>
+      <header><span className="integration-service-icon slack"><Hash size={20} /></span><div><h3 id="workspace-slack-heading">Slack 연결</h3><p>{slackConnected ? `${connectedSlackName} 워크스페이스가 연결되어 있습니다.` : `${workspaceName}의 봇이 메시지를 보낼 Slack을 관리자가 연결합니다.`}</p></div><strong className={`integration-status-badge ${slackState}`}>{loading ? "확인 중" : slackAction}</strong></header>
       {slackOAuthIssue && <div className={`integration-state-message ${slackOAuthIssueCopy[slackOAuthIssue].tone}`} role="alert"><AlertTriangle size={17} /><div><b>{slackOAuthIssueCopy[slackOAuthIssue].title}</b><p>{slackOAuthIssueCopy[slackOAuthIssue].detail}</p></div></div>}
       {!slackConnected && <section className="slack-one-button-connect" aria-label="Slack 팀 연결">
         <div><b>{slackState === "service_unavailable" || slackState === "error" ? "Slack 연결을 준비하고 있습니다" : "팀 Slack을 연결하세요"}</b><p>{slackState === "error" ? "연결 상태를 불러오지 못했습니다." : slack?.statusMessage || "Slack 사용자와 채널은 승인 후 자동으로 불러옵니다."}</p></div>
@@ -6477,10 +6475,10 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
           : <span className="integration-role-note">관리자가 권한을 업데이트해야 합니다.</span>}
       </section>}
       <SlackDailySettingsPanel connected={slackConnected} canManage={canManageSlack} teamName={connectedSlackName} onNotice={onNotice} />
-      {slackConnected && <>
-        {slackState === "reauthorization_required" && <div className="integration-state-message warning"><AlertTriangle size={17} /><div><b>새 데일리 기능 권한이 필요합니다</b><p>권한 업데이트 전까지 일부 DM·채널 기능이 작동하지 않을 수 있습니다.</p></div></div>}
-        <details className="slack-advanced-settings"><summary>팀 자동화와 연결 관리 <ChevronDown size={14} /></summary><div><section className="integration-extra-automation"><SlackAutomationManager connected canManage={canManageSlack} workspaceName={workspaceName} onNotice={onNotice} /></section>{canManageSlack && <button className="secondary-danger" onClick={() => void disconnectSlack()} disabled={disconnectingSlack}>{disconnectingSlack ? "연결 해제 중" : "Slack 연결 해제"}</button>}</div></details>
-      </>}
+      <WorkspaceManagementBot canManage={canManageSlack} onNotice={onNotice} />
+      <SlackAutomationManager connected={slackConnected} canManage={canManageSlack} workspaceName={workspaceName} onNotice={onNotice} />
+      {slackState === "reauthorization_required" && <div className="integration-state-message warning"><AlertTriangle size={17} /><div><b>새 봇 기능 권한이 필요합니다</b><p>권한 업데이트 전까지 일부 DM·채널 기능이 작동하지 않을 수 있습니다.</p></div></div>}
+      {slackConnected && canManageSlack && <details className="slack-advanced-settings"><summary>Slack 연결 관리 <ChevronDown size={14} /></summary><div><button className="secondary-danger" onClick={() => void disconnectSlack()} disabled={disconnectingSlack}>{disconnectingSlack ? "연결 해제 중" : "Slack 연결 해제"}</button></div></details>}
     </section>
   </section>;
 }
@@ -6846,10 +6844,11 @@ function SlackAutomationManager({ connected, canManage, workspaceName, onNotice 
     }
   }
 
-  if (!connected) return <div className="slack-automation-locked"><Zap size={16} /><div><b>Slack 자동화</b><p>Slack을 연결하면 업무 생성과 상태 변경을 채널로 자동 전송할 수 있습니다.</p></div></div>;
+  const automationHeading = <header className="workspace-daily-bot-heading"><span><Zap size={17} /></span><div><small>AUTOMATION BOT</small><h4>업무 자동화 봇</h4><p>Task 생성과 상태 변경을 조건에 맞춰 Slack 채널로 알려줍니다.</p></div><em>{connected ? "설정 가능" : "Slack 연결 필요"}</em></header>;
+  if (!connected) return <section className="workspace-automation-bot-section">{automationHeading}<div className="slack-automation-locked"><Zap size={16} /><div><b>Slack 연결 후 업무 자동화 봇을 설정할 수 있습니다</b><p>연결을 완료하면 업무 생성과 상태 변경을 채널로 자동 전송할 수 있습니다.</p></div></div></section>;
 
-  return <div className="slack-automation-manager">
-    <div className="slack-automation-heading"><div><span>SLACK AUTOMATION</span><h3>자동화 봇</h3><p>{workspaceName}의 업무 트리거마다 채널과 메시지를 정합니다.</p></div>{canManage && <button type="button" onClick={startCreate}><Plus size={14} />새 자동화</button>}</div>
+  return <section className="workspace-automation-bot-section">{automationHeading}<div className="slack-automation-manager">
+    <div className="slack-automation-heading"><div><span>AUTOMATION RULES</span><h3>자동화 규칙</h3><p>{workspaceName}의 업무 트리거마다 채널과 메시지를 정합니다.</p></div>{canManage && <button type="button" onClick={startCreate}><Plus size={14} />새 자동화</button>}</div>
     <div className="slack-bot-note"><Bot size={15} /><p>각 자동화는 독립된 규칙으로 작동하며, 메시지는 연결된 <b>OKRPTR 봇</b> 이름으로 전송됩니다.</p></div>
     {formOpen && <form className="slack-automation-form" onSubmit={(event) => void saveAutomation(event)}>
       <div className="slack-form-title"><b>{editingId ? "자동화 수정" : "새 자동화"}</b><button type="button" className="icon-button" onClick={() => setFormOpen(false)} aria-label="작성 취소"><X size={14} /></button></div>
@@ -6870,7 +6869,7 @@ function SlackAutomationManager({ connected, canManage, workspaceName, onNotice 
       {canManage && <div className="slack-automation-actions"><button type="button" onClick={() => void testSend(automation)} disabled={busyId === automation.id}>{busyId === automation.id ? <LoaderCircle className="spin" size={12} /> : <Send size={12} />}테스트</button><button type="button" onClick={() => void toggleAutomation(automation)} disabled={busyId === automation.id}>{automation.active ? "중지" : "활성화"}</button><button type="button" onClick={() => startEdit(automation)}><Pencil size={12} />수정</button><button type="button" className="danger" onClick={() => void removeAutomation(automation)} disabled={busyId === automation.id} aria-label={`${automation.name} 삭제`}><Trash2 size={12} /></button></div>}
     </article>)}</div>}
     {deliveries.length > 0 && <details className="slack-delivery-history"><summary>최근 전송 기록 <span>{deliveries.length}</span><ChevronDown size={13} /></summary><div>{deliveries.slice(0, 8).map((delivery) => <div key={delivery.id}><span className={`slack-delivery-dot ${delivery.status}`} /><p><b>{delivery.status === "sent" ? "전송 성공" : delivery.status === "failed" ? "전송 실패" : "전송 중"}</b><small>#{delivery.channelId} · {formatSlackAutomationTime(delivery.sentAt || delivery.createdAt)}</small>{delivery.error && <em>{delivery.error}</em>}</p></div>)}</div></details>}
-  </div>;
+  </div></section>;
 }
 
 function slackTriggerLabel(automation: SlackAutomation) {
