@@ -575,6 +575,8 @@ test.describe("개인 앱 연동과 워크스페이스 팀 연동", () => {
   test("Slack 관리자 승인과 중복 연결 오류는 워크스페이스 설정에서 안내한다", async ({ page }) => {
     await installApiMocks(page, { slackState: "workspace_disconnected", teamWorkspace: true });
     await page.goto("/?settings=workspace&tab=integrations&slack=slack_admin_approval_required");
+    await expect(page.getByRole("heading", { name: "데일리 봇" })).toBeVisible();
+    await expect(page.getByText("Slack 연결 후 데일리 봇을 설정할 수 있습니다")).toBeVisible();
     const oauthAlert = page.locator(".slack-service-card .integration-state-message[role='alert']");
     await expect(oauthAlert).toContainText("Slack 관리자 승인이 필요합니다");
     await expect(oauthAlert).toContainText("앱 설치 정책");

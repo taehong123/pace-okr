@@ -140,6 +140,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /view=integrations/);
   assert.match(page, /내 계정에 연결된 앱/);
   assert.match(page, /workspace-settings-trigger/);
+  assert.match(page, /Slack 연결 후 데일리 봇을 설정할 수 있습니다/);
+  assert.match(page, /workspace-daily-bot-heading/);
   assert.match(page, /워크스페이스 설정.*일반.*멤버.*그룹.*Project 설정.*팀 연동.*위험 구역/s);
   assert.match(page, /settings=workspace&tab=integrations/);
   assert.match(page, /자동화 봇/);

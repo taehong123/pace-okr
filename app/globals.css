@@ -2025,6 +2025,14 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .slack-one-button-connect p { margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
 .slack-primary-action, .slack-one-button-connect > button { min-height: 40px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; border: 1px solid #5b3fc6; border-radius: 8px; background: #5b3fc6; color: white; font-size: 11px; font-weight: 750; cursor: pointer; }
 .slack-one-button-flow { display: grid; gap: 12px; }
+.workspace-daily-bot-section { display: grid; gap: 12px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.workspace-daily-bot-heading { min-width: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.workspace-daily-bot-heading > span { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid #d9d2ee; border-radius: 9px; background: #f6f2ff; color: #6550a4; }
+.workspace-daily-bot-heading > div { min-width: 0; }
+.workspace-daily-bot-heading small { color: #6c5aa7; font-size: 8px; font-weight: 800; letter-spacing: .12em; }
+.workspace-daily-bot-heading h4 { margin: 2px 0 0; font-size: 15px; }
+.workspace-daily-bot-heading p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.workspace-daily-bot-heading > em { padding: 5px 8px; border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 9px; font-style: normal; font-weight: 700; white-space: nowrap; }
 .slack-onboarding-card { display: grid; gap: 16px; padding: 18px; border: 1px solid #d9d2ee; border-radius: 11px; background: #fcfbff; }
 .slack-onboarding-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .slack-onboarding-card > header span { color: #6c5aa7; font-size: 8px; font-weight: 800; letter-spacing: .12em; }
@@ -2120,7 +2128,8 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .compact-integration-card:last-child { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 .slack-integration-card { gap: 12px; padding: 15px; border: 1px solid #d7dce2; border-radius: var(--radius-container); background: var(--raised); box-shadow: var(--shadow-raised); }
 .slack-daily-locked, .slack-daily-settings { padding: 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
-.slack-daily-locked { display: flex; align-items: flex-start; gap: 10px; }
+.slack-daily-locked { min-height: 70px; display: flex; align-items: flex-start; gap: 10px; }
+.slack-daily-locked > svg { flex: 0 0 auto; margin-top: 1px; color: var(--muted); }
 .slack-daily-locked b, .slack-daily-settings h3 { font-size: 13px; }
 .slack-daily-locked p, .slack-daily-settings header p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
 .slack-daily-settings > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
@@ -2392,6 +2401,7 @@ html[data-theme="dark"] .task-check.checked::before { border-color: color-mix(in
 html[data-theme="dark"] .settings-danger-zone { background: color-mix(in srgb, var(--red) 8%, var(--raised)); }
 html[data-theme="dark"] :where(.integration-intro, .integration-service-card, .integration-service-actions, .integration-locked-preview > div, .integration-step-summary, .integration-personal-link) { background: var(--raised); border-color: var(--line); }
 html[data-theme="dark"] :where(.slack-one-button-connect, .slack-onboarding-card, .slack-onboarding-card fieldset, .slack-connected-summary, .slack-connected-summary dl > div, .slack-advanced-settings) { background: var(--raised); border-color: var(--line); }
+html[data-theme="dark"] .workspace-daily-bot-heading > span { border-color: var(--line); background: var(--surface-muted); color: #b7a7e6; }
 html[data-theme="dark"] .integration-intro { background: linear-gradient(135deg, var(--raised), var(--surface-muted)); }
 html[data-theme="dark"] .integration-service-icon { background: var(--surface-muted); }
 html[data-theme="dark"] .integration-state-message { background: color-mix(in srgb, #b47719 12%, var(--raised)); }
@@ -2631,6 +2641,8 @@ html[data-theme="dark"] .integration-state-message.error { background: color-mix
   .slack-one-button-connect { align-items: stretch; flex-direction: column; padding: 14px; }
   .slack-one-button-connect > button, .slack-one-button-connect .slack-primary-action { width: 100%; min-height: 44px; }
   .slack-onboarding-card { padding: 14px 12px; }
+  .workspace-daily-bot-heading { grid-template-columns: 36px minmax(0, 1fr); }
+  .workspace-daily-bot-heading > em { grid-column: 2; justify-self: start; }
   .slack-onboarding-card > header { flex-direction: column; }
   .slack-onboarding-card > header > button { width: 100%; min-height: 44px; }
   .slack-onboarding-grid, .slack-onboarding-members > div, .slack-onboarding-channels { grid-template-columns: 1fr; }
