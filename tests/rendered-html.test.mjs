@@ -715,6 +715,7 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
     readFile(new URL("../docs/slack-production-setup.md", import.meta.url), "utf8"),
     readFile(new URL("../docs/slack-customer-connect.md", import.meta.url), "utf8"),
   ]);
+  const paceData = await readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8");
   assert.match(page, /내 데일리/);
   assert.match(page, /확정 및 공유/);
   assert.match(page, /작성 중인 초안은 상태만 표시/);
@@ -752,10 +753,15 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(manifest, /message\.im/);
   assert.match(manifest, /channels:join/);
   assert.doesNotMatch(manifest, /incoming-webhook/);
-  for (const state of ["platform_unavailable", "workspace_disconnected", "reauthorization_required", "connected"]) assert.match(slackStatus, new RegExp(state));
+  for (const state of ["service_unavailable", "workspace_disconnected", "setup_required", "reauthorization_required", "connected"]) assert.match(slackStatus, new RegExp(state));
   for (const field of ["connectionScope", "distributionMode", "connectedTeam"]) assert.match(slackStatus, new RegExp(field));
   for (const code of ["slack_admin_approval_required", "workspace_already_connected", "authorization_cancelled", "missing_scope", "oauth_exchange_failed"]) assert.match(`${oauth}\n${slackCallback}`, new RegExp(code));
   assert.match(slackCallback, /setup_required/);
+  assert.match(slackCallback, /hasWorkspaceAdminAccess/);
+  assert.match(slackCallback, /x-okrptr-workspace-id/);
+  assert.match(paceData, /hasWorkspaceAdminAccess/);
+  assert.doesNotMatch(page, /slack\?\.configured/);
+  assert.doesNotMatch(paceData, /serializeSlackConnection\(connection: SlackConnection \| null, configured/);
   assert.match(onboardingRoute, /configureSlackDailyOnboarding/);
   assert.match(slackDaily, /conversations\.join/);
   assert.match(slackDaily, /chat\.scheduleMessage/);

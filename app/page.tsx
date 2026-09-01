@@ -524,9 +524,8 @@ type GoogleConnectionStatus = {
   updatedAt: string | null;
 };
 type SlackConnectionStatus = {
-  configured: boolean;
   connected: boolean;
-  state: "platform_unavailable" | "workspace_disconnected" | "connected" | "reauthorization_required" | "error";
+  state: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required" | "error";
   statusMessage: string;
   missingScopes: string[];
   connectionScope: "workspace";
@@ -543,7 +542,7 @@ type SlackConnectionStatus = {
   interactionUrl?: string | null;
   eventsUrl?: string | null;
 };
-type SlackOAuthIssue = "workspace_admin_required" | "slack_admin_approval_required" | "workspace_already_connected" | "authorization_cancelled" | "missing_scope" | "oauth_exchange_failed" | "missing_config";
+type SlackOAuthIssue = "workspace_admin_required" | "slack_admin_approval_required" | "workspace_already_connected" | "authorization_cancelled" | "missing_scope" | "oauth_exchange_failed" | "service_unavailable";
 const slackOAuthIssueCopy: Record<SlackOAuthIssue, { title: string; detail: string; tone: "warning" | "error" }> = {
   workspace_admin_required: { title: "OKRPTR 관리자 권한이 필요합니다", detail: "이 워크스페이스의 Owner 또는 Admin에게 Slack 연결을 요청해 주세요.", tone: "warning" },
   slack_admin_approval_required: { title: "Slack 관리자 승인이 필요합니다", detail: "선택한 Slack 워크스페이스의 앱 설치 정책에 따라 관리자 승인을 받은 뒤 다시 연결해 주세요.", tone: "warning" },
@@ -551,7 +550,7 @@ const slackOAuthIssueCopy: Record<SlackOAuthIssue, { title: string; detail: stri
   authorization_cancelled: { title: "Slack 승인이 취소되었습니다", detail: "연결할 워크스페이스를 다시 선택하려면 아래 연결 버튼을 눌러 주세요.", tone: "warning" },
   missing_scope: { title: "Slack 권한 업데이트가 필요합니다", detail: "데일리 DM과 채널 공유에 필요한 권한을 Slack에서 한 번 더 승인해 주세요.", tone: "warning" },
   oauth_exchange_failed: { title: "Slack 연결을 완료하지 못했습니다", detail: "승인 정보가 만료되었거나 Slack 응답을 확인하지 못했습니다. 다시 연결해 주세요.", tone: "error" },
-  missing_config: { title: "Slack 서비스 설정을 확인할 수 없습니다", detail: "고객이 입력할 기술 설정은 없습니다. 운영 설정을 확인한 뒤 다시 시도해 주세요.", tone: "error" },
+  service_unavailable: { title: "Slack 연결을 잠시 사용할 수 없습니다", detail: "별도로 입력할 설정은 없습니다. 서비스가 준비되면 이 화면에서 바로 연결할 수 있습니다.", tone: "error" },
 };
 type SlackAutomationTrigger = "task_created" | "task_status_changed";
 type SlackAutomation = {
@@ -6096,14 +6095,14 @@ function AppIntegrationsView({ google, slack, slackOAuthIssue, loading, loadErro
   }
 
   function connectSlack() {
-    if (!slack?.configured || !canManageSlack) return;
+    if (!canManageSlack || !slack || !["workspace_disconnected", "reauthorization_required"].includes(slack.state)) return;
     window.location.href = `/api/slack/auth?returnTo=${encodeURIComponent("/?view=integrations")}`;
   }
 
-  const slackState = loadError ? "error" : slack?.state ?? (slack?.connected ? "connected" : slack?.configured ? "workspace_disconnected" : "platform_unavailable");
-  const slackConnected = Boolean(slack?.connected);
+  const slackState = loadError ? "error" : slack?.state ?? "service_unavailable";
+  const slackConnected = Boolean(slack?.connected && slackState !== "service_unavailable" && slackState !== "error");
   const connectedSlackName = slack?.connectedTeam?.name || slack?.teamName || "Slack";
-  const slackAction = slackState === "connected" ? "연결 완료" : slackState === "reauthorization_required" ? "권한 업데이트 필요" : slackState === "workspace_disconnected" ? "연결 필요" : slackState === "error" ? "확인 실패" : "서비스 설정 확인 필요";
+  const slackAction = slackState === "connected" ? "연결 완료" : slackState === "setup_required" ? "초기 설정 필요" : slackState === "reauthorization_required" ? "권한 업데이트 필요" : slackState === "workspace_disconnected" ? "연결 필요" : "잠시 사용 불가";
 
   return <section className="integrations-page" aria-label="앱 연동 설정">
     <section className="integration-intro">
@@ -6122,9 +6121,9 @@ function AppIntegrationsView({ google, slack, slackOAuthIssue, loading, loadErro
       {slackOAuthIssue && <div className={`integration-state-message ${slackOAuthIssueCopy[slackOAuthIssue].tone}`} role="alert"><AlertTriangle size={17} /><div><b>{slackOAuthIssueCopy[slackOAuthIssue].title}</b><p>{slackOAuthIssueCopy[slackOAuthIssue].detail}</p></div></div>}
 
       {!slackConnected && <section className="slack-one-button-connect" aria-label="Slack 연결">
-        <div><b>승인 한 번이면 준비됩니다</b><p>{slack?.statusMessage || "Slack 사용자와 채널은 승인 후 자동으로 불러옵니다. Client ID나 Webhook URL을 입력할 필요가 없습니다."}</p></div>
+        <div><b>{slackState === "service_unavailable" || slackState === "error" ? "Slack 연결을 준비하고 있습니다" : "승인 한 번이면 준비됩니다"}</b><p>{slackState === "error" ? "연결 상태를 불러오지 못했습니다. 잠시 후 이 화면을 다시 열어 주세요." : slack?.statusMessage || "Slack 사용자와 채널은 승인 후 자동으로 불러옵니다. Client ID나 Webhook URL을 입력할 필요가 없습니다."}</p></div>
         {loading ? <span className="integration-inline-loading"><LoaderCircle className="spin" size={14} />확인 중</span>
-          : slackState === "error" || slackState === "platform_unavailable" ? <button onClick={onRefresh}><RefreshCw size={14} />다시 확인</button>
+          : slackState === "error" || slackState === "service_unavailable" ? <span className="integration-role-note">잠시 후 사용 가능</span>
           : slackState === "workspace_disconnected" && canManageSlack ? <button className="slack-primary-action" onClick={connectSlack}><Hash size={15} />Slack 연결</button>
           : slackState === "workspace_disconnected" ? <span className="integration-role-note">Owner 또는 Admin에게 Slack 연결을 요청해 주세요.</span>
           : slackState === "reauthorization_required" && canManageSlack ? <button className="slack-primary-action" onClick={connectSlack}>권한 업데이트</button>

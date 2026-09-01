@@ -106,7 +106,7 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "platform_unavailable" | "workspace_disconnected" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "member" | "viewer" } = {}) {
+async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "member" | "viewer" } = {}) {
   let krDataConnections: Array<Record<string, unknown>> = [];
   let slackSetupComplete = options.slackSetupComplete ?? true;
   const assistantDrafts = new Map<string, unknown>();
@@ -190,10 +190,10 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
     if (url.pathname === "/api/google/status") return json(route, { google: { configured: true, connected: false, email: null, displayName: null, scope: "", connectedAt: null, updatedAt: null } });
     if (url.pathname === "/api/slack/status") {
       const state = options.slackState ?? "workspace_disconnected";
-      const connected = state === "connected" || state === "reauthorization_required";
+      const connected = state === "setup_required" || state === "connected" || state === "reauthorization_required";
       return json(route, { slack: {
-        configured: state !== "platform_unavailable", connected, state,
-        statusMessage: state === "platform_unavailable" ? "Slack 연결 설정이 아직 완료되지 않았습니다. 현재 이용자가 입력할 기술 설정은 없습니다." : state === "workspace_disconnected" ? "Owner 또는 Admin이 이 OKRPTR 워크스페이스에 사용할 Slack을 직접 선택하고 승인할 수 있습니다." : state === "reauthorization_required" ? "새 데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요." : "고객 Slack A와 연결되어 데일리 알림을 설정할 수 있습니다.",
+        connected, state,
+        statusMessage: state === "service_unavailable" ? "Slack 연결을 잠시 사용할 수 없습니다. 서비스가 준비되면 이 화면에서 바로 연결할 수 있습니다." : state === "workspace_disconnected" ? "Owner 또는 Admin이 이 OKRPTR 워크스페이스에 사용할 Slack을 직접 선택하고 승인할 수 있습니다." : state === "reauthorization_required" ? "새 데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요." : state === "setup_required" ? "고객 Slack A 연결을 마쳤습니다. 데일리 발송 설정을 완료해 주세요." : "고객 Slack A와 연결되어 데일리 알림을 설정할 수 있습니다.",
         missingScopes: state === "reauthorization_required" ? ["im:write"] : [], teamName: connected ? "테스트 Slack" : null, teamId: connected ? "T123" : null, botUserId: connected ? "U-BOT" : null, scope: connected ? "commands,chat:write,im:write,im:history,users:read,users:read.email,channels:read,groups:read" : "", connectedAt: connected ? now : null, updatedAt: connected ? now : null,
         connectionScope: "workspace", distributionMode: "direct_oauth", connectedTeam: connected ? { id: "T123", name: "고객 Slack A" } : null,
         redirectUrl: "https://okrptr.com/api/slack/callback", commandUrl: "https://okrptr.com/api/slack/commands", interactionUrl: "https://okrptr.com/api/slack/interactions", eventsUrl: "https://okrptr.com/api/slack/events",
@@ -391,12 +391,13 @@ test.describe("독립 앱 연동 화면", () => {
     await expect(page.getByRole("dialog", { name: "앱 연동" })).toHaveCount(0);
   });
 
-  test("서비스 설정 오류에는 죽은 버튼 대신 설명과 재확인을 제공한다", async ({ page }) => {
-    await installApiMocks(page, { slackState: "platform_unavailable" });
+  test("서비스 장애에는 고객이 해결할 수 없는 재확인 버튼을 노출하지 않는다", async ({ page }) => {
+    await installApiMocks(page, { slackState: "service_unavailable" });
     await page.goto("/?view=integrations");
-    await expect(page.getByText("서비스 설정 확인 필요", { exact: true })).toBeVisible();
-    await expect(page.getByText(/현재 이용자가 입력할 기술 설정은 없습니다/)).toBeVisible();
-    await expect(page.getByRole("button", { name: "다시 확인" })).toBeVisible();
+    await expect(page.getByText("잠시 사용 불가", { exact: true })).toBeVisible();
+    await expect(page.getByText(/Slack 연결을 잠시 사용할 수 없습니다/)).toBeVisible();
+    await expect(page.getByText("잠시 후 사용 가능", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "다시 확인" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Slack 연결" })).toHaveCount(0);
   });
 
@@ -430,7 +431,7 @@ test.describe("독립 앱 연동 화면", () => {
   });
 
   test("초기 설정 한 번으로 대상·채널·예약·테스트를 완료한다", async ({ page }) => {
-    await installApiMocks(page, { slackState: "connected", slackSetupComplete: false });
+    await installApiMocks(page, { slackState: "setup_required", slackSetupComplete: false });
     await page.goto("/?view=integrations&slack=setup_required");
     await expect(page.getByRole("heading", { name: "Slack 초기 설정" })).toBeVisible();
     await expect(page.getByText("채널 공유 안 함")).toBeVisible();

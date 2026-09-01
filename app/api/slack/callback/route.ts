@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { consumeSlackOAuthState, saveSlackConnection, SlackWorkspaceConnectionError } from "@/lib/pace-data";
+import { authorizeRequest, canManageTeam, consumeSlackOAuthState, hasWorkspaceAdminAccess, saveSlackConnection, SlackWorkspaceConnectionError } from "@/lib/pace-data";
 import { classifySlackOAuthError, decryptSlackSecret, encryptSlackSecret, exchangeSlackCode, redirectWithSlackStatus, revokeSlackToken, SlackOAuthExchangeError, slackConfigured, slackScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { disconnectSlackDaily, syncSlackDailyInstallation } from "@/lib/slack-daily";
 
@@ -10,12 +10,23 @@ export async function GET(request: Request) {
   const returnTo = state?.returnTo ?? "/?view=integrations";
 
   if (!state) return redirectWithSlackStatus(request, returnTo, "oauth_exchange_failed");
+  const callbackHeaders = new Headers(request.headers);
+  callbackHeaders.set("x-okrptr-workspace-id", state.ownerId);
+  const callbackAuthorization = await authorizeRequest(new Request(request, { headers: callbackHeaders }), { allowViewerWrite: true });
+  const stateStillAuthorized = await hasWorkspaceAdminAccess(state.ownerId, state.userId);
+  if (
+    callbackAuthorization instanceof Response
+    || callbackAuthorization.ownerId !== state.ownerId
+    || callbackAuthorization.userId !== state.userId
+    || !canManageTeam(callbackAuthorization)
+    || !stateStillAuthorized
+  ) return redirectWithSlackStatus(request, returnTo, "workspace_admin_required");
   const authorizationError = requestUrl.searchParams.get("error");
   if (authorizationError) return redirectWithSlackStatus(request, returnTo, classifySlackOAuthError(authorizationError, requestUrl.searchParams.get("error_description") ?? ""));
 
   const runtime = env as SlackRuntimeEnv;
   if (!slackConfigured(runtime)) {
-    return redirectWithSlackStatus(request, returnTo, "missing_config");
+    return redirectWithSlackStatus(request, returnTo, "service_unavailable");
   }
 
   const code = requestUrl.searchParams.get("code");

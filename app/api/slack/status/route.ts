@@ -9,27 +9,34 @@ export async function GET(request: Request) {
   await ensureWorkspace(authorization.ownerId);
   const runtime = env as SlackRuntimeEnv;
   const connection = await getSlackConnection(authorization.ownerId);
-  if (connection) void reconcileDailyReminders(authorization.ownerId);
   const configured = slackConfigured(runtime);
+  if (connection && configured) void reconcileDailyReminders(authorization.ownerId);
   const grantedScopes = new Set((connection?.scope ?? "").split(/[ ,]/).map((scope) => scope.trim()).filter(Boolean));
   const missingScopes = connection ? slackScopes.filter((scope) => !grantedScopes.has(scope)) : [];
+  const dailySettings = connection
+    ? await env.DB.prepare("SELECT onboarding_completed_at FROM slack_daily_settings WHERE owner_id = ? LIMIT 1").bind(authorization.ownerId).first<{ onboarding_completed_at: string | null }>()
+    : null;
   const state = !configured
-    ? "platform_unavailable"
+    ? "service_unavailable"
     : !connection
       ? "workspace_disconnected"
       : missingScopes.length
         ? "reauthorization_required"
-        : "connected";
-  const statusMessage = state === "platform_unavailable"
-    ? "Slack 연결 설정이 아직 완료되지 않았습니다. 현재 이용자가 입력할 기술 설정은 없습니다."
+        : !dailySettings?.onboarding_completed_at
+          ? "setup_required"
+          : "connected";
+  const statusMessage = state === "service_unavailable"
+    ? "Slack 연결을 잠시 사용할 수 없습니다. 서비스가 준비되면 이 화면에서 바로 연결할 수 있습니다."
     : state === "workspace_disconnected"
       ? "Owner 또는 Admin이 이 OKRPTR 워크스페이스에 사용할 Slack을 직접 선택하고 승인할 수 있습니다."
       : state === "reauthorization_required"
         ? "새 데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요."
+        : state === "setup_required"
+          ? `${connection?.teamName || "Slack"} 연결을 마쳤습니다. 데일리 발송 설정을 완료해 주세요.`
         : `${connection?.teamName || "Slack"} 워크스페이스가 연결되어 데일리 알림을 설정할 수 있습니다.`;
   return Response.json({
     slack: {
-      ...serializeSlackConnection(connection, configured, {
+      ...serializeSlackConnection(connection, {
       redirectUrl: slackRedirectUri(runtime, request),
       commandUrl: slackCommandUrl(request),
       interactionUrl: slackInteractionUrl(request),
