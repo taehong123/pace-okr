@@ -214,16 +214,11 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /mode === "project"/);
   assert.match(page, /my_work: "내 업무"/);
   assert.match(layout, /okrptr\.theme/);
-  assert.match(page, /type ThemeMode = "white" \| "beige" \| "gray" \| "dark"/);
-  assert.match(page, /mode: "white", label: "화이트"[\s\S]*mode: "beige"[\s\S]*mode: "gray"[\s\S]*mode: "dark"/);
+  assert.match(page, /type ThemeMode = "beige" \| "gray" \| "dark"/);
+  assert.match(page, /베이지.*그레이.*다크/s);
   assert.match(page, /theme-picker/);
   assert.match(page, /chat-send-button/);
   assert.match(page, /메시지 보내기/);
-  assert.match(layout, /okrptr\.theme-default-white-v1/);
-  assert.match(layout, /validTheme \? savedTheme : "white"/);
-  assert.match(globals, /html\[data-theme="white"\]/);
-  assert.match(globals, /--paper: #ffffff/);
-  assert.match(globals, /html\[data-theme="beige"\]/);
   assert.match(globals, /--paper: #f3f2ee/);
   assert.match(globals, /html\[data-theme="gray"\]/);
   assert.match(globals, /html\[data-theme="dark"\]/);
@@ -872,25 +867,9 @@ test("uses warm-neutral KR and Initiative hierarchy surfaces", async () => {
   assert.match(styles, /\.hierarchy-kind-key_result \{[^}]*border-left: 2px solid var\(--kr-rail\)[^}]*box-shadow: none/);
   assert.match(styles, /\.hierarchy-kind-initiative \{[^}]*border-left: 2px solid var\(--initiative-rail\)[^}]*box-shadow: none/);
   assert.match(styles, /\.hierarchy-kind-initiative \.initiative-execution-summary \{ color: var\(--muted\); \}/);
-  assert.match(styles, /\.type-key_result \{ background: var\(--kr-badge-bg\); color: var\(--kr-badge-text\); \}/);
-  assert.match(styles, /\.type-initiative \{ background: var\(--initiative-badge-bg\); color: var\(--initiative-badge-text\); \}/);
-  assert.match(styles, /\.okr-file-read-kr \{[^}]*background: var\(--raised\)/);
-  assert.match(styles, /\.okr-file-read-initiative \{[^}]*background: var\(--raised\)/);
-  assert.doesNotMatch(styles, /\.okr-file-read-(?:kr|initiative) \{[^}]*color-mix/);
   assert.match(styles, /--kr-badge-bg: #43302b/);
   assert.match(styles, /--initiative-badge-bg: #30322e/);
   assert.doesNotMatch(styles, /--kr-soft|--initiative-soft|#42627a|#426653|#e8eff4|#e8f0eb/);
-});
-
-test("keeps the mobile OKR list header and KR rows aligned", async () => {
-  const [page, css] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
-  ]);
-  assert.match(page, /activeView === "okr" \? "okr-page-header"/);
-  assert.match(css, /\.okr-page-header \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto/);
-  assert.match(css, /\.okr-page-header > \.primary-action \{[^}]*min-width: max-content[^}]*white-space: nowrap/);
-  assert.match(css, /\.okr-tree-kr-row \{[^}]*grid-template-areas: "chevron badge copy progress" "\. \. count progress"/);
 });
 
 test("uses a restrained large-desktop density without scaling smaller viewports", async () => {

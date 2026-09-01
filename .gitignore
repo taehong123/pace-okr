@@ -39,3 +39,14 @@ yarn-error.log*
 /outputs/
 /work/
 *.tsbuildinfo
+
+# local Codex/Sites verification and deployment artifacts
+/.codex-remote-attachments/
+/.deploy-*/
+/.sites-*/
+/.validate-*/
+/.verify-*/
+/test-results/
+/debug.log
+/okrptr-*.tar.gz
+/%SystemDrive%/

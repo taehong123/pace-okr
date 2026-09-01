@@ -482,7 +482,10 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
     await expect(daily).toHaveAttribute("aria-expanded", "false");
     await expect(management).toHaveAttribute("aria-expanded", "true");
     await expect(page).toHaveURL(/bot=management/);
-    await page.goBack();
+    await Promise.all([
+      page.waitForURL(/bot=daily/),
+      page.evaluate(() => window.history.back()),
+    ]);
     await expect(daily).toHaveAttribute("aria-expanded", "true");
     await expect(management).toHaveAttribute("aria-expanded", "false");
   });
@@ -626,8 +629,8 @@ test.describe("개인 앱 연동과 워크스페이스 봇 연동", () => {
 
   test("Slack 관리자 승인과 중복 연결 오류는 워크스페이스 설정에서 안내한다", async ({ page }) => {
     await installApiMocks(page, { slackState: "workspace_disconnected", teamWorkspace: true });
-    await page.goto("/?settings=workspace&tab=integrations&slack=slack_admin_approval_required");
-    await expect(page.getByRole("heading", { name: "데일리 봇" })).toBeVisible();
+    await page.goto("/?settings=workspace&tab=integrations&bot=daily&slack=slack_admin_approval_required");
+    await expect(page.getByRole("button", { name: /^데일리 봇/ })).toHaveAttribute("aria-expanded", "true");
     await expect(page.getByText("Slack 연결 후 데일리 봇을 설정할 수 있습니다")).toBeVisible();
     const oauthAlert = page.locator(".slack-service-card .integration-state-message[role='alert']");
     await expect(oauthAlert).toContainText("Slack 관리자 승인이 필요합니다");
@@ -650,7 +653,8 @@ test.describe("개인 앱 연동과 워크스페이스 봇 연동", () => {
     await page.goto("/?settings=workspace&tab=integrations");
     await expect(page.getByRole("dialog", { name: "워크스페이스 설정" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "봇 연동" })).toBeVisible();
-    await expect(page.getByText("고객 Slack A 연결 완료")).toBeVisible();
+    await expect(page.getByText("고객 Slack A 워크스페이스가 연결되어 있습니다.")).toBeVisible();
+    await expect(page.locator(".slack-service-card .integration-status-badge")).toHaveText("연결 완료");
     await page.getByRole("button", { name: /^데일리 봇/ }).click();
     await expect(page.getByText("1명", { exact: true })).toBeVisible();
     await expect(page.locator(".slack-connected-summary dd", { hasText: "#daily" })).toBeVisible();

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 /* eslint-disable @next/next/no-img-element */
 
 import {
@@ -108,14 +108,14 @@ type GroupVisibility = "open" | "private";
 type GroupRole = "lead" | "member";
 type WorkspaceSettingsTab = "general" | "members" | "groups" | "projects" | "summary" | "integrations" | "danger" | "scheduled";
 type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
-type ThemeMode = "white" | "beige" | "gray" | "dark";
+type ThemeMode = "beige" | "gray" | "dark";
 type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "local" };
 type AuthState = { status: "loading" | "authenticated" | "unauthenticated"; user: AuthUser | null; reason: string | null };
 
 const THEME_STORAGE_KEY = "okrptr.theme";
 
 function isThemeMode(value: string | null | undefined): value is ThemeMode {
-  return value === "white" || value === "beige" || value === "gray" || value === "dark";
+  return value === "beige" || value === "gray" || value === "dark";
 }
 
 type ItemAssignment = {
@@ -855,9 +855,9 @@ function WorkspaceApp() {
   const [freshWorkspaceDataReady, setFreshWorkspaceDataReady] = useState(false);
   const [workspaceDataAttempt, setWorkspaceDataAttempt] = useState(0);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
-    if (typeof document === "undefined") return "white";
+    if (typeof document === "undefined") return "beige";
     const preference = document.documentElement.dataset.themePreference;
-    return isThemeMode(preference) ? preference : "white";
+    return isThemeMode(preference) ? preference : "beige";
   });
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
   const assistantAutoHandledWorkspaceRef = useRef<string | null>(null);
@@ -2114,8 +2114,8 @@ function WorkspaceApp() {
             userId={authState.user?.id ?? ""}
             onOpenSettings={() => setPropertyPanelOpen(true)}
           />
-          {activeView !== "home" && !selectedProject && <header className={`page-header ${activeView === "okr" ? "okr-page-header" : ""}`}>
-            <div className="page-header-copy"><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
+          {activeView !== "home" && !selectedProject && <header className="page-header">
+            <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setOkrListOpen(true)}><Archive size={14} />목록보기</button>
             ) : activeView === "inbox" ? (
@@ -5619,7 +5619,6 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
 
 function PropertyPanel({ user, displayName, themeMode, onThemeModeChange, onClose, onSignOut }: { user: AuthUser | null; displayName: string; themeMode: ThemeMode; onThemeModeChange: (mode: ThemeMode) => void; onClose: () => void; onSignOut: () => void }) {
   const themes: { mode: ThemeMode; label: string }[] = [
-    { mode: "white", label: "화이트" },
     { mode: "beige", label: "베이지" },
     { mode: "gray", label: "그레이" },
     { mode: "dark", label: "다크" },
@@ -6342,7 +6341,10 @@ function WorkspaceManagementSummary() {
         setSnapshot(payload.snapshot);
       })
       .catch((loadError: unknown) => {
-        if (loadError instanceof DOMException && loadError.name === "AbortError") return;
+        if (loadError instanceof DOMException && loadError.name === "AbortError") {
+          loadedRef.current = false;
+          return;
+        }
         setError(loadError instanceof Error ? loadError.message : "관리 요약을 불러오지 못했습니다.");
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
@@ -6585,6 +6587,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
     if (!active || !connected || !canManage || loadedRef.current) return;
     loadedRef.current = true;
     let mounted = true;
+    let completed = false;
     void Promise.all([
       fetch("/api/slack/daily/settings").then(async (response) => {
         const data = await response.json() as SlackDailyAdminData & { error?: string };
@@ -6597,6 +6600,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
         return data.channels ?? [];
       }),
     ]).then(([nextAdmin, nextChannels]) => {
+      completed = true;
       if (!mounted) return;
       setAdmin(nextAdmin);
       setChannels(nextChannels);
@@ -6604,8 +6608,14 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
       const days = nextAdmin.settings.weekdays.join(",") === "1,2,3,4,5" ? "평일" : nextAdmin.settings.weekdays.map((day) => ["일", "월", "화", "수", "목", "금", "토"][day]).join("·");
       onSummary(nextAdmin.setupComplete ? "설정 완료" : "설정 필요", `${days} ${nextAdmin.settings.reminderTime} · ${targetCount}명 · ${nextAdmin.channels.length ? nextAdmin.channels.map((channel) => `#${channel.name}`).join(", ") : "DM 전용"}`);
       setLoadError(false);
-    }).catch(() => { if (mounted) { setLoadError(true); onSummary("불러오기 실패", "설정을 다시 확인해 주세요"); } });
-    return () => { mounted = false; };
+    }).catch(() => {
+      completed = true;
+      if (mounted) { setLoadError(true); onSummary("불러오기 실패", "설정을 다시 확인해 주세요"); }
+    });
+    return () => {
+      mounted = false;
+      if (!completed) loadedRef.current = false;
+    };
   }, [active, connected, canManage, loadAttempt, onSummary]);
 
   useEffect(() => {
@@ -6828,16 +6838,18 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
     if (!active || !connected || loadedRef.current) return;
     loadedRef.current = true;
     let mounted = true;
+    let completed = false;
     setLoading(true);
     void Promise.all([
       fetchSlackAutomationData(),
-      fetch("/api/slack/channels?joinable=1").then(async (response) => {
+      canManage ? fetch("/api/slack/channels?joinable=1").then(async (response) => {
         const data = await response.json() as { channels?: Array<{ id: string; name: string; isPrivate: boolean; isMember: boolean }>; error?: string };
         if (!response.ok) throw new Error(data.error || "Slack 채널을 불러오지 못했습니다.");
         return data.channels ?? [];
-      }),
+      }) : Promise.resolve([]),
     ])
       .then(([data, nextChannels]) => {
+        completed = true;
         if (!mounted) return;
         setAutomations(data.automations);
         setDeliveries(data.deliveries);
@@ -6845,10 +6857,16 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
         const activeCount = data.automations.filter((entry) => entry.active).length;
         onSummary(activeCount ? "사용 중" : data.automations.length ? "중지" : "설정 필요", `활성 규칙 ${activeCount}개 · 전체 ${data.automations.length}개`);
       })
-      .catch((error: unknown) => { if (mounted) { onSummary("불러오기 실패", "설정을 다시 확인해 주세요"); onNotice(error instanceof Error ? error.message : "자동화를 불러오지 못했습니다."); } })
+      .catch((error: unknown) => {
+        completed = true;
+        if (mounted) { onSummary("불러오기 실패", "설정을 다시 확인해 주세요"); onNotice(error instanceof Error ? error.message : "자동화를 불러오지 못했습니다."); }
+      })
       .finally(() => { if (mounted) { setLoading(false); setLoaded(true); } });
-    return () => { mounted = false; };
-  }, [active, connected, onNotice, onSummary]);
+    return () => {
+      mounted = false;
+      if (!completed) loadedRef.current = false;
+    };
+  }, [active, canManage, connected, onNotice, onSummary]);
 
   useEffect(() => {
     if (connected || !active) return;

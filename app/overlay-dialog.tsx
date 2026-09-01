@@ -124,6 +124,7 @@ export function OverlayDialog({
     }
 
     const handlePopState = () => {
+      if (!useHistory) return;
       if (!isTopOverlay(overlayId)) return;
       if (window.history.state?.__okrptrOverlay === overlayId) return;
       requestCloseRef.current("history");
