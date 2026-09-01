@@ -1,14 +1,33 @@
 import { authorizeRequest, ensureWorkspace, ItemDeletePermissionError } from "@/lib/pace-data";
-import { getOkrFile, OkrFileConflictError, updateOkrFile, type OkrFileSaveInput } from "@/lib/okr-files";
+import { getOkrFile, getOkrFileRead, OkrFileConflictError, updateOkrFile, type OkrFileSaveInput } from "@/lib/okr-files";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  const startedAt = Date.now();
   const authorization = await authorizeRequest(request);
   if (authorization instanceof Response) return authorization;
+  const authorizedAt = Date.now();
   try {
     await ensureWorkspace(authorization.ownerId);
+    const workspaceReadyAt = Date.now();
     const { id } = await context.params;
-    const file = await getOkrFile(authorization.ownerId, authorization.userId, id);
-    return Response.json({ file });
+    const readMode = new URL(request.url).searchParams.get("mode") === "read";
+    const file = readMode
+      ? await getOkrFileRead(authorization.ownerId, id)
+      : await getOkrFile(authorization.ownerId, authorization.userId, id);
+    const loadedAt = Date.now();
+    const etag = `"${file.revision}"`;
+    const headers = {
+      "Cache-Control": "private, no-cache, must-revalidate",
+      ETag: etag,
+      "Server-Timing": [
+        `auth;dur=${authorizedAt - startedAt}`,
+        `workspace;dur=${workspaceReadyAt - authorizedAt}`,
+        `query;dur=${loadedAt - workspaceReadyAt}`,
+      ].join(", "),
+      Vary: "Cookie",
+    };
+    if (readMode && request.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
+    return Response.json({ file }, { headers });
   } catch (error) {
     return routeError(error);
   }

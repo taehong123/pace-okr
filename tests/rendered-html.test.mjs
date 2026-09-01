@@ -439,7 +439,12 @@ test("ships atomic OKR file editing and safe Project recovery contracts", async 
   assert.match(surface, /beforeunload/);
   assert.match(surface, /KR은 한 개 이상 필요/);
   assert.match(surface, /Project 탭/);
-  assert.doesNotMatch(surface, /onOpenProject|onOpenTask|완료 처리/);
+  assert.match(surface, /onOpenProject/);
+  assert.match(surface, /onOpenTask/);
+  assert.match(surface, /aria-expanded/);
+  assert.match(surface, /미완료 Project 없음/);
+  assert.match(surface, /미완료 Task 없음/);
+  assert.doesNotMatch(surface, /완료 처리/);
   assert.match(okrFiles, /calculateRevision/);
   assert.match(okrFiles, /await d1\.batch\(statements\)/);
   assert.match(okrFiles, /Project resolution is required/);
@@ -447,6 +452,10 @@ test("ships atomic OKR file editing and safe Project recovery contracts", async 
   assert.match(okrFiles, /completed\(status\) \? 100/);
   assert.match(collectionRoute, /createOkrFile/);
   assert.match(fileRoute, /getOkrFile/);
+  assert.match(fileRoute, /getOkrFileRead/);
+  assert.match(fileRoute, /mode.*read/);
+  assert.match(fileRoute, /ETag/);
+  assert.match(fileRoute, /Server-Timing/);
   assert.match(fileRoute, /updateOkrFile/);
   assert.match(fileRoute, /status: 409/);
   assert.match(splitRoute, /splitOkrFile/);

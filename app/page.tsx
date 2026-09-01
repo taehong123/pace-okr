@@ -601,7 +601,21 @@ type TrashRecord = {
 
 const dailyScrumMemoryCache = new Map<string, DailyDashboard>();
 const recommendationMemoryCache = new Map<string, Recommendation[]>();
-let trashMemoryCache: { records: TrashRecord[]; items: TrashedItem[]; initiativeOptions: TrashInitiativeOption[] } | null = null;
+const routineMemoryCache = new Map<string, Routine[]>();
+const projectTemplateMemoryCache = new Map<string, ProjectTemplate[]>();
+const propertyCatalogMemoryCache = new Map<string, PropertyDefinition[]>();
+const trashMemoryCache = new Map<string, { records: TrashRecord[]; items: TrashedItem[]; initiativeOptions: TrashInitiativeOption[] }>();
+const viewCacheTimestamps = new Map<string, number>();
+const VIEW_CACHE_FRESH_MS = 30_000;
+
+function viewCacheIsFresh(key: string) {
+  const storedAt = viewCacheTimestamps.get(key);
+  return typeof storedAt === "number" && Date.now() - storedAt < VIEW_CACHE_FRESH_MS;
+}
+
+function markViewCacheFresh(key: string) {
+  viewCacheTimestamps.set(key, Date.now());
+}
 
 function scrumNotesSnapshot(scrum: DailyDashboard) {
   return JSON.stringify(scrum.draft);
@@ -821,6 +835,7 @@ function WorkspaceApp() {
   });
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
   const assistantAutoHandledWorkspaceRef = useRef<string | null>(null);
+  const workspaceRefreshAtRef = useRef(0);
   const showNotice = useCallback((message: string, tone?: NoticeTone) => {
     const resolvedTone = tone ?? (/못했|실패|오류|찾을 수 없/.test(message) ? "error" : "success");
     const nextNotice = { id: Date.now(), message, tone: resolvedTone };
@@ -853,6 +868,7 @@ function WorkspaceApp() {
 
   useEffect(() => {
     let active = true;
+    workspaceRefreshAtRef.current = Date.now();
     const date = encodeURIComponent(localDate());
     const path = `/api/bootstrap?date=${date}`;
     const preload = window.__OKRPTR_BOOTSTRAP_REQUEST__;
@@ -889,6 +905,7 @@ function WorkspaceApp() {
       .then((result) => {
         if (!result.ok || !result.data) throw new Error(result.status === 401 || result.status === 403 ? "unauthenticated" : "workspace data unavailable");
         const data = result.data;
+        workspaceRefreshAtRef.current = Date.now();
         writeCachedBootstrap(path, data);
         applyBootstrapData(data, true);
       })
@@ -906,6 +923,18 @@ function WorkspaceApp() {
       });
     return () => { active = false; };
   }, [workspaceDataAttempt]);
+
+  useEffect(() => {
+    if (authState.status !== "authenticated") return;
+    const refreshIfStale = () => {
+      if (document.visibilityState !== "visible" || Date.now() - workspaceRefreshAtRef.current < VIEW_CACHE_FRESH_MS) return;
+      workspaceRefreshAtRef.current = Date.now();
+      setWorkspaceDataAttempt((current) => current + 1);
+    };
+    refreshIfStale();
+    document.addEventListener("visibilitychange", refreshIfStale);
+    return () => document.removeEventListener("visibilitychange", refreshIfStale);
+  }, [activeView, authState.status]);
 
   useEffect(() => {
     const group = new URLSearchParams(window.location.search).get("group")?.replace(/^@/, "").trim();
@@ -2145,25 +2174,28 @@ function WorkspaceApp() {
                 onClearItems={removeDeleteItems}
               />}
               {projectTab === "properties" && <ProjectPropertyManager
+                workspaceId={currentWorkspace?.id ?? ""}
                 properties={properties}
                 teamMembers={teamMembers}
                 readOnly={currentWorkspace?.role === "viewer"}
                 onChanged={(next) => setProperties([...next].sort((left, right) => left.sortOrder - right.sortOrder))}
                 onNotice={showNotice}
               />}
-              {projectTab === "templates" && <ProjectTemplateManager readOnly={currentWorkspace?.role === "viewer"} onNotice={showNotice} />}
+              {projectTab === "templates" && <ProjectTemplateManager workspaceId={currentWorkspace?.id ?? ""} readOnly={currentWorkspace?.role === "viewer"} onNotice={showNotice} />}
             </section>
           )}
-          {activeView === "routines" && <RoutineView initialRoutines={routines} teamMembers={teamMembers} onNotice={showNotice} onRoutinesChange={setRoutines} createOpen={routineCreateOpen} onCreateClose={() => setRoutineCreateOpen(false)} onCreateWithChat={openRoutineCreationChat} />}
+          {activeView === "routines" && <RoutineView workspaceId={currentWorkspace?.id ?? ""} initialRoutines={routines} teamMembers={teamMembers} onNotice={showNotice} onRoutinesChange={setRoutines} createOpen={routineCreateOpen} onCreateClose={() => setRoutineCreateOpen(false)} onCreateWithChat={openRoutineCreationChat} />}
           {activeView === "data" && <ClientDataView key={currentWorkspace?.id ?? ""} cacheKey={currentWorkspace?.id ?? ""} items={activeItems} cycles={okrCycles} readOnly={currentWorkspace?.role === "viewer"} onProgressChange={(id, progress) => setItems((current) => current.map((entry) => entry.id === id ? { ...entry, progress } : entry))} onNotice={showNotice} />}
           {activeView === "okr" && (
             <section className="okr-workbench">
               <section className="okr-document">
                 {okrCreating || selectedOkrCycle ? <OkrFileSurface
                   key={`${okrCreating ? "new" : selectedOkrCycle?.id}-${workspaceDataAttempt}`}
+                  workspaceId={currentWorkspace?.id ?? ""}
                   cycleId={okrCreating ? null : selectedOkrCycle?.id ?? null}
                   creating={okrCreating}
                   readOnly={!canWriteWorkspace}
+                  executionItems={activeItems}
                   onSaved={applySavedOkrFile}
                   onSplit={(cycles) => {
                     setOkrCycles(cycles);
@@ -2172,6 +2204,8 @@ function WorkspaceApp() {
                   }}
                   onCancelCreate={() => { setOkrCreating(false); setOkrEditorDirty(false); }}
                   onNavigateProjects={() => navigateView("work")}
+                  onOpenProject={openProjectPage}
+                  onOpenTask={openTaskDetail}
                   onNotice={(message, tone) => showNotice(message, tone)}
                   onDirtyChange={setOkrEditorDirty}
                   onConfirm={(options) => confirmAction(options)}
@@ -2179,11 +2213,11 @@ function WorkspaceApp() {
               </section>
             </section>
           )}
-          {activeView === "scrum" && <DailyScrumView onOpenTask={openTaskDetail} onNotice={showNotice} />}
+          {activeView === "scrum" && <DailyScrumView workspaceId={currentWorkspace?.id ?? ""} onOpenTask={openTaskDetail} onNotice={showNotice} />}
           {activeView === "integrations" && <AppIntegrationsView google={googleStatus} slack={slackStatus} slackOAuthIssue={slackOAuthIssue} loading={!integrationStatusesLoaded} loadError={integrationStatusError} workspaceName={currentWorkspace?.name || "개인 워크스페이스"} canManageSlack={currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin"} onGoogleChange={setGoogleStatus} onSlackChange={setSlackStatus} onRefresh={refreshIntegrationStatuses} onNotice={showNotice} />}
-          {activeView === "recommendations" && <RecommendationsView items={activeItems} onOpenTask={openTaskDetail} onOpenProject={openProjectPage} onNavigate={navigateView} />}
+          {activeView === "recommendations" && <RecommendationsView workspaceId={currentWorkspace?.id ?? ""} items={activeItems} onOpenTask={openTaskDetail} onOpenProject={openProjectPage} onNavigate={navigateView} />}
           {activeView === "reviews" && <ReviewView items={periodItems} cadence={cadence} completed={completed} blocked={blocked} averageProgress={averageProgress} onOpenTask={openTaskDetail} onOpenProject={openProjectPage} />}
-          {activeView === "trash" && <TrashView onNotice={showNotice} canDeleteRecords={canDeleteRecords} canRestore={Boolean(currentWorkspace && currentWorkspace.role !== "viewer")} />}
+          {activeView === "trash" && <TrashView workspaceId={currentWorkspace?.id ?? ""} onNotice={showNotice} canDeleteRecords={canDeleteRecords} canRestore={Boolean(currentWorkspace && currentWorkspace.role !== "viewer")} />}
             </>
           )}
           </>}
@@ -3604,10 +3638,12 @@ function CreatePropertyField({ property, value, members, onChange }: { property:
   return <label><span>{property.name}</span><input type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => onChange(property, event.target.value)} /></label>;
 }
 
-function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange, createOpen, onCreateClose, onCreateWithChat }: { initialRoutines: Routine[]; teamMembers: TeamMember[]; onNotice: (message: string) => void; onRoutinesChange: (routines: Routine[]) => void; createOpen: boolean; onCreateClose: () => void; onCreateWithChat: (initialMessage?: string) => void }) {
+function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRoutinesChange, createOpen, onCreateClose, onCreateWithChat }: { workspaceId: string; initialRoutines: Routine[]; teamMembers: TeamMember[]; onNotice: (message: string) => void; onRoutinesChange: (routines: Routine[]) => void; createOpen: boolean; onCreateClose: () => void; onCreateWithChat: (initialMessage?: string) => void }) {
   const confirmAction = useAppConfirm();
-  const [date, setDate] = useState(localDate());
-  const [rows, setRows] = useState<Routine[] | null>(() => initialRoutines);
+  const initialDate = localDate();
+  const initialCacheKey = `routines:${workspaceId}:${initialDate}`;
+  const [date, setDate] = useState(initialDate);
+  const [rows, setRows] = useState<Routine[] | null>(() => routineMemoryCache.get(initialCacheKey) ?? initialRoutines);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [triggerPoint, setTriggerPoint] = useState("");
@@ -3622,15 +3658,23 @@ function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange,
   const rowsRef = useRef(rows);
 
   useEffect(() => { rowsRef.current = rows; }, [rows]);
-
   useEffect(() => {
     let active = true;
+    const key = `routines:${workspaceId}:${date}`;
+    const cached = routineMemoryCache.get(key);
+    if (cached && viewCacheIsFresh(key)) return () => { active = false; };
     fetch(`/api/routines?date=${date}`)
       .then(async (response) => response.ok ? response.json() as Promise<{ routines: Routine[] }> : Promise.reject())
-      .then((data) => { if (active) { setLoadError(false); setRows(data.routines); onRoutinesChange(data.routines); } })
+      .then((data) => { if (active) { routineMemoryCache.set(key, data.routines); markViewCacheFresh(key); setLoadError(false); setRows(data.routines); onRoutinesChange(data.routines); } })
       .catch(() => { if (active && rowsRef.current === null) setLoadError(true); });
     return () => { active = false; };
-  }, [date, loadAttempt, onRoutinesChange]);
+  }, [date, loadAttempt, onRoutinesChange, workspaceId]);
+  useEffect(() => {
+    if (!rows) return;
+    const key = `routines:${workspaceId}:${date}`;
+    routineMemoryCache.set(key, rows);
+    markViewCacheFresh(key);
+  }, [date, rows, workspaceId]);
 
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -3800,7 +3844,7 @@ function RoutineView({ initialRoutines, teamMembers, onNotice, onRoutinesChange,
   return (<>
     <section className="routine-section">
       <div className="routine-toolbar">
-        <label><CalendarDays size={14} /><input type="date" value={date} onChange={(event) => { setRows(null); setLoadError(false); setDate(event.target.value); }} /></label>
+        <label><CalendarDays size={14} /><input type="date" value={date} onChange={(event) => { const nextDate = event.target.value; setRows(routineMemoryCache.get(`routines:${workspaceId}:${nextDate}`) ?? null); setLoadError(false); setDate(nextDate); }} /></label>
         <p>반복 실행 날짜와 오늘의 완료 상태를 확인합니다.</p>
       </div>
       <div className="routine-cards">
@@ -3913,9 +3957,10 @@ function MyWorkSection({ title, count, children }: { title: string; count: numbe
   return <section className="my-work-section"><header><b>{title}</b><span>{count}</span></header><div>{count ? children : <p className="my-work-empty">담당된 {title}가 없습니다.</p>}</div></section>;
 }
 
-function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => void; onNotice: (message: string) => void }) {
+function DailyScrumView({ workspaceId, onOpenTask, onNotice }: { workspaceId: string; onOpenTask: (id: string) => void; onNotice: (message: string) => void }) {
   const initialDate = localDate();
-  const initialScrum = dailyScrumMemoryCache.get(initialDate) ?? null;
+  const initialCacheKey = `daily:${workspaceId}:${initialDate}`;
+  const initialScrum = dailyScrumMemoryCache.get(initialCacheKey) ?? null;
   const [date, setDate] = useState(initialDate);
   const [scrum, setScrum] = useState<DailyDashboard | null>(initialScrum);
   const [saving, setSaving] = useState<"draft" | "submit" | "task" | null>(null);
@@ -3936,13 +3981,15 @@ function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => 
   }, [onNotice]);
   useEffect(() => {
     let active = true;
-    const cachedScrum = dailyScrumMemoryCache.get(date) ?? null;
+    const key = `daily:${workspaceId}:${date}`;
+    const cachedScrum = dailyScrumMemoryCache.get(key) ?? null;
+    if (cachedScrum && viewCacheIsFresh(key)) return () => { active = false; };
     fetch(`/api/daily-scrum?date=${date}`)
       .then(async (response) => response.ok ? response.json() as Promise<DailyDashboard> : Promise.reject())
-      .then((data) => { if (active) { dailyScrumMemoryCache.set(date, data); setLoadError(false); setScrum(data); setSavedNotes(scrumNotesSnapshot(data)); setNewTaskParent(defaultDailyParent(data)); } })
+      .then((data) => { if (active) { dailyScrumMemoryCache.set(key, data); markViewCacheFresh(key); setLoadError(false); setScrum(data); setSavedNotes(scrumNotesSnapshot(data)); setNewTaskParent(defaultDailyParent(data)); } })
       .catch(() => { if (active && !cachedScrum) setLoadError(true); });
     return () => { active = false; };
-  }, [date, loadAttempt]);
+  }, [date, loadAttempt, workspaceId]);
   const notesDirty = Boolean(scrum) && savedNotes !== scrumNotesSnapshot(scrum!);
   useEffect(() => {
     if (!notesDirty) return;
@@ -3959,7 +4006,7 @@ function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => 
       const response = await fetch("/api/daily-scrum", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...currentScrum.draft, date }) });
       const data = await response.json() as DailyDashboard & { error?: string };
       if (!response.ok) throw new Error(data.error || "데일리 초안을 저장하지 못했습니다.");
-      dailyScrumMemoryCache.set(date, data); setScrum(data); setSavedNotes(scrumNotesSnapshot(data));
+      const key = `daily:${workspaceId}:${date}`; dailyScrumMemoryCache.set(key, data); markViewCacheFresh(key); setScrum(data); setSavedNotes(scrumNotesSnapshot(data));
       if (showNotice) onNotice("데일리 초안을 저장했습니다.");
       return data;
     } catch (saveError) {
@@ -3983,7 +4030,7 @@ function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => 
   }
   async function reload() {
     const refreshed = await fetch(`/api/daily-scrum?date=${date}`).then((entry) => entry.json() as Promise<DailyDashboard>);
-    dailyScrumMemoryCache.set(date, refreshed); setScrum(refreshed); setSavedNotes(scrumNotesSnapshot(refreshed)); return refreshed;
+    const key = `daily:${workspaceId}:${date}`; dailyScrumMemoryCache.set(key, refreshed); markViewCacheFresh(key); setScrum(refreshed); setSavedNotes(scrumNotesSnapshot(refreshed)); return refreshed;
   }
   async function createDailyTask(event: FormEvent) {
     event.preventDefault(); if (!newTaskTitle.trim() || !newTaskParent) return; setSaving("task");
@@ -4010,7 +4057,7 @@ function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => 
   const noTaskProjects = currentScrum.createTargets.projects.filter((project) => project.needsTask);
   return <section className="daily-workspace">
     <div className="scrum-toolbar">
-      <label><CalendarDays size={14} /><span className="sr-only">데일리 날짜</span><input aria-label="데일리 날짜" type="date" value={date} onChange={(event) => { const nextDate = event.target.value; const cached = dailyScrumMemoryCache.get(nextDate) ?? null; setScrum(cached); setSavedNotes(cached ? scrumNotesSnapshot(cached) : ""); setLoadError(false); setDate(nextDate); }} /></label>
+      <label><CalendarDays size={14} /><span className="sr-only">데일리 날짜</span><input aria-label="데일리 날짜" type="date" value={date} onChange={(event) => { const nextDate = event.target.value; const cached = dailyScrumMemoryCache.get(`daily:${workspaceId}:${nextDate}`) ?? null; setScrum(cached); setSavedNotes(cached ? scrumNotesSnapshot(cached) : ""); setLoadError(false); setDate(nextDate); }} /></label>
       <div><button onClick={() => void save()} disabled={Boolean(saving) || !notesDirty}>{saving === "draft" ? "저장 중" : notesDirty ? "초안 저장" : "저장됨"}</button><button className="primary-action" onClick={() => void submit()} disabled={Boolean(saving) || skipNeedsNote}><Send size={14} />{saving === "submit" ? "확정 중" : isSkipped ? "스킵 확정 및 공유" : "확정 및 공유"}</button></div>
     </div>
     <div className="daily-layout"><section className="daily-editor" aria-labelledby="my-daily-heading"><header><div><span>MY DAILY</span><h2 id="my-daily-heading">내 데일리</h2><p>조회와 선택은 Task 상태·기한·담당자를 바꾸지 않습니다.</p></div>{currentScrum.latestSubmission && <small>{currentScrum.latestSubmission.skipReason ? "스킵" : "제출"} v{currentScrum.latestSubmission.version} · {formatDateTime(currentScrum.latestSubmission.submittedAt)}</small>}</header>
@@ -4032,20 +4079,22 @@ function DailyScrumView({ onOpenTask, onNotice }: { onOpenTask: (id: string) => 
 
 function defaultDailyParent(scrum: DailyDashboard) { const project = scrum.createTargets.projects.find((entry) => entry.needsTask) ?? scrum.createTargets.projects[0]; if (project) return `project:${project.id}`; if (scrum.createTargets.routines[0]) return `routine:${scrum.createTargets.routines[0].id}`; return scrum.createTargets.allowGeneral ? "general:" : ""; }
 
-function RecommendationsView({ items, onOpenTask, onOpenProject, onNavigate }: { items: OkrptrItem[]; onOpenTask: (id: string) => void; onOpenProject: (id: string) => void; onNavigate: (view: View) => void }) {
+function RecommendationsView({ workspaceId, items, onOpenTask, onOpenProject, onNavigate }: { workspaceId: string; items: OkrptrItem[]; onOpenTask: (id: string) => void; onOpenProject: (id: string) => void; onNavigate: (view: View) => void }) {
   const date = localDate();
-  const [rows, setRows] = useState<Recommendation[] | null>(() => recommendationMemoryCache.get(date) ?? null);
+  const cacheKey = `recommendations:${workspaceId}:${date}`;
+  const [rows, setRows] = useState<Recommendation[] | null>(() => recommendationMemoryCache.get(cacheKey) ?? null);
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   useEffect(() => {
     let active = true;
-    const cachedRows = recommendationMemoryCache.get(date) ?? null;
+    const cachedRows = recommendationMemoryCache.get(cacheKey) ?? null;
+    if (cachedRows && viewCacheIsFresh(cacheKey)) return () => { active = false; };
     fetch(`/api/recommendations?date=${date}`)
       .then(async (response) => response.ok ? response.json() as Promise<{ recommendations: Recommendation[] }> : Promise.reject())
-      .then((data) => { if (active) { recommendationMemoryCache.set(date, data.recommendations); setLoadError(false); setRows(data.recommendations); } })
+      .then((data) => { if (active) { recommendationMemoryCache.set(cacheKey, data.recommendations); markViewCacheFresh(cacheKey); setLoadError(false); setRows(data.recommendations); } })
       .catch(() => { if (active && !cachedRows) setLoadError(true); });
     return () => { active = false; };
-  }, [date, loadAttempt]);
+  }, [cacheKey, date, loadAttempt]);
   if (loadError) return <AsyncState icon={AlertTriangle} title="추천을 계산하지 못했습니다" detail="워크스페이스 데이터를 다시 확인해 주세요." actionLabel="다시 시도" onAction={() => { setRows(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} />;
   if (!rows) return <AsyncState icon={LoaderCircle} title="추천을 계산하는 중입니다" loading />;
   if (!rows.length) return <EmptyState icon={CheckCircle2} title="지금 바로 정리할 항목이 없습니다" />;
@@ -4962,17 +5011,20 @@ function AsyncState({ icon: Icon, title, detail, actionLabel, onAction, loading 
   );
 }
 
-function TrashView({ onNotice, canDeleteRecords, canRestore }: { onNotice: (message: string) => void; canDeleteRecords: boolean; canRestore: boolean }) {
+function TrashView({ workspaceId, onNotice, canDeleteRecords, canRestore }: { workspaceId: string; onNotice: (message: string) => void; canDeleteRecords: boolean; canRestore: boolean }) {
   const confirmAction = useAppConfirm();
-  const [records, setRecords] = useState<TrashRecord[] | null>(() => trashMemoryCache?.records ?? null);
-  const [trashedItems, setTrashedItems] = useState<TrashedItem[] | null>(() => trashMemoryCache?.items ?? null);
-  const [initiativeOptions, setInitiativeOptions] = useState<TrashInitiativeOption[]>(() => trashMemoryCache?.initiativeOptions ?? []);
+  const initialCache = trashMemoryCache.get(workspaceId) ?? null;
+  const [records, setRecords] = useState<TrashRecord[] | null>(() => initialCache?.records ?? null);
+  const [trashedItems, setTrashedItems] = useState<TrashedItem[] | null>(() => initialCache?.items ?? null);
+  const [initiativeOptions, setInitiativeOptions] = useState<TrashInitiativeOption[]>(() => initialCache?.initiativeOptions ?? []);
   const [restoreParents, setRestoreParents] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   useEffect(() => {
     let active = true;
-    const cached = trashMemoryCache;
+    const cached = trashMemoryCache.get(workspaceId) ?? null;
+    const cacheKey = `trash:${workspaceId}`;
+    if (cached && viewCacheIsFresh(cacheKey)) return () => { active = false; };
     Promise.all([fetch("/api/item-trash"), fetch("/api/trash")])
       .then(async ([itemResponse, recordResponse]) => {
         if (!itemResponse.ok || !recordResponse.ok) throw new Error("trash-load-failed");
@@ -4982,7 +5034,8 @@ function TrashView({ onNotice, canDeleteRecords, canRestore }: { onNotice: (mess
       })
       .then((data) => {
         if (!active) return;
-        trashMemoryCache = { records: data.records, items: data.items, initiativeOptions: data.initiativeOptions };
+        trashMemoryCache.set(workspaceId, { records: data.records, items: data.items, initiativeOptions: data.initiativeOptions });
+        markViewCacheFresh(cacheKey);
         setLoadError(false);
         setTrashedItems(data.items);
         setRecords(data.records);
@@ -4990,11 +5043,14 @@ function TrashView({ onNotice, canDeleteRecords, canRestore }: { onNotice: (mess
       })
       .catch(() => { if (active && !cached) setLoadError(true); });
     return () => { active = false; };
-  }, [loadAttempt]);
+  }, [loadAttempt, workspaceId]);
 
   useEffect(() => {
-    if (records !== null && trashedItems !== null) trashMemoryCache = { records, items: trashedItems, initiativeOptions };
-  }, [initiativeOptions, records, trashedItems]);
+    if (records !== null && trashedItems !== null) {
+      trashMemoryCache.set(workspaceId, { records, items: trashedItems, initiativeOptions });
+      markViewCacheFresh(`trash:${workspaceId}`);
+    }
+  }, [initiativeOptions, records, trashedItems, workspaceId]);
 
   async function permanentlyDeleteRecord(record: TrashRecord) {
     if (!await confirmAction({ title: "휴지통 기록 영구 삭제", message: `'${record.title}' 기록은 복구할 수 없게 됩니다.`, confirmationText: "영구 삭제", confirmLabel: "영구 삭제", danger: true })) return;
@@ -5102,10 +5158,12 @@ function ReviewView({ items, cadence, completed, blocked, averageProgress, onOpe
   return <section className="review-content"><div className="metrics-row"><div><span>완료</span><strong>{completed}<small> / {items.length}</small></strong></div><div><span>평균 진행</span><strong>{averageProgress}<small>%</small></strong></div><div><span>막힘</span><strong>{blocked}</strong></div></div><div className="review-progress"><div><b>{cadenceLabels[cadence]} 측정 항목 진행률</b><span>{averageProgress}%</span></div><span><i style={{ width: `${averageProgress}%` }} /></span></div><div className="review-list"><span>검토할 항목</span>{items.slice(0, 7).map((entry) => { const tracksProgress = entry.kind !== "objective" && entry.kind !== "initiative"; return entry.kind === "task" || entry.kind === "project" ? <button key={entry.id} onClick={() => entry.kind === "task" ? onOpenTask(entry.id) : onOpenProject(entry.id)}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b>{tracksProgress && <em>{entry.progress}%</em>}<ChevronRight size={14} /></button> : <div key={entry.id}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b>{tracksProgress && <em>{entry.progress}%</em>}</div>; })}{!items.length && <p className="my-work-empty">이 기간에 검토할 항목이 없습니다.</p>}</div></section>;
 }
 
-function ProjectPropertyManager({ properties, teamMembers, readOnly, onChanged, onNotice }: { properties: PropertyDefinition[]; teamMembers: TeamMember[]; readOnly: boolean; onChanged: (properties: PropertyDefinition[]) => void; onNotice: (message: string) => void }) {
+function ProjectPropertyManager({ workspaceId, properties, teamMembers, readOnly, onChanged, onNotice }: { workspaceId: string; properties: PropertyDefinition[]; teamMembers: TeamMember[]; readOnly: boolean; onChanged: (properties: PropertyDefinition[]) => void; onNotice: (message: string) => void }) {
   const confirmAction = useAppConfirm();
-  const [catalog, setCatalog] = useState<PropertyDefinition[]>(properties);
-  const [selectedId, setSelectedId] = useState<string | null>(properties[0]?.id ?? null);
+  const cacheKey = `properties:${workspaceId}`;
+  const initialCatalog = propertyCatalogMemoryCache.get(cacheKey) ?? properties;
+  const [catalog, setCatalog] = useState<PropertyDefinition[]>(initialCatalog);
+  const [selectedId, setSelectedId] = useState<string | null>(initialCatalog[0]?.id ?? null);
   const [creatingNew, setCreatingNew] = useState(properties.length === 0);
   const [name, setName] = useState("");
   const [type, setType] = useState<PropertyType>("text");
@@ -5123,20 +5181,25 @@ function ProjectPropertyManager({ properties, teamMembers, readOnly, onChanged, 
 
   useEffect(() => {
     let active = true;
+    if (propertyCatalogMemoryCache.has(cacheKey) && viewCacheIsFresh(cacheKey)) return () => { active = false; };
     void fetch("/api/properties?includeInactive=true")
       .then(async (response) => response.ok ? response.json() as Promise<{ properties: PropertyDefinition[] }> : Promise.reject())
       .then((data) => {
         if (!active) return;
+        propertyCatalogMemoryCache.set(cacheKey, data.properties);
+        markViewCacheFresh(cacheKey);
         setCatalog(data.properties);
         onChangedRef.current(data.properties);
         setSelectedId((current) => current ?? data.properties[0]?.id ?? null);
       })
       .catch(() => onNoticeRef.current("속성 목록을 새로 불러오지 못했습니다."));
     return () => { active = false; };
-  }, []);
+  }, [cacheKey]);
 
   function applyCatalog(next: PropertyDefinition[]) {
     const sorted = [...next].sort((left, right) => left.sortOrder - right.sortOrder);
+    propertyCatalogMemoryCache.set(cacheKey, sorted);
+    markViewCacheFresh(cacheKey);
     setCatalog(sorted);
     onChanged(sorted);
   }
@@ -5225,9 +5288,10 @@ function PropertyDefaultInput({ type, options, value, members, disabled = false,
   return <label><span>생성 시 기본값</span><input disabled={disabled} type={type === "number" ? "number" : type === "date" ? "date" : "text"} value={value === null || Array.isArray(value) ? "" : String(value)} onChange={(event) => onChange(type === "number" ? (event.target.value ? Number(event.target.value) : null) : event.target.value || null)} /></label>;
 }
 
-function ProjectTemplateManager({ readOnly, onNotice }: { readOnly: boolean; onNotice: (message: string) => void }) {
+function ProjectTemplateManager({ workspaceId, readOnly, onNotice }: { workspaceId: string; readOnly: boolean; onNotice: (message: string) => void }) {
   const confirmAction = useAppConfirm();
-  const [templates, setTemplates] = useState<ProjectTemplate[] | null>(null);
+  const cacheKey = `templates:${workspaceId}`;
+  const [templates, setTemplates] = useState<ProjectTemplate[] | null>(() => projectTemplateMemoryCache.get(cacheKey) ?? null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [templateName, setTemplateName] = useState("");
   const [creatingTemplate, setCreatingTemplate] = useState(false);
@@ -5236,13 +5300,21 @@ function ProjectTemplateManager({ readOnly, onNotice }: { readOnly: boolean; onN
 
   useEffect(() => {
     let active = true;
+    if (projectTemplateMemoryCache.has(cacheKey) && viewCacheIsFresh(cacheKey)) return () => { active = false; };
     void fetch("/api/project-templates").then(async (response) => response.ok ? response.json() as Promise<{ templates: ProjectTemplate[] }> : Promise.reject()).then((data) => {
       if (!active) return;
+      projectTemplateMemoryCache.set(cacheKey, data.templates);
+      markViewCacheFresh(cacheKey);
       setTemplates(data.templates);
       setSelectedId(data.templates[0]?.id ?? null);
     }).catch(() => setTemplates([]));
     return () => { active = false; };
-  }, []);
+  }, [cacheKey]);
+  useEffect(() => {
+    if (!templates) return;
+    projectTemplateMemoryCache.set(cacheKey, templates);
+    markViewCacheFresh(cacheKey);
+  }, [cacheKey, templates]);
 
   async function createTemplate(event: FormEvent) {
     event.preventDefault();

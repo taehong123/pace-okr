@@ -596,7 +596,7 @@ test("Project 생성창 닫기는 현재 화면을 유지하고 AI 대화 초안
 test("OKR 파일 요청 실패는 무한 로딩 대신 다시 시도를 제공한다", async ({ page }) => {
   await installApiMocks(page);
   let attempts = 0;
-  await page.route("**/api/okr-files/cycle-1", async (route) => {
+  await page.route("**/api/okr-files/cycle-1**", async (route) => {
     attempts += 1;
     await json(route, { error: "일시적인 연결 오류" }, 503);
   });
@@ -604,6 +604,23 @@ test("OKR 파일 요청 실패는 무한 로딩 대신 다시 시도를 제공�
   await expect(page.getByText("파일을 열지 못했습니다.")).toBeVisible();
   await page.getByRole("button", { name: "다시 시도" }).click();
   await expect.poll(() => attempts).toBe(2);
+});
+
+test("OKR 파일은 30초 안에 다시 열면 캐시를 즉시 사용한다", async ({ page }) => {
+  await installApiMocks(page);
+  let readRequests = 0;
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/okr-files/cycle-1" && url.searchParams.get("mode") === "read" && request.method() === "GET") readRequests += 1;
+  });
+  await page.goto("/?view=okr");
+  await expect(page.getByRole("heading", { name: "2026 하반기" })).toBeVisible();
+  expect(readRequests).toBe(1);
+  await page.getByRole("button", { name: "Project", exact: true }).first().click();
+  await page.getByRole("button", { name: "OKR", exact: true }).first().click();
+  await expect(page.getByRole("heading", { name: "2026 하반기" })).toBeVisible();
+  await expect(page.getByText("OKR 파일을 불러오는 중")).toHaveCount(0);
+  expect(readRequests).toBe(1);
 });
 
 test("모바일 Project 기본 보기는 카드이며 페이지가 가로로 넘치지 않는다", async ({ page, isMobile }) => {
@@ -694,7 +711,7 @@ test("Viewer는 OKR 파일 전체 편집을 열 수 없다", async ({ page }) =>
   await installApiMocks(page, { workspaceRole: "viewer" });
   await page.goto("/?view=okr");
   await expect(page.getByRole("button", { name: "파일 수정" })).toHaveCount(0);
-  await expect(page.locator(".okr-file-read-surface")).toBeVisible();
+  await expect(page.getByRole("article")).toBeVisible();
 });
 
 test("KR과 Project 데이터는 각 대상 진행률만 갱신한다", async ({ page }) => {
@@ -703,10 +720,19 @@ test("KR과 Project 데이터는 각 대상 진행률만 갱신한다", async ({
   const objectiveSurface = page.locator(".okr-file-read-objective");
   const keyResultSurface = page.locator(".okr-file-read-kr").first();
   await expect(objectiveSurface).not.toContainText("50%");
-  await expect(keyResultSurface.locator(":scope > header > b")).toHaveText("45%");
+  await expect(keyResultSurface.locator(".okr-tree-progress")).toHaveText("45%");
+  await expect(page.locator(".okr-file-read-initiative")).toHaveCount(0);
+  await expect(page.locator(".okr-file-read-surface")).not.toContainText("할 일");
+  await page.getByRole("button", { name: /활성 사용자 20% 증가/ }).click();
   await expect(page.locator(".okr-file-read-initiative")).toHaveCount(2);
+  await page.getByRole("button", { name: /핵심 흐름 개편/ }).click();
+  await expect(page.getByText("모바일 사용성 개선", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /모바일 사용성 개선.*Task 1개/ }).click();
+  const taskDisclosure = page.getByRole("button", { name: /오버레이 동작 점검/ });
+  await expect(taskDisclosure).toBeVisible();
+  expect(await taskDisclosure.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   await expect(page.locator(".okr-file-read-surface")).not.toContainText("40%");
-  await expect(page.locator(".okr-file-read-surface")).not.toContainText("모바일 사용성 개선");
 
   await page.goto("/?view=data");
   await expect(page.getByRole("heading", { name: "데이터" })).toBeVisible();

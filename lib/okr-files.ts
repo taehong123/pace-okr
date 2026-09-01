@@ -149,6 +149,19 @@ export async function getOkrFile(ownerId: string, userId: string, cycleId: strin
   return serializeOkrFile(context);
 }
 
+export async function getOkrFileRead(ownerId: string, cycleId: string): Promise<OkrFileResponse> {
+  const [cycle] = await getDb().select().from(okrCycles).where(and(eq(okrCycles.ownerId, ownerId), eq(okrCycles.id, cycleId))).limit(1);
+  if (!cycle) throw new Error("OKR file not found");
+  const okrItems = await getDb().select().from(items).where(and(
+    eq(items.ownerId, ownerId),
+    eq(items.cycleId, cycleId),
+    inArray(items.kind, ["objective", "key_result", "initiative"]),
+    isNull(items.archivedAt),
+  )).orderBy(asc(items.sortOrder), asc(items.createdAt));
+  const revision = await calculateRevision(cycle, okrItems);
+  return serializeOkrFileTree(cycle, okrItems, revision);
+}
+
 export async function createOkrFile(ownerId: string, userId: string, input: OkrFileSaveInput): Promise<OkrFileResponse> {
   const normalized = normalizeSaveInput(input, null);
   const rules = await getWorkspaceRules(ownerId);
@@ -401,6 +414,44 @@ function serializeOkrFile(context: OkrFileContext): OkrFileResponse {
       cycleId: initiative.cycleId!,
       cycleName: context.cycleNames.get(initiative.cycleId!) ?? "OKR",
     })),
+  };
+}
+
+function serializeOkrFileTree(cycle: OkrCycle, okrItems: PaceItem[], revision: string): OkrFileResponse {
+  const objectives = okrItems.filter((item) => item.kind === "objective").sort(compareItems);
+  const objective = objectives[0] ?? null;
+  const keyResults = objective ? okrItems.filter((item) => item.kind === "key_result" && item.parentId === objective.id).sort(compareItems) : [];
+  return {
+    cycle: serializeCycle(cycle),
+    revision,
+    objective: objective ? {
+      id: objective.id,
+      clientId: objective.id,
+      title: objective.title,
+      status: objective.status as ItemStatus,
+      updatedAt: objective.updatedAt,
+      keyResults: keyResults.map((keyResult) => ({
+        id: keyResult.id,
+        clientId: keyResult.id,
+        title: keyResult.title,
+        status: keyResult.status as ItemStatus,
+        progress: keyResult.progress,
+        sortOrder: keyResult.sortOrder,
+        updatedAt: keyResult.updatedAt,
+        initiatives: okrItems.filter((item) => item.kind === "initiative" && item.parentId === keyResult.id).sort(compareItems).map((initiative) => ({
+          id: initiative.id,
+          clientId: initiative.id,
+          title: initiative.title,
+          status: initiative.status as ItemStatus,
+          sortOrder: initiative.sortOrder,
+          updatedAt: initiative.updatedAt,
+          linkedProjects: [],
+        })),
+      })),
+    } : null,
+    objectiveCount: objectives.length,
+    needsSplit: objectives.length > 1,
+    initiativeOptions: [],
   };
 }
 

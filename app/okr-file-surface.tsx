@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
   Briefcase,
   Check,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  ListChecks,
   LoaderCircle,
   Pencil,
   Plus,
@@ -90,6 +94,79 @@ type Draft = {
 type Resolution = { action: "move" | "trash"; targetInitiativeRef?: string };
 type ConfirmOptions = { title: string; message: string; confirmLabel: string; danger?: boolean };
 
+export type OkrExecutionItem = {
+  id: string;
+  parentId: string | null;
+  kind: "objective" | "key_result" | "initiative" | "project" | "task";
+  title: string;
+  status: ItemStatus;
+  progress: number;
+  sortOrder: number;
+  createdAt: string;
+  archivedAt: string | null;
+};
+
+type OkrCacheEntry = { file: OkrFile; etag: string | null; storedAt: number };
+type OkrLoadMode = "read" | "edit";
+
+const OKR_CACHE_FRESH_MS = 30_000;
+const okrFileCache = new Map<string, OkrCacheEntry>();
+const okrFileRequests = new Map<string, Promise<OkrFile>>();
+const okrExpandedRows = new Map<string, Set<string>>();
+
+function cacheKey(workspaceId: string, cycleId: string, mode: OkrLoadMode) {
+  return `${workspaceId}:${cycleId}:${mode}`;
+}
+
+function readCache(workspaceId: string, cycleId: string, mode: OkrLoadMode) {
+  return okrFileCache.get(cacheKey(workspaceId, cycleId, mode)) ?? null;
+}
+
+function cacheFile(workspaceId: string, file: OkrFile, mode: OkrLoadMode, etag: string | null = null) {
+  okrFileCache.set(cacheKey(workspaceId, file.cycle.id, mode), { file, etag, storedAt: Date.now() });
+  if (mode === "edit") okrFileCache.set(cacheKey(workspaceId, file.cycle.id, "read"), { file, etag: null, storedAt: Date.now() });
+}
+
+async function fetchOkrFile(workspaceId: string, cycleId: string, mode: OkrLoadMode, force = false) {
+  const key = cacheKey(workspaceId, cycleId, mode);
+  const cached = okrFileCache.get(key) ?? null;
+  if (!force && cached && Date.now() - cached.storedAt < OKR_CACHE_FRESH_MS) return cached.file;
+  const pending = okrFileRequests.get(key);
+  if (pending) return pending;
+  const request = (async () => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 12_000);
+    try {
+      const headers = new Headers();
+      if (mode === "read" && cached?.etag) headers.set("If-None-Match", cached.etag);
+      const suffix = mode === "read" ? "?mode=read" : "";
+      const response = await fetch(`/api/okr-files/${encodeURIComponent(cycleId)}${suffix}`, {
+        signal: controller.signal,
+        cache: "no-cache",
+        headers,
+      });
+      if (response.status === 304 && cached) {
+        okrFileCache.set(key, { ...cached, storedAt: Date.now() });
+        return cached.file;
+      }
+      const data = await response.json() as { file?: OkrFile; error?: string };
+      if (!response.ok || !data.file) throw new Error(data.error ?? "OKR 파일을 불러오지 못했습니다.");
+      cacheFile(workspaceId, data.file, mode, response.headers.get("etag"));
+      return data.file;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") throw new Error("응답이 오래 걸려 불러오기를 중단했습니다. 다시 시도해 주세요.");
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  })();
+  okrFileRequests.set(key, request);
+  void request.finally(() => {
+    if (okrFileRequests.get(key) === request) okrFileRequests.delete(key);
+  }).catch(() => undefined);
+  return request;
+}
+
 const statuses: Array<{ value: ItemStatus; label: string }> = [
   { value: "backlog", label: "백로그" },
   { value: "todo", label: "할 일" },
@@ -108,37 +185,53 @@ const cycleStatuses: Array<{ value: CycleStatus; label: string }> = [
 ];
 
 export function OkrFileSurface({
+  workspaceId,
   cycleId,
   creating = false,
   readOnly,
+  executionItems,
   onSaved,
   onSplit,
   onCancelCreate,
   onNavigateProjects,
+  onOpenProject,
+  onOpenTask,
   onNotice,
   onDirtyChange,
   onConfirm,
 }: {
+  workspaceId: string;
   cycleId: string | null;
   creating?: boolean;
   readOnly: boolean;
+  executionItems: OkrExecutionItem[];
   onSaved: (file: OkrFile) => void;
   onSplit: (cycles: OkrFileCycleSummary[]) => void;
   onCancelCreate: () => void;
   onNavigateProjects: () => void;
+  onOpenProject: (id: string) => void;
+  onOpenTask: (id: string) => void;
   onNotice: (message: string, tone?: "error") => void;
   onDirtyChange: (dirty: boolean) => void;
   onConfirm: (options: ConfirmOptions) => Promise<boolean>;
 }) {
-  const [file, setFile] = useState<OkrFile | null>(null);
-  const [draft, setDraft] = useState<Draft>(() => emptyDraft());
-  const [initialDraft, setInitialDraft] = useState("");
+  const fileCacheKey = cycleId ? `${workspaceId}:${cycleId}` : `${workspaceId}:new`;
+  const initialCachedFile = !creating && cycleId ? readCache(workspaceId, cycleId, "read")?.file ?? null : null;
+  const initialEditorDraft = initialCachedFile ? draftFromFile(initialCachedFile) : emptyDraft();
+  const [file, setFile] = useState<OkrFile | null>(initialCachedFile);
+  const [draft, setDraft] = useState<Draft>(initialEditorDraft);
+  const [initialDraft, setInitialDraft] = useState(() => JSON.stringify({ draft: initialEditorDraft, resolutions: {} }));
   const [editing, setEditing] = useState(creating);
   const [resolutions, setResolutions] = useState<Record<string, Resolution>>({});
-  const [loading, setLoading] = useState(!creating);
+  const [loading, setLoading] = useState(!creating && !initialCachedFile);
+  const [refreshing, setRefreshing] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set(okrExpandedRows.get(fileCacheKey) ?? []));
+  const fileModeRef = useRef<OkrLoadMode>("read");
 
   useEffect(() => {
     if (creating) {
@@ -157,41 +250,38 @@ export function OkrFileSurface({
       setError("불러올 OKR 파일이 없습니다.");
       return;
     }
-    const controller = new AbortController();
     let active = true;
-    let timedOut = false;
-    const timeout = window.setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, 12_000);
-    setLoading(true);
-    setError("");
-    setFile(null);
-    void fetch(`/api/okr-files/${encodeURIComponent(cycleId)}`, { signal: controller.signal, cache: "no-store" })
-      .then(async (response) => {
-        const data = await response.json() as { file?: OkrFile; error?: string };
-        if (!response.ok || !data.file) throw new Error(data.error ?? "OKR 파일을 불러오지 못했습니다.");
-        setFile(data.file);
-        const next = draftFromFile(data.file);
+    const cached = readCache(workspaceId, cycleId, "read");
+    if (cached) setFile(cached.file);
+    setLoading(!cached);
+    setRefreshing(Boolean(cached));
+    setRefreshError("");
+    if (!cached) setError("");
+    void fetchOkrFile(workspaceId, cycleId, "read", loadAttempt > 0)
+      .then((nextFile) => {
+        if (!active || fileModeRef.current === "edit") return;
+        setFile(nextFile);
+        const next = draftFromFile(nextFile);
         setDraft(next);
         setInitialDraft(JSON.stringify({ draft: next, resolutions: {} }));
         setResolutions({});
       })
       .catch((loadError: unknown) => {
         if (!active) return;
-        if (timedOut) setError("응답이 오래 걸려 불러오기를 중단했습니다. 다시 시도해 주세요.");
-        else if (!(loadError instanceof DOMException && loadError.name === "AbortError")) setError(loadError instanceof Error ? loadError.message : "OKR 파일을 불러오지 못했습니다.");
+        const message = loadError instanceof Error ? loadError.message : "OKR 파일을 불러오지 못했습니다.";
+        if (cached) setRefreshError(message);
+        else setError(message);
       })
       .finally(() => {
-        window.clearTimeout(timeout);
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       });
     return () => {
       active = false;
-      window.clearTimeout(timeout);
-      controller.abort();
     };
-  }, [creating, cycleId, loadAttempt]);
+  }, [creating, cycleId, loadAttempt, workspaceId]);
 
   const currentSnapshot = JSON.stringify({ draft, resolutions });
   const dirty = editing && currentSnapshot !== initialDraft;
@@ -218,15 +308,54 @@ export function OkrFileSurface({
     const external = (file?.initiativeOptions ?? []).filter((initiative) => !removedIds.has(initiative.id) && !draftInitiatives.some((entry) => entry.id === initiative.id)).map((initiative) => ({ ref: initiative.id, label: `${initiative.cycleName} · ${initiative.title}` }));
     return [...local, ...external];
   }, [draft.metadata.name, draftInitiatives, file?.initiativeOptions, removedInitiatives]);
+  const executionTree = useMemo(() => {
+    const completed = new Set<ItemStatus>(["done", "development_done"]);
+    const tasksByProject = new Map<string, OkrExecutionItem[]>();
+    const projectsByInitiative = new Map<string, OkrExecutionItem[]>();
+    const activeRows = executionItems.filter((item) => !item.archivedAt);
+    for (const task of activeRows) {
+      if (task.kind !== "task" || !task.parentId || completed.has(task.status)) continue;
+      tasksByProject.set(task.parentId, [...(tasksByProject.get(task.parentId) ?? []), task]);
+    }
+    for (const project of activeRows) {
+      if (project.kind !== "project" || !project.parentId) continue;
+      const hasIncompleteTasks = Boolean(tasksByProject.get(project.id)?.length);
+      if (completed.has(project.status) && !hasIncompleteTasks) continue;
+      projectsByInitiative.set(project.parentId, [...(projectsByInitiative.get(project.parentId) ?? []), project]);
+    }
+    for (const rows of [...tasksByProject.values(), ...projectsByInitiative.values()]) rows.sort(compareExecutionItems);
+    return { projectsByInitiative, tasksByProject };
+  }, [executionItems]);
 
-  function beginEdit() {
-    if (!file) return;
-    const next = draftFromFile(file);
-    setDraft(next);
-    setResolutions({});
-    setInitialDraft(JSON.stringify({ draft: next, resolutions: {} }));
-    setEditing(true);
+  function toggleExpanded(id: string) {
+    setExpandedRows((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      okrExpandedRows.set(fileCacheKey, next);
+      return next;
+    });
+  }
+
+  async function beginEdit() {
+    if (!file || !cycleId || editLoading) return;
+    setEditLoading(true);
     setError("");
+    fileModeRef.current = "edit";
+    try {
+      const editableFile = await fetchOkrFile(workspaceId, cycleId, "edit");
+      setFile(editableFile);
+      const next = draftFromFile(editableFile);
+      setDraft(next);
+      setResolutions({});
+      setInitialDraft(JSON.stringify({ draft: next, resolutions: {} }));
+      setEditing(true);
+    } catch (loadError) {
+      fileModeRef.current = "read";
+      setError(loadError instanceof Error ? loadError.message : "편집 정보를 불러오지 못했습니다.");
+    } finally {
+      setEditLoading(false);
+    }
   }
 
   async function cancelEdit() {
@@ -239,6 +368,7 @@ export function OkrFileSurface({
     if (file) setDraft(draftFromFile(file));
     setResolutions({});
     setEditing(false);
+    fileModeRef.current = "read";
     setError("");
   }
 
@@ -303,11 +433,13 @@ export function OkrFileSurface({
         throw new Error(data.error ?? "OKR 파일을 저장하지 못했습니다.");
       }
       setFile(data.file);
+      cacheFile(workspaceId, data.file, "edit", response.headers.get("etag"));
       const next = draftFromFile(data.file);
       setDraft(next);
       setResolutions({});
       setInitialDraft(JSON.stringify({ draft: next, resolutions: {} }));
       setEditing(false);
+      fileModeRef.current = "read";
       onDirtyChange(false);
       onSaved(data.file);
       onNotice(creating ? "OKR 파일을 만들었습니다." : "OKR 파일 전체를 저장했습니다.");
@@ -328,6 +460,8 @@ export function OkrFileSurface({
       setError(data.error ?? "OKR 파일을 분리하지 못했습니다.");
       return;
     }
+    okrFileCache.delete(cacheKey(workspaceId, file.cycle.id, "read"));
+    okrFileCache.delete(cacheKey(workspaceId, file.cycle.id, "edit"));
     onSplit(data.cycles);
     onNotice("Objective별로 OKR 파일을 분리했습니다.");
   }
@@ -394,20 +528,118 @@ export function OkrFileSurface({
   if (file.needsSplit) return <section className="okr-file-repair"><AlertTriangle size={22} /><div><h2>Objective별 파일 분리가 필요합니다</h2><p>이 파일에는 Objective가 {file.objectiveCount}개 있습니다. 데이터는 자동으로 바꾸지 않았습니다.</p></div>{!readOnly && <button onClick={() => void splitFile()} disabled={saving}>{saving ? <LoaderCircle className="spin" size={14} /> : <RotateCcw size={14} />}Objective별 파일로 분리</button>}</section>;
 
   return <article className="okr-file-read-surface">
-    <header className="okr-file-read-header"><div><small>OKR 파일 · v{file.cycle.version}</small><h2>{file.cycle.name}</h2><p>{file.cycle.startDate} – {file.cycle.endDate} · {cycleStatuses.find((status) => status.value === file.cycle.status)?.label} · {file.cycle.department || "부서 미지정"}</p></div><div>{!readOnly && <button className="primary" onClick={beginEdit}><Pencil size={13} />파일 수정</button>}<button onClick={onNavigateProjects}><Briefcase size={13} />Project 탭</button></div></header>
+    <header className="okr-file-read-header"><div><small>OKR 파일 · v{file.cycle.version}</small><h2>{file.cycle.name}</h2><p>{file.cycle.startDate} – {file.cycle.endDate} · {cycleStatuses.find((status) => status.value === file.cycle.status)?.label} · {file.cycle.department || "부서 미지정"}</p></div><div>{!readOnly && <button className="primary" onClick={() => void beginEdit()} disabled={editLoading}>{editLoading ? <LoaderCircle className="spin" size={13} /> : <Pencil size={13} />}{editLoading ? "편집 준비 중" : "파일 수정"}</button>}<button onClick={onNavigateProjects}><Briefcase size={13} />Project 탭</button></div></header>
+    {(refreshing || refreshError || error) && <div className={`okr-file-refresh-state ${refreshError || error ? "error" : ""}`} role={refreshError || error ? "status" : undefined}>{refreshing ? <><LoaderCircle className="spin" size={12} />최신 내용을 확인하는 중</> : <><AlertTriangle size={12} />{error || "최신 내용을 확인하지 못했습니다. 현재 저장된 내용을 표시합니다."}<button type="button" onClick={() => { setError(""); setRefreshError(""); setLoadAttempt((attempt) => attempt + 1); }}><RotateCcw size={11} />다시 확인</button></>}</div>}
     {file.objective ? <section className="okr-file-read-tree">
-      <div className="okr-file-read-objective"><span className="type-icon type-objective">O</span><div><small>Objective</small><h3>{file.objective.title}</h3></div><StatusTag status={file.objective.status} /></div>
-      {file.objective.keyResults.map((keyResult, keyResultIndex) => <section className="okr-file-read-kr" key={keyResult.id}><header><span className="type-icon type-key_result">KR</span><div><small>Key Result {keyResultIndex + 1}</small><h3>{keyResult.title}</h3></div><StatusTag status={keyResult.status} /><b>{keyResult.progress}%</b></header><div>{keyResult.initiatives.map((initiative, initiativeIndex) => <div className="okr-file-read-initiative" key={initiative.id}><span className="type-icon type-initiative">I</span><div><small>Initiative {initiativeIndex + 1}</small><b>{initiative.title}</b></div><StatusTag status={initiative.status} /></div>)}</div></section>)}
-    </section> : <div className="okr-file-empty"><Target size={22} /><div><h2>이 파일의 Objective를 작성해 주세요</h2><p>파일 수정에서 Objective와 KR을 한 번에 만들 수 있습니다.</p></div>{!readOnly && <button onClick={beginEdit}><Plus size={14} />파일 작성</button>}</div>}
+      <div className="okr-file-read-objective"><span className="type-icon type-objective">O</span><div><small>Objective</small><h3>{file.objective.title}</h3></div></div>
+      {file.objective.keyResults.map((keyResult, keyResultIndex) => <OkrReadKeyResult
+        key={keyResult.id}
+        keyResult={keyResult}
+        keyResultIndex={keyResultIndex}
+        projectsByInitiative={executionTree.projectsByInitiative}
+        tasksByProject={executionTree.tasksByProject}
+        expandedRows={expandedRows}
+        onToggle={toggleExpanded}
+        onOpenProject={onOpenProject}
+        onOpenTask={onOpenTask}
+      />)}
+    </section> : <div className="okr-file-empty"><Target size={22} /><div><h2>이 파일의 Objective를 작성해 주세요</h2><p>파일 수정에서 Objective와 KR을 한 번에 만들 수 있습니다.</p></div>{!readOnly && <button onClick={() => void beginEdit()}><Plus size={14} />파일 작성</button>}</div>}
   </article>;
+}
+
+function OkrReadKeyResult({
+  keyResult,
+  keyResultIndex,
+  projectsByInitiative,
+  tasksByProject,
+  expandedRows,
+  onToggle,
+  onOpenProject,
+  onOpenTask,
+}: {
+  keyResult: KeyResult;
+  keyResultIndex: number;
+  projectsByInitiative: Map<string, OkrExecutionItem[]>;
+  tasksByProject: Map<string, OkrExecutionItem[]>;
+  expandedRows: Set<string>;
+  onToggle: (id: string) => void;
+  onOpenProject: (id: string) => void;
+  onOpenTask: (id: string) => void;
+}) {
+  const keyResultId = keyResult.id ?? keyResult.clientId;
+  const keyResultExpanded = expandedRows.has(keyResultId);
+  const initiativesId = `okr-tree-${keyResultId}`;
+  const hasInitiatives = keyResult.initiatives.length > 0;
+  return <section className="okr-file-read-kr">
+    {hasInitiatives ? <button type="button" className="okr-tree-row okr-tree-kr-row" aria-expanded={keyResultExpanded} aria-controls={initiativesId} onClick={() => onToggle(keyResultId)}>
+      <TreeChevron expanded={keyResultExpanded} />
+      <span className="type-icon type-key_result">KR</span>
+      <span className="okr-tree-copy"><small>Key Result {keyResultIndex + 1}</small><strong>{keyResult.title}</strong></span>
+      <span className="okr-tree-count">Initiative {keyResult.initiatives.length}개</span>
+      <b className="okr-tree-progress">{keyResult.progress}%</b>
+    </button> : <div className="okr-tree-row okr-tree-kr-row static">
+      <span className="okr-tree-chevron-placeholder" />
+      <span className="type-icon type-key_result">KR</span>
+      <span className="okr-tree-copy"><small>Key Result {keyResultIndex + 1}</small><strong>{keyResult.title}</strong></span>
+      <span className="okr-tree-count empty">Initiative 없음</span>
+      <b className="okr-tree-progress">{keyResult.progress}%</b>
+    </div>}
+    {hasInitiatives && keyResultExpanded && <div className="okr-tree-initiatives" id={initiativesId} role="group" aria-label={`${keyResult.title}의 Initiative`}>
+      {keyResult.initiatives.map((initiative, initiativeIndex) => {
+        const initiativeId = initiative.id ?? initiative.clientId;
+        const projects = projectsByInitiative.get(initiativeId) ?? [];
+        const initiativeExpanded = expandedRows.has(initiativeId);
+        const projectsId = `okr-tree-${initiativeId}`;
+        return <section className="okr-file-read-initiative" key={initiativeId}>
+          {projects.length ? <button type="button" className="okr-tree-row okr-tree-initiative-row" aria-expanded={initiativeExpanded} aria-controls={projectsId} onClick={() => onToggle(initiativeId)}>
+            <TreeChevron expanded={initiativeExpanded} />
+            <span className="type-icon type-initiative">I</span>
+            <span className="okr-tree-copy"><small>Initiative {initiativeIndex + 1}</small><strong>{initiative.title}</strong></span>
+            <span className="okr-tree-count">Project {projects.length}개</span>
+          </button> : <div className="okr-tree-row okr-tree-initiative-row static">
+            <span className="okr-tree-chevron-placeholder" />
+            <span className="type-icon type-initiative">I</span>
+            <span className="okr-tree-copy"><small>Initiative {initiativeIndex + 1}</small><strong>{initiative.title}</strong></span>
+            <span className="okr-tree-count empty">미완료 Project 없음</span>
+          </div>}
+          {projects.length > 0 && initiativeExpanded && <div className="okr-tree-projects" id={projectsId} role="group" aria-label={`${initiative.title}의 미완료 Project`}>
+            {projects.map((project) => {
+              const tasks = tasksByProject.get(project.id) ?? [];
+              const projectExpanded = expandedRows.has(project.id);
+              const tasksId = `okr-tree-${project.id}`;
+              return <section className="okr-tree-project" key={project.id}>
+                <div className="okr-tree-project-row">
+                  {tasks.length ? <button type="button" className="okr-tree-row okr-tree-project-main" aria-expanded={projectExpanded} aria-controls={tasksId} onClick={() => onToggle(project.id)}>
+                    <TreeChevron expanded={projectExpanded} />
+                    <Briefcase className="okr-tree-kind-icon" size={15} />
+                    <span className="okr-tree-copy"><small>Project</small><strong>{project.title}</strong></span>
+                    <span className="okr-tree-count">Task {tasks.length}개</span>
+                  </button> : <div className="okr-tree-row okr-tree-project-main static">
+                    <span className="okr-tree-chevron-placeholder" />
+                    <Briefcase className="okr-tree-kind-icon" size={15} />
+                    <span className="okr-tree-copy"><small>Project</small><strong>{project.title}</strong></span>
+                    <span className="okr-tree-count empty">미완료 Task 없음</span>
+                  </div>}
+                  <button type="button" className="okr-tree-open-detail" aria-label={`${project.title} Project 상세 보기`} title="Project 상세 보기" onClick={() => onOpenProject(project.id)}><ExternalLink size={13} /></button>
+                </div>
+                {tasks.length > 0 && projectExpanded && <div className="okr-tree-tasks" id={tasksId} role="group" aria-label={`${project.title}의 미완료 Task`}>
+                  {tasks.map((task) => <button type="button" className="okr-tree-task" key={task.id} onClick={() => onOpenTask(task.id)}><ListChecks size={14} /><span>{task.title}</span><ChevronRight size={13} /></button>)}
+                </div>}
+              </section>;
+            })}
+          </div>}
+        </section>;
+      })}
+    </div>}
+  </section>;
+}
+
+function TreeChevron({ expanded }: { expanded: boolean }) {
+  return expanded ? <ChevronDown className="okr-tree-chevron" size={14} aria-hidden="true" /> : <ChevronRight className="okr-tree-chevron" size={14} aria-hidden="true" />;
 }
 
 function StatusSelect({ value, onChange }: { value: ItemStatus; onChange: (status: ItemStatus) => void }) {
   return <select className={`okr-status-select status-${value}`} value={value} onChange={(event) => onChange(event.target.value as ItemStatus)} aria-label="상태">{statuses.map((status) => <option value={status.value} key={status.value}>{status.label}</option>)}</select>;
-}
-
-function StatusTag({ status }: { status: ItemStatus }) {
-  return <span className={`status-tag status-${status}`}>{statuses.find((entry) => entry.value === status)?.label ?? status}</span>;
 }
 
 function emptyDraft(): Draft {
@@ -429,6 +661,10 @@ function draftFromFile(file: OkrFile): Draft {
 }
 
 function makeClientId(kind: string) { return `draft-${kind}-${crypto.randomUUID()}`; }
+
+function compareExecutionItems(left: OkrExecutionItem, right: OkrExecutionItem) {
+  return left.sortOrder - right.sortOrder || left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+}
 
 type DraftSetter = Dispatch<SetStateAction<Draft>>;
 function patchKeyResult(setDraft: DraftSetter, id: string, patch: Partial<KeyResult>) { setDraft((current) => ({ ...current, objective: { ...current.objective, keyResults: current.objective.keyResults.map((entry) => entry.clientId === id ? { ...entry, ...patch } : entry) } })); }

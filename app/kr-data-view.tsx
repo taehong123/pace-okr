@@ -51,8 +51,14 @@ type Draft = {
 };
 
 const connectionMemoryCache = new Map<string, DataConnection[]>();
+const connectionCacheTimestamps = new Map<string, number>();
+const CONNECTION_CACHE_FRESH_MS = 30_000;
 const cadenceLabels: Record<DataCadence, string> = { hourly: "매시간", daily: "매일", weekly: "매주", manual: "수동만" };
 const targetLabels: Record<DataTargetKind, string> = { key_result: "KR", project: "Project" };
+
+function markConnectionCacheFresh(key: string) {
+  connectionCacheTimestamps.set(key, Date.now());
+}
 
 export default function DataView({ cacheKey, items, cycles, readOnly, onProgressChange, onNotice }: {
   cacheKey: string;
@@ -77,11 +83,14 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
 
   useEffect(() => {
     let active = true;
+    const storedAt = connectionCacheTimestamps.get(cacheKey);
+    if (connectionMemoryCache.has(cacheKey) && typeof storedAt === "number" && Date.now() - storedAt < CONNECTION_CACHE_FRESH_MS && loadAttempt === 0) return () => { active = false; };
     fetch("/api/data-connections")
       .then(async (response) => response.ok ? response.json() as Promise<{ connections: DataConnection[] }> : Promise.reject())
       .then((data) => {
         if (!active) return;
         connectionMemoryCache.set(cacheKey, data.connections);
+        markConnectionCacheFresh(cacheKey);
         setConnections(data.connections);
         setLoadError(false);
       })
@@ -162,6 +171,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
       ? [...(connections ?? []), data.connection]
       : (connections ?? []).map((connection) => connection.id === data.connection?.id ? data.connection : connection);
     connectionMemoryCache.set(cacheKey, next);
+    markConnectionCacheFresh(cacheKey);
     setConnections(next);
     setEditing(null);
     onNotice(editing === "new" ? "데이터 연결을 만들었습니다." : "데이터 연결을 저장했습니다.");
@@ -183,6 +193,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
     }
     const next = (connections ?? []).map((entry) => entry.id === connection.id ? data.connection! : entry);
     connectionMemoryCache.set(cacheKey, next);
+    markConnectionCacheFresh(cacheKey);
     setConnections(next);
     onProgressChange(connection.itemId, data.progress);
     onNotice(`${targetLabels[connection.targetKind]} 진행률을 ${data.progress}%로 업데이트했습니다.`);
@@ -195,6 +206,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
     if (!response.ok) { onNotice("데이터 연결을 삭제하지 못했습니다."); return; }
     const next = (connections ?? []).filter((entry) => entry.id !== connection.id);
     connectionMemoryCache.set(cacheKey, next);
+    markConnectionCacheFresh(cacheKey);
     setConnections(next);
     onNotice(`${target?.title ?? targetLabels[connection.targetKind]}의 데이터 연결을 삭제했습니다.`);
   }
