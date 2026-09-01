@@ -25,7 +25,7 @@ export type SlackOAuthResultCode =
   | "authorization_cancelled"
   | "missing_scope"
   | "oauth_exchange_failed"
-  | "missing_config";
+  | "service_unavailable";
 
 export class SlackOAuthExchangeError extends Error {
   readonly slackCode: string;

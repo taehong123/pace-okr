@@ -10,7 +10,7 @@ export async function GET(request: Request) {
 
   const runtime = env as SlackRuntimeEnv;
   if (!slackConfigured(runtime)) {
-    return redirectWithSlackStatus(request, "/?view=integrations", "missing_config");
+    return redirectWithSlackStatus(request, "/?view=integrations", "service_unavailable");
   }
 
   const url = new URL(request.url);

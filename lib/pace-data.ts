@@ -1807,6 +1807,22 @@ export async function consumeSlackOAuthState(state: string) {
   return saved;
 }
 
+export async function hasWorkspaceAdminAccess(workspaceId: string, userId: string) {
+  await ensureSchema();
+  const [membership] = await getDb()
+    .select({ role: workspaceMembers.role })
+    .from(workspaceMembers)
+    .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
+    .where(and(
+      eq(workspaceMembers.workspaceId, workspaceId),
+      eq(workspaceMembers.userId, userId),
+      eq(workspaceMembers.status, "active"),
+      isNull(workspaces.scheduledDeletionAt),
+    ))
+    .limit(1);
+  return membership?.role === "owner" || membership?.role === "admin";
+}
+
 export async function getSlackConnection(ownerId: string) {
   await ensureSchema();
   const [row] = await getDb()
@@ -1900,9 +1916,8 @@ export async function deleteSlackConnection(ownerId: string) {
   return current;
 }
 
-export function serializeSlackConnection(connection: SlackConnection | null, configured: boolean, urls: { redirectUrl: string; commandUrl: string; interactionUrl?: string; eventsUrl?: string }) {
+export function serializeSlackConnection(connection: SlackConnection | null, urls: { redirectUrl: string; commandUrl: string; interactionUrl?: string; eventsUrl?: string }) {
   return {
-    configured,
     connected: Boolean(connection),
     teamName: connection?.teamName ?? null,
     teamId: connection?.teamId ?? null,

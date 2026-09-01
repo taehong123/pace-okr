@@ -1816,7 +1816,7 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .integration-status-badge { min-height: 27px; display: inline-flex; align-items: center; justify-content: center; padding: 0 9px; border-radius: 999px; background: #eff1f3; color: #626a73; font-size: 9px; font-weight: 750; white-space: nowrap; }
 .integration-status-badge.connected { background: #e8f5ec; color: #34704a; }
 .integration-status-badge.workspace_disconnected, .integration-status-badge.idle { background: #eef3f6; color: #526b7b; }
-.integration-status-badge.reauthorization_required, .integration-status-badge.warning, .integration-status-badge.platform_unavailable { background: #fff3df; color: #8c5c14; }
+.integration-status-badge.reauthorization_required, .integration-status-badge.setup_required, .integration-status-badge.warning, .integration-status-badge.service_unavailable { background: #fff3df; color: #8c5c14; }
 .integration-status-badge.error { background: #fff0ee; color: #a0443d; }
 .integration-loading, .integration-inline-loading { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
 .integration-service-actions { min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
