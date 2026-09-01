@@ -62,6 +62,63 @@ export const authIdentities = sqliteTable(
   ],
 );
 
+export const accountRegistrations = sqliteTable(
+  "account_registrations",
+  {
+    userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+    encryptedPhone: text("encrypted_phone").notNull().default(""),
+    phoneHash: text("phone_hash").notNull().default(""),
+    phoneLastFour: text("phone_last_four").notNull().default(""),
+    verificationProvider: text("verification_provider").notNull().default(""),
+    phoneVerifiedAt: text("phone_verified_at"),
+    requiredPrivacyConsentAt: text("required_privacy_consent_at"),
+    age14ConfirmedAt: text("age_14_confirmed_at"),
+    marketingDataConsent: integer("marketing_data_consent", { mode: "boolean" }).notNull().default(false),
+    marketingDataConsentAt: text("marketing_data_consent_at"),
+    electronicMarketingConsent: integer("electronic_marketing_consent", { mode: "boolean" }).notNull().default(false),
+    electronicMarketingConsentAt: text("electronic_marketing_consent_at"),
+    consentVersion: text("consent_version").notNull().default("2026-09-01"),
+    completedAt: text("completed_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("idx_account_registrations_phone_hash").on(table.phoneHash)],
+);
+
+export const accountConsentEvents = sqliteTable(
+  "account_consent_events",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    consentType: text("consent_type").notNull(),
+    granted: integer("granted", { mode: "boolean" }).notNull(),
+    policyVersion: text("policy_version").notNull(),
+    source: text("source").notNull().default("signup"),
+    occurredAt: text("occurred_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("idx_account_consent_events_user_type").on(table.userId, table.consentType, table.occurredAt)],
+);
+
+export const phoneVerificationRequests = sqliteTable(
+  "phone_verification_requests",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    encryptedPhone: text("encrypted_phone").notNull(),
+    phoneHash: text("phone_hash").notNull(),
+    phoneLastFour: text("phone_last_four").notNull(),
+    providerSid: text("provider_sid").notNull().default(""),
+    status: text("status").notNull().default("pending"),
+    requestedAt: text("requested_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    expiresAt: text("expires_at").notNull(),
+    verifiedAt: text("verified_at"),
+  },
+  (table) => [
+    index("idx_phone_verification_requests_user_time").on(table.userId, table.requestedAt),
+    index("idx_phone_verification_requests_phone_time").on(table.phoneHash, table.requestedAt),
+  ],
+);
+
 export const workspaceMembers = sqliteTable(
   "workspace_members",
   {
@@ -809,6 +866,25 @@ export const slackDailySettings = sqliteTable(
   },
 );
 
+export const workspaceManagementBotSettings = sqliteTable(
+  "workspace_management_bot_settings",
+  {
+    ownerId: text("owner_id").primaryKey().references(() => workspaces.id, { onDelete: "cascade" }),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    weekdays: text("weekdays").notNull().default("[1,2,3,4,5]"),
+    reportTime: text("report_time").notNull().default("09:00"),
+    timezone: text("timezone").notNull().default("Asia/Seoul"),
+    channelId: text("channel_id").notNull().default(""),
+    channelName: text("channel_name").notNull().default(""),
+    signals: text("signals").notNull().default("[\"missing_due_date\",\"missing_owner\",\"overdue\",\"completed_yesterday\",\"due_today\"]"),
+    lastSentDate: text("last_sent_date"),
+    lastSentAt: text("last_sent_at"),
+    lastError: text("last_error").notNull().default(""),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("idx_workspace_management_bot_due").on(table.enabled, table.lastSentDate)],
+);
+
 export const slackDailyPreferences = sqliteTable(
   "slack_daily_preferences",
   {
@@ -947,6 +1023,9 @@ export type RoutineCompletion = typeof routineCompletions.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type AuthIdentity = typeof authIdentities.$inferSelect;
+export type AccountRegistration = typeof accountRegistrations.$inferSelect;
+export type AccountConsentEvent = typeof accountConsentEvents.$inferSelect;
+export type PhoneVerificationRequest = typeof phoneVerificationRequests.$inferSelect;
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect;
 export type WorkspaceInvitation = typeof workspaceInvitations.$inferSelect;
 export type UserWorkspacePreference = typeof userWorkspacePreferences.$inferSelect;

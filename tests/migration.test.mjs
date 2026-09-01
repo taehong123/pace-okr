@@ -3,6 +3,42 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
+test("grandfathers existing users but requires registration for users created after the migration", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY, email_normalized TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE app_migrations (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+    INSERT INTO users (id, email_normalized, display_name) VALUES ('legacy-user', 'legacy@example.com', 'Legacy');
+  `);
+  const migration = await readFile(new URL("../drizzle/0032_account_registration.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+
+  const legacy = db.prepare("SELECT verification_provider, completed_at, marketing_data_consent, electronic_marketing_consent FROM account_registrations WHERE user_id = 'legacy-user'").get();
+  assert.equal(legacy.verification_provider, "legacy");
+  assert.ok(legacy.completed_at);
+  assert.equal(legacy.marketing_data_consent, 0);
+  assert.equal(legacy.electronic_marketing_consent, 0);
+
+  db.exec("INSERT INTO users (id, email_normalized, display_name) VALUES ('new-user', 'new@example.com', 'New')");
+  assert.equal(db.prepare("SELECT count(*) AS count FROM account_registrations WHERE user_id = 'new-user'").get().count, 0);
+
+  db.exec(`INSERT INTO account_registrations
+    (user_id, encrypted_phone, phone_hash, phone_last_four, verification_provider, phone_verified_at,
+     required_privacy_consent_at, age_14_confirmed_at, completed_at)
+    VALUES ('new-user', 'encrypted', 'hash', '1234', 'twilio_verify', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`);
+  db.exec(`INSERT INTO account_consent_events
+    (id, user_id, consent_type, granted, policy_version, source)
+    VALUES ('event', 'new-user', 'electronic_marketing', 0, '2026-09-01', 'signup')`);
+  db.exec("DELETE FROM users WHERE id = 'new-user'");
+  assert.equal(db.prepare("SELECT count(*) AS count FROM account_registrations WHERE user_id = 'new-user'").get().count, 0);
+  assert.equal(db.prepare("SELECT count(*) AS count FROM account_consent_events WHERE user_id = 'new-user'").get().count, 0);
+  db.close();
+});
+
 test("stores one assistant draft per workspace, user, and flow", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`
@@ -18,6 +54,33 @@ test("stores one assistant draft per workspace, user, and flow", async () => {
     VALUES ('duplicate', 'workspace', 'user', 'workspace:project', '{}');`), /UNIQUE constraint failed/);
   db.exec("DELETE FROM workspaces WHERE id = 'workspace'");
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM assistant_drafts").get().count, 0);
+  db.close();
+});
+
+test("stores one workspace management bot schedule with safe defaults", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_user_id TEXT NOT NULL);
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
+  `);
+  const migration = await readFile(new URL("../drizzle/0033_workspace_management_bot.sql", import.meta.url), "utf8");
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  db.exec("INSERT INTO workspace_management_bot_settings (owner_id) VALUES ('workspace')");
+
+  const settings = db.prepare(`SELECT enabled, weekdays, report_time, timezone, signals, last_sent_date
+    FROM workspace_management_bot_settings WHERE owner_id = 'workspace'`).get();
+  assert.deepEqual({ ...settings }, {
+    enabled: 0,
+    weekdays: "[1,2,3,4,5]",
+    report_time: "09:00",
+    timezone: "Asia/Seoul",
+    signals: '["missing_due_date","missing_owner","overdue","completed_yesterday","due_today"]',
+    last_sent_date: null,
+  });
+  assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_workspace_management_bot_due'").get().name, "idx_workspace_management_bot_due");
+  db.exec("DELETE FROM workspaces WHERE id = 'workspace'");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM workspace_management_bot_settings").get().count, 0);
   db.close();
 });
 

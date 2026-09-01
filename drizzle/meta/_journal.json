@@ -211,6 +211,20 @@
       "when": 1788465600000,
       "tag": "0029_slack_workspace_isolation",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1788724800000,
+      "tag": "0032_account_registration",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1788811200000,
+      "tag": "0033_workspace_management_bot",
+      "breakpoints": true
     }
   ]
 }

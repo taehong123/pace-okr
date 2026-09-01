@@ -106,18 +106,63 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "member" | "viewer" } = {}) {
+test("new users can finish phone verification without optional marketing consent", async ({ page }) => {
+  let completed = false;
+  let verificationPayload: Record<string, unknown> | null = null;
+  await page.addInitScript(() => localStorage.clear());
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname === "/api/bootstrap") {
+      if (completed) return json(route, bootstrap);
+      return json(route, {
+        code: "registration_required",
+        error: "가입 확인을 완료해 주세요.",
+        registration: { user: bootstrap.user, verificationConfigured: true, consentVersion: "2026-09-01" },
+      }, 428);
+    }
+    if (pathname === "/api/account/phone/send") return json(route, { verification: { expiresAt: "2026-09-01T00:10:00.000Z" } }, 201);
+    if (pathname === "/api/account/phone/verify") {
+      verificationPayload = request.postDataJSON() as Record<string, unknown>;
+      completed = true;
+      return json(route, { registration: { completed: true } });
+    }
+    return json(route, { error: "not mocked" }, 404);
+  });
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "휴대전화 소유 확인" })).toBeVisible();
+  const optionalMarketing = page.getByRole("checkbox", { name: /선택 마케팅 목적 개인정보 이용 동의/ });
+  const optionalMessages = page.getByRole("checkbox", { name: /선택 광고성 정보 문자 수신 동의/ });
+  await expect(optionalMarketing).not.toBeChecked();
+  await expect(optionalMessages).not.toBeChecked();
+  await page.getByRole("textbox", { name: "휴대전화 번호" }).fill("010-1234-5678");
+  await page.getByRole("checkbox", { name: /필수 전화번호 수집 및 이용 동의/ }).check();
+  await page.getByRole("checkbox", { name: /필수 만 14세 이상 확인/ }).check();
+  await page.getByRole("button", { name: "인증번호 받기" }).click();
+  await page.getByRole("textbox", { name: "문자로 받은 인증번호" }).fill("123456");
+  await page.getByRole("button", { name: "가입 완료" }).click();
+  await expect(page.getByRole("heading", { name: "휴대전화 소유 확인" })).not.toBeVisible();
+  await expect(page.locator(".workspace")).toBeVisible();
+  expect(verificationPayload).toMatchObject({ marketingDataConsent: false, electronicMarketingConsent: false });
+  const accessibility = await new AxeBuilder({ page: page as never }).include("body").analyze();
+  expect(accessibility.violations).toEqual([]);
+});
+
+async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "member" | "viewer"; teamWorkspace?: boolean } = {}) {
   let krDataConnections: Array<Record<string, unknown>> = [];
   let slackSetupComplete = options.slackSetupComplete ?? true;
+  let managementBotSettings = { enabled: false, weekdays: [1, 2, 3, 4, 5], reportTime: "09:00", timezone: "Asia/Seoul", channelId: "", channelName: "", signals: ["missing_due_date", "missing_owner", "overdue", "completed_yesterday", "due_today"], lastSentDate: null, lastSentAt: null, lastError: "", updatedAt: now };
   const assistantDrafts = new Map<string, unknown>();
   const baseBootstrapResponse = options.withoutTaskContainers
     ? { ...bootstrap, items: bootstrap.items.filter((entry) => entry.kind !== "project" && entry.kind !== "task") }
     : bootstrap;
   const workspaceRole = options.workspaceRole ?? "owner";
+  const workspaceKind = options.teamWorkspace ? "team" : "personal";
   const bootstrapResponse = {
     ...baseBootstrapResponse,
-    workspaces: baseBootstrapResponse.workspaces.map((workspace) => ({ ...workspace, role: workspaceRole })),
-    team: { ...baseBootstrapResponse.team, currentRole: workspaceRole, canManage: workspaceRole === "owner", members: baseBootstrapResponse.team.members.map((member) => ({ ...member, role: workspaceRole })) },
+    workspaces: baseBootstrapResponse.workspaces.map((workspace) => ({ ...workspace, kind: workspaceKind, personal: workspaceKind === "personal", role: workspaceRole })),
+    team: { ...baseBootstrapResponse.team, workspace: { ...baseBootstrapResponse.team.workspace, kind: workspaceKind }, currentRole: workspaceRole, canManage: workspaceRole === "owner", members: baseBootstrapResponse.team.members.map((member) => ({ ...member, role: workspaceRole })) },
   };
   await page.addInitScript(() => {
     localStorage.clear();
@@ -214,6 +259,21 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
     if (url.pathname === "/api/slack/daily/settings") return json(route, slackAdmin());
     if (url.pathname === "/api/slack/channels") return json(route, { channels: [{ id: "C123", name: "daily", isPrivate: false, isMember: false }] });
     if (url.pathname === "/api/slack/automations") return json(route, { automations: [], deliveries: [] });
+    if (url.pathname === "/api/groups" && request.method() === "GET") return json(route, { groups: [] });
+    if (url.pathname === "/api/workspace-management-bot") {
+      const snapshot = { date: "2026-09-01", totalCount: 8, groups: [
+        { signal: "missing_due_date", count: 2, items: [{ id: "project-1", kind: "project", title: "모바일 사용성 개선", status: "in_progress", dueDate: null }] },
+        { signal: "missing_owner", count: 1, items: [{ id: "task-1", kind: "task", title: "오버레이 동작 점검", status: "todo", dueDate: null }] },
+        { signal: "overdue", count: 2, items: [{ id: "task-overdue", kind: "task", title: "지난 기한 Task", status: "in_progress", dueDate: "2026-08-31" }] },
+        { signal: "completed_yesterday", count: 1, items: [{ id: "task-done", kind: "task", title: "어제 완료 Task", status: "done", dueDate: "2026-08-31" }] },
+        { signal: "due_today", count: 2, items: [{ id: "task-today", kind: "task", title: "오늘 마감 Task", status: "todo", dueDate: "2026-09-01" }] },
+      ] };
+      if (request.method() === "GET") return json(route, { settings: managementBotSettings, snapshot, slackConnected: options.slackState === "connected", channels: [{ id: "C123", name: "daily", isPrivate: false, isMember: true }] });
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      if (payload.action === "test") return json(route, { sent: true, snapshot });
+      managementBotSettings = { ...managementBotSettings, ...payload, channelName: payload.channelId === "C123" ? "daily" : managementBotSettings.channelName, updatedAt: now } as typeof managementBotSettings;
+      return json(route, { settings: managementBotSettings, snapshot, slackConnected: true, channels: [{ id: "C123", name: "daily", isPrivate: false, isMember: true }] });
+    }
     if (url.pathname === "/api/data-connections/sync" && request.method() === "POST") {
       const payload = request.postDataJSON() as { id: string };
       const connection = krDataConnections.find((entry) => entry.id === payload.id);
@@ -307,6 +367,119 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
   });
 }
 
+test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => {
+  test("데스크톱 사이드바는 워크스페이스 톱니바퀴와 개인 진입점만 제공한다", async ({ page, isMobile }) => {
+    test.skip(isMobile);
+    await installApiMocks(page, { teamWorkspace: true });
+    await page.goto("/?view=okr");
+
+    const sidebar = page.locator(".sidebar");
+    const workspaceSettings = sidebar.locator(".workspace-settings-trigger");
+    await expect(workspaceSettings).toBeVisible();
+    await expect(sidebar.getByText("ChatGPT 연동", { exact: true })).toBeVisible();
+    await expect(sidebar.getByText("개인 앱 연동", { exact: true })).toBeVisible();
+    await expect(sidebar.getByText("팀 멤버", { exact: true })).toHaveCount(0);
+    await expect(sidebar.getByText("그룹 관리", { exact: true })).toHaveCount(0);
+    await expect(sidebar.getByText("내 설정", { exact: true })).toHaveCount(0);
+
+    await workspaceSettings.click();
+    const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
+    await expect(settingsDialog).toBeVisible();
+    for (const tab of ["일반", "멤버", "그룹", "Project 설정", "관리 봇", "팀 연동", "위험 구역"]) {
+      await expect(settingsDialog.getByRole("button", { name: new RegExp(`^${tab}`) })).toBeVisible();
+    }
+    await expect(page).toHaveURL(/settings=workspace/);
+    await settingsDialog.getByRole("button", { name: "워크스페이스 설정 닫기" }).click();
+    await expect(page).not.toHaveURL(/settings=workspace/);
+
+    await sidebar.locator(".profile-row").click();
+    const personalDialog = page.getByRole("dialog", { name: "내 설정" });
+    await expect(personalDialog.getByRole("heading", { name: "내 계정" })).toBeVisible();
+    await expect(personalDialog.getByRole("heading", { name: "테마" })).toBeVisible();
+    await expect(personalDialog.getByText("워크스페이스 삭제", { exact: false })).toHaveCount(0);
+  });
+
+  test("모바일은 상단과 더보기에서 같은 워크스페이스 설정 시트를 연다", async ({ page, isMobile }) => {
+    test.skip(!isMobile);
+    await installApiMocks(page, { teamWorkspace: true });
+    await page.goto("/?view=okr");
+
+    await page.locator(".workspace-topbar").getByRole("button", { name: "워크스페이스 설정" }).click();
+    const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
+    await expect(settingsDialog).toBeVisible();
+    await expect(settingsDialog.locator(".workspace-settings-panel")).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    await settingsDialog.getByRole("button", { name: "워크스페이스 설정 닫기" }).click();
+
+    await page.getByRole("button", { name: "더보기", exact: true }).click();
+    const moreDialog = page.getByRole("dialog", { name: "더보기 메뉴" });
+    await expect(moreDialog.getByText("팀 멤버", { exact: true })).toHaveCount(0);
+    await expect(moreDialog.getByText("그룹 관리", { exact: true })).toHaveCount(0);
+    await expect(moreDialog.getByText("내 설정", { exact: true })).toHaveCount(0);
+    await expect(moreDialog.locator(".mobile-account-entry")).toContainText("테스트 사용자");
+    await moreDialog.getByRole("button", { name: "워크스페이스 설정" }).click();
+    await expect(settingsDialog).toBeVisible();
+  });
+
+  test("Member의 워크스페이스 관리는 조회 전용으로 표시한다", async ({ page }) => {
+    await installApiMocks(page, { teamWorkspace: true, workspaceRole: "member", slackState: "connected" });
+    await page.goto("/?settings=workspace&tab=general");
+    const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
+    await expect(settingsDialog).toBeVisible();
+    await expect(settingsDialog.getByText(/읽기 전용/)).toBeVisible();
+    await expect(settingsDialog.getByRole("button", { name: /이미지 변경/ })).toHaveCount(0);
+    await expect(settingsDialog.getByRole("button", { name: /^위험 구역/ })).toHaveCount(0);
+
+    await settingsDialog.getByRole("button", { name: /^멤버/ }).click();
+    await expect(settingsDialog.getByRole("button", { name: "멤버 초대" })).toHaveCount(0);
+    await settingsDialog.getByRole("button", { name: /^팀 연동/ }).click();
+    await expect(settingsDialog.getByRole("button", { name: "Slack 연결 해제" })).toHaveCount(0);
+    await settingsDialog.getByRole("button", { name: /^관리 봇/ }).click();
+    await expect(settingsDialog.getByText(/관리 봇 설정은 읽기 전용/)).toBeVisible();
+    await expect(settingsDialog.getByRole("button", { name: "설정 저장" })).toHaveCount(0);
+    await expect(settingsDialog.getByRole("button", { name: "테스트 보내기" })).toHaveCount(0);
+  });
+
+  test("Owner는 관리 봇의 정보 부족·Urgency 신호를 선택해 Slack으로 시험 발송한다", async ({ page }) => {
+    const patches: Record<string, unknown>[] = [];
+    await installApiMocks(page, { teamWorkspace: true, slackState: "connected" });
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/workspace-management-bot" && request.method() === "PATCH") {
+        patches.push(request.postDataJSON() as Record<string, unknown>);
+      }
+    });
+    await page.goto("/?settings=workspace&tab=management");
+
+    const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
+    await expect(settingsDialog).toBeVisible();
+    await expect(settingsDialog.getByRole("heading", { name: "관리 봇" })).toBeVisible();
+    for (const signal of ["기한 없음", "DRI·담당자 없음", "기한 초과", "어제 완료", "오늘 마감"]) {
+      await expect(settingsDialog.getByText(signal, { exact: true }).first()).toBeVisible();
+    }
+    await settingsDialog.getByLabel("Slack 발송 채널").selectOption("C123");
+    await settingsDialog.locator(".management-bot-toggle > label").click();
+    await expect(settingsDialog.getByRole("checkbox", { name: "워크스페이스 관리 봇 사용" })).toBeChecked();
+    await settingsDialog.getByRole("button", { name: "테스트 보내기" }).click();
+
+    await expect.poll(() => patches.length).toBe(2);
+    expect(patches[0]).toMatchObject({
+      enabled: true,
+      channelId: "C123",
+      signals: ["missing_due_date", "missing_owner", "overdue", "completed_yesterday", "due_today"],
+    });
+    expect(patches[1]).toEqual({ action: "test" });
+    await expect(page.getByText(/관리 리포트 테스트를 보냈습니다/)).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  });
+
+  test("개인 워크스페이스에는 팀 Slack 기반 관리 봇을 노출하지 않는다", async ({ page }) => {
+    await installApiMocks(page, { teamWorkspace: false, slackState: "connected" });
+    await page.goto("/?settings=workspace&tab=general");
+    const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
+    await expect(settingsDialog.getByRole("button", { name: /^관리 봇/ })).toHaveCount(0);
+  });
+});
+
 test.describe("개인 데일리와 팀 롤업", () => {
   test.beforeEach(async ({ page }) => {
     await installApiMocks(page);
@@ -378,61 +551,61 @@ test.describe("개인 데일리와 팀 롤업", () => {
   });
 });
 
-test.describe("독립 앱 연동 화면", () => {
-  test("연결 전에는 이해 가능한 단일 Slack CTA를 제공한다", async ({ page }) => {
-    await installApiMocks(page, { slackState: "workspace_disconnected" });
+test.describe("개인 앱 연동과 워크스페이스 팀 연동", () => {
+  test("개인 앱 연동에는 개인 Slack 설정만 표시한다", async ({ page }) => {
+    await installApiMocks(page, { slackState: "workspace_disconnected", teamWorkspace: true });
     await page.goto("/?view=integrations");
     await expect(page).toHaveURL(/view=integrations/);
-    await expect(page.getByRole("heading", { name: "앱 연동" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Slack 데일리 봇" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Slack 연결" })).toBeVisible();
-    await expect(page.getByText("승인 한 번이면 준비됩니다")).toBeVisible();
-    await expect(page.getByText("준비 중", { exact: true })).toHaveCount(0);
-    await expect(page.getByRole("dialog", { name: "앱 연동" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "개인 앱 연동" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Slack 개인 DM" })).toBeVisible();
+    await expect(page.getByText("팀 연결 필요", { exact: true })).toBeVisible();
+    await expect(page.getByText(/워크스페이스 설정의 팀 연동/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Slack 연결" })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "개인 앱 연동" })).toHaveCount(0);
   });
 
-  test("서비스 장애에는 고객이 해결할 수 없는 재확인 버튼을 노출하지 않는다", async ({ page }) => {
-    await installApiMocks(page, { slackState: "service_unavailable" });
+  test("개인 화면은 Slack 서비스 장애에서도 팀 관리 버튼을 노출하지 않는다", async ({ page }) => {
+    await installApiMocks(page, { slackState: "service_unavailable", teamWorkspace: true });
     await page.goto("/?view=integrations");
-    await expect(page.getByText("잠시 사용 불가", { exact: true })).toBeVisible();
-    await expect(page.getByText(/Slack 연결을 잠시 사용할 수 없습니다/)).toBeVisible();
-    await expect(page.getByText("잠시 후 사용 가능", { exact: true })).toBeVisible();
+    await expect(page.getByText("팀 연결 필요", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "다시 확인" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Slack 연결" })).toHaveCount(0);
   });
 
-  test("Slack 관리자 승인과 중복 연결 오류를 구체적으로 안내한다", async ({ page }) => {
-    await installApiMocks(page, { slackState: "workspace_disconnected" });
-    await page.goto("/?view=integrations&slack=slack_admin_approval_required");
+  test("Slack 관리자 승인과 중복 연결 오류는 워크스페이스 설정에서 안내한다", async ({ page }) => {
+    await installApiMocks(page, { slackState: "workspace_disconnected", teamWorkspace: true });
+    await page.goto("/?settings=workspace&tab=integrations&slack=slack_admin_approval_required");
     const oauthAlert = page.locator(".slack-service-card .integration-state-message[role='alert']");
     await expect(oauthAlert).toContainText("Slack 관리자 승인이 필요합니다");
     await expect(oauthAlert).toContainText("앱 설치 정책");
-    await page.goto("/?view=integrations&slack=workspace_already_connected");
+    await page.goto("/?settings=workspace&tab=integrations&slack=workspace_already_connected");
     await expect(oauthAlert).toContainText("이미 다른 OKRPTR 워크스페이스에 연결된 Slack입니다");
   });
 
-  test("일반 멤버는 공용 연결 대신 개인 Slack 설정만 사용한다", async ({ page }) => {
-    await installApiMocks(page, { slackState: "connected", workspaceRole: "member" });
+  test("일반 멤버의 개인 앱 화면에는 개인 Slack DM 설정만 보인다", async ({ page }) => {
+    await installApiMocks(page, { slackState: "connected", workspaceRole: "member", teamWorkspace: true });
     await page.goto("/?view=integrations");
-    await expect(page.getByText("고객 Slack A 워크스페이스가 연결되어 있습니다.")).toBeVisible();
-    await expect(page.getByText("고객 Slack A 연결 완료")).toBeVisible();
+    await expect(page.getByText("내 Slack 계정이 연결되었습니다")).toBeVisible();
+    await expect(page.getByText("내 Slack DM 알림 사용")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "팀 공유 채널" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Slack 연결 해제" })).toHaveCount(0);
   });
 
-  test("연결 완료 상태는 핵심 정보와 설정 변경만 간결하게 보여준다", async ({ page }) => {
-    await installApiMocks(page, { slackState: "connected" });
-    await page.goto("/?view=integrations");
+  test("팀 Slack 연결과 공용 설정은 워크스페이스 설정에 표시한다", async ({ page }) => {
+    await installApiMocks(page, { slackState: "connected", teamWorkspace: true });
+    await page.goto("/?settings=workspace&tab=integrations");
+    await expect(page.getByRole("dialog", { name: "워크스페이스 설정" })).toBeVisible();
     await expect(page.getByText("고객 Slack A 연결 완료")).toBeVisible();
     await expect(page.getByText("1명", { exact: true })).toBeVisible();
     await expect(page.getByText("#daily", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "설정 변경" })).toBeVisible();
-    await expect(page.getByText("개인별 시간·수동 연결·실패 기록")).toBeVisible();
+    await expect(page.getByText("멤버 연결·실패 기록")).toBeVisible();
     await expect(page.getByRole("heading", { name: "팀 공유 채널" })).toHaveCount(0);
   });
 
-  test("초기 설정 한 번으로 대상·채널·예약·테스트를 완료한다", async ({ page }) => {
-    await installApiMocks(page, { slackState: "setup_required", slackSetupComplete: false });
-    await page.goto("/?view=integrations&slack=setup_required");
+  test("워크스페이스 설정에서 팀 데일리 초기 설정을 완료한다", async ({ page }) => {
+    await installApiMocks(page, { slackState: "setup_required", slackSetupComplete: false, teamWorkspace: true });
+    await page.goto("/?settings=workspace&tab=integrations&slack=setup_required");
     await expect(page.getByRole("heading", { name: "Slack 초기 설정" })).toBeVisible();
     await expect(page.getByText("채널 공유 안 함")).toBeVisible();
     await page.getByText("#daily", { exact: true }).click();
@@ -444,7 +617,7 @@ test.describe("독립 앱 연동 화면", () => {
     await expect(page.getByText("고객 Slack A 워크스페이스가 연결되어 있습니다.")).toBeVisible();
     const metrics = await page.evaluate(() => ({ scrollHeight: document.documentElement.scrollHeight, clientHeight: document.documentElement.clientHeight, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth }));
     expect(metrics.overflow).toBeLessThanOrEqual(1);
-    const results = await new AxeBuilder({ page: page as never }).include(".integrations-page").analyze();
+    const results = await new AxeBuilder({ page: page as never }).include(".workspace-settings-panel").analyze();
     expect(results.violations).toEqual([]);
   });
 });

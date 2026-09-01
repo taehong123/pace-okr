@@ -119,3 +119,7 @@ The D1 schema lives in `db/schema.ts`, and generated migrations live in
 items, and daily scrum notes use relational tables. The app initializes missing
 tables defensively at runtime and seeds representative data only for a new
 workspace.
+
+## Account registration
+
+New-account phone ownership verification is feature-gated and uses Twilio Verify. Configure `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, and a dedicated `ACCOUNT_DATA_ENCRYPTION_KEY`, then enable `ACCOUNT_REGISTRATION_REQUIRED=true` only after the migration and production SMS test succeed. Existing users are grandfathered without marketing consent. See `docs/account-registration-production.md` for the rollout checklist.

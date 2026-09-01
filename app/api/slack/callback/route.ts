@@ -7,7 +7,7 @@ export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const stateValue = requestUrl.searchParams.get("state") ?? "";
   const state = await consumeSlackOAuthState(stateValue);
-  const returnTo = state?.returnTo ?? "/?view=integrations";
+  const returnTo = state?.returnTo ?? "/?settings=workspace&tab=integrations";
 
   if (!state) return redirectWithSlackStatus(request, returnTo, "oauth_exchange_failed");
   const callbackHeaders = new Headers(request.headers);

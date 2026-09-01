@@ -1,89 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-export const metadata: Metadata = {
-  title: "개인정보처리방침 | OKRPTR",
-  description: "OKRPTR 개인정보처리방침",
-};
+export const metadata: Metadata = { title: "개인정보처리방침 | OKRPTR", description: "OKRPTR 개인정보처리방침" };
 
 export default function PrivacyPage() {
-  return (
-    <main className="legal-page">
-      <article>
-        <header>
-          <Link href="/">OKRPTR</Link>
-          <h1>개인정보처리방침</h1>
-          <p>시행일: 2026년 8월 24일</p>
-        </header>
-
-        <section>
-          <h2>1. 수집하는 정보</h2>
-          <p>
-            OKRPTR는 Google 계정 로그인 시 계정 식별자, 이메일 주소, 이름과
-            프로필 이미지를 수집할 수 있습니다. 사용자가 Google Calendar 연결을
-            별도로 승인하면 일정 조회 및 생성에 필요한 OAuth 권한과 토큰을
-            처리합니다.
-          </p>
-        </section>
-
-        <section>
-          <h2>2. 이용 목적</h2>
-          <p>
-            수집한 정보는 사용자 인증, 워크스페이스 멤버 식별, 담당자 표시,
-            사용자가 요청한 캘린더 연동 기능 제공, 보안 및 오류 대응에만
-            사용합니다.
-          </p>
-        </section>
-
-        <section>
-          <h2>3. 보관과 보호</h2>
-          <p>
-            인증 정보와 연동 토큰은 접근이 제한된 환경에서 보관하며, OAuth
-            토큰은 암호화하여 처리합니다. 서비스 제공에 필요하지 않게 된 정보는
-            관련 법령상 보관 의무가 없는 한 지체 없이 삭제합니다.
-          </p>
-        </section>
-
-        <section>
-          <h2>4. 제3자 제공</h2>
-          <p>
-            OKRPTR는 개인정보를 판매하지 않습니다. 법령상 의무가 있거나 사용자가
-            명시적으로 동의한 경우를 제외하고 개인정보를 제3자에게 제공하지
-            않습니다.
-          </p>
-        </section>
-
-        <section>
-          <h2>5. Google 사용자 데이터</h2>
-          <p>
-            Google API에서 받은 정보의 사용 및 다른 앱으로의 전송은 제한적 사용
-            요건을 포함한 Google API 서비스 사용자 데이터 정책을 준수합니다.
-            Google 계정 로그인은 기본 프로필과 이메일 확인에만 사용하며, 캘린더
-            권한은 사용자가 연동을 선택한 경우에만 요청합니다.
-          </p>
-        </section>
-
-        <section>
-          <h2>6. 사용자 권리</h2>
-          <p>
-            사용자는 앱의 연동 설정에서 Google Calendar 연결을 해제하거나 Google
-            계정의 보안 설정에서 접근 권한을 철회할 수 있습니다. 개인정보 열람,
-            정정 또는 삭제 요청은 아래 연락처로 접수할 수 있습니다.
-          </p>
-        </section>
-
-        <section>
-          <h2>7. 문의</h2>
-          <p>
-            개인정보 관련 문의: <a href="mailto:taehong0613@gmail.com">taehong0613@gmail.com</a>
-          </p>
-        </section>
-
-        <footer>
-          <Link href="/terms">이용약관</Link>
-          <Link href="/">서비스로 돌아가기</Link>
-        </footer>
-      </article>
-    </main>
-  );
+  return <main className="legal-page"><article>
+    <header><Link href="/">OKRPTR</Link><h1>개인정보처리방침</h1><p>시행일: 2026년 9월 1일</p></header>
+    <section><h2>1. 수집하는 개인정보</h2><p>Google 계정 로그인 시 계정 식별자, 이메일 주소와 표시 이름을 수집합니다. 신규 가입자의 계정 보호와 휴대전화 소유 확인을 위해 휴대전화 번호, 인증 결과와 인증 시각을 수집합니다. OKRPTR는 이 절차를 실명 또는 PASS 본인인증으로 표시하지 않습니다. 사용자가 외부 서비스 연동을 선택하면 해당 기능 제공에 필요한 OAuth 권한과 토큰을 처리합니다.</p></section>
+    <section><h2>2. 필수 정보의 이용 목적</h2><p>계정 정보와 휴대전화 번호는 사용자 인증, 중복·부정 가입 방지, 계정 보호, 서비스 운영 안내와 오류 대응에 사용합니다. 만 14세 미만 사용자를 위한 법정대리인 동의 절차가 제공되기 전에는 만 14세 이상인 사용자만 가입할 수 있습니다.</p></section>
+    <section><h2>3. 선택적 마케팅 이용과 광고성 정보</h2><p>마케팅 목적 개인정보 이용 동의와 광고성 정보 문자 수신 동의는 각각 별도로 받으며 기본 선택하지 않습니다. 어느 하나에 동의하지 않아도 서비스 가입과 일반 기능 이용에는 영향이 없습니다. 광고성 문자는 두 동의를 모두 유지한 사용자에게만 보낼 수 있으며, 사용자는 서비스의 ‘내 설정’에서 언제든 동의를 철회할 수 있습니다. 광고성 정보 수신 동의 여부는 관련 법령에 따라 2년마다 다시 안내합니다.</p></section>
+    <section><h2>4. 보유 기간</h2><p>계정과 확인된 휴대전화 번호는 회원 탈퇴 시까지 보유한 뒤 법령상 보존 의무가 있는 경우를 제외하고 지체 없이 삭제합니다. 동의와 철회 이력은 동의 증명 및 분쟁 대응에 필요한 기간 동안 보관할 수 있습니다. 미완료 인증 요청은 인증 만료 및 부정 이용 방지에 필요한 단기간만 보관합니다.</p></section>
+    <section><h2>5. 처리위탁 및 국외 이전</h2><p>휴대전화 인증번호 발송과 확인을 위해 Twilio Inc.의 Verify 서비스를 사용합니다. 인증 과정에서 휴대전화 번호와 인증 처리 정보가 암호화된 네트워크를 통해 미국의 Twilio 시스템으로 전송될 수 있으며, 인증 거래 데이터는 Twilio의 서비스 정책에 따른 기간 동안 처리됩니다. 이 이전을 거부하면 신규 계정의 휴대전화 확인을 완료할 수 없습니다. 인증 공급자를 변경하는 경우 본 방침을 갱신하고 필요한 안내와 동의를 제공합니다.</p></section>
+    <section><h2>6. 보호 조치</h2><p>휴대전화 번호와 OAuth 토큰은 암호화하여 저장하고, 접근 권한을 서비스 제공에 필요한 범위로 제한합니다. 전화번호 검색이나 중복·남용 확인에는 원문 대신 단방향 해시를 사용합니다. 인증번호 자체는 OKRPTR 데이터베이스에 저장하지 않습니다.</p></section>
+    <section><h2>7. 이용자의 권리</h2><p>사용자는 개인정보 열람, 정정, 삭제와 처리정지를 요청할 수 있습니다. 선택적 마케팅 동의는 내 설정에서 직접 변경할 수 있습니다. 계정 삭제 및 개인정보 관련 요청은 아래 연락처로 접수할 수 있습니다.</p></section>
+    <section><h2>8. 문의</h2><p>개인정보 관련 문의: <a href="mailto:taehong0613@gmail.com">taehong0613@gmail.com</a></p></section>
+    <footer><Link href="/terms">이용약관</Link><Link href="/">서비스로 돌아가기</Link></footer>
+  </article></main>;
 }

@@ -57,6 +57,12 @@ import {
 import { decryptSlackSecret } from "@/lib/slack-oauth";
 import { syncDueKrDataConnectionsWithDb, syncKrDataConnectionWithDb } from "@/lib/kr-data-sync";
 import {
+  ACCOUNT_CONSENT_VERSION,
+  accountRegistrationRequired,
+  getAccountRegistrationStatus,
+  type AccountRegistrationRuntimeEnv,
+} from "@/lib/account-registration";
+import {
   defaultSlackAutomationTemplate,
   isSlackAutomationTrigger,
   normalizeSlackChannelId,
@@ -184,6 +190,11 @@ type RuntimeEnv = typeof env & {
   OKITA_API_TOKEN?: string;
   PACE_API_TOKEN?: string;
   GOOGLE_TOKEN_ENCRYPTION_KEY?: string;
+  ACCOUNT_REGISTRATION_REQUIRED?: string;
+  ACCOUNT_DATA_ENCRYPTION_KEY?: string;
+  TWILIO_ACCOUNT_SID?: string;
+  TWILIO_AUTH_TOKEN?: string;
+  TWILIO_VERIFY_SERVICE_SID?: string;
   SLACK_TOKEN_ENCRYPTION_KEY?: string;
   RESEND_API_KEY?: string;
   OKRPTR_PUBLIC_URL?: string;
@@ -251,6 +262,49 @@ async function ensureSchema() {
         )`),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_identities_provider_subject ON auth_identities(provider, provider_subject)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_auth_identities_user ON auth_identities(user_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS account_registrations (
+          user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          encrypted_phone TEXT NOT NULL DEFAULT '',
+          phone_hash TEXT NOT NULL DEFAULT '',
+          phone_last_four TEXT NOT NULL DEFAULT '',
+          verification_provider TEXT NOT NULL DEFAULT '',
+          phone_verified_at TEXT,
+          required_privacy_consent_at TEXT,
+          age_14_confirmed_at TEXT,
+          marketing_data_consent INTEGER NOT NULL DEFAULT 0,
+          marketing_data_consent_at TEXT,
+          electronic_marketing_consent INTEGER NOT NULL DEFAULT 0,
+          electronic_marketing_consent_at TEXT,
+          consent_version TEXT NOT NULL DEFAULT '2026-09-01',
+          completed_at TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_account_registrations_phone_hash ON account_registrations(phone_hash)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS account_consent_events (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          consent_type TEXT NOT NULL,
+          granted INTEGER NOT NULL,
+          policy_version TEXT NOT NULL,
+          source TEXT NOT NULL DEFAULT 'signup',
+          occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_account_consent_events_user_type ON account_consent_events(user_id, consent_type, occurred_at)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS phone_verification_requests (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          encrypted_phone TEXT NOT NULL,
+          phone_hash TEXT NOT NULL,
+          phone_last_four TEXT NOT NULL,
+          provider_sid TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'pending',
+          requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          expires_at TEXT NOT NULL,
+          verified_at TEXT
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_phone_verification_requests_user_time ON phone_verification_requests(user_id, requested_at)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_phone_verification_requests_phone_time ON phone_verification_requests(phone_hash, requested_at)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS workspace_members (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -754,6 +808,16 @@ async function ensureSchema() {
           required_scopes TEXT NOT NULL DEFAULT '', onboarding_completed_at TEXT, last_synced_at TEXT, last_error TEXT NOT NULL DEFAULT '',
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS workspace_management_bot_settings (
+          owner_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+          enabled INTEGER NOT NULL DEFAULT 0, weekdays TEXT NOT NULL DEFAULT '[1,2,3,4,5]',
+          report_time TEXT NOT NULL DEFAULT '09:00', timezone TEXT NOT NULL DEFAULT 'Asia/Seoul',
+          channel_id TEXT NOT NULL DEFAULT '', channel_name TEXT NOT NULL DEFAULT '',
+          signals TEXT NOT NULL DEFAULT '["missing_due_date","missing_owner","overdue","completed_yesterday","due_today"]',
+          last_sent_date TEXT, last_sent_at TEXT, last_error TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_workspace_management_bot_due ON workspace_management_bot_settings(enabled, last_sent_date)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS slack_daily_preferences (
           id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
           member_id TEXT NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE, enabled INTEGER NOT NULL DEFAULT 1,
@@ -833,6 +897,7 @@ async function ensureSchema() {
           AND onboarding_completed_at IS NULL
           AND EXISTS (SELECT 1 FROM slack_daily_preferences WHERE slack_daily_preferences.owner_id = slack_daily_settings.owner_id)`).run();
       await migrateIdentityAndInvitations(d1);
+      await migrateLegacyAccountRegistrations(d1);
       await ensureAssistantDraftSchema(d1);
     })()
       .catch((error: unknown) => {
@@ -884,7 +949,9 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       daily_submission.skip_reason,
       slack_daily_setting.reminder_time,
       slack_daily_setting.onboarding_completed_at
+      ,management_bot.report_time
       ,assistant_draft.updated_at
+      ,account_registration.completed_at
       ,app_migration.applied_at
     FROM workspaces AS workspace
     LEFT JOIN routines AS routine ON 1 = 0
@@ -895,10 +962,12 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
     LEFT JOIN daily_scrums AS daily_scrum ON 1 = 0
     LEFT JOIN daily_submissions AS daily_submission ON 1 = 0
     LEFT JOIN slack_daily_settings AS slack_daily_setting ON 1 = 0
+    LEFT JOIN workspace_management_bot_settings AS management_bot ON 1 = 0
     LEFT JOIN users AS app_user ON 1 = 0
     LEFT JOIN auth_identities AS auth_identity ON 1 = 0
     LEFT JOIN workspace_invitations AS invitation ON 1 = 0
     LEFT JOIN assistant_drafts AS assistant_draft ON 1 = 0
+    LEFT JOIN account_registrations AS account_registration ON 1 = 0
     LEFT JOIN app_migrations AS app_migration ON 1 = 0
     LIMIT 0`).first();
     return true;
@@ -914,6 +983,18 @@ async function addColumnIfMissing(d1: RuntimeEnv["DB"], statement: string) {
     const message = error instanceof Error ? error.message : String(error);
     if (!/duplicate column|already exists/i.test(message)) throw error;
   }
+}
+
+async function migrateLegacyAccountRegistrations(d1: RuntimeEnv["DB"]) {
+  const migrationId = "account_registration_legacy_v1";
+  const applied = await d1.prepare("SELECT id FROM app_migrations WHERE id = ?").bind(migrationId).first();
+  if (applied) return;
+  await d1.batch([
+    d1.prepare(`INSERT OR IGNORE INTO account_registrations
+      (user_id, verification_provider, consent_version, completed_at, created_at, updated_at)
+      SELECT id, 'legacy', 'legacy-2026-09-01', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM users`),
+    d1.prepare("INSERT OR IGNORE INTO app_migrations (id, applied_at) VALUES (?, CURRENT_TIMESTAMP)").bind(migrationId),
+  ]);
 }
 
 async function migrateIdentityAndInvitations(d1: RuntimeEnv["DB"]) {
@@ -1782,7 +1863,7 @@ export async function saveGoogleCalendarEvent(input: {
   return event;
 }
 
-export async function createSlackOAuthState(ownerId: string, userId: string, returnTo = "/?view=integrations") {
+export async function createSlackOAuthState(ownerId: string, userId: string, returnTo = "/?settings=workspace&tab=integrations") {
   await ensureSchema();
   const state = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
@@ -2251,7 +2332,7 @@ async function hashIntegrationToken(token: string) {
 
 export async function authorizeRequest(
   request: Request,
-  options: { allowViewerWrite?: boolean } = {},
+  options: { allowViewerWrite?: boolean; allowIncompleteRegistration?: boolean } = {},
 ): Promise<RequestAuthorization | Response> {
   // Run idempotent schema and account repairs before choosing an authentication
   // mechanism. This lets the first post-deploy session check complete the repair
@@ -2318,6 +2399,21 @@ export async function authorizeRequest(
       const role = membership.role as TeamRole;
       if (!options.allowViewerWrite && role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
         return Response.json({ error: "Viewer access is read-only." }, { status: 403 });
+      }
+      const runtime = env as RuntimeEnv & AccountRegistrationRuntimeEnv;
+      if (!options.allowIncompleteRegistration && accountRegistrationRequired(runtime)) {
+        const registration = await getAccountRegistrationStatus(runtime, canonicalUserId);
+        if (!registration.completed) {
+          return Response.json({
+            error: "가입 확인을 완료해 주세요.",
+            code: "registration_required",
+            registration: {
+              user: { id: canonicalUserId, email: googleSession.email, displayName: membership.displayName, provider: "google" },
+              verificationConfigured: registration.verificationConfigured,
+              consentVersion: ACCOUNT_CONSENT_VERSION,
+            },
+          }, { status: 428, headers: { "Cache-Control": "no-store" } });
+        }
       }
       return { ownerId: membership.workspaceId, userId: canonicalUserId, email: googleSession.email, displayName: membership.displayName, role, apiToken: false };
     } catch (error) {

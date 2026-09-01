@@ -92,7 +92,12 @@ const worker = {
     return response;
   },
   scheduled(_controller: ScheduledController, _env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(syncDueKrDataConnectionsWithDb(_env.DB));
+    const managementBotRun = import("@/lib/workspace-management-bot")
+      .then(({ runDueWorkspaceManagementBots }) => runDueWorkspaceManagementBots(_env.DB));
+    ctx.waitUntil(Promise.all([
+      syncDueKrDataConnectionsWithDb(_env.DB),
+      managementBotRun,
+    ]));
   },
 };
 

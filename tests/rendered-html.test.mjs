@@ -120,7 +120,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(layout, /openGraph/);
   assert.doesNotMatch(layout, /\/og\.png/);
   assert.match(page, /ChatGPT 연결 문구 복사/);
-  assert.match(page, /앱 연동/);
+  assert.match(page, /개인 앱 연동/);
   assert.match(page, /mobile-navigation/);
   assert.match(page, /workspace-mobile-home/);
   assert.match(page, /goToMobileHome/);
@@ -136,9 +136,12 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /더보기/);
   assert.match(page, /개인 연결/);
   assert.match(page, /Slack 연결/);
-  assert.match(page, /승인 한 번이면 준비됩니다/);
+  assert.match(page, /팀 Slack을 연결하세요/);
   assert.match(page, /view=integrations/);
-  assert.match(page, /기술 설정이나 훅 URL을 입력할 필요 없이/);
+  assert.match(page, /내 계정에 연결된 앱/);
+  assert.match(page, /workspace-settings-trigger/);
+  assert.match(page, /워크스페이스 설정.*일반.*멤버.*그룹.*Project 설정.*팀 연동.*위험 구역/s);
+  assert.match(page, /settings=workspace&tab=integrations/);
   assert.match(page, /자동화 봇/);
   assert.match(page, /업무가 생성될 때/);
   assert.match(page, /업무 상태가 바뀔 때/);
@@ -470,6 +473,36 @@ test("ships atomic OKR file editing and safe Project recovery contracts", async 
   assert.match(paceData, /parent_id = \?, cycle_id = \?/);
 });
 
+test("separates required phone verification from optional marketing consent", async () => {
+  const [page, paceData, registration, phoneVerification, sendRoute, verifyRoute, privacy, terms, migration] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/account-registration.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/phone-verification.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/account/phone/send/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/account/phone/verify/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/privacy/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/terms/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0032_account_registration.sql", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /선택 동의 · 동의하지 않아도 가입 가능/);
+  assert.match(page, /marketingDataConsent, electronicMarketingConsent/);
+  assert.match(page, /내 설정에서 언제든 철회/);
+  assert.match(page, /실명·PASS 인증이 아니라/);
+  assert.match(paceData, /ACCOUNT_REGISTRATION_REQUIRED/);
+  assert.match(paceData, /allowIncompleteRegistration/);
+  assert.match(registration, /marketingEligible: marketingDataConsent && electronicMarketingConsent && withinTwoYears/);
+  assert.match(registration, /phone_verification_requests/);
+  assert.match(phoneVerification, /VerificationCheck/);
+  assert.match(phoneVerification, /Channel: "sms"/);
+  assert.match(sendRoute, /requiredPrivacyConsent !== true \|\| body\.age14Confirmed !== true/);
+  assert.match(verifyRoute, /body\.marketingDataConsent === true/);
+  assert.match(privacy, /광고성 문자는 두 동의를 모두 유지한 사용자/);
+  assert.match(terms, /서비스 이용 대가나 가입 조건이 아닙니다/);
+  assert.match(migration, /verification_provider.*legacy/s);
+  assert.match(migration, /account_consent_events/);
+});
+
 test("serves hashed assets with immutable browser and edge caching", async () => {
   const staticHtml = await readFile(new URL("../dist/client/index.html", import.meta.url), "utf8");
   const assetPath = staticHtml.match(/\/_next\/static\/chunks\/index-[A-Za-z0-9_-]+\.js/)?.[0];
@@ -493,7 +526,8 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
     readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /목록.*속성 관리.*템플릿 관리/s);
+  assert.match(page, /Project 설정.*속성.*템플릿/s);
+  assert.doesNotMatch(page, /setProjectTab\(/);
   assert.doesNotMatch(page, /setProjectTab\("archive"\)/);
   assert.doesNotMatch(page, /모든 Project·Task 선택|Project·Task 선택/);
   assert.doesNotMatch(page, /function TreeView/);
@@ -690,7 +724,7 @@ test("connects API data independently to Key Results and Projects", async () => 
   assert.match(schema, /kr_data_connections/);
   assert.match(schema, /itemId: text\("kr_item_id"\)/);
   assert.match(worker, /scheduled\(_controller/);
-  assert.match(viteConfig, /crons: \["0 \* \* \* \*"\]/);
+  assert.match(viteConfig, /crons: \["\*\/15 \* \* \* \*"\]/);
   assert.match(migration, /UPDATE `items` SET `progress` = 0 WHERE `kind` IN \('objective', 'initiative'\)/);
 });
 
@@ -727,7 +761,7 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(page, /Slack 초기 설정/);
   assert.match(page, /채널 공유 안 함/);
   assert.match(page, /설정 완료/);
-  assert.match(page, /개인별 시간·수동 연결·실패 기록/);
+  assert.match(page, /멤버 연결·실패 기록/);
   assert.match(styles, /\.daily-layout/);
   assert.match(styles, /\.integrations-page/);
   assert.match(styles, /\.integration-step/);
@@ -845,4 +879,49 @@ test("uses verified Google identities and explicit pending workspace invitations
   assert.match(page, /초대 링크 복사/);
   assert.match(googleSession, /emailVerified/);
   assert.doesNotMatch(googleSession, /BrowserSignIn/);
+});
+
+test("implements a workspace management bot for data quality and urgency reporting", async () => {
+  const [page, styles, route, domain, schema, runtimeSchema, worker, viteConfig, migration] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/workspace-management-bot/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/workspace-management-bot.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0033_workspace_management_bot.sql", import.meta.url), "utf8"),
+  ]);
+
+  for (const signal of ["missing_due_date", "missing_owner", "overdue", "completed_yesterday", "due_today"]) {
+    assert.match(domain, new RegExp(signal));
+  }
+  assert.match(page, /id: "management", label: "관리 봇"/);
+  assert.match(page, /function WorkspaceManagementBot/);
+  assert.match(page, /워크스페이스 관리 봇 사용/);
+  assert.match(page, /LIVE PREVIEW/);
+  assert.match(styles, /\.management-bot-grid/);
+  assert.match(route, /canManageTeam/);
+  assert.match(route, /testWorkspaceManagementBot/);
+  assert.match(domain, /activity_log/);
+  assert.match(domain, /listSlackChannels/);
+  assert.match(domain, /last_sent_date/);
+  assert.match(schema, /workspace_management_bot_settings/);
+  assert.match(runtimeSchema, /workspace_management_bot_settings/);
+  assert.match(migration, /idx_workspace_management_bot_due/);
+  assert.match(worker, /runDueWorkspaceManagementBots/);
+  assert.match(viteConfig, /crons: \["\*\/15 \* \* \* \*"\]/);
+});
+
+test("keeps completion checkboxes visually compact while preserving mobile touch targets", async () => {
+  const [page, styles] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /aria-pressed=\{isCompletedStatus\(entry\.status\)\}/);
+  assert.match(styles, /\.task-check \{[^}]*width: 26px;[^}]*height: 26px;[^}]*border: 0;[^}]*background: transparent/s);
+  assert.match(styles, /\.task-check::before \{[^}]*width: 17px;[^}]*height: 17px/s);
+  assert.match(styles, /\.workspace-topbar button, \.icon-button, \.task-check,[^}]*min-width: 44px; min-height: 44px/s);
 });
