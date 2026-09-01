@@ -953,6 +953,9 @@ test("implements a workspace management bot for data quality and urgency reporti
   assert.match(page, /막힘 상태 알림/);
   assert.match(page, /새 Task 알림/);
   assert.doesNotMatch(page, /BOT CONNECTIONS|WORKSPACE HEALTH|RECOMMENDED|CURRENT RULES/);
+  assert.match(page, /workspace-settings-section-header workspace-bot-header/);
+  assert.doesNotMatch(page, /integration-intro compact/);
+  assert.match(styles, /\.workspace-bot-header > button \{[^}]*min-height: 34px;[^}]*background: var\(--raised\)/s);
   assert.match(styles, /\.bot-accordion/);
   assert.match(styles, /\.management-summary-groups/);
   assert.match(route, /mode === "settings"/);

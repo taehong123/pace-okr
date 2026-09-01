@@ -6525,12 +6525,13 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
     onNotice("Slack 연결을 해제했습니다. 자동화 규칙은 보관됩니다.");
   }
 
-  return <section className="workspace-integration-pane">
-    <section className="integration-intro compact">
-      <div><h2>봇 연동</h2><p>워크스페이스의 데일리 봇, 관리 봇과 업무 자동화 봇을 한곳에서 관리합니다.</p></div>
-      <button type="button" onClick={onRefresh} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={15} />{loading ? "상태 확인 중" : "연결 상태 새로고침"}</button>
-    </section>
-    <section className="integration-service-card slack-service-card" aria-labelledby="workspace-slack-heading">
+  return <section className="workspace-integration-section">
+    <header className="workspace-settings-section-header workspace-bot-header">
+      <div><h3>봇 연동</h3><p>워크스페이스의 데일리 봇, 관리 봇과 업무 자동화 봇을 한곳에서 관리합니다.</p></div>
+      <button type="button" onClick={onRefresh} disabled={loading}><RefreshCw className={loading ? "spin" : ""} size={14} />{loading ? "확인 중" : "상태 새로고침"}</button>
+    </header>
+    <div className="workspace-integration-pane">
+      <section className="integration-service-card slack-service-card" aria-labelledby="workspace-slack-heading">
       <header><span className="integration-service-icon slack"><Hash size={20} /></span><div><h3 id="workspace-slack-heading">Slack 연결</h3><p>{slackConnected ? `${connectedSlackName} 워크스페이스가 연결되어 있습니다.` : `${workspaceName}의 봇이 메시지를 보낼 Slack을 관리자가 연결합니다.`}</p></div><strong className={`integration-status-badge ${slackState}`}>{loading ? "확인 중" : slackAction}</strong></header>
       {slackOAuthIssue && <div className={`integration-state-message ${slackOAuthIssueCopy[slackOAuthIssue].tone}`} role="alert"><AlertTriangle size={17} /><div><b>{slackOAuthIssueCopy[slackOAuthIssue].title}</b><p>{slackOAuthIssueCopy[slackOAuthIssue].detail}</p></div></div>}
       {!slackConnected && <section className="slack-one-button-connect" aria-label="Slack 팀 연결">
@@ -6544,11 +6545,12 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
       </section>}
       {slackState === "reauthorization_required" && <div className="integration-state-message warning"><AlertTriangle size={17} /><div><b>새 봇 기능 권한이 필요합니다</b><p>권한 업데이트 전까지 일부 DM·채널 기능이 작동하지 않을 수 있습니다.</p></div></div>}
       {slackConnected && canManageSlack && <details className="slack-advanced-settings"><summary>Slack 연결 관리 <ChevronDown size={14} /></summary><div><button className="secondary-danger" onClick={() => void disconnectSlack()} disabled={disconnectingSlack}>{disconnectingSlack ? "연결 해제 중" : "Slack 연결 해제"}</button></div></details>}
-    </section>
-    <div className="bot-accordion" aria-label="워크스페이스 봇 목록">
-      <BotAccordionRow id="daily" icon={Bot} title="데일리 봇" description="멤버별 데일리 DM과 선택한 공유 채널에 알립니다." status={displayedBotSummaries.daily.status} summary={displayedBotSummaries.daily.summary} expanded={openBot === "daily"} onToggle={toggleBot}><SlackDailySettingsPanel active={openBot === "daily"} connected={slackConnected} canManage={canManageSlack} teamName={connectedSlackName} onSummary={updateDailySummary} onNotice={onNotice} /></BotAccordionRow>
-      <BotAccordionRow id="management" icon={Activity} title="관리 봇" description="정보 부족과 긴급 업무를 정해진 시간에 정리합니다." status={displayedBotSummaries.management.status} summary={displayedBotSummaries.management.summary} expanded={openBot === "management"} onToggle={toggleBot}><WorkspaceManagementBot active={openBot === "management"} canManage={canManageSlack} onSummary={updateManagementSummary} onNotice={onNotice} /></BotAccordionRow>
-      <BotAccordionRow id="automation" icon={Zap} title="업무 자동화 봇" description="Task 생성과 상태 변경을 조건에 맞춰 알립니다." status={displayedBotSummaries.automation.status} summary={displayedBotSummaries.automation.summary} expanded={openBot === "automation"} onToggle={toggleBot}><SlackAutomationManager active={openBot === "automation"} connected={slackConnected} canManage={canManageSlack} workspaceName={workspaceName} onSummary={updateAutomationSummary} onNotice={onNotice} /></BotAccordionRow>
+      </section>
+      <div className="bot-accordion" aria-label="워크스페이스 봇 목록">
+        <BotAccordionRow id="daily" icon={Bot} title="데일리 봇" description="멤버별 데일리 DM과 선택한 공유 채널에 알립니다." status={displayedBotSummaries.daily.status} summary={displayedBotSummaries.daily.summary} expanded={openBot === "daily"} onToggle={toggleBot}><SlackDailySettingsPanel active={openBot === "daily"} connected={slackConnected} canManage={canManageSlack} teamName={connectedSlackName} onSummary={updateDailySummary} onNotice={onNotice} /></BotAccordionRow>
+        <BotAccordionRow id="management" icon={Activity} title="관리 봇" description="정보 부족과 긴급 업무를 정해진 시간에 정리합니다." status={displayedBotSummaries.management.status} summary={displayedBotSummaries.management.summary} expanded={openBot === "management"} onToggle={toggleBot}><WorkspaceManagementBot active={openBot === "management"} canManage={canManageSlack} onSummary={updateManagementSummary} onNotice={onNotice} /></BotAccordionRow>
+        <BotAccordionRow id="automation" icon={Zap} title="업무 자동화 봇" description="Task 생성과 상태 변경을 조건에 맞춰 알립니다." status={displayedBotSummaries.automation.status} summary={displayedBotSummaries.automation.summary} expanded={openBot === "automation"} onToggle={toggleBot}><SlackAutomationManager active={openBot === "automation"} connected={slackConnected} canManage={canManageSlack} workspaceName={workspaceName} onSummary={updateAutomationSummary} onNotice={onNotice} /></BotAccordionRow>
+      </div>
     </div>
   </section>;
 }

@@ -1230,8 +1230,11 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .workspace-project-tabs button { min-height: 34px; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }
 .workspace-project-tabs button.active { background: var(--raised); color: var(--ink); box-shadow: var(--shadow-raised); font-weight: 650; }
 .workspace-project-settings .project-property-manager, .workspace-project-settings .project-template-manager { background: transparent; }
+.workspace-integration-section { min-height: 100%; }
 .workspace-integration-pane { display: grid; gap: 16px; padding: 18px 20px 28px; }
-.workspace-integration-pane .integration-intro.compact { margin: 0; }
+.workspace-bot-header > div { min-width: 0; }
+.workspace-bot-header > button { min-height: 34px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--raised); color: var(--ink); font-size: 10px; cursor: pointer; }
+.workspace-bot-header > button:disabled { opacity: .6; cursor: default; }
 .workspace-management-loading { min-height: 260px; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 11px; }
 .workspace-management-error { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 9px; margin: 20px; padding: 14px; border: 1px solid #e2baba; border-radius: var(--radius-container); background: #fbefee; color: var(--red); }
 .workspace-management-error b { font-size: 12px; }
@@ -2598,6 +2601,7 @@ html[data-theme="dark"] .integration-state-message.error { background: color-mix
   .workspace-profile-card > button { grid-column: 1 / -1; min-height: 44px; }
   .workspace-settings-note { margin: 10px 12px; }
   .workspace-settings-section-header { align-items: stretch; flex-direction: column; }
+  .workspace-bot-header > button { min-height: 44px; align-self: flex-start; }
   .workspace-project-tabs { width: 100%; }
   .workspace-project-tabs button { min-height: 42px; flex: 1; justify-content: center; }
   .workspace-integration-pane { padding: 12px 12px 24px; }
