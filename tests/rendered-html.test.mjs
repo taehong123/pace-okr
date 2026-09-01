@@ -952,6 +952,7 @@ test("implements a workspace management bot for data quality and urgency reporti
   assert.doesNotMatch(page, /LIVE PREVIEW/);
   assert.match(page, /막힘 상태 알림/);
   assert.match(page, /새 Task 알림/);
+  assert.doesNotMatch(page, /BOT CONNECTIONS|WORKSPACE HEALTH|RECOMMENDED|CURRENT RULES/);
   assert.match(styles, /\.bot-accordion/);
   assert.match(styles, /\.management-summary-groups/);
   assert.match(route, /mode === "settings"/);
