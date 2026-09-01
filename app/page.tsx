@@ -989,6 +989,9 @@ function WorkspaceApp() {
       if (slackResult === "connected") {
         setSlackOAuthIssue(null);
         showNotice("선택한 Slack 워크스페이스를 연결했습니다.");
+      } else if (slackResult === "setup_required") {
+        setSlackOAuthIssue(null);
+        showNotice("Slack 연결이 완료되었습니다. 데일리 초기 설정을 마쳐 주세요.");
       } else if (Object.prototype.hasOwnProperty.call(slackOAuthIssueCopy, slackResult)) {
         const issue = slackResult as SlackOAuthIssue;
         setSlackOAuthIssue(issue);
@@ -6118,51 +6121,166 @@ function AppIntegrationsView({ google, slack, slackOAuthIssue, loading, loadErro
 
       {slackOAuthIssue && <div className={`integration-state-message ${slackOAuthIssueCopy[slackOAuthIssue].tone}`} role="alert"><AlertTriangle size={17} /><div><b>{slackOAuthIssueCopy[slackOAuthIssue].title}</b><p>{slackOAuthIssueCopy[slackOAuthIssue].detail}</p></div></div>}
 
-      <section className="integration-step integration-connect-step" aria-labelledby="slack-step-connect">
-        <span className="integration-step-number">1</span><div className="integration-step-copy"><h4 id="slack-step-connect">Slack 워크스페이스 연결</h4><p>{slack?.statusMessage || "연결 상태를 확인하고 있습니다."}</p></div>
-        <div className="integration-step-action">
-          {loading ? <span className="integration-inline-loading"><LoaderCircle className="spin" size={14} />확인 중</span>
-            : slackState === "error" || slackState === "platform_unavailable" ? <button onClick={onRefresh}><RefreshCw size={14} />다시 확인</button>
-            : slackState === "workspace_disconnected" && canManageSlack ? <button className="slack-primary-action" onClick={connectSlack}><Hash size={14} />내 Slack 워크스페이스에 연결</button>
-            : slackState === "workspace_disconnected" ? <span className="integration-role-note">OKRPTR Owner 또는 Admin에게 Slack 연결을 요청해 주세요.</span>
-            : slackState === "reauthorization_required" && canManageSlack ? <button className="slack-primary-action" onClick={connectSlack}>권한 업데이트</button>
-            : slackState === "reauthorization_required" ? <span className="integration-role-note">관리자가 권한을 업데이트해야 합니다.</span>
-            : canManageSlack ? <button className="secondary-danger" onClick={() => void disconnectSlack()} disabled={disconnectingSlack}>{disconnectingSlack ? "해제 중" : "연결 해제"}</button>
-            : <span className="integration-connected-note"><CheckCircle2 size={14} />연결됨</span>}
-        </div>
-      </section>
-
-      <div className="integration-oauth-flow" aria-label="Slack 연결 방법">
-        <div><span>1</span><p><b>OKRPTR에서 시작</b><small>Owner/Admin이 연결 버튼을 누릅니다.</small></p></div>
-        <div><span>2</span><p><b>내 Slack 선택</b><small>Slack 승인 화면에서 고객 워크스페이스를 직접 선택합니다.</small></p></div>
-        <div><span>3</span><p><b>자동 설정</b><small>훅 URL 입력 없이 사용자·알림·채널 설정이 열립니다.</small></p></div>
-      </div>
-      <details className="integration-permission-help"><summary>Slack에서 어떤 권한을 요청하나요?</summary><div><p><b>명령과 메시지</b><span>`/okrptr` 실행, 개인 DM, 선택한 팀 채널의 데일리 카드 전송에 사용합니다.</span></p><p><b>사용자와 채널 확인</b><span>이메일 자동 매칭과 봇이 참여한 공유 채널 목록을 불러오는 데 사용합니다.</span></p><p><b>고객별 분리</b><span>승인한 Slack의 Bot Token은 암호화해 현재 OKRPTR 워크스페이스에만 연결합니다.</span></p></div></details>
+      {!slackConnected && <section className="slack-one-button-connect" aria-label="Slack 연결">
+        <div><b>승인 한 번이면 준비됩니다</b><p>{slack?.statusMessage || "Slack 사용자와 채널은 승인 후 자동으로 불러옵니다. Client ID나 Webhook URL을 입력할 필요가 없습니다."}</p></div>
+        {loading ? <span className="integration-inline-loading"><LoaderCircle className="spin" size={14} />확인 중</span>
+          : slackState === "error" || slackState === "platform_unavailable" ? <button onClick={onRefresh}><RefreshCw size={14} />다시 확인</button>
+          : slackState === "workspace_disconnected" && canManageSlack ? <button className="slack-primary-action" onClick={connectSlack}><Hash size={15} />Slack 연결</button>
+          : slackState === "workspace_disconnected" ? <span className="integration-role-note">Owner 또는 Admin에게 Slack 연결을 요청해 주세요.</span>
+          : slackState === "reauthorization_required" && canManageSlack ? <button className="slack-primary-action" onClick={connectSlack}>권한 업데이트</button>
+          : <span className="integration-role-note">관리자가 권한을 업데이트해야 합니다.</span>}
+      </section>}
 
       {slackConnected ? <>
         {slackState === "reauthorization_required" && <div className="integration-state-message warning"><AlertTriangle size={17} /><div><b>새 데일리 기능 권한이 필요합니다</b><p>관리자가 권한 업데이트를 완료하기 전까지 일부 DM·채널 기능이 작동하지 않을 수 있습니다.</p></div></div>}
-        <SlackDailySettingsPanel connected canManage={canManageSlack} onNotice={onNotice} />
-        <section className="integration-extra-automation"><SlackAutomationManager connected canManage={canManageSlack} workspaceName={workspaceName} onNotice={onNotice} /></section>
-      </> : <div className="integration-locked-preview" aria-label="Slack 연결 후 사용할 기능">
-        {["사용자 이메일 자동 연결", "개인 데일리 알림 시간", "팀 공유 채널", "테스트 DM과 작동 확인"].map((label, index) => <div key={label}><span>{index + 2}</span><p><b>{label}</b><small>Slack 연결 후 이 단계가 자동으로 열립니다.</small></p></div>)}
-      </div>}
+        <SlackDailySettingsPanel connected canManage={canManageSlack} teamName={connectedSlackName} onNotice={onNotice} />
+        <details className="slack-advanced-settings"><summary>고급 설정 <ChevronDown size={14} /></summary><div><section className="integration-extra-automation"><SlackAutomationManager connected canManage={canManageSlack} workspaceName={workspaceName} onNotice={onNotice} /></section>{canManageSlack && <button className="secondary-danger" onClick={() => void disconnectSlack()} disabled={disconnectingSlack}>{disconnectingSlack ? "연결 해제 중" : "Slack 연결 해제"}</button>}</div></details>
+      </> : null}
     </section>
   </section>;
 }
 
 type SlackDailyAdminData = {
-  connected: boolean; teamName: string | null; needsReauthorization: boolean;
-  settings: { enabled: boolean; weekdays: number[]; reminderTime: string; timezone: string; installStatus: string; lastSyncedAt: string | null; lastError: string };
-  channels: Array<{ id: string; name: string; isPrivate: boolean }>;
-  members: Array<{ memberId: string; displayName: string; email: string; linked: boolean; slackDisplayName: string | null; reminder: { status: string; postAt: number; error: string } | null }>;
+  connected: boolean; teamName: string | null; needsReauthorization: boolean; setupComplete: boolean;
+  settings: { enabled: boolean; weekdays: number[]; reminderTime: string; timezone: string; installStatus: string; onboardingCompletedAt: string | null; lastSyncedAt: string | null; lastError: string };
+  channels: Array<{ id: string; name: string; isPrivate: boolean; isMember: boolean }>;
+  members: Array<{ memberId: string; displayName: string; email: string; linked: boolean; slackDisplayName: string | null; preference: { enabled: boolean; reminderTime: string | null; timezone: string | null }; reminder: { status: string; postAt: number; error: string } | null }>;
   failedPublications: Array<{ id: string; channelId: string; memberName: string; date: string; error: string; attempts: number }>;
 };
 type SlackDailyPreferenceData = { linked: boolean; enabled: boolean; reminderTime: string; timezone: string; usesWorkspaceTime: boolean; usesWorkspaceTimezone: boolean };
 
-function SlackDailySettingsPanel({ connected, canManage, onNotice }: { connected: boolean; canManage: boolean; onNotice: (message: string) => void }) {
+type SlackOnboardingResult = {
+  setupComplete: boolean;
+  admin: SlackDailyAdminData;
+  tests: {
+    dm: { status: "sent" | "skipped" | "failed"; memberId: string | null; error?: string };
+    channels: Array<{ channelId: string; channelName: string; status: "sent" | "failed"; error?: string }>;
+  };
+  schedules: Array<{ memberId: string; status: "scheduled" | "failed"; postAt: number | null; error?: string }>;
+};
+
+function SlackDailySettingsPanel({ connected, canManage, teamName, onNotice }: { connected: boolean; canManage: boolean; teamName: string; onNotice: (message: string) => void }) {
+  const [admin, setAdmin] = useState<SlackDailyAdminData | null>(null);
+  const [channels, setChannels] = useState<Array<{ id: string; name: string; isPrivate: boolean; isMember: boolean }>>([]);
+  const [editing, setEditing] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [result, setResult] = useState<SlackOnboardingResult | null>(null);
+
+  useEffect(() => {
+    if (!connected || !canManage) return;
+    let active = true;
+    void Promise.all([
+      fetch("/api/slack/daily/settings").then(async (response) => {
+        const data = await response.json() as SlackDailyAdminData & { error?: string };
+        if (!response.ok) throw new Error(data.error || "Slack 설정을 불러오지 못했습니다.");
+        return data;
+      }),
+      fetch("/api/slack/channels?joinable=1").then(async (response) => {
+        const data = await response.json() as { channels?: Array<{ id: string; name: string; isPrivate: boolean; isMember: boolean }>; error?: string };
+        if (!response.ok) throw new Error(data.error || "Slack 채널을 불러오지 못했습니다.");
+        return data.channels ?? [];
+      }),
+    ]).then(([nextAdmin, nextChannels]) => {
+      if (!active) return;
+      setAdmin(nextAdmin);
+      setChannels(nextChannels);
+      setLoadError(false);
+    }).catch(() => { if (active) setLoadError(true); });
+    return () => { active = false; };
+  }, [connected, canManage, loadAttempt]);
+
+  async function completeSetup() {
+    if (!admin) return;
+    const memberIds = admin.members.filter((member) => member.linked && member.preference.enabled).map((member) => member.memberId);
+    if (!memberIds.length) { onNotice("알림을 받을 멤버를 한 명 이상 선택해 주세요."); return; }
+    setBusy(true);
+    try {
+      const response = await fetch("/api/slack/onboarding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          weekdays: admin.settings.weekdays,
+          reminderTime: admin.settings.reminderTime,
+          timezone: admin.settings.timezone,
+          memberIds,
+          channelIds: admin.channels.map((channel) => channel.id),
+        }),
+      });
+      const data = await response.json() as SlackOnboardingResult & { error?: string };
+      if (!response.ok || !data.admin) throw new Error(data.error || "Slack 초기 설정을 완료하지 못했습니다.");
+      setAdmin(data.admin);
+      setResult(data);
+      setEditing(false);
+      const failed = data.schedules.some((entry) => entry.status === "failed") || data.tests.dm.status === "failed" || data.tests.channels.some((entry) => entry.status === "failed");
+      onNotice(failed ? "설정은 저장했습니다. 실패한 테스트만 고급 설정에서 다시 시도해 주세요." : "Slack 연결과 데일리 테스트를 완료했습니다.");
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "Slack 초기 설정을 완료하지 못했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retrySetupResult(kind: "dm" | "channel" | "schedule", id: string | null) {
+    if (!result) return;
+    setBusy(true);
+    try {
+      const payload = kind === "dm" ? { action: "test_dm", memberId: id }
+        : kind === "channel" ? { action: "test_channel", channelId: id }
+          : { action: "resync" };
+      const response = await fetch("/api/slack/daily/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const data = await response.json() as SlackDailyAdminData & { error?: string };
+      if (!response.ok) throw new Error(data.error || "Slack 테스트를 다시 실행하지 못했습니다.");
+      if (kind === "dm") setResult({ ...result, tests: { ...result.tests, dm: { ...result.tests.dm, status: "sent", error: undefined } } });
+      if (kind === "channel") setResult({ ...result, tests: { ...result.tests, channels: result.tests.channels.map((entry) => entry.channelId === id ? { ...entry, status: "sent", error: undefined } : entry) } });
+      if (kind === "schedule" && data.settings) {
+        setAdmin(data);
+        setResult({ ...result, schedules: result.schedules.map((entry) => data.members.find((member) => member.memberId === entry.memberId)?.reminder ? { ...entry, status: "scheduled", error: undefined } : entry) });
+      }
+      onNotice("실패한 Slack 항목을 다시 확인했습니다.");
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "Slack 테스트를 다시 실행하지 못했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!connected) return null;
+  if (!canManage) return <section className="slack-connected-summary"><div><CheckCircle2 size={18} /><p><b>{teamName} 연결 완료</b><span>관리자가 설정한 시간에 내 Slack DM으로 데일리를 받을 수 있습니다.</span></p></div></section>;
+  if (loadError) return <section className="integration-state-message error"><AlertTriangle size={17} /><div><b>Slack 설정을 불러오지 못했습니다</b><p>연결은 유지됩니다. 잠시 후 다시 확인해 주세요.</p></div><button onClick={() => { setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }}>다시 불러오기</button></section>;
+  if (!admin) return <div className="slack-daily-loading"><LoaderCircle className="spin" size={15} />Slack 사용자와 채널을 자동으로 확인하고 있습니다.</div>;
+
+  const showSetup = !admin.setupComplete || editing;
+  const targetMembers = admin.members.filter((member) => member.linked && member.preference.enabled);
+  const nextReminder = targetMembers.flatMap((member) => member.reminder?.postAt ? [member.reminder.postAt] : []).sort((a, b) => a - b)[0];
+  const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
+
+  return <div className="slack-one-button-flow">
+    {showSetup ? <section className="slack-onboarding-card" aria-labelledby="slack-onboarding-title">
+      <header><div><span>{admin.setupComplete ? "SETTINGS" : "ONE-TIME SETUP"}</span><h4 id="slack-onboarding-title">{admin.setupComplete ? "Slack 데일리 설정 변경" : "Slack 초기 설정"}</h4><p>요일·시간·대상·공유 채널만 정하면 예약과 테스트까지 한 번에 처리합니다.</p></div>{admin.setupComplete && <button type="button" onClick={() => setEditing(false)}>취소</button>}</header>
+      <div className="slack-onboarding-grid">
+        <label><span>발송 시간</span><input aria-label="Slack 데일리 발송 시간" type="time" value={admin.settings.reminderTime} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, reminderTime: event.target.value } })} /></label>
+        <label><span>시간대</span><select aria-label="Slack 데일리 시간대" value={admin.settings.timezone} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, timezone: event.target.value } })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label>
+      </div>
+      <fieldset className="slack-onboarding-weekdays"><legend>발송 요일</legend><div>{weekdayLabels.map((label, day) => <label key={label}><input type="checkbox" checked={admin.settings.weekdays.includes(day)} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, weekdays: event.target.checked ? [...admin.settings.weekdays, day].sort() : admin.settings.weekdays.filter((entry) => entry !== day) } })} /><span>{label}</span></label>)}</div></fieldset>
+      <fieldset className="slack-onboarding-members"><legend>알림 받을 멤버</legend><p>OKRPTR와 Slack 이메일이 같은 멤버는 자동 연결했습니다.</p><div>{admin.members.map((member) => <label key={member.memberId} className={member.linked ? "" : "disabled"}><input aria-label={`${member.displayName} Slack 알림 대상`} type="checkbox" disabled={!member.linked} checked={member.linked && member.preference.enabled} onChange={(event) => setAdmin({ ...admin, members: admin.members.map((entry) => entry.memberId === member.memberId ? { ...entry, preference: { ...entry.preference, enabled: event.target.checked } } : entry) })} /><span><b>{member.displayName}</b><small>{member.linked ? member.slackDisplayName || member.email : "Slack 이메일이 일치하지 않아 미연결"}</small></span></label>)}</div></fieldset>
+      <fieldset className="slack-onboarding-channels"><legend>데일리 공유 채널</legend><label className="slack-no-channel"><input aria-label="채널 공유 안 함" type="radio" name="slack-channel-sharing" checked={admin.channels.length === 0} onChange={() => setAdmin({ ...admin, channels: [] })} /><span><b>채널 공유 안 함</b><small>개인 DM만 사용합니다.</small></span></label>{channels.map((channel) => <label key={channel.id}><input aria-label={`${channel.name} Slack 공유 채널`} type="checkbox" checked={admin.channels.some((entry) => entry.id === channel.id)} onChange={(event) => setAdmin({ ...admin, channels: event.target.checked ? [...admin.channels, channel] : admin.channels.filter((entry) => entry.id !== channel.id) })} /><span><b>#{channel.name}</b><small>{channel.isPrivate ? "비공개 · 봇 참여 중" : channel.isMember ? "공개 · 봇 참여 중" : "공개 · 선택 시 봇 자동 참여"}</small></span></label>)}</fieldset>
+      <footer><button className="slack-primary-action" type="button" disabled={busy || admin.settings.weekdays.length === 0} onClick={() => void completeSetup()}>{busy ? <LoaderCircle className="spin" size={14} /> : <CheckCircle2 size={14} />}{busy ? "설정·테스트 중" : "설정 완료"}</button></footer>
+    </section> : <section className="slack-connected-summary">
+      <div className="slack-connected-title"><CheckCircle2 size={19} /><p><b>{teamName} 연결 완료</b><span>Slack 승인부터 데일리 예약까지 준비되었습니다.</span></p><button type="button" onClick={() => setEditing(true)}>설정 변경</button></div>
+      <dl><div><dt>대상</dt><dd>{targetMembers.length}명</dd></div><div><dt>다음 발송</dt><dd>{nextReminder ? new Date(nextReminder * 1000).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "예약 확인 필요"}</dd></div><div><dt>공유 채널</dt><dd>{admin.channels.length ? admin.channels.map((channel) => `#${channel.name}`).join(", ") : "공유 안 함"}</dd></div></dl>
+      {result && <div className="slack-test-results" role="status"><p className={result.tests.dm.status}><span>{result.tests.dm.status === "sent" ? "설치자 테스트 DM 성공" : result.tests.dm.status === "skipped" ? "설치자 DM 테스트 생략" : `테스트 DM 실패 · ${result.tests.dm.error || "다시 시도 필요"}`}</span>{result.tests.dm.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("dm", result.tests.dm.memberId)}>재시도</button>}</p>{result.tests.channels.map((channel) => <p key={channel.channelId} className={channel.status}><span>{channel.status === "sent" ? `#${channel.channelName} 테스트 성공` : `#${channel.channelName} 실패 · ${channel.error || "다시 시도 필요"}`}</span>{channel.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("channel", channel.channelId)}>재시도</button>}</p>)}{result.schedules.filter((entry) => entry.status === "failed").map((entry) => <p key={entry.memberId} className="failed"><span>예약 실패 · {admin.members.find((member) => member.memberId === entry.memberId)?.displayName || entry.memberId}</span><button disabled={busy} onClick={() => void retrySetupResult("schedule", null)}>재시도</button></p>)}</div>}
+    </section>}
+    {admin.setupComplete && <details className="slack-advanced-settings" onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}><summary>개인별 시간·수동 연결·실패 기록 <ChevronDown size={14} /></summary>{advancedOpen && <SlackDailyAdvancedSettings connected canManage onNotice={onNotice} />}</details>}
+  </div>;
+}
+
+function SlackDailyAdvancedSettings({ connected, canManage, onNotice }: { connected: boolean; canManage: boolean; onNotice: (message: string) => void }) {
   const [preference, setPreference] = useState<SlackDailyPreferenceData | null>(null);
   const [admin, setAdmin] = useState<SlackDailyAdminData | null>(null);
-  const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string; isPrivate: boolean }>>([]);
+  const [availableChannels, setAvailableChannels] = useState<Array<{ id: string; name: string; isPrivate: boolean; isMember: boolean }>>([]);
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -6175,7 +6293,7 @@ function SlackDailySettingsPanel({ connected, canManage, onNotice }: { connected
     });
     const adminRequest = canManage ? Promise.all([
       fetch("/api/slack/daily/settings").then(async (response) => { if (!response.ok) throw new Error("settings load failed"); return response.json() as Promise<SlackDailyAdminData>; }),
-      fetch("/api/slack/channels").then(async (response) => { if (!response.ok) throw new Error("channels load failed"); return response.json() as Promise<{ channels?: Array<{ id: string; name: string; isPrivate: boolean }> }>; }),
+      fetch("/api/slack/channels?joinable=1").then(async (response) => { if (!response.ok) throw new Error("channels load failed"); return response.json() as Promise<{ channels?: Array<{ id: string; name: string; isPrivate: boolean; isMember: boolean }> }>; }),
     ]) : Promise.resolve(null);
     void Promise.all([preferenceRequest, adminRequest]).then(([nextPreference, adminResult]) => {
       if (!active) return;

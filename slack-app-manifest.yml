@@ -24,6 +24,7 @@ oauth_config:
       - users:read
       - users:read.email
       - channels:read
+      - channels:join
       - groups:read
 settings:
   interactivity:

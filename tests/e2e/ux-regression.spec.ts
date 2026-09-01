@@ -106,8 +106,9 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "platform_unavailable" | "workspace_disconnected" | "connected" | "reauthorization_required"; workspaceRole?: "owner" | "member" | "viewer" } = {}) {
+async function installApiMocks(page: Page, options: { failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "platform_unavailable" | "workspace_disconnected" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "member" | "viewer" } = {}) {
   let krDataConnections: Array<Record<string, unknown>> = [];
+  let slackSetupComplete = options.slackSetupComplete ?? true;
   const assistantDrafts = new Map<string, unknown>();
   const baseBootstrapResponse = options.withoutTaskContainers
     ? { ...bootstrap, items: bootstrap.items.filter((entry) => entry.kind !== "project" && entry.kind !== "task") }
@@ -199,14 +200,19 @@ async function installApiMocks(page: Page, options: { failItemCreate?: boolean; 
       } });
     }
     if (url.pathname === "/api/slack/daily/preferences") return json(route, { linked: true, enabled: true, reminderTime: "09:00", timezone: "Asia/Seoul", usesWorkspaceTime: true, usesWorkspaceTimezone: true });
-    if (url.pathname === "/api/slack/daily/settings") return json(route, {
-      connected: true, teamName: "테스트 Slack", needsReauthorization: false,
-      settings: { enabled: true, weekdays: [1, 2, 3, 4, 5], reminderTime: "09:00", timezone: "Asia/Seoul", installStatus: "connected", lastSyncedAt: now, lastError: "" },
-      channels: [{ id: "C123", name: "daily", isPrivate: false }],
-      members: [{ memberId: "member-1", displayName: "테스트 사용자", email: "owner@example.com", linked: true, slackDisplayName: "test-owner", reminder: { status: "scheduled", postAt: 1788120000, error: "" } }],
+    const slackAdmin = () => ({
+      connected: true, teamName: "테스트 Slack", needsReauthorization: false, setupComplete: slackSetupComplete,
+      settings: { enabled: slackSetupComplete, weekdays: [1, 2, 3, 4, 5], reminderTime: "09:00", timezone: "Asia/Seoul", installStatus: "connected", onboardingCompletedAt: slackSetupComplete ? now : null, lastSyncedAt: now, lastError: "" },
+      channels: slackSetupComplete ? [{ id: "C123", name: "daily", isPrivate: false, isMember: true }] : [],
+      members: [{ memberId: "member-1", displayName: "테스트 사용자", email: "owner@example.com", linked: true, slackDisplayName: "test-owner", preference: { enabled: true, reminderTime: null, timezone: null }, reminder: slackSetupComplete ? { status: "scheduled", postAt: 1788120000, error: "" } : null }],
       failedPublications: [],
     });
-    if (url.pathname === "/api/slack/channels") return json(route, { channels: [{ id: "C123", name: "daily", isPrivate: false }] });
+    if (url.pathname === "/api/slack/onboarding") {
+      slackSetupComplete = true;
+      return json(route, { setupComplete: true, admin: slackAdmin(), tests: { dm: { status: "sent", memberId: "member-1" }, channels: [{ channelId: "C123", channelName: "daily", status: "sent" }] }, schedules: [{ memberId: "member-1", status: "scheduled", postAt: 1788120000 }] });
+    }
+    if (url.pathname === "/api/slack/daily/settings") return json(route, slackAdmin());
+    if (url.pathname === "/api/slack/channels") return json(route, { channels: [{ id: "C123", name: "daily", isPrivate: false, isMember: false }] });
     if (url.pathname === "/api/slack/automations") return json(route, { automations: [], deliveries: [] });
     if (url.pathname === "/api/data-connections/sync" && request.method() === "POST") {
       const payload = request.postDataJSON() as { id: string };
@@ -379,8 +385,8 @@ test.describe("독립 앱 연동 화면", () => {
     await expect(page).toHaveURL(/view=integrations/);
     await expect(page.getByRole("heading", { name: "앱 연동" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Slack 데일리 봇" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "내 Slack 워크스페이스에 연결" })).toBeVisible();
-    await expect(page.getByText("고객 워크스페이스를 직접 선택합니다.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Slack 연결" })).toBeVisible();
+    await expect(page.getByText("승인 한 번이면 준비됩니다")).toBeVisible();
     await expect(page.getByText("준비 중", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("dialog", { name: "앱 연동" })).toHaveCount(0);
   });
@@ -391,7 +397,7 @@ test.describe("독립 앱 연동 화면", () => {
     await expect(page.getByText("서비스 설정 확인 필요", { exact: true })).toBeVisible();
     await expect(page.getByText(/현재 이용자가 입력할 기술 설정은 없습니다/)).toBeVisible();
     await expect(page.getByRole("button", { name: "다시 확인" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "내 Slack 워크스페이스에 연결" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Slack 연결" })).toHaveCount(0);
   });
 
   test("Slack 관리자 승인과 중복 연결 오류를 구체적으로 안내한다", async ({ page }) => {
@@ -408,21 +414,35 @@ test.describe("독립 앱 연동 화면", () => {
     await installApiMocks(page, { slackState: "connected", workspaceRole: "member" });
     await page.goto("/?view=integrations");
     await expect(page.getByText("고객 Slack A 워크스페이스가 연결되어 있습니다.")).toBeVisible();
-    await expect(page.getByText("내 Slack 계정이 연결되었습니다")).toBeVisible();
-    await expect(page.getByRole("button", { name: "연결 해제" })).toHaveCount(0);
+    await expect(page.getByText("고객 Slack A 연결 완료")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Slack 연결 해제" })).toHaveCount(0);
   });
 
-  test("연결 후 5단계 설정이 페이지 스크롤로 모두 접근 가능하다", async ({ page, isMobile }) => {
+  test("연결 완료 상태는 핵심 정보와 설정 변경만 간결하게 보여준다", async ({ page }) => {
     await installApiMocks(page, { slackState: "connected" });
     await page.goto("/?view=integrations");
-    for (const heading of ["Slack 워크스페이스 연결", "사용자 이메일 연결 상태", "개인 데일리 알림 시간", "팀 공유 채널", "테스트 DM과 작동 확인"]) {
-      await expect(page.getByRole("heading", { name: heading })).toBeVisible();
-    }
-    await expect(page.getByRole("button", { name: "테스트 DM" })).toBeVisible();
+    await expect(page.getByText("고객 Slack A 연결 완료")).toBeVisible();
+    await expect(page.getByText("1명", { exact: true })).toBeVisible();
+    await expect(page.getByText("#daily", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "설정 변경" })).toBeVisible();
+    await expect(page.getByText("개인별 시간·수동 연결·실패 기록")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "팀 공유 채널" })).toHaveCount(0);
+  });
+
+  test("초기 설정 한 번으로 대상·채널·예약·테스트를 완료한다", async ({ page }) => {
+    await installApiMocks(page, { slackState: "connected", slackSetupComplete: false });
+    await page.goto("/?view=integrations&slack=setup_required");
+    await expect(page.getByRole("heading", { name: "Slack 초기 설정" })).toBeVisible();
+    await expect(page.getByText("채널 공유 안 함")).toBeVisible();
+    await page.getByText("#daily", { exact: true }).click();
+    const onboardingRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/slack/onboarding");
+    await page.getByRole("button", { name: "설정 완료" }).click();
+    expect((await onboardingRequest).postDataJSON()).toMatchObject({ weekdays: [1, 2, 3, 4, 5], reminderTime: "09:00", timezone: "Asia/Seoul", memberIds: ["member-1"], channelIds: ["C123"] });
+    await expect(page.getByText("설치자 테스트 DM 성공")).toBeVisible();
+    await expect(page.getByText("#daily 테스트 성공")).toBeVisible();
     await expect(page.getByText("고객 Slack A 워크스페이스가 연결되어 있습니다.")).toBeVisible();
     const metrics = await page.evaluate(() => ({ scrollHeight: document.documentElement.scrollHeight, clientHeight: document.documentElement.clientHeight, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth }));
     expect(metrics.overflow).toBeLessThanOrEqual(1);
-    if (isMobile) expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
     const results = await new AxeBuilder({ page: page as never }).include(".integrations-page").analyze();
     expect(results.violations).toEqual([]);
   });

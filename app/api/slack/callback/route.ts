@@ -1,4 +1,4 @@
-import { env, waitUntil } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
 import { consumeSlackOAuthState, saveSlackConnection, SlackWorkspaceConnectionError } from "@/lib/pace-data";
 import { classifySlackOAuthError, decryptSlackSecret, encryptSlackSecret, exchangeSlackCode, redirectWithSlackStatus, revokeSlackToken, SlackOAuthExchangeError, slackConfigured, slackScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { disconnectSlackDaily, syncSlackDailyInstallation } from "@/lib/slack-daily";
@@ -36,10 +36,10 @@ export async function GET(request: Request) {
       encryptedBotToken: await encryptSlackSecret(botToken, runtime.SLACK_TOKEN_ENCRYPTION_KEY!),
       scope: install.scope ?? "",
     });
-    waitUntil(finalizeSlackInstallation(state.ownerId, teamId, previousConnection, runtime));
     const grantedScopes = new Set((install.scope ?? "").split(/[ ,]/).map((scope) => scope.trim()).filter(Boolean));
     const missingScopes = slackScopes.filter((scope) => !grantedScopes.has(scope));
-    return redirectWithSlackStatus(request, returnTo, missingScopes.length ? "missing_scope" : "connected");
+    await finalizeSlackInstallation(state.ownerId, teamId, previousConnection, runtime);
+    return redirectWithSlackStatus(request, returnTo, missingScopes.length ? "missing_scope" : "setup_required");
   } catch (error) {
     if (error instanceof SlackWorkspaceConnectionError) return redirectWithSlackStatus(request, returnTo, error.code);
     if (error instanceof SlackOAuthExchangeError) return redirectWithSlackStatus(request, returnTo, classifySlackOAuthError(error.slackCode));

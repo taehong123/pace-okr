@@ -18,6 +18,7 @@ export type SlackOAuthResponse = {
 
 export type SlackOAuthResultCode =
   | "connected"
+  | "setup_required"
   | "workspace_admin_required"
   | "slack_admin_approval_required"
   | "workspace_already_connected"
@@ -44,6 +45,7 @@ export const slackScopes = [
   "users:read",
   "users:read.email",
   "channels:read",
+  "channels:join",
   "groups:read",
 ];
 

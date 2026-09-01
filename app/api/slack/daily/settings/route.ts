@@ -1,5 +1,5 @@
 import { authorizeRequest, canManageTeam } from "@/lib/pace-data";
-import { getSlackDailySettings, retryDailyPublication, syncSlackDailyInstallation, testDailyDm, updateSlackDailySettings } from "@/lib/slack-daily";
+import { getSlackDailySettings, retryDailyPublication, syncSlackDailyInstallation, testDailyChannel, testDailyDm, updateSlackDailySettings } from "@/lib/slack-daily";
 
 export async function GET(request: Request) {
   const authorization = await authorizeRequest(request, { allowViewerWrite: true });
@@ -20,6 +20,10 @@ export async function PATCH(request: Request) {
     }
     if (payload.action === "test_dm" && typeof payload.memberId === "string") {
       await testDailyDm(authorization.ownerId, payload.memberId);
+      return Response.json({ sent: true });
+    }
+    if (payload.action === "test_channel" && typeof payload.channelId === "string") {
+      await testDailyChannel(authorization.ownerId, payload.channelId);
       return Response.json({ sent: true });
     }
     if (payload.action === "retry_publication" && typeof payload.publicationId === "string") {

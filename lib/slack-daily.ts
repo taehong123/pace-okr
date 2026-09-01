@@ -23,7 +23,7 @@ type SlackUser = {
   profile?: { email?: string; display_name?: string; real_name?: string };
 };
 
-export type SlackDailyChannel = { id: string; name: string; isPrivate: boolean };
+export type SlackDailyChannel = { id: string; name: string; isPrivate: boolean; isMember: boolean };
 export const DAILY_REMINDER_BLOCK_PREFIX = "okrptr_daily_reminder:";
 
 export async function slackTokenForConnection(connection: SlackConnection) {
@@ -86,7 +86,9 @@ export async function syncSlackDailyInstallation(ownerId: string) {
     const email = user.profile?.email?.trim().toLocaleLowerCase();
     return !email || !memberByEmail.has(email);
   });
+  const currentSettings = await ensureDailySettingsRow(ownerId, connection);
   await upsertSlackDailySettings(ownerId, {
+    enabled: currentSettings.onboardingCompletedAt ? currentSettings.enabled : false,
     installStatus: "connected", requiredScopes: "", lastSyncedAt: now, lastError: "",
   });
   await reconcileDailyReminders(ownerId);
@@ -164,6 +166,7 @@ export async function getSlackDailySettings(authorization: RequestAuthorization)
     teamName: connection?.teamName ?? null,
     scopes: connection?.scope ?? "",
     needsReauthorization: settings.installStatus === "needs_reauthorization",
+    setupComplete: Boolean(settings.onboardingCompletedAt),
     settings: serializeSettings(settings),
     channels: channels.map(serializeStoredChannel),
     members: members.results.map((row) => ({
@@ -198,14 +201,8 @@ export async function updateSlackDailySettings(ownerId: string, input: {
     weekdays: JSON.stringify(weekdays), reminderTime, timezone,
   });
   if (input.channelIds) {
-    const available = await listSlackChannels(ownerId);
-    const byId = new Map(available.map((channel) => [channel.id, channel]));
-    const selected = [...new Set(input.channelIds)].map((id) => byId.get(id)).filter((channel): channel is SlackDailyChannel => Boolean(channel));
-    if (selected.length !== new Set(input.channelIds).size) throw new Error("봇이 참여한 채널만 선택할 수 있습니다.");
-    await getDb().delete(slackDailyChannels).where(eq(slackDailyChannels.ownerId, ownerId));
-    if (selected.length) await getDb().insert(slackDailyChannels).values(selected.map((channel) => ({
-      id: crypto.randomUUID(), ownerId, channelId: channel.id, channelName: channel.name, isPrivate: channel.isPrivate,
-    })));
+    const selected = await prepareSlackDailyChannels(ownerId, input.channelIds);
+    await storeSlackDailyChannels(ownerId, selected);
   }
   await reconcileDailyReminders(ownerId, { force: true });
   return getSlackDailySettings({ ownerId, userId: "system", email: null, displayName: "System", role: "owner", apiToken: true });
@@ -252,7 +249,7 @@ export async function updateSlackDailyPreference(authorization: RequestAuthoriza
   return getSlackDailyPreference(authorization);
 }
 
-export async function listSlackChannels(ownerId: string) {
+export async function listSlackChannels(ownerId: string, options: { includeJoinablePublic?: boolean } = {}) {
   const connection = await getSlackConnection(ownerId);
   if (!connection) return [];
   const token = await slackTokenForConnection(connection);
@@ -263,7 +260,11 @@ export async function listSlackChannels(ownerId: string) {
       types: "public_channel,private_channel", exclude_archived: true, limit: 200, cursor: cursor || undefined,
     });
     for (const channel of result.channels ?? []) {
-      if (channel.id && channel.name && channel.is_member && !channel.is_archived) channels.push({ id: channel.id, name: channel.name, isPrivate: Boolean(channel.is_private) });
+      const isPrivate = Boolean(channel.is_private);
+      const isMember = Boolean(channel.is_member);
+      if (channel.id && channel.name && !channel.is_archived && (isMember || (options.includeJoinablePublic && !isPrivate))) {
+        channels.push({ id: channel.id, name: channel.name, isPrivate, isMember });
+      }
     }
     cursor = result.response_metadata?.next_cursor ?? "";
   } while (cursor);
@@ -282,6 +283,123 @@ export async function testDailyDm(ownerId: string, memberId: string) {
   if (dmChannelId !== link.dmChannelId) await getDb().update(slackMemberLinks).set({ dmChannelId, updatedAt: new Date().toISOString() }).where(eq(slackMemberLinks.id, link.id));
 }
 
+export async function testDailyChannel(ownerId: string, channelId: string) {
+  const [connection, channel] = await Promise.all([
+    getSlackConnection(ownerId),
+    getDb().select().from(slackDailyChannels).where(and(
+      eq(slackDailyChannels.ownerId, ownerId), eq(slackDailyChannels.channelId, channelId),
+    )).limit(1).then((rows) => rows[0] ?? null),
+  ]);
+  if (!connection || !channel) throw new Error("선택된 Slack 공유 채널을 찾을 수 없습니다.");
+  const token = await slackTokenForConnection(connection);
+  await slackApi(token, "chat.postMessage", {
+    channel: channelId,
+    text: "OKRPTR Slack 연결 테스트입니다. 데일리 공유가 이 채널에 전송됩니다.",
+  });
+}
+
+export async function configureSlackDailyOnboarding(authorization: RequestAuthorization, input: {
+  weekdays: number[]; reminderTime: string; timezone: string; memberIds: string[]; channelIds: string[];
+}) {
+  const connection = await getSlackConnection(authorization.ownerId);
+  if (!connection) throw new Error("Slack을 먼저 연결해 주세요.");
+  const missingScopes = slackScopes.filter((scope) => !scopeSet(connection.scope).has(scope));
+  if (missingScopes.length) throw new Error(`Slack 권한 업데이트가 필요합니다: ${missingScopes.join(", ")}`);
+
+  const weekdays = normalizeWeekdays(input.weekdays);
+  const reminderTime = normalizeReminderTime(input.reminderTime);
+  const timezone = normalizeTimezone(input.timezone);
+  const memberIds = [...new Set(input.memberIds)];
+  if (!memberIds.length) throw new Error("알림을 받을 멤버를 한 명 이상 선택해 주세요.");
+
+  const [members, links] = await Promise.all([
+    getDb().select().from(workspaceMembers).where(and(
+      eq(workspaceMembers.workspaceId, authorization.ownerId), eq(workspaceMembers.status, "active"),
+    )),
+    getDb().select().from(slackMemberLinks).where(eq(slackMemberLinks.ownerId, authorization.ownerId)),
+  ]);
+  const activeMemberIds = new Set(members.map((member) => member.id));
+  const linkByMemberId = new Map(links.map((link) => [link.memberId, link]));
+  if (memberIds.some((memberId) => !activeMemberIds.has(memberId) || !linkByMemberId.has(memberId))) {
+    throw new Error("Slack에 자동 연결된 활성 멤버만 선택할 수 있습니다.");
+  }
+
+  const selectedChannels = await prepareSlackDailyChannels(authorization.ownerId, input.channelIds);
+  const now = new Date().toISOString();
+  await upsertSlackDailySettings(authorization.ownerId, {
+    enabled: true,
+    weekdays: JSON.stringify(weekdays),
+    reminderTime,
+    timezone,
+    onboardingCompletedAt: now,
+    installStatus: "connected",
+    requiredScopes: "",
+    lastError: "",
+  });
+  await storeSlackDailyChannels(authorization.ownerId, selectedChannels);
+
+  const selectedMemberIds = new Set(memberIds);
+  for (const member of members) {
+    await getDb().insert(slackDailyPreferences).values({
+      id: crypto.randomUUID(), ownerId: authorization.ownerId, memberId: member.id,
+      enabled: selectedMemberIds.has(member.id), reminderTime: null, timezone: null, updatedAt: now,
+    }).onConflictDoUpdate({
+      target: [slackDailyPreferences.ownerId, slackDailyPreferences.memberId],
+      set: { enabled: selectedMemberIds.has(member.id), reminderTime: null, timezone: null, updatedAt: now },
+    });
+  }
+
+  const scheduleResults: Array<{ memberId: string; status: "scheduled" | "failed"; postAt: number | null; error?: string }> = [];
+  for (const link of links) {
+    try {
+      await scheduleMemberReminder(authorization.ownerId, link.memberId, { force: true });
+      if (selectedMemberIds.has(link.memberId)) {
+        const reminder = await env.DB.prepare("SELECT post_at FROM slack_daily_reminders WHERE owner_id = ? AND member_id = ? LIMIT 1")
+          .bind(authorization.ownerId, link.memberId).first<{ post_at: number }>();
+        if (!reminder?.post_at) throw new Error("다음 Slack 알림 예약을 확인하지 못했습니다.");
+        scheduleResults.push({ memberId: link.memberId, status: "scheduled", postAt: reminder.post_at });
+      }
+    } catch (error) {
+      if (selectedMemberIds.has(link.memberId)) {
+        scheduleResults.push({ memberId: link.memberId, status: "failed", postAt: null, error: error instanceof Error ? error.message : "Slack 알림 예약 실패" });
+      }
+    }
+  }
+
+  const installerMember = members.find((member) => member.userId === authorization.userId);
+  const dmTest: { status: "sent" | "skipped" | "failed"; memberId: string | null; error?: string } = {
+    status: "skipped", memberId: installerMember?.id ?? null,
+  };
+  if (installerMember && selectedMemberIds.has(installerMember.id) && linkByMemberId.has(installerMember.id)) {
+    try { await testDailyDm(authorization.ownerId, installerMember.id); dmTest.status = "sent"; }
+    catch (error) { dmTest.status = "failed"; dmTest.error = error instanceof Error ? error.message : "테스트 DM 전송 실패"; }
+  }
+
+  const channelTests = [] as Array<{ channelId: string; channelName: string; status: "sent" | "failed"; error?: string }>;
+  for (const channel of selectedChannels) {
+    try {
+      await testDailyChannel(authorization.ownerId, channel.id);
+      channelTests.push({ channelId: channel.id, channelName: channel.name, status: "sent" });
+    } catch (error) {
+      channelTests.push({ channelId: channel.id, channelName: channel.name, status: "failed", error: error instanceof Error ? error.message : "테스트 채널 전송 실패" });
+    }
+  }
+
+  const setupErrors = [
+    ...scheduleResults.filter((entry) => entry.status === "failed").map((entry) => entry.error || "Slack 알림 예약 실패"),
+    ...(dmTest.status === "failed" ? [dmTest.error || "테스트 DM 전송 실패"] : []),
+    ...channelTests.filter((entry) => entry.status === "failed").map((entry) => entry.error || "테스트 채널 전송 실패"),
+  ];
+  await upsertSlackDailySettings(authorization.ownerId, { lastError: setupErrors.join(" · ") });
+
+  return {
+    setupComplete: true,
+    admin: await getSlackDailySettings(authorization),
+    tests: { dm: dmTest, channels: channelTests },
+    schedules: scheduleResults,
+  };
+}
+
 export async function disconnectSlackDaily(ownerId: string, connection: SlackConnection) {
   const token = await slackTokenForConnection(connection);
   const reminders = await env.DB.prepare("SELECT * FROM slack_daily_reminders WHERE owner_id = ? AND status = 'scheduled'")
@@ -291,9 +409,9 @@ export async function disconnectSlackDaily(ownerId: string, connection: SlackCon
     env.DB.prepare("DELETE FROM slack_daily_reminders WHERE owner_id = ?").bind(ownerId),
     env.DB.prepare("DELETE FROM slack_member_links WHERE owner_id = ?").bind(ownerId),
     env.DB.prepare("DELETE FROM slack_daily_channels WHERE owner_id = ?").bind(ownerId),
-    env.DB.prepare(`INSERT INTO slack_daily_settings (owner_id, enabled, install_status, required_scopes, last_error, updated_at)
-      VALUES (?, 1, 'not_connected', '', '', ?)
-      ON CONFLICT(owner_id) DO UPDATE SET install_status = 'not_connected', required_scopes = '', last_error = '', updated_at = excluded.updated_at`)
+    env.DB.prepare(`INSERT INTO slack_daily_settings (owner_id, enabled, install_status, required_scopes, onboarding_completed_at, last_error, updated_at)
+      VALUES (?, 0, 'not_connected', '', NULL, '', ?)
+      ON CONFLICT(owner_id) DO UPDATE SET enabled = 0, install_status = 'not_connected', required_scopes = '', onboarding_completed_at = NULL, last_error = '', updated_at = excluded.updated_at`)
       .bind(ownerId, new Date().toISOString()),
   ]);
 }
@@ -325,7 +443,10 @@ export async function scheduleMemberReminder(ownerId: string, memberId: string, 
   }
   const nowSeconds = Math.floor(Date.now() / 1000);
   if (existing && existing.status === "scheduled" && Number(existing.post_at) > nowSeconds + 60 && !options.force) return;
-  if (existing?.scheduled_message_id) await cancelScheduledReminder(token, existing);
+  if (existing?.scheduled_message_id) {
+    await cancelScheduledReminder(token, existing);
+    await env.DB.prepare("DELETE FROM slack_daily_reminders WHERE owner_id = ? AND member_id = ?").bind(ownerId, memberId).run();
+  }
   const dmChannelId = await ensureDmChannel(token, link.slackUserId, link.dmChannelId);
   const postAt = nextReminderEpoch(preference?.reminderTime ?? settings.reminderTime, preference?.timezone ?? settings.timezone, parseWeekdays(settings.weekdays));
   const blockId = `${DAILY_REMINDER_BLOCK_PREFIX}${crypto.randomUUID()}`;
@@ -491,6 +612,7 @@ async function ensureDailySettingsRow(ownerId: string, connection: SlackConnecti
     [settings] = await getDb().insert(slackDailySettings).values({
       ownerId,
       installStatus: !connection ? "not_connected" : missingScopes.length ? "needs_reauthorization" : "connected",
+      enabled: false,
       requiredScopes: missingScopes.join(","),
     }).returning();
   }
@@ -571,11 +693,35 @@ function dailyCard(submission: DailySubmissionValue) {
 function serializeSettings(settings: typeof slackDailySettings.$inferSelect) {
   return { enabled: settings.enabled, weekdays: parseWeekdays(settings.weekdays), reminderTime: settings.reminderTime, timezone: settings.timezone,
     installStatus: settings.installStatus, requiredScopes: settings.requiredScopes ? settings.requiredScopes.split(",").filter(Boolean) : [],
+    onboardingCompletedAt: settings.onboardingCompletedAt,
     lastSyncedAt: settings.lastSyncedAt, lastError: settings.lastError, updatedAt: settings.updatedAt };
 }
 
 function serializeStoredChannel(channel: typeof slackDailyChannels.$inferSelect) {
-  return { id: channel.channelId, name: channel.channelName, isPrivate: channel.isPrivate };
+  return { id: channel.channelId, name: channel.channelName, isPrivate: channel.isPrivate, isMember: true };
+}
+
+async function prepareSlackDailyChannels(ownerId: string, channelIds: string[]) {
+  const uniqueChannelIds = [...new Set(channelIds)];
+  if (!uniqueChannelIds.length) return [];
+  const connection = await getSlackConnection(ownerId);
+  if (!connection) throw new Error("Slack을 먼저 연결해 주세요.");
+  const available = await listSlackChannels(ownerId, { includeJoinablePublic: true });
+  const byId = new Map(available.map((channel) => [channel.id, channel]));
+  const selected = uniqueChannelIds.map((id) => byId.get(id)).filter((channel): channel is SlackDailyChannel => Boolean(channel));
+  if (selected.length !== uniqueChannelIds.length) throw new Error("공개 채널 또는 봇이 참여한 비공개 채널만 선택할 수 있습니다.");
+  const token = await slackTokenForConnection(connection);
+  for (const channel of selected) {
+    if (!channel.isPrivate && !channel.isMember) await slackApi(token, "conversations.join", { channel: channel.id });
+  }
+  return selected.map((channel) => ({ ...channel, isMember: true }));
+}
+
+async function storeSlackDailyChannels(ownerId: string, channels: SlackDailyChannel[]) {
+  await getDb().delete(slackDailyChannels).where(eq(slackDailyChannels.ownerId, ownerId));
+  if (channels.length) await getDb().insert(slackDailyChannels).values(channels.map((channel) => ({
+    id: crypto.randomUUID(), ownerId, channelId: channel.id, channelName: channel.name, isPrivate: channel.isPrivate,
+  })));
 }
 
 function scopeSet(value: string) {

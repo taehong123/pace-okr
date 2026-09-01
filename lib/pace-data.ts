@@ -750,10 +750,10 @@ async function ensureSchema() {
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_member_links_team_user ON slack_member_links(team_id, slack_user_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_member_links_owner ON slack_member_links(owner_id)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS slack_daily_settings (
-          owner_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE, enabled INTEGER NOT NULL DEFAULT 1,
+          owner_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE, enabled INTEGER NOT NULL DEFAULT 0,
           weekdays TEXT NOT NULL DEFAULT '[1,2,3,4,5]', reminder_time TEXT NOT NULL DEFAULT '09:00',
           timezone TEXT NOT NULL DEFAULT 'Asia/Seoul', install_status TEXT NOT NULL DEFAULT 'not_connected',
-          required_scopes TEXT NOT NULL DEFAULT '', last_synced_at TEXT, last_error TEXT NOT NULL DEFAULT '',
+          required_scopes TEXT NOT NULL DEFAULT '', onboarding_completed_at TEXT, last_synced_at TEXT, last_error TEXT NOT NULL DEFAULT '',
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
         d1.prepare(`CREATE TABLE IF NOT EXISTS slack_daily_preferences (
@@ -828,6 +828,12 @@ async function ensureSchema() {
       ]);
       await addColumnIfMissing(d1, "ALTER TABLE daily_submissions ADD COLUMN skip_reason TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE daily_submissions ADD COLUMN skip_note TEXT NOT NULL DEFAULT ''");
+      await addColumnIfMissing(d1, "ALTER TABLE slack_daily_settings ADD COLUMN onboarding_completed_at TEXT");
+      await d1.prepare(`UPDATE slack_daily_settings
+        SET onboarding_completed_at = COALESCE(last_synced_at, updated_at)
+        WHERE install_status = 'connected'
+          AND onboarding_completed_at IS NULL
+          AND EXISTS (SELECT 1 FROM slack_daily_preferences WHERE slack_daily_preferences.owner_id = slack_daily_settings.owner_id)`).run();
       await migrateIdentityAndInvitations(d1);
       await ensureAssistantDraftSchema(d1);
     })()
@@ -878,7 +884,8 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       daily_scrum.no_planned_tasks,
       daily_scrum.skip_reason,
       daily_submission.skip_reason,
-      slack_daily_setting.reminder_time
+      slack_daily_setting.reminder_time,
+      slack_daily_setting.onboarding_completed_at
       ,app_migration.applied_at
     FROM workspaces AS workspace
     LEFT JOIN routines AS routine ON 1 = 0
