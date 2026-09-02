@@ -560,7 +560,11 @@ test("모바일 Task 완료 체크는 작게 보이고 삭제 선택은 선택 �
   await expect(completion).toBeVisible();
   await expect(page.getByRole("checkbox", { name: /Task .* 삭제 선택/ })).toHaveCount(0);
   const visualSize = await completion.evaluate((element) => getComputedStyle(element, "::before").width);
-  expect(visualSize).toBe("17px");
+  expect(visualSize).toBe("18px");
+  const completionTarget = await completion.boundingBox();
+  expect(completionTarget!.width).toBeGreaterThanOrEqual(44);
+  expect(completionTarget!.height).toBeGreaterThanOrEqual(44);
+  expect(await completion.evaluate((element) => getComputedStyle(element, "::before").borderRadius)).toBe("50%");
   await page.getByRole("button", { name: "선택", exact: true }).click();
   await expect(page.getByRole("checkbox", { name: /Task .* 삭제 선택/ })).toHaveCount(1);
 });

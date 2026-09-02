@@ -8,7 +8,7 @@ const themeSeeds = {
     page: "#FFFFFF", surface: "#F8F9FA", raised: "#FFFFFF", subtle: "#F1F3F5", hover: "#E8EBEE", sidebar: "#F6F7F8",
     text: "#202124", muted: "#555C65", faint: "#606872", line: "#DEE2E6", control: "#7C848D",
     primary: "#202124", onPrimary: "#FFFFFF", primaryHover: "#35383D", primaryActive: "#101114",
-    accent: "#365E91", accentSoft: "#E7EDF5", link: "#24558E", focus: "#24558E", secondaryAccent: "#71529B",
+    accent: "#202124", accentSoft: "#E8EBEE", link: "#202124", focus: "#202124", secondaryAccent: "#555C65",
   },
   beige: {
     label: "베이지", description: "따뜻한 종이", scheme: "light",

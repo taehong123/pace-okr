@@ -57,7 +57,7 @@ for (const theme of THEMES) {
 test("all stylesheet palette references resolve and no action uses a text token as its fill", () => {
   const declared = new Set([...`${themeCss}\n${css}`.matchAll(/--([\w-]+)\s*:/g)].map((match) => match[1]));
   for (const match of css.matchAll(/var\(--([\w-]+)/g)) {
-    assert.ok(declared.has(match[1]) || ["font-geist-sans", "custom-columns", "depth"].includes(match[1]), `missing --${match[1]}`);
+    assert.ok(declared.has(match[1]) || ["font-geist-sans", "custom-columns", "custom-column-tracks", "depth"].includes(match[1]), `missing --${match[1]}`);
   }
   const root = postcss.parse(css);
   root.walkDecls((decl) => {
@@ -83,4 +83,20 @@ test("first paint preserves every saved theme and tolerates missing, invalid or 
   const root = { dataset: {}, style: {} };
   vm.runInNewContext(themeBootstrapScript, { document: { documentElement: root }, window: { get localStorage() { throw new Error("blocked"); } } });
   assert.equal(root.dataset.theme, DEFAULT_THEME);
+});
+
+test("readability uses scalable roles instead of per-screen font patches or CSS zoom", () => {
+  const root = postcss.parse(css);
+  const roles = { "--type-body": "1rem", "--type-label": ".875rem", "--type-meta": ".8125rem", "--type-section": "1.25rem", "--type-page": "1.75rem", "--control-height": "2.75rem", "--row-height": "3.25rem" };
+  for (const [name, value] of Object.entries(roles)) {
+    const declarations = [];
+    root.walkDecls(name, (decl) => declarations.push(decl.value));
+    assert.deepEqual(declarations, [value], `${name} has one source of truth`);
+  }
+  root.walkDecls("font-size", (decl) => assert.doesNotMatch(decl.value, /\dpx\b/, `fixed type in ${decl.parent.selector}`));
+  root.walkDecls("zoom", () => assert.fail("Do not scale the entire application with zoom"));
+  assert.match(css, /@media \(min-width: 1800px\) \{ html \{ font-size: 112\.5%; \} \}/);
+  const white = THEMES.find((theme) => theme.mode === "white").tokens;
+  assert.equal(white["text-link"], white["text-primary"]);
+  assert.equal(white["focus-ring"], white["text-primary"]);
 });

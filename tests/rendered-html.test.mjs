@@ -653,7 +653,7 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.match(paceData, /Workspace name confirmation does not match/);
 });
 
-test("keeps the Task page as stable one-line rows with details in the side panel", async () => {
+test("keeps Task row structure and the side panel while allowing long titles to wrap", async () => {
   const [page, styles] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
@@ -666,8 +666,8 @@ test("keeps the Task page as stable one-line rows with details in the side panel
   assert.match(page, /onPatch\(\{ status:/);
   assert.match(page, /onPatch\(\{ priority:/);
   assert.match(styles, /\.task-list-open[^}]*grid-template-columns:[^}]*minmax\(260px, \.85fr\)/s);
-  assert.match(styles, /\.task-list-open b, \.task-list-inline-meta[^}]*white-space: nowrap/s);
-  assert.match(styles, /\.task-detail-panel \{ width: min\(520px, 100vw\); \}/);
+  assert.match(styles, /\.task-list-open b, \.task-list-inline-meta[^}]*white-space: normal/s);
+  assert.match(styles, /\.task-detail-panel \{ width: min\(36rem, 100vw\); \}/);
 });
 
 test("defaults unlinked web Tasks to General and exposes direct bulk deletion", async () => {
@@ -716,7 +716,7 @@ test("uses distinct Project and Routine AI creation flows", async () => {
   assert.match(page, /상위 Initiative/);
   assert.match(page, /Initiative 연결 없음/);
   assert.match(page, /createOpen=\{routineCreateOpen\}/);
-  assert.match(styles, /\.page-create-actions > button[^}]*min-height: 36px/);
+  assert.match(styles, /\.page-create-actions > button[^}]*min-height: var\(--control-height\)/);
   assert.match(styles, /\.page-create-actions > button \{ min-height: 44px/);
   assert.match(organizeRoute, /"okr" \| "project" \| "routine" \| "task"/);
   assert.match(organizeRoute, /if \(mode === "routine"\)/);
@@ -913,19 +913,21 @@ test("uses warm-neutral KR and Initiative hierarchy surfaces", async () => {
   assert.doesNotMatch(styles, /--kr-soft|--initiative-soft|#42627a|#426653|#e8eff4|#e8f0eb/);
 });
 
-test("uses a restrained large-desktop density without scaling smaller viewports", async () => {
+test("uses shared rem typography and large-desktop density without zooming the UI", async () => {
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-  const largeDesktop = styles.match(/@media \(min-width: 1800px\) \{([\s\S]*)\}\s*$/)?.[1] ?? "";
+  const largeDesktop = styles.match(/@media \(min-width: 1800px\) \{\r?\n([\s\S]*?)\r?\n\}/)?.[1] ?? "";
 
   assert.ok(largeDesktop);
-  assert.match(largeDesktop, /grid-template-columns: 246px minmax\(0, 1fr\)/);
-  assert.match(largeDesktop, /width: min\(1600px, 100%\)/);
-  assert.match(largeDesktop, /workspace-topbar, \.app-loading-topbar \{ height: 46px/);
-  assert.match(largeDesktop, /page-header h1, \.app-loading-copy h1 \{ font-size: 28px/);
+  assert.match(styles, /html \{ font-size: 100%; \}/);
+  assert.match(styles, /@media \(min-width: 1800px\) \{ html \{ font-size: 112\.5%; \} \}/);
+  assert.match(largeDesktop, /grid-template-columns: 16rem minmax\(0, 1fr\)/);
+  assert.match(largeDesktop, /width: min\(100rem, 100%\)/);
+  assert.match(largeDesktop, /workspace-topbar, \.app-loading-topbar \{ min-height: var\(--row-height\)/);
+  assert.match(styles, /page-header h1[^}]*font-size: var\(--type-page\)/);
   assert.match(largeDesktop, /hierarchy-row \{ min-height: 56px/);
-  assert.match(largeDesktop, /task-table-row \{ min-height: 42px/);
+  assert.match(largeDesktop, /task-table-row \{ min-height: var\(--row-height\)/);
   assert.match(largeDesktop, /task-list-row \{ min-height: 54px/);
-  assert.match(largeDesktop, /routine-card b \{ font-size: 13px/);
+  assert.match(styles, /routine-card b \{[^}]*font-size: var\(--type-body\)/);
   assert.match(largeDesktop, /my-work-item \{ min-height: 56px/);
   assert.doesNotMatch(largeDesktop, /\bzoom\s*:|transform\s*:\s*scale/);
   assert.match(styles, /@media \(max-width: 700px\)/);
@@ -996,7 +998,7 @@ test("implements a workspace management bot for data quality and urgency reporti
   assert.doesNotMatch(page, /BOT CONNECTIONS|WORKSPACE HEALTH|RECOMMENDED|CURRENT RULES/);
   assert.match(page, /workspace-settings-section-header workspace-bot-header/);
   assert.doesNotMatch(page, /integration-intro compact/);
-  assert.match(styles, /\.workspace-bot-header > button \{[^}]*min-height: 34px;[^}]*background: var\(--raised\)/s);
+  assert.match(styles, /\.workspace-bot-header > button \{[^}]*min-height: var\(--control-height\);[^}]*background: var\(--raised\)/s);
   assert.match(styles, /\.bot-accordion/);
   assert.match(styles, /\.management-summary-groups/);
   assert.match(route, /mode === "settings"/);
@@ -1021,9 +1023,10 @@ test("keeps completion checkboxes visually compact while preserving mobile touch
   ]);
 
   assert.match(page, /aria-pressed=\{isCompletedStatus\(entry\.status\)\}/);
-  assert.match(styles, /\.task-check \{[^}]*width: 26px;[^}]*height: 26px;[^}]*border: 0;[^}]*background: transparent/s);
-  assert.match(styles, /\.task-check::before \{[^}]*width: 17px;[^}]*height: 17px/s);
-  assert.match(styles, /\.workspace-topbar button, \.icon-button, \.task-check,[^}]*min-width: 44px; min-height: 44px/s);
+  assert.match(styles, /--control-height: 2\.75rem/);
+  assert.match(styles, /\.task-check \{[^}]*width: var\(--control-height\);[^}]*min-height: var\(--control-height\);[^}]*border: 0;[^}]*background: transparent/s);
+  assert.match(styles, /\.task-check::before \{[^}]*width: 18px;[^}]*height: 18px;[^}]*border-radius: 50%/s);
+  assert.match(styles, /\.workspace-topbar button, \.icon-button, \.task-check,[^}]*min-width: 44px; min-height: var\(--row-height\)/s);
 });
 
 test("keeps workspace controls visible above project checkboxes", async () => {
@@ -1034,6 +1037,6 @@ test("keeps workspace controls visible above project checkboxes", async () => {
 
   assert.match(page, /workspace-settings-trigger[\s\S]*?<Settings size=\{17\}/);
   assert.match(styles, /\.sidebar \{[^}]*position: sticky;[^}]*z-index: 20;/s);
-  assert.match(styles, /\.workspace-settings-trigger \{[^}]*width: 34px;[^}]*height: 34px;[^}]*border: 1px solid var\(--line\)/s);
+  assert.match(styles, /\.workspace-settings-trigger \{[^}]*width: var\(--control-height\);[^}]*min-height: var\(--control-height\);[^}]*border: 1px solid var\(--line\)/s);
   assert.match(styles, /\.workspace-menu \{[^}]*z-index: 50;/s);
 });

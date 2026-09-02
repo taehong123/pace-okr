@@ -1,4 +1,34 @@
-# Theme color contract
+# OKRPTR design and theme contract
+
+## Design source and structure preservation
+
+The upstream design source is [ALLVIBE Design v1.0.0](https://github.com/all-vibe/all-vibe-agent-toolkit/blob/4f927714f728abcbe8920a3c39aad49692758c46/plugins/all-vibe-design/skills/all-vibe-design/SKILL.md), shared by 조성배 on 2026-08-24.
+Read its foundations, application-design, interaction-accessibility, content-design
+and service-profiles references before substantial UI work. This document records
+OKRPTR-specific clarifications, not a replacement design system.
+
+- Preserve navigation order, default destination, URL contracts, tab grouping,
+  object hierarchy, view modes and create/edit flows. Styling is not permission
+  to move features or rewrite their behavior.
+- White is monochrome: white canvas, ink-black actions/links/focus, cool neutral
+  separators. Keep semantic status colors and external brand marks intact.
+- Existing explicit themes remain available and saved preferences win.
+- Typography comes from `--type-body` (1rem), `--type-label` (.875rem),
+  `--type-meta` (.8125rem), `--type-section` (1.25rem), `--type-page` (1.75rem).
+  The root respects browser defaults (100%), becoming 112.5% at 1800 CSS px.
+  Do not add per-screen pixel font patches, CSS zoom or scale transforms.
+- Korean body line height is 1.6; headings start at 1.25 with restrained tracking.
+  Titles wrap instead of losing essential content. Rows expand with their content.
+- Controls target 44 CSS px or more, rows 52px or more. Deletion selection has an
+  18px square inside an unframed hit area; completion has a circular indicator.
+- Radii: controls 8px, containers 10px, overlays 14px. Prefer quiet borders over
+  shadows or nested tinted panels. Remove redundant eyebrow copy, not useful help.
+- New layout/typography tests cover 320, 390, 768, 1440, 1920, 2560 and 3840 CSS px,
+  larger user text, unchanged navigation, long Korean titles and overlay stacking.
+- Run browser verification with one worker. Test writes use local mocks only;
+  never create production QA workspaces, records or Slack messages.
+
+## Theme color contract
 
 `lib/themes.ts` is the single source for theme IDs, labels, brightness, defaults,
 previews and semantic colors. White is the fallback; a valid saved `okrptr.theme`

@@ -105,7 +105,7 @@ export async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-export async function installApiMocks(page: Page, options: { preserveStorage?: boolean; failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "admin" | "member" | "viewer"; teamWorkspace?: boolean } = {}) {
+export async function installApiMocks(page: Page, options: { withRoutine?: boolean; preserveStorage?: boolean; failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "admin" | "member" | "viewer"; teamWorkspace?: boolean } = {}) {
   let krDataConnections: Array<Record<string, unknown>> = [];
   let slackSetupComplete = options.slackSetupComplete ?? true;
   let slackAutomations: Array<Record<string, unknown>> = [];
@@ -118,6 +118,7 @@ export async function installApiMocks(page: Page, options: { preserveStorage?: b
   const workspaceKind = options.teamWorkspace ? "team" : "personal";
   const bootstrapResponse = {
     ...baseBootstrapResponse,
+    routines: options.withRoutine ? [...baseBootstrapResponse.routines, { ...generalRoutine, id: "routine-1", title: "매주 고객 피드백을 모아 다음 실행을 정리하는 반복 업무", systemKey: "", assigneeMemberId: "member-1", triggerPoint: "금요일 오후", actionSteps: "고객 피드백 확인 · 다음 주 실행 항목 정리" }] : baseBootstrapResponse.routines,
     workspaces: baseBootstrapResponse.workspaces.map((workspace) => ({ ...workspace, kind: workspaceKind, personal: workspaceKind === "personal", role: workspaceRole })),
     team: { ...baseBootstrapResponse.team, workspace: { ...baseBootstrapResponse.team.workspace, kind: workspaceKind }, currentRole: workspaceRole, canManage: workspaceRole === "owner" || workspaceRole === "admin", members: baseBootstrapResponse.team.members.map((member) => ({ ...member, role: workspaceRole })) },
   };
@@ -312,6 +313,7 @@ export async function installApiMocks(page: Page, options: { preserveStorage?: b
       return json(route, { document: { id: "document-1", projectId: "project-1", content: "[]", plainText: "", version: 1, updatedAt: now } });
     }
     if (url.pathname === "/api/project-templates") return json(route, { templates: [] });
+    if (url.pathname === "/api/properties") return json(route, { properties: bootstrapResponse.properties });
     if (url.pathname === "/api/checklists") return json(route, { items: [] });
     if (url.pathname === "/api/recommendations") return json(route, { recommendations: [] });
     if (url.pathname === "/api/daily-scrum" && request.method() === "GET") return json(route, {
@@ -344,7 +346,8 @@ export async function installApiMocks(page: Page, options: { preserveStorage?: b
       if (options.slowRoutineRefresh) await new Promise((resolve) => setTimeout(resolve, 800));
       return json(route, { routines: bootstrapResponse.routines });
     }
-    if (url.pathname === "/api/trash") return json(route, { items: [], cleanupRecords: [] });
+    if (url.pathname === "/api/trash") return json(route, { trash: [] });
+    if (url.pathname === "/api/item-trash") return json(route, { items: [], initiativeOptions: [] });
     return json(route, {});
   });
 }
