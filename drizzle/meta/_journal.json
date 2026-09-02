@@ -225,6 +225,13 @@
       "when": 1788811200000,
       "tag": "0033_workspace_management_bot",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1788331485070,
+      "tag": "0035_ai_connections",
+      "breakpoints": true
     }
   ]
 }

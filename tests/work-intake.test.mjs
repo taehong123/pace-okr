@@ -50,7 +50,7 @@ function fixture() {
         sql, values,
         async all() { return { results: db.prepare(sql).all(...values) }; },
         async first() { return db.prepare(sql).get(...values) ?? null; },
-        async raw() { const statement = db.prepare(sql); const columns = statement.columns().map((column) => column.name); return statement.all(...values).map((row) => columns.map((column) => row[column])); },
+        async raw() { return db.prepare(sql).all(...values).map((row) => Object.values(row)); },
       });
       return { bind, ...bind() };
     },

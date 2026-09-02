@@ -63,6 +63,7 @@ import {
 } from "lucide-react";
 import { startTransition, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { ConfirmationProvider, OverlayDialog, useAppConfirm } from "./overlay-dialog";
+import AIConnectionsDialog from "./ai-connections";
 import { OkrFileSurface, type OkrFileCycleSummary } from "./okr-file-surface";
 import BillingView, { ProjectQuotaBadge } from "./billing-view";
 import { readMyWorkSort, saveMyWorkSort, sortMyWorkItems, type MyWorkSort } from "@/lib/my-work-sort";
@@ -635,14 +636,6 @@ type SlackAutomationDelivery = {
   error: string;
   createdAt: string;
   sentAt: string | null;
-};
-type IntegrationConnection = {
-  id: string;
-  name: string;
-  tokenPrefix: string;
-  createdAt: string;
-  lastUsedAt: string | null;
-  revokedAt: string | null;
 };
 
 type TrashRecord = {
@@ -2131,7 +2124,7 @@ function WorkspaceApp() {
           <button className={`nav-item ${mobileMenuOpen ? "active" : ""}`} onClick={() => setMobileMenuOpen(true)}><Menu size={16} /><span>더보기</span></button>
         </nav>
         <div className="sidebar-bottom">
-          <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>ChatGPT 연동</span></button>
+          <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>AI 연결</span></button>
           <button className={`nav-item ${activeView === "integrations" && !selectedProject && !selectedTask ? "active" : ""}`} aria-current={activeView === "integrations" && !selectedProject && !selectedTask ? "page" : undefined} onClick={() => navigateView("integrations")}><Plug size={16} /><span>개인 앱 연동</span></button>
           <button className={`nav-item ${activeView === "billing" && !selectedProject && !selectedTask ? "active" : ""}`} aria-current={activeView === "billing" && !selectedProject && !selectedTask ? "page" : undefined} onClick={() => navigateView("billing")}><CreditCard size={16} /><span>요금제 및 결제</span></button>
           <button className="profile-row" onClick={() => setPropertyPanelOpen(true)}><span className="avatar">{accountInitial}</span><span>{accountDisplayName}</span><MoreHorizontal size={15} /></button>
@@ -2144,7 +2137,7 @@ function WorkspaceApp() {
             <header><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : "팀 워크스페이스"}</small></div><span className="mobile-menu-header-actions"><button className="icon-button" onClick={() => openWorkspaceSettings("general")} aria-label="워크스페이스 설정"><Settings size={17} /></button><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="닫기"><X size={17} /></button></span></header>
             <div className="mobile-menu-list">
               {navItems.slice(5).map((entry) => { const Icon = entry.icon; return <button key={entry.id} onClick={() => { navigateView(entry.id); setMobileMenuOpen(false); }}><Icon size={16} /><span>{entry.label}</span><ChevronRight size={14} /></button>; })}
-              <button onClick={() => { setMobileMenuOpen(false); setIntegrationOpen(true); }}><Link2 size={16} /><span>ChatGPT 연동</span><ChevronRight size={14} /></button>
+              <button onClick={() => { setMobileMenuOpen(false); setIntegrationOpen(true); }}><Link2 size={16} /><span>AI 연결</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); navigateView("integrations"); }}><Plug size={16} /><span>개인 앱 연동</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); navigateView("billing"); }}><CreditCard size={16} /><span>요금제 및 결제</span><ChevronRight size={14} /></button>
               <button className="mobile-account-entry" onClick={() => { setMobileMenuOpen(false); setPropertyPanelOpen(true); }}><span className="avatar">{accountInitial}</span><span><b>{accountDisplayName}</b><small>개인 설정</small></span><ChevronRight size={14} /></button>
@@ -2383,7 +2376,7 @@ function WorkspaceApp() {
           }}
         />
       )}
-      {integrationOpen && <IntegrationModal onNotice={showNotice} onClose={() => setIntegrationOpen(false)} />}
+      {integrationOpen && <AIConnectionsDialog onNotice={showNotice} onClose={() => setIntegrationOpen(false)} />}
       {propertyPanelOpen && (
         <PropertyPanel
           user={authState.user}
@@ -6266,73 +6259,6 @@ function GroupDetail({ detail, team, onBack, onChange, onGroupChange, onDeleted,
   );
 }
 
-function IntegrationModal({ onNotice, onClose }: { onNotice: (message: string) => void; onClose: () => void }) {
-  const [connections, setConnections] = useState<IntegrationConnection[]>([]);
-  const [loadingConnections, setLoadingConnections] = useState(true);
-  const [creatingConnection, setCreatingConnection] = useState(false);
-  const [revokingConnections, setRevokingConnections] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    const refreshConnections = () => {
-      void fetch("/api/integration-tokens")
-        .then(async (response) => response.ok ? response.json() as Promise<{ connections: IntegrationConnection[] }> : Promise.reject())
-        .then((data) => { if (active) setConnections(data.connections); })
-        .catch(() => undefined)
-        .finally(() => { if (active) setLoadingConnections(false); });
-    };
-    refreshConnections();
-    const interval = window.setInterval(refreshConnections, 5000);
-    return () => { active = false; window.clearInterval(interval); };
-  }, []);
-
-  async function copyChatGptConnectionPrompt() {
-    setCreatingConnection(true);
-    try {
-      const response = await fetch("/api/integration-tokens", { method: "POST" });
-      const data = await response.json() as { prompt?: string; error?: string };
-      if (!response.ok || !data.prompt) {
-        onNotice(data.error || "연결 내용을 만들지 못했습니다.");
-        return;
-      }
-      try {
-        await navigator.clipboard.writeText(data.prompt);
-      } catch {
-        onNotice("클립보드에 복사하지 못했습니다. 브라우저의 클립보드 권한을 확인해 주세요.");
-        return;
-      }
-      onNotice("연결 내용을 복사했습니다. 브라우저 제어가 가능한 ChatGPT 대화에 붙여넣으세요.");
-    } catch {
-      onNotice("연결 내용을 만들지 못했습니다.");
-    } finally {
-      setCreatingConnection(false);
-    }
-  }
-
-  async function revokeChatGptConnections() {
-    setRevokingConnections(true);
-    try {
-      const response = await fetch("/api/integration-tokens", { method: "DELETE" });
-      if (!response.ok) throw new Error("revoke failed");
-      setConnections([]);
-      onNotice("이 워크스페이스의 대화 연결을 해제했습니다.");
-    } catch {
-      onNotice("대화 연결을 해제하지 못했습니다.");
-    } finally {
-      setRevokingConnections(false);
-    }
-  }
-
-  const hasConnectedConversation = connections.some((connection) => connection.lastUsedAt);
-  const connectionStatus = loadingConnections ? "확인 중" : hasConnectedConversation ? "연결됨" : connections.length > 0 ? "연결 대기" : "연결 없음";
-  return <OverlayDialog title="ChatGPT 연동" onRequestClose={() => onClose()}>{(requestClose) => <section className="integration-modal"><header><h2>ChatGPT 연동</h2><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="닫기"><X size={17} /></button></header><div className="integration-sections">
-    <section className="integration-card chatgpt-simple">
-      <header><Bot size={18} /><div><b>ChatGPT에 OKRPTR MCP 연결</b><p>문구를 복사해 브라우저 제어가 가능한 ChatGPT 대화에 붙여넣으면 설정 화면에서 연결을 진행합니다.</p></div><div className={`connection-state ${hasConnectedConversation ? "active" : connections.length > 0 ? "pending" : "inactive"}`}><i />{connectionStatus}</div></header>
-      <div className="chatgpt-simple-actions"><button className="copy-primary" onClick={() => void copyChatGptConnectionPrompt()} disabled={creatingConnection}>{creatingConnection ? <LoaderCircle className="spin" size={13} /> : <Copy size={13} />}{creatingConnection ? "복사 준비 중" : "ChatGPT 연결 문구 복사"}</button></div>
-      <details className="connection-management"><summary><span>연결 관리</span><ChevronDown size={13} /></summary><div><span>발급된 연결 키 {connections.length}개</span>{connections.length > 0 && <button onClick={() => void revokeChatGptConnections()} disabled={revokingConnections}>{revokingConnections ? "해제 중" : "연결 해제"}</button>}</div></details>
-    </section>
-  </div><footer><span><CheckCircle2 size={15} />OKR · Objective → Key Result → Initiative → Project → Task / Routine → Task</span><button onClick={() => requestClose("close-button")}>닫기</button></footer></section>}</OverlayDialog>;
-}
 
 function AppIntegrationsView({ google, slack, loading, loadError, onGoogleChange, onRefresh, onNotice }: { google: GoogleConnectionStatus | null; slack: SlackConnectionStatus | null; loading: boolean; loadError: boolean; onGoogleChange: (status: GoogleConnectionStatus | null) => void; onRefresh: () => void; onNotice: (message: string) => void }) {
   const [disconnectingGoogle, setDisconnectingGoogle] = useState(false);
