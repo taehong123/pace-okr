@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { decryptPrivateValue, encryptPrivateValue } from "@/lib/secret-crypto";
+import { aiUsagePercent } from "@/lib/ai-usage";
 
 export const BILLING_PLANS = {
   free: { label: "Free", priceWon: 0, projectLimit: 10, editorLimit: 3, aiBudgetWon: 500 },
@@ -216,7 +217,7 @@ export async function getBillingStatus(workspaceId: string, userId: string, role
       WHERE member.workspace_id = ? AND member.status = 'active' AND member.role IN ('owner','admin','member')
       ORDER BY explicitly_selected DESC, CASE WHEN member.role = 'owner' THEN 0 ELSE 1 END, member.created_at, member.id`)
       .bind(workspaceId).all<Record<string, string | number | null>>(),
-    getAiMonthlyUsage(workspaceId, subscription.billing_owner_user_id, plan),
+    getAiMonthlyUsage(workspaceId, subscription.billing_owner_user_id, plan, period),
     d1.prepare("SELECT id, card_company, masked_card, created_at FROM billing_payment_methods WHERE workspace_id = ? AND active = 1 LIMIT 1").bind(workspaceId).first<Record<string, string>>(),
     d1.prepare(`SELECT id, kind, plan, price_won, status, receipt_url, created_at
       FROM billing_transactions WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 20`).bind(workspaceId).all<Record<string, string | number | null>>(),
@@ -254,7 +255,7 @@ export async function getBillingStatus(workspaceId: string, userId: string, role
         enforced: editorEnforcement.enforced,
         graceEndsAt: editorEnforcement.graceEndsAt,
       },
-      ai: { usedWon: Math.ceil(aiUsage / 1_000_000), limitWon: limits.aiBudgetWon, remainingWon: Math.max(0, limits.aiBudgetWon - Math.ceil(aiUsage / 1_000_000)), resetsAt: period.resetsAt },
+      ai: { usedWon: Math.ceil(aiUsage / 1_000_000), limitWon: limits.aiBudgetWon, remainingWon: Math.max(0, limits.aiBudgetWon - Math.ceil(aiUsage / 1_000_000)), ...aiUsagePercent(aiUsage, limits.aiBudgetWon * 1_000_000), resetsAt: period.resetsAt },
     },
     editorMembers,
     paymentMethod: method ? { id: method.id, cardCompany: method.card_company, maskedCard: method.masked_card, createdAt: method.created_at } : null,
@@ -445,6 +446,16 @@ export async function memberCanWrite(workspaceId: string, userId: string, role: 
   return rows.results.slice(0, limit).some((row) => row.user_id === userId);
 }
 
+export async function getAiUsageStatus(workspaceId: string) {
+  const subscription = await getWorkspaceSubscription(workspaceId);
+  const plan = validPlan(subscription.plan) ? subscription.plan : "free";
+  const period = kstPeriod();
+  const used = await getAiMonthlyUsage(workspaceId, subscription.billing_owner_user_id, plan, period);
+  const percent = aiUsagePercent(used, BILLING_PLANS[plan].aiBudgetWon * 1_000_000);
+  if (!percent) throw new Error("AI 사용량을 확인하지 못했습니다.");
+  return { ...percent, resetsAt: period.resetsAt };
+}
+
 export async function assertAiBudget(workspaceId: string, userId: string) {
   if (!billingEnforcementEnabled()) return { limitWon: null, spentWonMicros: 0, resetsAt: kstPeriod().resetsAt };
   const subscription = await getWorkspaceSubscription(workspaceId);
@@ -459,8 +470,7 @@ export async function assertAiBudget(workspaceId: string, userId: string) {
   return { limitWon, spentWonMicros, resetsAt: kstPeriod().resetsAt };
 }
 
-async function getAiMonthlyUsage(workspaceId: string, billingOwnerUserId: string, plan: BillingPlan) {
-  const period = kstPeriod();
+async function getAiMonthlyUsage(workspaceId: string, billingOwnerUserId: string, plan: BillingPlan, period = kstPeriod()) {
   const d1 = (env as BillingRuntimeEnv).DB;
   const row = plan === "free"
     ? await d1.prepare(`SELECT coalesce(sum(usage.estimated_cost_won_micros), 0) AS spent

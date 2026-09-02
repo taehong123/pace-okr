@@ -1,0 +1,14 @@
+.ai-usage-meter { min-width: 0; }
+.ai-usage-meter > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.ai-usage-meter > header > span { color: var(--text-secondary); font-size: var(--type-meta); }
+.ai-usage-meter > header > b { color: var(--progress-text); font-size: var(--type-label); font-weight: 600; }
+.ai-usage-meter > .ai-usage-track { height: .25rem; margin-block: var(--space-2); overflow: hidden; border-radius: var(--radius-control); background: var(--progress-track); }
+.ai-usage-meter > .ai-usage-track > i { display: block; height: 100%; background: var(--progress-fill); }
+.ai-usage-meter > p { margin: 0; color: var(--text-secondary); font-size: var(--type-meta); }
+.billing-usage-grid > .ai-usage-meter > .ai-usage-track { background: var(--progress-track); }
+.billing-usage-grid > .ai-usage-meter > .ai-usage-track > i { background: var(--progress-fill); }
+.billing-usage-grid > .ai-usage-meter > header > b { color: var(--progress-text); }
+.chat-ai-usage { min-width: 0; width: 100%; display: grid; gap: var(--space-2); }
+.chat-ai-usage > button { justify-self: start; }
+.chat-ai-usage .ai-usage-meter { max-width: 26rem; }
+.chat-ai-usage .ai-usage-meter > p { margin: 0; }

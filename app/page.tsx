@@ -67,6 +67,9 @@ import AIConnectionsDialog from "./ai-connections";
 import WorkspaceBackups from "./workspace-backups";
 import { OkrFileSurface, type OkrFileCycleSummary } from "./okr-file-surface";
 import BillingView, { ProjectQuotaBadge } from "./billing-view";
+import { ChatAiUsage } from "./ai-usage-meter";
+import { aiUsageLimitMessage } from "@/lib/ai-usage";
+import { invalidateAiUsage, type AiUsageScope } from "@/lib/ai-usage-client";
 import { readMyWorkSort, saveMyWorkSort, sortMyWorkItems, type MyWorkSort } from "@/lib/my-work-sort";
 import { DEFAULT_THEME, THEME_STORAGE_KEY, isThemeMode, themeColorScheme, type ThemeMode } from "@/lib/themes";
 import { ThemePicker } from "./theme-picker";
@@ -382,6 +385,8 @@ type AssistantConversationDraft = {
 type OrganizeError = {
   code?: string;
   error?: string;
+  spentWon?: number;
+  limitWon?: number;
   usage?: { spentWon?: number; budgetWon?: number; remainingWon?: number; requestsToday?: number };
   options?: string[];
 };
@@ -2204,6 +2209,7 @@ function WorkspaceApp() {
               onFinish={() => { const destination = okrChatContext?.entry === "task" ? "inbox" : okrChatContext?.entry === "project" ? "work" : okrChatContext?.entry === "routine" ? "routines" : "okr"; setOkrChatContext(null); navigateView(destination); }}
               onNavigateToOkr={() => { setOkrChatContext(null); navigateView("okr"); }}
               context={okrChatContext}
+              usageScope={activeView === "home" && currentWorkspace && authState.user ? { workspaceId: currentWorkspace.id, userId: authState.user.id } : null}
               workspaceContext={assistantWorkspaceContext}
               canWrite={canWriteWorkspace}
               members={teamMembers.filter((member) => member.status === "active")}
@@ -4219,7 +4225,8 @@ function RecommendationsView({ workspaceId, items, onOpenTask, onOpenProject, on
   return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{row.itemIds.length}개 항목 · 우선순위 {row.score}</small></div><button aria-label={`${row.title} 관련 항목 열기`} title="관련 항목 열기" onClick={() => openRecommendation(row)}><ChevronRight size={15} /></button></article>)}</section>;
 }
 
-function HomeView({ onCreatePlan, onCreateProject, onCreateRoutine, onApplyOkrPlan, onCreateTasks, onFinish, onNavigateToOkr, context, workspaceContext, canWrite, members, taskContainers, projectTargets, defaultDriMemberId, defaultCycleId }: {
+function HomeView({ onCreatePlan, onCreateProject, onCreateRoutine, onApplyOkrPlan, onCreateTasks, onFinish, onNavigateToOkr, context, usageScope, workspaceContext, canWrite, members, taskContainers, projectTargets, defaultDriMemberId, defaultCycleId }: {
+  usageScope: AiUsageScope | null;
   onCreatePlan: (plan: OnboardingPlan, cycleId: string | null) => Promise<PlanCreationResult | null>;
   onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget, driMemberId: string | null) => Promise<boolean>;
   onCreateRoutine: (plan: OnboardingPlan, assigneeMemberId: string | null) => Promise<boolean>;
@@ -4238,7 +4245,7 @@ function HomeView({ onCreatePlan, onCreateProject, onCreateRoutine, onApplyOkrPl
 }) {
   return (
     <div className="home-layout">
-      <HomeOkrChat onCreate={onCreatePlan} onCreateProject={onCreateProject} onCreateRoutine={onCreateRoutine} onApplyOkrPlan={onApplyOkrPlan} onCreateTasks={onCreateTasks} onFinish={onFinish} onNavigateToOkr={onNavigateToOkr} context={context} workspaceContext={workspaceContext} canWrite={canWrite} members={members} taskContainers={taskContainers} projectTargets={projectTargets} defaultDriMemberId={defaultDriMemberId} defaultCycleId={defaultCycleId} />
+      <HomeOkrChat onCreate={onCreatePlan} onCreateProject={onCreateProject} onCreateRoutine={onCreateRoutine} onApplyOkrPlan={onApplyOkrPlan} onCreateTasks={onCreateTasks} onFinish={onFinish} onNavigateToOkr={onNavigateToOkr} context={context} usageScope={usageScope} workspaceContext={workspaceContext} canWrite={canWrite} members={members} taskContainers={taskContainers} projectTargets={projectTargets} defaultDriMemberId={defaultDriMemberId} defaultCycleId={defaultCycleId} />
     </div>
   );
 }
@@ -4263,7 +4270,8 @@ function isAssistantConversationDraft(value: unknown): value is AssistantConvers
     && Array.isArray(draft.targetCandidates);
 }
 
-function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPlan, onCreateTasks, onFinish, onNavigateToOkr, context, workspaceContext, canWrite, members, taskContainers, projectTargets, defaultDriMemberId, defaultCycleId }: {
+function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPlan, onCreateTasks, onFinish, onNavigateToOkr, context, usageScope, workspaceContext, canWrite, members, taskContainers, projectTargets, defaultDriMemberId, defaultCycleId }: {
+  usageScope: AiUsageScope | null;
   onCreate: (plan: OnboardingPlan, cycleId: string | null) => Promise<PlanCreationResult | null>;
   onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget, driMemberId: string | null) => Promise<boolean>;
   onCreateRoutine: (plan: OnboardingPlan, assigneeMemberId: string | null) => Promise<boolean>;
@@ -4280,6 +4288,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   defaultDriMemberId: string | null;
   defaultCycleId: string | null;
 }) {
+  const [aiUsageRevision, setAiUsageRevision] = useState(0);
   const emptyPlan: OnboardingPlan = {
     objectiveTitle: "",
     keyResults: [],
@@ -4561,6 +4570,8 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
       setGuideQuestions([]);
     } finally {
       setSaving(false);
+      invalidateAiUsage();
+      setAiUsageRevision((revision) => revision + 1);
     }
   }
   function chooseTarget(target: OkrPlanTarget) {
@@ -4711,6 +4722,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
         </div>
       </header>
       <div className="home-chat-surface">
+        {usageScope && <ChatAiUsage scope={usageScope} refreshKey={aiUsageRevision} />}
         <div className="chat-thread">
           {conversationHistory.map((entry) => <p className={entry.role === "user" ? "user-message" : "assistant-message"} key={entry.id}>{entry.content}</p>)}
           {referencesOpen && targetCandidates.length > 0 && <div id="assistant-references" className="assistant-target-picker" aria-label="대화 대상 선택">
@@ -4917,12 +4929,7 @@ function targetPrompt(target: OkrPlanTarget) {
 }
 
 function aiLimitMessage(error: OrganizeError) {
-  if (error.code === "ai_rate_limited") {
-    return "AI 정리 요청이 너무 빠르게 반복되고 있습니다. 작성 중인 초안은 그대로 두었습니다. 잠시 후 다시 시도해 주세요.";
-  }
-  const spent = typeof error.usage?.spentWon === "number" ? `${error.usage.spentWon.toLocaleString()}원` : "무료 사용량";
-  const budget = typeof error.usage?.budgetWon === "number" ? `${error.usage.budgetWon.toLocaleString()}원` : "무료 한도";
-  return `무료 AI 정리 예산을 다 썼습니다. 작성 중인 초안은 그대로 두었습니다. 현재 사용량은 ${spent} / ${budget} 기준입니다.`;
+  return aiUsageLimitMessage(error);
 }
 
 function OkrFileManager({

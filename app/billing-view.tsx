@@ -6,6 +6,9 @@ import { AlertTriangle, CreditCard, LoaderCircle, LockKeyhole } from "lucide-rea
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useAppConfirm } from "./overlay-dialog";
+import { AiUsageMeter } from "./ai-usage-meter";
+import type { AiUsage } from "@/lib/ai-usage";
+import { invalidateAiUsage } from "@/lib/ai-usage-client";
 
 type NoticeTone = "success" | "error" | "info";
 type BillingPlanId = "free" | "team" | "business";
@@ -22,7 +25,7 @@ type BillingStatusData = {
   usage: {
     projects: { used: number; limit: number | null; remaining: number | null; resetsAt: string };
     editors: { used: number; limit: number | null; remaining: number | null; enforced: boolean; graceEndsAt: string | null };
-    ai: { usedWon: number; limitWon: number; remainingWon: number; resetsAt: string };
+    ai: AiUsage;
   };
   editorMembers: Array<{ id: string; displayName: string; email: string; role: string; selected: boolean; writeAllowed: boolean }>;
   paymentMethod: { id: string; cardCompany: string; maskedCard: string; createdAt: string } | null;
@@ -33,9 +36,9 @@ type BillingStatusData = {
 };
 
 const plans: Array<{ id: BillingPlanId; label: string; price: number; projects: string; editors: string; ai: string }> = [
-  { id: "free", label: "Free", price: 0, projects: "월 Project 10개", editors: "활성 편집자 3명", ai: "월 AI 500원 안전한도" },
-  { id: "team", label: "Team", price: 11_000, projects: "월 Project 100개", editors: "활성 편집자 10명", ai: "월 AI 2,000원 안전한도" },
-  { id: "business", label: "Business", price: 55_000, projects: "Project 무제한", editors: "활성 편집자 무제한", ai: "월 AI 10,000원 안전한도" },
+  { id: "free", label: "Free", price: 0, projects: "월 Project 10개", editors: "활성 편집자 3명", ai: "기본 월간 AI 사용량" },
+  { id: "team", label: "Team", price: 11_000, projects: "월 Project 100개", editors: "활성 편집자 10명", ai: "월간 AI 사용량 · Free의 4배" },
+  { id: "business", label: "Business", price: 55_000, projects: "Project 무제한", editors: "활성 편집자 무제한", ai: "월간 AI 사용량 · Free의 20배" },
 ];
 
 export default function BillingView({ onNotice }: { onNotice: (message: string, tone?: NoticeTone) => void }) {
@@ -56,6 +59,7 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
       const data = await response.json() as BillingStatusData & { error?: string };
       if (!response.ok) throw new Error(data.error || "결제 정보를 불러오지 못했습니다.");
       setBilling(data);
+      invalidateAiUsage();
       setSelectedPlan(data.plan === "free" ? "team" : data.plan);
       setSelectedEditorIds(data.editorMembers.filter((member) => member.selected).map((member) => member.id));
     } catch (loadError) {
@@ -176,7 +180,7 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
     {!billing.enforcementEnabled && <div className="billing-rollout-note" role="status"><AlertTriangle size={18} /><div><b>안전한 사전 배포 상태</b><p>Payple 실결제·이메일·예약 청구·환불 검증이 끝날 때까지 Project·편집자·AI 한도는 강제하지 않습니다. 기존 기능은 그대로 사용할 수 있습니다.</p></div></div>}
     {billing.status === "past_due" && <div className="billing-alert" role="alert"><AlertTriangle size={18} /><div><b>결제를 다시 확인해 주세요</b><p>{billing.graceEndsAt ? `${formatDate(billing.graceEndsAt)}까지 현재 플랜을 유지하며 자동으로 재시도합니다.` : "결제수단을 확인해 주세요."}</p></div></div>}
 
-    <section className="billing-usage-section"><header><div><span>이번 달</span><h3>사용량</h3></div><small>Project·AI는 한국시간 매월 1일 초기화</small></header><div className="billing-usage-grid"><Usage label="Project 생성" used={billing.usage.projects.used} limit={billing.usage.projects.limit} suffix="개" /><Usage label="활성 편집자" used={billing.usage.editors.used} limit={billing.usage.editors.limit} suffix="명" /><Usage label="AI 안전한도" used={billing.usage.ai.usedWon} limit={billing.usage.ai.limitWon} suffix="원" /></div></section>
+    <section className="billing-usage-section"><header><div><span>이번 달</span><h3>사용량</h3></div><small>Project·AI는 한국시간 매월 1일 초기화</small></header><div className="billing-usage-grid"><Usage label="Project 생성" used={billing.usage.projects.used} limit={billing.usage.projects.limit} suffix="개" /><Usage label="활성 편집자" used={billing.usage.editors.used} limit={billing.usage.editors.limit} suffix="명" /><AiUsageMeter usage={billing.usage.ai} /></div></section>
 
     {billing.usage.editors.graceEndsAt && !billing.usage.editors.enforced && <div className="billing-editor-grace" role="status"><AlertTriangle size={18} /><div><b>기존 워크스페이스 편집자 정리 유예</b><p>{formatDate(billing.usage.editors.graceEndsAt)}까지 편집 권한을 정리할 수 있습니다. 그전에는 초과 멤버를 읽기 전용으로 전환하지 않습니다.</p></div></div>}
 

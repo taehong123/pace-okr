@@ -134,6 +134,7 @@ export async function installApiMocks(page: Page, options: { withRoutine?: boole
       marketingDataConsent: true, advertisingEmailConsent: true,
       marketingEligible: true, needsReaffirmation: false, reaffirmAfter: null,
     } });
+    if (url.pathname === "/api/billing/ai-usage") return json(route, { workspaceId: "workspace-1", userId: "user-1", ai: { usedPercent: 24, remainingPercent: 76, resetsAt: "2026-09-30T15:00:00.000Z" } });
     if (url.pathname === "/api/billing/status") return json(route, {
       plan: "free", planLabel: "Free", status: "free", nextPlan: null,
       trialEndsAt: null, currentPeriodEndsAt: null, nextBillingAt: null,
