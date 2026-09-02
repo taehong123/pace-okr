@@ -14,6 +14,7 @@ function compile(source, dependencies = {}) {
 }
 const intake = compile(await readFile(new URL("../lib/work-intake.ts", import.meta.url), "utf8"));
 const mcpSource = await readFile(new URL("../app/mcp/route.ts", import.meta.url), "utf8");
+const reviewCore = compile(await readFile(new URL("../lib/project-review.ts", import.meta.url), "utf8"));
 
 function fixture() {
   const db = new DatabaseSync(":memory:");
@@ -139,6 +140,8 @@ test("Unsure stays undecided; Routine does not need an Initiative or invented ta
 function mcpFixture() {
   const fixtureData = fixture();
   const calls = [];
+  const reviewReceipt = { id: "10000000-0000-4000-8000-000000000001", state: "pending", projectId: "approved-project",
+    proposal: { title: "처음 초안", properties: { 예산: null }, requestedCycleId: null }, fieldLabels: { dri: null, workers: [], template: null, cycle: null }, propertyLabels: { 예산: "미지정" }, selectedParent: null };
   const rules = { workspaceId: "a", captureInstruction: "Capture", structureInstruction: "Structure", routineInstruction: "Repeat", defaultPriority: "medium", defaultCadence: "weekly", reviewBeforeCreate: true, configured: true, createdAt: "", updatedAt: "" };
   const fullItem = (input) => ({
     id: "created", cycleId: null, parentId: null, routineId: null, kind: "task", title: "Task", description: "", status: "todo", priority: "medium", cadence: "weekly", progress: 0, dueDate: null, source: "mcp", archivedAt: null, archivedFromStatus: null, archiveRootId: null, createdAt: "", updatedAt: "", properties: {}, assignments: [], ...Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)),
@@ -168,7 +171,7 @@ function mcpFixture() {
     "cloudflare:workers": { env: { DB: fixtureData.d1 } },
     "@/lib/pace-data": data,
     "@/lib/work-intake": intake,
-    "@/lib/project-review": { getProjectReview: async () => ({}) },
+    "@/lib/project-review": { ...reviewCore, getProjectReview: async () => reviewReceipt },
     "@/lib/project-review-service": { stageProjectReview: async (_auth, input, recommendations) => {
       if (input.properties?.invalid) throw new Error("Property not found");
       calls.push({ method: "review", input, recommendations });
@@ -185,8 +188,28 @@ function mcpFixture() {
     z.object(definition.outputSchema).parse(output.structuredContent);
     return output.structuredContent;
   }
-  return { ...fixtureData, calls, tools, call, async init() { await serverModule.createOkrptrServer({ ownerId: "a", userId: "user", role: "owner" }); } };
+  return { ...fixtureData, calls, tools, call, reviewReceipt, async init() { await serverModule.createOkrptrServer({ ownerId: "a", userId: "user", role: "owner" }); } };
 }
+
+test("MCP review outcome contains the final edited connection and property summary, never a false pending success", async () => {
+  const f = mcpFixture();
+  try {
+    await f.init();
+    const pending = await f.call("get_project_review", { review_id: f.reviewReceipt.id });
+    assert.equal(pending.review.projectId, null); assert.equal(pending.review.summary.displayProperties.예산, "미지정");
+    f.reviewReceipt.state = "created";
+    f.reviewReceipt.proposal = { ...f.reviewReceipt.proposal, title: "사용자가 수정한 제목", properties: { 예산: 0, 검토됨: false }, requestedCycleId: "next" };
+    f.reviewReceipt.selectedParent = { path: ["O", "KR", "다른 Initiative"], cycleId: "next" };
+    f.reviewReceipt.propertyLabels = { 예산: "0", 검토됨: "체크 안 됨" };
+    f.reviewReceipt.fieldLabels.dri = "민지";
+    const final = await f.call("get_project_review", { review_id: f.reviewReceipt.id });
+    assert.equal(final.review.projectId, "approved-project"); assert.equal(final.review.title, "사용자가 수정한 제목");
+    assert.deepEqual(final.review.initiativePath, ["O", "KR", "다른 Initiative"]);
+    assert.equal(final.review.summary.cycleId, "next"); assert.equal(final.review.summary.dri, "민지");
+    assert.deepEqual(final.review.summary.properties, { 예산: 0, 검토됨: false });
+    assert.equal(f.calls.length, 0);
+  } finally { f.db.close(); }
+});
 
 test("MCP contracts expose the single-read preparation, optional Routine/cycle, and all read-only hints match policy", async () => {
   const f = mcpFixture();

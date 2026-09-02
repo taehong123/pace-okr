@@ -18,6 +18,36 @@ shows hierarchy/evidence, allows another search, and supports defer/cancel.
 Semantic recommendation quality still requires evaluation with real prompts;
 server validation proves lineage/permissions, not business relevance.
 
+## Editable review (September 2026)
+
+The same confirmation page now edits title, scope, DRI, workers, deadline, status,
+priority, progress, cadence, template and every active custom property. Unset,
+zero and false values remain distinct. Member values are displayed as names.
+Draft/default/edited labels identify where a value came from. No candidate is
+automatically selected. A file filter searches other active files; the explicitly
+chosen Initiative determines the actual saved cycle.
+
+`GET /api/project-reviews` includes the property/member/template catalog and its
+`editor.revision`. `mode=candidates&q=...&cycleId=...` only returns candidates,
+without resetting the form or reloading the editor catalog. The new approval
+body includes the complete `proposal` and `editorRevision`. Missing new fields
+retain the legacy frozen-review behavior. New requests must include all fields,
+even nulls: no workspace defaults are applied during approval.
+
+Catalog conflicts return the current editor catalog and field-specific errors.
+The client keeps the edited proposal, clears consent and requires a fresh check.
+Before the atomic claim, the server validates all types, options, active members,
+templates and the selected file/Initiative. The claimed review contains the final
+proposal, display names and fingerprints, so the existing atomic writer persists
+exactly that snapshot and the same created receipt. Repeated or uncertain requests
+read the existing receipt, not a new creation. MCP summaries include every unset
+property and `get_project_review` returns the final approved summary.
+
+The page uses the existing native property input shared with manual Project
+creation, and the typography/palette contract in `docs/THEMES.md`. It does not
+change the layout or navigation of other work screens. Native document navigation
+is intentional on this standalone review page to preserve before-unload warnings.
+
 ## Safety and storage
 
 - Protected `system:project-review:` keys in `assistant_drafts` are inaccessible
