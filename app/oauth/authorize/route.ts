@@ -1,11 +1,12 @@
 import { authorizeRequest, getTeam } from "@/lib/pace-data";
 import { matchesOAuthRedirect, oauthProviderForRedirect } from "@/lib/integration-providers";
-import { approvalCookieName, approvalPage, consumeOAuthApproval, createOAuthApproval } from "@/lib/mcp-oauth-approval";
+import { approvalContentSecurityPolicy, approvalCookieName, approvalPage, consumeOAuthApproval, createOAuthApproval } from "@/lib/mcp-oauth-approval";
 import {
   createMcpOAuthAuthorizationCode,
   getMcpOAuthClient,
   mcpResourceUrl,
   normalizeOAuthScope,
+  limitOAuthScopeForRole,
   oauthIssuer,
 } from "@/lib/mcp-oauth";
 
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
     return oauthRedirectError(redirectUri, state, request, "invalid_request", "A valid S256 PKCE code challenge is required.");
   }
   const requestedScopes = (url.searchParams.get("scope") ?? "okrptr:read okrptr:write").split(/\s+/).filter(Boolean);
-  const scope = normalizeOAuthScope(url.searchParams.get("scope"));
+  let scope = normalizeOAuthScope(url.searchParams.get("scope"));
   if (!scope || requestedScopes.some((entry) => !scope.split(" ").includes(entry))) {
     return oauthRedirectError(redirectUri, state, request, "invalid_scope", "Requested scopes are not supported.");
   }
@@ -47,13 +48,16 @@ export async function GET(request: Request) {
   }
 
   if (authorization.apiToken) return oauthJsonError("access_denied", "Sign in with your OKRPTR account to authorize a connection.");
+  scope = limitOAuthScopeForRole(scope, authorization.role);
+  if (!scope) return oauthRedirectError(redirectUri, state, request, "invalid_scope", "This role can only approve read access.");
   if (oauthProviderForRedirect(redirectUri) !== "chatgpt") {
     const input = { clientId, redirectUri, codeChallenge, resource, scope, state };
     const team = await getTeam(authorization.ownerId, authorization.userId);
     const approval = await createOAuthApproval(authorization, input);
-    return new Response(approvalPage(input, authorization, team.workspace.name, approval.id, approval.csrf), { headers: {
+    const nonce = crypto.randomUUID().replaceAll("-", "");
+    return new Response(approvalPage(input, authorization, team.workspace.name, approval.id, approval.csrf, nonce), { headers: {
       "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
-      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+      "Content-Security-Policy": approvalContentSecurityPolicy(nonce),
       "Set-Cookie": `${approvalCookieName(approval.id)}=${approval.csrf}; Path=/oauth/authorize; HttpOnly; Secure; SameSite=Lax; Max-Age=600`,
     } });
   }
@@ -94,7 +98,9 @@ export async function POST(request: Request) {
   let response: Response;
   if (decision === "cancel") response = oauthRedirectError(input.redirectUri, input.state, request, "access_denied", "The user cancelled this connection.");
   else {
-    const code = await createMcpOAuthAuthorizationCode(authorization, input);
+    const scope = limitOAuthScopeForRole(input.scope, authorization.role);
+    if (!scope) return oauthJsonError("invalid_scope", "Your current role cannot approve this scope. Restart the connection.");
+    const code = await createMcpOAuthAuthorizationCode(authorization, { ...input, scope });
     const callback = new URL(input.redirectUri);
     callback.searchParams.set("code", code);
     if (input.state) callback.searchParams.set("state", input.state);

@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { installApiMocks, json } from "./ai-connection-mocks";
+import { approvalFixture } from "./approval-page-fixture";
 
 async function openConnections(page: Page, mobile: boolean) {
   await page.goto("/");
@@ -9,7 +10,8 @@ async function openConnections(page: Page, mobile: boolean) {
   return page.getByRole("dialog", { name: "AI 연결", exact: true });
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
+  if (testInfo.title.startsWith("actual OAuth consent")) return;
   await installApiMocks(page);
   await page.route("**/api/integration-tokens*", (route) => json(route, route.request().method() === "POST" ? { prompt: "EXISTING_CHATGPT_PROMPT" } : { connections: [] }));
   await page.addInitScript(() => {
@@ -129,6 +131,30 @@ test("AI connection panels preserve contrast in all six themes", async ({ page, 
       await dialog.getByRole("tab", { name, exact: true }).click();
       const result = await new AxeBuilder({ page: page as unknown as ConstructorParameters<typeof AxeBuilder>[0]["page"] }).include(".ai-connections").withRules(["color-contrast"]).analyze();
       expect(result.violations, `${theme} / ${name}`).toEqual([]);
+    }
+  }
+});
+
+test("actual OAuth consent HTML preserves all six themes under nonce CSP at every width", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.route("**/oauth/authorize?qa=*", (route) => route.fulfill(approvalFixture()));
+  await page.goto("/oauth/authorize?qa=initial");
+  for (const theme of ["white", "beige", "gray", "dark", "neon", "cyberpunk"]) {
+    await page.evaluate((mode) => localStorage.setItem("okrptr.theme", mode), theme);
+    await page.goto(`/oauth/authorize?qa=${theme}`);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    await expect(page.getByRole("heading", { name: "Claude Code에 연결하시겠어요?" })).toBeVisible();
+    await expect(page.getByText("http://127.0.0.1:54321/callback", { exact: true })).toBeVisible();
+    const dimensions = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, width: innerWidth }));
+    expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.width);
+    const result = await new AxeBuilder({ page: page as unknown as ConstructorParameters<typeof AxeBuilder>[0]["page"] }).analyze();
+    expect(result.violations, theme).toEqual([]);
+    for (const name of ["취소", "Claude Code 연결 승인"]) {
+      const button = page.getByRole("button", { name, exact: true });
+      await button.focus();
+      await expect(button).toBeFocused();
+      await expect(button).toBeInViewport();
+      expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     }
   }
 });

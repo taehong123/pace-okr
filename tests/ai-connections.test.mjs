@@ -68,13 +68,13 @@ function fixture() {
     import { getDb } from '@/db'; import { integrationTokens } from '@/db/schema';
     import { effectiveIntegrationProvider } from '@/lib/integration-providers';
     const ensureSchema = async () => {}; ${tokenFunctions}`);
-  const common = { "cloudflare:workers": { env: { DB } }, "@/lib/pace-data": tokens, "@/lib/integration-providers": providers,
+  const common = { "cloudflare:workers": { env: { DB } }, "@/lib/pace-data": tokens, "@/lib/integration-providers": providers, "@/lib/themes": load("lib/themes.ts"),
     "@/lib/mcp-oauth-metadata": load("lib/mcp-oauth-metadata.ts") };
   const oauth = load("lib/mcp-oauth.ts", common);
   const approval = load("lib/mcp-oauth-approval.ts", common);
   const routes = { ...common, "@/lib/mcp-oauth": oauth, "@/lib/mcp-oauth-approval": approval, "@/lib/pace-data": {
     ...tokens,
-    authorizeRequest: async (request) => ({ ...authorization, userId: request.headers.get("x-test-user") ?? authorization.userId, ownerId: request.headers.get("x-test-workspace") ?? authorization.ownerId, apiToken: request.headers.has("authorization") }),
+    authorizeRequest: async (request) => ({ ...authorization, userId: request.headers.get("x-test-user") ?? authorization.userId, ownerId: request.headers.get("x-test-workspace") ?? authorization.ownerId, role: request.headers.get("x-test-role") ?? authorization.role, apiToken: request.headers.has("authorization") }),
     getTeam: async () => ({ workspace: { name: '<Workspace "A">' } }),
   } };
   const authFunction = data.slice(data.indexOf("export async function authorizeRequest("), data.indexOf("async function canonicalUserIdForGoogle("));
@@ -86,17 +86,18 @@ function fixture() {
     const ensureSchema = async () => {}; const ensureBillingSchema = async () => {}; const readGoogleSession = async () => null;
     const memberCanWrite = async () => true;
     ${tokenFunctions} ${authFunction} ${canManage}`);
-  return { sql, tokens, oauth, approval, realAuth, authorize: load("app/oauth/authorize/route.ts", routes), register: load("app/oauth/register/route.ts", routes), api: load("app/api/integration-tokens/route.ts", routes) };
+  return { sql, tokens, oauth, approval, realAuth, authorize: load("app/oauth/authorize/route.ts", routes), register: load("app/oauth/register/route.ts", routes), api: load("app/api/integration-tokens/route.ts", routes),
+    bearerApi: load("app/api/integration-tokens/route.ts", { ...routes, "@/lib/pace-data": { ...routes["@/lib/pace-data"], authorizeRequest: realAuth.authorizeRequest } }) };
 }
 const verifier = "a".repeat(64);
 const challenge = createHash("sha256").update(verifier).digest("base64url");
 const resource = "https://okrptr.com/api/mcp";
-async function consent(f, redirectUri = "https://claude.ai/api/mcp/auth_callback") {
+async function consent(f, redirectUri = "https://claude.ai/api/mcp/auth_callback", headers = {}) {
   const client = await f.oauth.registerMcpOAuthClient({ redirectUris: [redirectUri], clientName: "Untrusted name" });
   const url = new URL("https://okrptr.com/oauth/authorize");
   const params = { client_id: client.clientId, redirect_uri: redirectUri, response_type: "code", resource, code_challenge: challenge, code_challenge_method: "S256", state: "original-state" };
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
-  const response = await f.authorize.GET(new Request(url));
+  const response = await f.authorize.GET(new Request(url, { headers }));
   const html = await response.text();
   const id = html.match(/name="request_id" value="([a-f0-9]+)"/)?.[1];
   const csrf = html.match(/name="csrf" value="([a-f0-9]+)"/)?.[1];
@@ -149,6 +150,9 @@ test("Claude approval is escaped, user/workspace/CSRF/origin bound and consumed 
     const c = await consent(f);
     assert.match(c.html, /Claude 연결 승인/); assert.match(c.html, /&lt;Owner&gt;/); assert.match(c.html, /&lt;Workspace &quot;A&quot;&gt;/);
     assert.equal(c.response.headers.get("x-frame-options"), "DENY");
+    assert.doesNotMatch(c.response.headers.get("content-security-policy"), /unsafe-inline/);
+    const nonce = c.html.match(/<script nonce="([a-f0-9]+)"/)?.[1];
+    assert.ok(nonce && c.response.headers.get("content-security-policy").includes(`'nonce-${nonce}'`));
     assert.equal(f.sql.prepare("SELECT COUNT(*) AS n FROM mcp_oauth_codes").get().n, 0);
     for (const override of [ { headers: { origin: "https://evil.test" } }, { headers: { "x-test-user": "attacker" } }, { headers: { "x-test-workspace": "workspace-b" } }, { headers: { cookie: "" } }, { fields: { csrf: "b".repeat(64) } }, { headers: { authorization: "Bearer test" } } ]) assert.equal((await submit(f, c, override)).status, 400);
     const approved = await submit(f, c, { fields: { redirect_uri: "https://evil.test/callback", workspace_id: "workspace-b" } });
@@ -227,5 +231,51 @@ test("OAuth bearer access stays workspace-bound, revocable, and limited by scope
     assert.equal((await f.realAuth.authorizeRequest(request("GET"))).status, 403);
     await f.tokens.revokeIntegrationTokens(authorization, undefined, "claude");
     assert.equal((await f.realAuth.authorizeRequest(request("GET"))).status, 401);
+  } finally { f.sql.close(); }
+});
+
+test("connection management rejects read and write bearer tokens across providers", async () => {
+  const f = fixture();
+  try {
+    for (const scope of ["okrptr:read", "okrptr:read okrptr:write"]) {
+      const { token } = await f.tokens.createIntegrationToken(authorization, "Claude OAuth", "claude", scope);
+      for (const method of ["POST", "DELETE"]) {
+        const response = await f.bearerApi[method](new Request("https://okrptr.com/api/integration-tokens?provider=chatgpt", {
+          method, headers: { authorization: `Bearer ${token}` },
+        }));
+        assert.equal(response.status, 403);
+        assert.equal((await response.json()).error, "browser_session_required");
+      }
+    }
+    assert.equal((await f.tokens.listIntegrationTokens(authorization, "chatgpt")).length, 1);
+    const response = await f.api.DELETE(new Request("https://okrptr.com/api/integration-tokens?provider=chatgpt", { method: "DELETE" }));
+    assert.equal(response.status, 200);
+    assert.equal((await f.tokens.listIntegrationTokens(authorization, "chatgpt")).length, 0);
+    assert.equal((await f.tokens.listIntegrationTokens(authorization, "claude")).length, 2);
+  } finally { f.sql.close(); }
+});
+
+test("viewer consent permanently bounds scope even after promotion; demotion at approval also narrows scope", async () => {
+  const f = fixture();
+  try {
+    for (const roles of [["viewer", "member"], ["owner", "viewer"]]) {
+      const c = await consent(f, undefined, { "x-test-role": roles[0] });
+      const stored = JSON.parse(f.sql.prepare("SELECT request_json FROM mcp_oauth_approvals WHERE id=?").get(c.id).request_json);
+      if (roles[0] === "viewer") {
+        assert.equal(stored.scope, "okrptr:read");
+        assert.match(c.html, /읽기 전용/);
+        assert.doesNotMatch(c.html, /업무 생성·수정·삭제/);
+      }
+      const response = await submit(f, c, { headers: { "x-test-role": roles[1] } });
+      const code = new URL(response.headers.get("location")).searchParams.get("code");
+      const issued = await f.oauth.exchangeMcpOAuthAuthorizationCode({ code, clientId: c.client.clientId, redirectUri: c.redirectUri, codeVerifier: verifier, resource });
+      assert.equal(issued.scope, "okrptr:read");
+      f.sql.exec("UPDATE workspace_members SET role='member'");
+      const headers = { authorization: `Bearer ${issued.accessToken}` };
+      assert.equal((await f.realAuth.authorizeRequest(new Request(resource, { method: "POST", headers }))).status, 403);
+      const read = await f.realAuth.authorizeRequest(new Request(resource, { method: "POST", headers }), { allowViewerWrite: true });
+      assert.equal(read.role, "member");
+      assert.equal(read.oauthScopes, "okrptr:read");
+    }
   } finally { f.sql.close(); }
 });

@@ -17,6 +17,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const authorization = await authorizeRequest(request, { allowViewerWrite: true });
   if (authorization instanceof Response) return authorization;
+  if (authorization.apiToken) return Response.json({ error: "browser_session_required" }, { status: 403 });
 
   const team = await getTeam(authorization.ownerId, authorization.userId);
   const origin = new URL(request.url).origin;
@@ -28,6 +29,7 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   const authorization = await authorizeRequest(request, { allowViewerWrite: true });
   if (authorization instanceof Response) return authorization;
+  if (authorization.apiToken) return Response.json({ error: "browser_session_required" }, { status: 403 });
   const id = new URL(request.url).searchParams.get("id")?.trim() || undefined;
   const provider = new URL(request.url).searchParams.get("provider");
   if (provider !== null && !isIntegrationProvider(provider)) return Response.json({ error: "invalid_provider" }, { status: 400 });

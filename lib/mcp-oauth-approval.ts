@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import type { RequestAuthorization } from "@/lib/pace-data";
 import { providerLabels, oauthProviderForRedirect } from "@/lib/integration-providers";
+import { themeCss, themeBootstrapScript } from "@/lib/themes";
 
 export type ApprovalRequest = {
   clientId: string; redirectUri: string; codeChallenge: string; resource: string; scope: string; state: string | null;
@@ -36,12 +37,16 @@ export async function consumeOAuthApproval(authorization: RequestAuthorization, 
   return JSON.parse(row.request_json) as ApprovalRequest;
 }
 
-export function approvalPage(input: ApprovalRequest, authorization: RequestAuthorization, workspaceName: string, id: string, csrf: string) {
+export function approvalContentSecurityPolicy(nonce: string) {
+  return `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`;
+}
+
+export function approvalPage(input: ApprovalRequest, authorization: RequestAuthorization, workspaceName: string, id: string, csrf: string, nonce: string) {
   const provider = oauthProviderForRedirect(input.redirectUri)!;
   const label = providerLabels[provider];
   const canWrite = authorization.role !== "viewer" && input.scope.split(" ").includes("okrptr:write");
-  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${label}에 OKRPTR 연결 승인</title><style>
-    *{box-sizing:border-box}body{margin:0;background:#f4f5f7;color:#20252d;font:15px/1.65 system-ui,sans-serif}main{max-width:540px;margin:6vh auto;padding:28px;background:#fff;border:1px solid #d9dde3;border-radius:14px}h1{font-size:24px;line-height:1.4}h2{font-size:16px}dl{display:grid;grid-template-columns:110px 1fr;gap:12px}dt{color:#596272}dd{margin:0;overflow-wrap:anywhere}code{overflow-wrap:anywhere}p{color:#4c5666}.actions{display:flex;gap:12px;margin-top:24px}button,a{min-height:44px}button{flex:1;padding:12px;border:1px solid #b5bdc9;border-radius:7px;background:white;color:#20252d;font:inherit;cursor:pointer}button[value=approve]{background:#20252d;color:white}button:focus-visible,a:focus-visible{outline:3px solid #386de5;outline-offset:3px}@media(max-width:600px){main{margin:16px;padding:20px}dl{grid-template-columns:1fr;gap:4px}dd{margin-bottom:10px}}
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${label}에 OKRPTR 연결 승인</title><script nonce="${nonce}">${themeBootstrapScript}</script><style nonce="${nonce}">${themeCss}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg-page);color:var(--text-primary);font:15px/1.65 system-ui,sans-serif}main{max-width:540px;margin:6vh auto;padding:28px;background:var(--bg-raised);border:1px solid var(--border-default);border-radius:14px}h1{font-size:24px;line-height:1.4}h2{font-size:16px}dl{display:grid;grid-template-columns:110px 1fr;gap:12px}dt,p{color:var(--text-secondary)}dd{margin:0;overflow-wrap:anywhere}code{overflow-wrap:anywhere}.actions{display:flex;gap:12px;margin-top:24px}button,a{min-height:44px}button{flex:1;padding:12px;border:1px solid var(--border-control);border-radius:7px;background:var(--button-secondary-bg);color:var(--button-secondary-fg);font:inherit;cursor:pointer}button:hover{background:var(--button-secondary-hover-bg);color:var(--button-secondary-hover-fg)}button:active{background:var(--button-secondary-active-bg);color:var(--button-secondary-active-fg)}button[value=approve]{background:var(--button-primary-bg);color:var(--button-primary-fg)}button[value=approve]:hover{background:var(--button-primary-hover-bg);color:var(--button-primary-hover-fg)}button[value=approve]:active{background:var(--button-primary-active-bg);color:var(--button-primary-active-fg)}button:disabled,button[value=approve]:disabled{background:var(--button-disabled-bg);color:var(--button-disabled-fg);cursor:default}button:focus-visible,a:focus-visible{outline:3px solid var(--focus-ring);outline-offset:3px}@media(max-width:600px){main{margin:16px;padding:20px}dl{grid-template-columns:1fr;gap:4px}dd{margin-bottom:10px}}
     </style></head><body><main><div>OKRPTR · AI 연결</div><h1>${label}에 연결하시겠어요?</h1>
     <p>아래 계정과 워크스페이스에 대한 접근을 승인합니다. 다른 워크스페이스는 연결되지 않습니다.</p>
     <dl><dt>OKRPTR 계정</dt><dd>${escapeHtml(authorization.displayName)}<br>${escapeHtml(authorization.email ?? "")}</dd><dt>워크스페이스</dt><dd>${escapeHtml(workspaceName)}</dd><dt>현재 역할</dt><dd>${escapeHtml(authorization.role)}</dd></dl>

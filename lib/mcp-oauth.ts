@@ -46,6 +46,11 @@ export function isAllowedChatGptRedirectUri(value: string) {
   return oauthProviderForRedirect(value) === "chatgpt";
 }
 
+// Never expand a previously approved scope when a member's role changes.
+export function limitOAuthScopeForRole(scope: string, role: RequestAuthorization["role"]) {
+  return scope.split(/\s+/).filter((entry) => entry && (role !== "viewer" || entry !== "okrptr:write")).join(" ");
+}
+
 export async function registerMcpOAuthClient(input: {
   redirectUris: string[];
   clientName?: string;
@@ -90,6 +95,8 @@ export async function createMcpOAuthAuthorizationCode(
   },
 ) {
   await ensureMcpOAuthSchema();
+  const scope = limitOAuthScopeForRole(input.scope, authorization.role);
+  if (!scope) throw new Error("invalid_scope");
   const code = `okrptr_oauth_code_${randomHex(32)}`;
   const now = new Date();
   await database().prepare(`
@@ -104,7 +111,7 @@ export async function createMcpOAuthAuthorizationCode(
     input.redirectUri,
     input.codeChallenge,
     input.resource,
-    input.scope,
+    scope,
     now.toISOString(),
     new Date(now.getTime() + OAUTH_CODE_TTL_MS).toISOString(),
   ).run();
