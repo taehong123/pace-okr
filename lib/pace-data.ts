@@ -1316,6 +1316,9 @@ export async function deleteOkrCycle(ownerId: string, id: string) {
   if (!target) throw new Error("OKR cycle not found");
   if ((countRow?.count ?? 0) <= 1) throw new Error("At least one OKR file is required");
 
+  const { createWorkspaceBackup } = await import("@/lib/workspace-backups");
+  await createWorkspaceBackup(env, ownerId, "before_okr_delete");
+
   await getDb()
     .update(items)
     .set({ cycleId: null, updatedAt: new Date().toISOString() })
@@ -1344,6 +1347,8 @@ export async function deleteOkrCycle(ownerId: string, id: string) {
 
 export async function cleanupWorkspaceExecutionData(ownerId: string, createdByUserId: string | null = null) {
   await ensureSchema();
+  const { createWorkspaceBackup } = await import("@/lib/workspace-backups");
+  await createWorkspaceBackup(env, ownerId, "before_cleanup", createdByUserId);
   const [itemCount, routineCount, cycleCount] = await Promise.all([
     getDb().select({ count: sql<number>`count(*)` }).from(items).where(eq(items.ownerId, ownerId)),
     getDb().select({ count: sql<number>`count(*)` }).from(routines).where(eq(routines.ownerId, ownerId)),

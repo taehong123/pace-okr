@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const workspaces = sqliteTable(
   "workspaces",
@@ -32,6 +32,49 @@ export const appMigrations = sqliteTable(
     appliedAt: text("applied_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
 );
+
+export const workspaceBackupState = sqliteTable("workspace_backup_state", {
+  ownerId: text("owner_id").primaryKey(),
+  revision: integer("revision").notNull().default(0),
+  lastDailyDate: text("last_daily_date"),
+  lastSuccessAt: text("last_success_at"),
+  lastAttemptAt: text("last_attempt_at"),
+  lastError: text("last_error"),
+  leaseToken: text("lease_token"),
+  leaseUntil: text("lease_until"),
+});
+
+// Metadata outlives workspace deletion until the separate R2 objects are purged.
+export const workspaceBackups = sqliteTable("workspace_backups", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  objectKey: text("object_key").notNull(),
+  reason: text("reason").notNull(),
+  status: text("status").notNull().default("pending"),
+  schemaVersion: integer("schema_version").notNull().default(1),
+  checksum: text("checksum").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  summary: text("summary").notNull(),
+  createdByUserId: text("created_by_user_id"),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+}, (table) => [
+  index("idx_workspace_backups_owner_created").on(table.ownerId, table.createdAt),
+  index("idx_workspace_backups_expires").on(table.expiresAt),
+]);
+
+export const workspaceBackupGuards = sqliteTable("workspace_backup_guards", {
+  id: text("id").primaryKey(),
+  verified: integer("verified").notNull(),
+}, (table) => [check("workspace_backup_guard_verified", sql`${table.verified} = 1`)]);
+
+export const workspaceRestoreLinks = sqliteTable("workspace_restore_links", {
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  tableName: text("table_name").notNull(),
+  rowId: text("row_id").notNull(),
+  payload: text("payload").notNull(),
+  expiresAt: text("expires_at").notNull(),
+}, (table) => [uniqueIndex("idx_workspace_restore_links_unique").on(table.ownerId, table.tableName, table.rowId)]);
 
 export const users = sqliteTable(
   "users",

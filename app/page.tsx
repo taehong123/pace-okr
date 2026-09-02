@@ -64,6 +64,7 @@ import {
 import { startTransition, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { ConfirmationProvider, OverlayDialog, useAppConfirm } from "./overlay-dialog";
 import AIConnectionsDialog from "./ai-connections";
+import WorkspaceBackups from "./workspace-backups";
 import { OkrFileSurface, type OkrFileCycleSummary } from "./okr-file-surface";
 import BillingView, { ProjectQuotaBadge } from "./billing-view";
 import { readMyWorkSort, saveMyWorkSort, sortMyWorkItems, type MyWorkSort } from "@/lib/my-work-sort";
@@ -93,7 +94,7 @@ function workspaceSettingsFromLocation() {
   const params = new URLSearchParams(window.location.search);
   const rawTab = params.get("tab") as WorkspaceSettingsTab | "management" | null;
   const normalizedTab = rawTab === "management" ? "summary" : rawTab;
-  const supported = new Set<WorkspaceSettingsTab>(["general", "members", "groups", "projects", "summary", "integrations", "danger", "scheduled"]);
+  const supported = new Set<WorkspaceSettingsTab>(["general", "members", "groups", "projects", "summary", "integrations", "backups", "danger", "scheduled"]);
   return {
     open: params.get("settings") === "workspace",
     tab: normalizedTab && supported.has(normalizedTab) ? normalizedTab : "general",
@@ -110,7 +111,7 @@ type TeamRole = "owner" | "admin" | "member" | "viewer";
 type GroupColor = "gray" | "blue" | "green" | "yellow" | "orange" | "red" | "purple";
 type GroupVisibility = "open" | "private";
 type GroupRole = "lead" | "member";
-type WorkspaceSettingsTab = "general" | "members" | "groups" | "projects" | "summary" | "integrations" | "danger" | "scheduled";
+type WorkspaceSettingsTab = "general" | "members" | "groups" | "projects" | "summary" | "integrations" | "backups" | "danger" | "scheduled";
 type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
 type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "local" };
 type AuthState = { status: "loading" | "authenticated" | "unauthenticated"; user: AuthUser | null; reason: string | null };
@@ -5652,6 +5653,7 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
     { id: "projects", label: "Project 설정", icon: Briefcase, visible: true },
     { id: "summary", label: "관리 요약", icon: Activity, visible: !currentWorkspace.personal },
     { id: "integrations", label: "봇 연동", icon: Bot, visible: !currentWorkspace.personal },
+    { id: "backups", label: "백업 및 복원", icon: Database, visible: canManageWorkspace },
     { id: "danger", label: "위험 구역", icon: AlertTriangle, visible: canManageWorkspace },
     { id: "scheduled", label: "삭제 예정", icon: Trash2, visible: scheduledWorkspaces.length > 0, count: scheduledWorkspaces.length },
   ];
@@ -5667,6 +5669,7 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
         {activeTab === "members" && <div className="workspace-settings-section team-settings-section"><header><span>ORGANIZATION</span><h3>멤버</h3><p>초대, 역할과 워크스페이스 구성원을 관리합니다.</p></header><TeamPanel key={`${currentWorkspace.id}:members`} initialTeam={teamData} initialTab="members" initialGroupHandle={null} embedded onTeamChange={onTeamChange} onClose={onClose} onNotice={onNotice} /></div>}
         {activeTab === "groups" && <div className="workspace-settings-section team-settings-section"><header><span>ORGANIZATION</span><h3>그룹</h3><p>조직 그룹과 구성원, Lead 권한을 관리합니다.</p></header><TeamPanel key={`${currentWorkspace.id}:groups`} initialTeam={teamData} initialTab="groups" initialGroupHandle={requestedGroupHandle} embedded onTeamChange={onTeamChange} onClose={onClose} onNotice={onNotice} /></div>}
         {activeTab === "projects" && <div className="workspace-project-settings"><header className="workspace-settings-section-header"><div><span>WORKSPACE DATA</span><h3>Project 설정</h3><p>모든 Project에서 함께 사용하는 속성과 본문 템플릿입니다.</p></div><div className="workspace-project-tabs" role="tablist" aria-label="Project 설정"><button role="tab" aria-selected={projectSettingsTab === "properties"} className={projectSettingsTab === "properties" ? "active" : ""} onClick={() => setProjectSettingsTab("properties")}><Settings2 size={14} />속성</button><button role="tab" aria-selected={projectSettingsTab === "templates"} className={projectSettingsTab === "templates" ? "active" : ""} onClick={() => setProjectSettingsTab("templates")}><BookTemplate size={14} />템플릿</button></div></header>{projectSettingsTab === "properties" ? <ProjectPropertyManager workspaceId={currentWorkspace.id} properties={properties} teamMembers={teamMembers} readOnly={!canManageWorkspace} onChanged={(next) => onPropertiesChanged([...next].sort((left, right) => left.sortOrder - right.sortOrder))} onNotice={onNotice} /> : <ProjectTemplateManager workspaceId={currentWorkspace.id} readOnly={!canManageWorkspace} onNotice={onNotice} />}</div>}
+        {activeTab === "backups" && <WorkspaceBackups key={`${currentWorkspace.id}:backups`} workspaceId={currentWorkspace.id} workspaceName={currentWorkspace.name} onNotice={onNotice} />}
         {activeTab === "summary" && <WorkspaceManagementSummary key={`${currentWorkspace.id}:summary`} />}
         {activeTab === "integrations" && <WorkspaceSlackIntegration key={`${currentWorkspace.id}:bots`} slack={slack} slackOAuthIssue={slackOAuthIssue} loading={integrationLoading} loadError={integrationLoadError} workspaceName={currentWorkspace.name} canManageSlack={canManageWorkspace} onSlackChange={onSlackChange} onRefresh={onRefreshIntegrations} onNotice={onNotice} />}
         {activeTab === "danger" && <div className="workspace-settings-section danger-settings"><header><span>WORKSPACE CONTROL</span><h3>위험 구역</h3><p>현재 워크스페이스의 실행 데이터와 워크스페이스 자체를 정리합니다.</p></header><article><div><b>OKR 실행 데이터 클린업</b><p>워크스페이스와 그룹은 유지하고 OKR·Project·Task를 휴지통으로 이동합니다.</p></div><button onClick={onCleanup}><Trash2 size={14} />클린업 열기</button></article>{!currentWorkspace.personal && currentWorkspace.role === "owner" && <article><div><b>워크스페이스 삭제 예약</b><p>즉시 접근을 중단하고 30일 동안 복구할 수 있도록 삭제 예약합니다.</p></div><button onClick={() => onDeleteWorkspace(currentWorkspace)} disabled={workspaceSaving}><Trash2 size={14} />삭제 예약</button></article>}</div>}
