@@ -913,23 +913,21 @@ test("uses theme-specific KR and Initiative hierarchy surfaces", async () => {
   assert.doesNotMatch(styles, /--kr-soft|--initiative-soft|#42627a|#426653|#e8eff4|#e8f0eb/);
 });
 
-test("uses shared rem typography and large-desktop density without zooming the UI", async () => {
+test("keeps desktop density stable at wide widths and enlarges only touch controls", async () => {
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-  const largeDesktop = styles.match(/@media \(min-width: 1800px\) \{\r?\n([\s\S]*?)\r?\n\}/)?.[1] ?? "";
-
-  assert.ok(largeDesktop);
   assert.match(styles, /html \{ font-size: 100%; \}/);
   assert.doesNotMatch(styles, /@media[^{}]+\{\s*html\s*\{\s*font-size:/);
-  assert.match(largeDesktop, /grid-template-columns: 16rem minmax\(0, 1fr\)/);
-  assert.match(largeDesktop, /width: min\(100rem, 100%\)/);
-  assert.match(largeDesktop, /workspace-topbar, \.app-loading-topbar \{ min-height: var\(--row-height\)/);
+  assert.doesNotMatch(styles, /@media \(min-width: 1800px\)/);
+  assert.match(styles, /grid-template-columns: 16rem minmax\(0, 1fr\)/);
+  assert.match(styles, /width: min\(100rem, 100%\)/);
+  assert.match(styles, /workspace-topbar, \.app-loading-topbar \{ min-height: var\(--row-height\)/);
   assert.match(styles, /page-header h1[^}]*font-size: var\(--type-page\)/);
-  assert.match(largeDesktop, /hierarchy-row \{ min-height: 56px/);
-  assert.match(largeDesktop, /task-table-row \{ min-height: var\(--row-height\)/);
-  assert.match(largeDesktop, /task-list-row \{ min-height: 54px/);
+  assert.match(styles, /task-table-row \{ min-height: var\(--row-height\)/);
+  assert.match(styles, /task-list-row \{[^}]*min-height: var\(--row-height\)/);
   assert.match(styles, /routine-card b \{[^}]*font-size: var\(--type-body\)/);
-  assert.match(largeDesktop, /my-work-item \{ min-height: 56px/);
-  assert.doesNotMatch(largeDesktop, /\bzoom\s*:|transform\s*:\s*scale/);
+  assert.match(styles, /my-work-item \{[^}]*min-height: var\(--row-height\)/);
+  assert.doesNotMatch(styles, /\bzoom\s*:|transform\s*:\s*scale/);
+  assert.match(styles, /@media \(max-width: 980px\), \(pointer: coarse\)/);
   assert.match(styles, /@media \(max-width: 700px\)/);
   assert.match(styles, /@media \(max-width: 980px\)/);
 });

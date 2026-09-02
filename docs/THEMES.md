@@ -17,17 +17,23 @@ OKRPTR-specific clarifications, not a replacement design system.
   family through `--font-ui`. The 92 official Unicode-range subsets load only
   when their glyphs are visible; do not preload the entire font or add a CDN.
 - Typography comes from `--type-body` (1rem), `--type-label` (.875rem),
-  `--type-meta` (.8125rem), `--type-section` (1.25rem), `--type-page` (1.75rem).
+  `--type-meta` (.8125rem), `--type-section` (1.125rem), `--type-page` (1.5rem).
   The root respects browser defaults (100%) at every viewport width.
   Do not add per-screen pixel font patches, CSS zoom or scale transforms.
 - Korean body line height is 1.6; headings start at 1.25. Letter spacing is zero.
   Titles wrap instead of losing essential content. Rows expand with their content.
-- Controls target 44 CSS px or more, rows 52px or more. Deletion selection has an
-  18px square inside an unframed hit area; completion has a circular indicator.
+- Desktop density is deliberately quieter: controls 36px, editable fields 40px,
+  and rows at least 48px. At 980px and below, or with a coarse pointer, controls
+  and fields are at least 44px and rows at least 52px. All dimensions use rem.
+  This is the user's balance correction, not a font-size reduction: body and
+  inputs remain 16px. Never enlarge desktop density at 1800px or any wider size.
+  Deletion selection retains an 18px square inside a 44px unframed hit area;
+  completion has a circular indicator. Long content must increase row height.
 - Radii: controls 8px, containers 10px, overlays 14px. Prefer quiet borders over
   shadows or nested tinted panels. Remove redundant eyebrow copy, not useful help.
 - Spacing uses the 4/8/12/16/24/32px scale (`--space-*`). Desktop page insets are
-  32px, mobile insets 16px. The page heading and document share a left edge.
+  32px, mobile insets 16px. Page top spacing is 24px and heading-to-content spacing
+  is 16px. The page heading and document share a left edge.
   Tree indentation is 32px on desktop and 16px on mobile. Sibling titles,
   counts and percentages share fixed grid tracks; labels must not split mid-word.
 - The OKR read surface is an unframed document, not a card inside another card.
@@ -99,6 +105,10 @@ the first body paint. The client and BlockNote consume the same registry.
 
 ## Regression checks
 
+- `tests/e2e/design-balance.spec.ts`: desktop density stays stable through 4K;
+  editable values and mobile touch targets retain their size, search/date values
+  fit their columns, and selection/completion hit areas stay separate with larger
+  user text.
 - `tests/themes.test.mjs`: all palettes are complete, references resolve, text
   and button contrast is at least 4.5:1; controls, rails and disabled labels are
   at least 3:1. First-paint restoration handles invalid/blocked storage.

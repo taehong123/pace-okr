@@ -93,11 +93,19 @@ test("first paint preserves every saved theme and tolerates missing, invalid or 
 
 test("readability uses scalable roles instead of per-screen font patches or CSS zoom", () => {
   const root = postcss.parse(css);
-  const roles = { "--type-body": "1rem", "--type-label": ".875rem", "--type-meta": ".8125rem", "--type-section": "1.25rem", "--type-page": "1.75rem", "--control-height": "2.75rem", "--row-height": "3.25rem" };
+  const roles = { "--type-body": "1rem", "--type-label": ".875rem", "--type-meta": ".8125rem", "--type-section": "1.125rem", "--type-page": "1.5rem" };
   for (const [name, value] of Object.entries(roles)) {
     const declarations = [];
     root.walkDecls(name, (decl) => declarations.push(decl.value));
     assert.deepEqual(declarations, [value], `${name} has one source of truth`);
+  }
+  for (const [name, sizes] of Object.entries({ "--control-height": ["2.25rem", "2.75rem"], "--field-height": ["2.5rem", "2.75rem"], "--row-height": ["3rem", "3.25rem"] })) {
+    const declarations = [];
+    root.walkDecls(name, (decl) => {
+      declarations.push(decl.value);
+      if (decl.parent.parent.type === "atrule") assert.equal(decl.parent.parent.params, "(max-width: 980px), (pointer: coarse)");
+    });
+    assert.deepEqual(declarations, sizes, `${name} only changes for touch-sized controls`);
   }
   root.walkDecls("font-size", (decl) => assert.doesNotMatch(decl.value, /\dpx\b/, `fixed type in ${decl.parent.selector}`));
   root.walkDecls("zoom", () => assert.fail("Do not scale the entire application with zoom"));

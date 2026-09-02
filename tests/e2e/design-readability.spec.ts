@@ -29,7 +29,7 @@ for (const width of [320, 390, 768, 1440, 1920, 2560, 3840]) {
       await expect(page.locator('.page-header h1')).toBeVisible();
       await fits(page);
       expect(await page.locator('body').evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeCloseTo(16 * scale);
-      expect(await page.locator('.page-header h1').evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeCloseTo(28 * scale);
+      expect(await page.locator('.page-header h1').evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeCloseTo(24 * scale);
       const navLabel = page.locator('.nav-item span:visible').first();
       expect(await navLabel.evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeCloseTo(14 * scale);
       if (view === 'my_work') {
