@@ -312,6 +312,7 @@ export async function installApiMocks(page: Page, options: { preserveStorage?: b
       return json(route, { document: { id: "document-1", projectId: "project-1", content: "[]", plainText: "", version: 1, updatedAt: now } });
     }
     if (url.pathname === "/api/project-templates") return json(route, { templates: [] });
+    if (url.pathname === "/api/properties") return json(route, { properties: bootstrapResponse.properties });
     if (url.pathname === "/api/checklists") return json(route, { items: [] });
     if (url.pathname === "/api/recommendations") return json(route, { recommendations: [] });
     if (url.pathname === "/api/daily-scrum" && request.method() === "GET") return json(route, {
@@ -344,7 +345,8 @@ export async function installApiMocks(page: Page, options: { preserveStorage?: b
       if (options.slowRoutineRefresh) await new Promise((resolve) => setTimeout(resolve, 800));
       return json(route, { routines: bootstrapResponse.routines });
     }
-    if (url.pathname === "/api/trash") return json(route, { items: [], cleanupRecords: [] });
+    if (url.pathname === "/api/trash") return json(route, { trash: [] });
+    if (url.pathname === "/api/item-trash") return json(route, { items: [], initiativeOptions: [] });
     return json(route, {});
   });
 }
