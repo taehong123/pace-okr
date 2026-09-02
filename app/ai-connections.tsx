@@ -104,8 +104,9 @@ export default function AIConnectionsDialog({ onNotice, onClose }: { onNotice: (
     <div id={`${id}-panel`} role="tabpanel" aria-labelledby={`${id}-${tab}`} className="ai-connection-panel" tabIndex={0}>
       <div className="ai-connection-heading"><h3>{providerLabels[tab]}에 OKRPTR 연결</h3><span className="ai-connection-state">{status}</span></div>
       {tab === "chatgpt" ? <>
-        <div className="ai-connection-actions"><button type="button" className="ai-primary" onClick={() => void copyPrompt()} disabled={creating}>{creating ? <LoaderCircle className="spin" size={16} /> : <Copy size={16} />}{creating ? "복사 준비 중" : "ChatGPT 연결 문구 복사"}</button><a href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer">ChatGPT 열기<ArrowUpRight size={15} /></a></div>
-        <div className={`ai-paste-instruction${copiedPrompt ? " copied" : ""}`} role="status" aria-live="polite"><CheckCircle2 size={21} /><div><strong>{copiedPrompt ? "복사 완료! 이제 ChatGPT 대화창에 붙여넣고 전송하세요." : "복사한 내용을 ChatGPT 대화창에 붙여넣어 주세요."}</strong><p>브라우저 제어가 가능한 대화에서 진행해 주세요.</p></div></div>
+        <div className="ai-connection-actions"><button type="button" className="ai-primary" onClick={() => void copyPrompt()} disabled={creating}>{creating ? <LoaderCircle className="spin" size={16} /> : <Copy size={16} />}{creating ? "복사 준비 중" : "ChatGPT 연결 문구 복사"}</button></div>
+        <div className={`ai-paste-instruction${copiedPrompt ? " copied" : ""}`} role="status" aria-live="polite">{copiedPrompt ? <CheckCircle2 size={21} /> : <Copy size={21} />}<div><strong>{copiedPrompt ? "복사 완료! 이제 ChatGPT 대화창에 붙여넣고 전송하세요." : "복사한 내용을 ChatGPT 대화창에 붙여넣어 주세요."}</strong><p>브라우저 제어가 가능한 대화에서 진행해 주세요.</p></div></div>
+        <div className="ai-connection-actions"><a href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer">ChatGPT 열기<ArrowUpRight size={15} /></a></div>
       </> : <>
         {tab === "claude_code" && <p>Claude에 연결한 뒤 같은 Claude 구독 계정으로 Code에 로그인하고 <code>/mcp</code>에서 확인하세요. 지원 환경에서 연결 설정을 재사용할 수 있습니다.</p>}
         <div className="ai-connection-actions"><a className="ai-primary" href={claudeInstallUrl()} target="_blank" rel="noopener noreferrer">Claude에 연결<ArrowUpRight size={16} /></a></div>
