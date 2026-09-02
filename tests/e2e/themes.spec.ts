@@ -106,7 +106,8 @@ for (const theme of THEMES) {
     await expect(page.getByRole("dialog", { name: "내 설정" })).toHaveCount(0);
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme.mode);
-    await page.goto(`/#invite=${"a".repeat(64)}`);
+    // A distinct document URL models arrival from an external invitation link.
+    await page.goto(`/?theme-qa=invitation#invite=${"a".repeat(64)}`);
     await expect(page.getByRole("dialog", { name: "워크스페이스 초대" })).toBeVisible();
     await readable(page, `${theme.mode}/invitation`);
     await page.route("**/api/auth/session", (route) => json(route, { user: null }, 401));
