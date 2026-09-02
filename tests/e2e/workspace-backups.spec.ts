@@ -125,6 +125,7 @@ test("backup list and preview fit every theme and viewport", async ({ page }, te
     const contrast = await new AxeBuilder({ page: page as never }).include(".workspace-backups").withRules(["color-contrast"]).analyze();
     expect(contrast.violations, theme.mode).toEqual([]);
     expect(await page.locator(".workspace-backups").evaluate((element) => element.scrollWidth <= element.clientWidth), theme.mode).toBe(true);
+    expect(await page.locator(".workspace-backups button").evaluateAll((buttons) => buttons.every((button) => button.getBoundingClientRect().height >= 44)), theme.mode).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), theme.mode).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`backups-${theme.mode}.png`), fullPage: true });
   }

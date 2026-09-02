@@ -1,10 +1,10 @@
-.workspace-backups { min-width: 0; padding: 22px; color: var(--ink); font-size: 13px; }
+.workspace-backups { min-width: 0; padding: 22px; color: var(--ink); font-size: var(--type-label, .875rem); }
 .backup-header, .backup-actions { display: flex; align-items: center; gap: 8px; }
 .backup-header { justify-content: space-between; flex-wrap: wrap; margin-bottom: 18px; }
-.backup-header h3 { margin: 0 0 6px; font-size: 18px; }
+.backup-header h3 { margin: 0 0 6px; font-size: var(--type-section, 1.25rem); }
 .workspace-backups p { line-height: 1.65; overflow-wrap: anywhere; }
-.backup-header p, .backup-last, .backup-preview header p { margin: 0; color: var(--muted); font-size: 12px; }
-.workspace-backups button { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--raised); color: var(--ink); cursor: pointer; font: inherit; }
+.backup-header p, .backup-last, .backup-preview header p { margin: 0; color: var(--muted); font-size: var(--type-meta, .8125rem); }
+.workspace-backups button { min-width: var(--control-height, 2.75rem); min-height: var(--control-height, 2.75rem); display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: var(--radius-control, 6px); background: var(--raised); color: var(--ink); cursor: pointer; font: inherit; }
 .workspace-backups button:hover { background: var(--hover); }
 .workspace-backups button:disabled { cursor: default; opacity: .6; }
 .workspace-backups button:focus-visible, .workspace-backups summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
@@ -18,13 +18,13 @@
 .backup-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--line); }
 .backup-list li > div { display: grid; gap: 5px; min-width: 0; overflow-wrap: anywhere; }
 .backup-list time { font-weight: 600; }
-.backup-list span, .backup-list small { color: var(--muted); font-size: 12px; }
+.backup-list span, .backup-list small { color: var(--muted); font-size: var(--type-meta, .8125rem); }
 .backup-list button { flex-shrink: 0; }
 .backup-empty { padding: 30px 0; color: var(--muted); }
 .backup-preview { margin-top: 18px; }
 .backup-preview header { margin: 20px 0; }
-.backup-preview h4 { font-size: 16px; margin: 0 0 6px; }
-.backup-preview table { width: 100%; table-layout: fixed; border-collapse: collapse; margin: 16px 0; font-size: 12px; }
+.backup-preview h4 { font-size: var(--type-body, 1rem); margin: 0 0 6px; }
+.backup-preview table { width: 100%; table-layout: fixed; border-collapse: collapse; margin: 16px 0; font-size: var(--type-label, .875rem); }
 .backup-preview caption { text-align: left; padding-bottom: 10px; font-weight: 600; }
 .backup-preview th, .backup-preview td { padding: 9px 6px; border-bottom: 1px solid var(--line); text-align: right; overflow-wrap: anywhere; }
 .backup-preview th:first-child { text-align: left; width: 46%; }
@@ -35,4 +35,4 @@
 .backup-preview li { display: grid; gap: 5px; padding: 8px 0; overflow-wrap: anywhere; }
 .backup-preview li small { color: var(--muted); }
 .workspace-backups .backup-restore { background: var(--button-primary-bg); color: var(--button-primary-fg); border-color: var(--button-primary-bg); }
-@media (max-width: 700px) { .workspace-backups { padding: 16px 12px; } .backup-actions { width: 100%; justify-content: flex-end; } .backup-list li { gap: 8px; } .workspace-backups button { min-height: 40px; } }
+@media (max-width: 700px) { .workspace-backups { padding: 16px 12px; } .backup-actions { width: 100%; justify-content: flex-end; } .backup-list li { gap: 8px; } }

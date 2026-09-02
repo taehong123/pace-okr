@@ -21,7 +21,8 @@ async function mockReview(page: Page, options: { single?: boolean; getStatus?: n
     fieldLabels: { dri: "태홍", workers: ["민지"], template: "개발 계획", cycle: null }, templateVersion: "version", templatePreview: "목표 / 완료 기준 / 검증 방법",
     requestHash: "test", propertyVersions: {}, createdAt: "2026-09-02T00:00:00Z", expiresAt: "2099-09-02T00:30:00Z", selectedParent: null,
   };
-  const state = { review, posts: [] as Record<string, unknown>[], queries: [] as string[] };
+  const state = { review, posts: [] as Record<string, unknown>[], queries: [] as string[], errors: [] as string[] };
+  page.on("pageerror", (error) => state.errors.push(error.message));
   await page.route("**/api/project-reviews**", async (route) => {
     const request = route.request();
     expect(request.headers()["x-okrptr-workspace-id"]).toBe("review-test");
@@ -109,13 +110,18 @@ for (const status of [401, 403, 410]) test(`HTTP ${status} has a safe login/erro
   expect(state.posts).toEqual([]);
 });
 
-test("review form remains readable in all themes and has accessible controls", async ({ page }) => {
-  await mockReview(page);
+test("review form remains readable in all themes and has accessible controls", async ({ page }, testInfo) => {
+  test.setTimeout(90_000);
+  const state = await mockReview(page);
   await expect(page.getByRole("heading", { name: "생성 전에 연결을 확인해 주세요" })).toBeVisible();
   for (const theme of ["white", "beige", "gray", "dark", "neon", "cyberpunk"]) {
     await page.evaluate((name) => document.documentElement.setAttribute("data-theme", name), theme);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const violations = (await new AxeBuilder({ page: page as unknown as ConstructorParameters<typeof AxeBuilder>[0]["page"] }).include(".project-review-page").analyze()).violations;
     expect(violations, theme).toEqual([]);
+    expect(await page.getByLabel("다른 Initiative 검색").evaluate((element) => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(16);
+    expect(await page.getByRole("button", { name: "확인한 연결로 Project 생성" }).evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+    if (theme === "beige" || theme === "dark") await page.screenshot({ path: testInfo.outputPath(`project-review-${theme}.png`), fullPage: true });
   }
+  expect(state.errors).toEqual([]);
 });
