@@ -32,7 +32,7 @@ for (const theme of THEMES) {
     expect(colors.initiativeBadge).toBe(rgb(theme.tokens["initiative-badge-text"]));
     expect(colors.initiativeRail).toBe(colors.initiativeBadge);
     expect(colors.progress).toBe(colors.badge);
-    const alignment = await page.evaluate(() => {
+    const inspectAlignment = () => page.evaluate(() => {
       const left = (selector: string) => document.querySelector(selector)!.getBoundingClientRect().left;
       const frame = document.querySelector(".page-body")!.getBoundingClientRect();
       return {
@@ -51,6 +51,7 @@ for (const theme of THEMES) {
         }).length,
       };
     });
+    const alignment = await inspectAlignment();
     expect(alignment.title).toBeCloseTo(alignment.header);
     expect(alignment.header).toBeCloseTo(alignment.objective);
     expect(alignment.overflow).toBe(false);
@@ -59,6 +60,13 @@ for (const theme of THEMES) {
     const axe = await new AxeBuilder({ page: page as never }).withRules(["color-contrast"]).analyze();
     expect(axe.violations).toEqual([]);
     await page.screenshot({ path: info.outputPath(`${theme.mode}-hierarchy.png`), fullPage: true });
+    await page.locator(".okr-tree-copy strong").evaluateAll((titles) => {
+      for (const title of titles) title.textContent = "고객 경험 개선을 위한 긴 업무 제목과 담당 범위 확인 ".repeat(4);
+    });
+    const longTitles = await inspectAlignment();
+    expect(longTitles.overflow).toBe(false);
+    expect(longTitles.escaped).toBe(0);
+    expect(longTitles.collisions).toBe(0);
 
     await page.goto("/?view=work");
     await page.getByRole("tab", { name: "카드", exact: true }).click();
@@ -94,6 +102,7 @@ test("Korean and Latin glyphs render from local subsets without viewport font sc
   for (const width of [320, 390, 768, 1440, 1920, 2560, 3840]) {
     await page.setViewportSize({ width, height: 1000 });
     expect(await page.locator("body").evaluate((element) => getComputedStyle(element).fontSize)).toBe("16px");
+    expect(await page.locator(".page-body").evaluate((element) => getComputedStyle(element).paddingLeft)).toBe(width <= 700 ? "16px" : "32px");
     expect(await heading.evaluate((element) => getComputedStyle(element).letterSpacing)).toBe("normal");
   }
   await client.detach();

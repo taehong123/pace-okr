@@ -75,7 +75,7 @@ function colors(seed: Seed, mode: ThemeMode) {
   const dark = seed.scheme === "dark";
   const danger = dark ? radix.redDark : radix.red;
   const semantic = (name: "red" | "green" | "amber" | "blue" | "purple" | "orange") => {
-    const palette = radix[dark ? `${name}Dark` : name];
+    const palette = radix[dark ? `${name}Dark` as const : name];
     return { fg: contrast(palette[10], palette[2]) >= 4.5 ? palette[10] : palette[11], bg: palette[2] };
   };
   return {

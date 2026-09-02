@@ -2509,7 +2509,7 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
 
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 200px minmax(0, 1fr); }
-  .page-body { padding: 30px 28px 56px; }
+  .page-body { padding: var(--space-8) var(--space-8) 4rem; }
   .home-layout { grid-template-columns: 1fr; gap: 28px; }
   .okr-setup-fields { grid-template-columns: 1fr; }
   .page-header:has(.page-create-actions) { flex-wrap: wrap; gap: 12px; }
@@ -3077,7 +3077,7 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
 @media (min-width: 1800px) {
   .app-shell, .app-loading-shell { grid-template-columns: 16rem minmax(0, 1fr); }
   .workspace-topbar, .app-loading-topbar { min-height: var(--row-height); }
-  .page-body, .app-loading-body { width: min(100rem, 100%); min-height: calc(100vh - var(--row-height)); padding: 32px 56px 68px; }
+  .page-body, .app-loading-body { width: min(100rem, 100%); min-height: calc(100vh - var(--row-height)); padding: var(--space-8) var(--space-8) 4rem; }
   .page-header { min-height: 69px; }
 
   .workspace-switcher { height: 45px; grid-template-columns: 30px minmax(0, 1fr) 17px; gap: 10px; padding: 4px 8px; }

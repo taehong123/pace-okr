@@ -898,15 +898,15 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(customerGuide, /다른 고객의 Slack이나 운영자의 테스트 Slack과 연결되지 않는다/);
 });
 
-test("uses warm-neutral KR and Initiative hierarchy surfaces", async () => {
+test("uses theme-specific KR and Initiative hierarchy surfaces", async () => {
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   const themes = await readFile(new URL("../lib/themes.ts", import.meta.url), "utf8");
   assert.match(themes, /"okr-card-bg": "bg-raised"/);
-  assert.match(themes, /"kr-badge-bg": dark \? "#43302B" : "#F6EDEA"/);
-  assert.match(themes, /"kr-badge-text": dark \? "#D4B3A5" : "#7D5E54"/);
-  assert.match(themes, /"kr-rail": "#A18072"/);
-  assert.match(themes, /"initiative-badge-bg": dark \? "#30322E" : "#EFF1EF"/);
-  assert.match(themes, /"initiative-badge-text": dark \? "#AFB5AD" : "#60655F"/);
+  assert.match(themes, /"kr-badge-bg": seed\.accentSoft/);
+  assert.match(themes, /"kr-badge-text": seed\.accent, "kr-rail": seed\.accent/);
+  assert.match(themes, /"initiative-badge-bg": seed\.secondarySoft/);
+  assert.match(themes, /"initiative-badge-text": seed\.secondaryAccent, "initiative-rail": seed\.secondaryAccent/);
+  assert.match(themes, /"progress-fill": seed\.accent/);
   assert.match(styles, /\.hierarchy-kind-key_result \{[^}]*border-left: 2px solid var\(--kr-rail\)[^}]*box-shadow: none/);
   assert.match(styles, /\.hierarchy-kind-initiative \{[^}]*border-left: 2px solid var\(--initiative-rail\)[^}]*box-shadow: none/);
   assert.match(styles, /\.hierarchy-kind-initiative \.initiative-execution-summary \{ color: var\(--muted\); \}/);
