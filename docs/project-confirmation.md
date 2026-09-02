@@ -7,6 +7,8 @@ from MCP (including cached legacy `create_item` calls) or integration-token
 `POST /api/items` requests first create an unsaved review. A browser session for
 the same user and workspace must choose a current Initiative, check the final
 summary and click Create. No candidate is preselected, even if only one exists.
+Integration-token bulk OKR plans containing a Project are rejected before any
+ancestors are created; that endpoint cannot bypass the review flow.
 
 `prepare_work` includes bounded Initiative, KR and Objective descriptions and
 searches their titles/descriptions. Candidate order is recency, not relevance.

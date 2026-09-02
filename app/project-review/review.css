@@ -1,6 +1,6 @@
 .project-review-page { min-height: 100vh; background: var(--paper); color: var(--ink); padding: 24px 20px 72px; }
 .project-review-page > header { display: flex; justify-content: space-between; gap: 16px; max-width: 860px; margin: 0 auto; padding: 12px 0 22px; border-bottom: 1px solid var(--line); color: var(--muted); }
-.project-review-page a { color: var(--link); }
+.project-review-page a { color: var(--text-link); }
 .project-review-page > header a { font-weight: 750; color: var(--ink); text-decoration: none; }
 .project-review-page article { max-width: 860px; margin: 32px auto 0; }
 .project-review-page h1 { margin: 0 0 10px; font-size: clamp(23px, 4vw, 30px); line-height: 1.4; }
@@ -17,7 +17,8 @@
 .project-review-page dd { margin: 0; overflow-wrap: anywhere; font-size: 14px; }
 .project-review-page button, .project-review-page .review-primary { min-height: 44px; padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-control, 5px); background: var(--raised); color: var(--ink); cursor: pointer; font-weight: 650; font-size: 13px; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
 .project-review-page .review-primary { background: var(--button-primary-bg); color: var(--button-primary-fg); border-color: var(--button-primary-bg); }
-.project-review-page button:disabled { opacity: .5; cursor: not-allowed; }
+.project-review-page button:disabled { opacity: 1; background: var(--button-disabled-bg); color: var(--button-disabled-fg); border-color: var(--line); cursor: not-allowed; }
+.project-review-page :is(button, a, input, summary):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
 .project-review-page .review-candidate { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 12px; padding: 18px; margin: 12px 0; border: 1px solid var(--line-strong); border-radius: var(--radius-control, 5px); background: var(--raised); cursor: pointer; }
 .project-review-page .review-candidate.selected { outline: 2px solid var(--focus); outline-offset: 1px; }
 .project-review-page .review-candidate > span { display: grid; gap: 9px; overflow-wrap: anywhere; line-height: 1.55; font-size: 13px; }
@@ -28,7 +29,8 @@
 .project-review-page .review-search { display: grid; gap: 8px; margin: 24px 0 16px; }
 .project-review-page .review-search > label { font-size: 13px; font-weight: 650; }
 .project-review-page .review-search > div { display: flex; gap: 8px; }
-.project-review-page .review-search input { min-width: 0; flex: 1; min-height: 44px; padding: 10px; background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--radius-control, 5px); }
+.project-review-page .review-search input { min-width: 0; flex: 1; min-height: 44px; padding: 10px; background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--line-strong); border-radius: var(--radius-control, 5px); }
+.project-review-page .review-search input::placeholder { color: var(--input-placeholder); }
 .project-review-page .review-confirm > label { display: flex; gap: 10px; align-items: flex-start; line-height: 1.6; margin: 22px 0; font-size: 14px; }
 .project-review-page .review-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .project-review-page .review-error { padding: 14px; color: var(--danger-fg, var(--red)); border: 1px solid var(--line-strong); border-radius: 5px; background: var(--danger-bg, var(--surface)); }

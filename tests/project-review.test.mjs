@@ -20,6 +20,7 @@ const billingSource = await readFile(new URL("../lib/billing.ts", import.meta.ur
 const billingAst = ts.createSourceFile("billing.ts", billingSource, ts.ScriptTarget.Latest, true);
 const quotaSource = billingAst.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "prepareReviewedProjectQuota").getText(billingAst);
 const permissionSource = billingAst.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "reviewedProjectPermissionGuard").getText(billingAst);
+const editorPolicySource = billingAst.statements.filter((node) => ts.isFunctionDeclaration(node) && ["memberCanWrite", "getEditorEnforcementState"].includes(node.name?.text)).map((node) => node.getText(billingAst)).join("\n");
 const paceSource = await readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8");
 const paceAst = ts.createSourceFile("pace-data.ts", paceSource, ts.ScriptTarget.Latest, true);
 const documentHelpers = compile(paceAst.statements.filter((node) => ts.isFunctionDeclaration(node) && ["prepareProjectTemplateDocument", "normalizeBlockContent", "parseBlockArray", "blocksFromPlainText", "normalizeDocumentText"].includes(node.name?.text)).map((node) => node.getText(paceAst)).join("\n"));
@@ -44,7 +45,7 @@ function fixture() {
     INSERT INTO property_definitions (id,owner_id,name,type,options,default_value,updated_at) VALUES ('budget','a','예산','number','[]','7','2026-09-02');
     INSERT INTO project_templates (id,owner_id,name,content,plain_text,updated_at) VALUES ('template','a','개발 계획','[]','승인한 본문','2026-09-02');
   `);
-  const stats = { batches: 0, beforeBatch: null, loseResponse: false, lastBatchError: null };
+  const stats = { batches: 0, beforeBatch: null, loseResponse: false, lastBatchError: null, billingEnabled: true };
   const d1 = {
     prepare(sql) {
       const bind = (...values) => ({ sql, values,
@@ -82,9 +83,10 @@ function fixture() {
       return { property, value };
     }),
   };
-  const quotaContext = { billingEnforcementEnabled: () => true, getWorkspaceSubscription: async () => ({ plan: "free" }),
-    validPlan: () => true, BILLING_PLANS: { free: { projectLimit: 3, editorLimit: 3 }, team: { editorLimit: 10 } }, kstPeriod: () => ({ key: "2026-09", resetsAt: "2026-10-01" }) };
-  const quota = compile(`const { env } = require('cloudflare:workers'); const { billingEnforcementEnabled, getWorkspaceSubscription, validPlan, BILLING_PLANS, kstPeriod } = require('quota-context');\n${quotaSource}\n${permissionSource}`, { "cloudflare:workers": { env: { DB: d1 } }, "quota-context": quotaContext });
+  const quotaContext = { billingEnforcementEnabled: () => stats.billingEnabled, getWorkspaceSubscription: async () => db.prepare("SELECT plan FROM workspace_subscriptions WHERE workspace_id = 'a'").get() ?? { plan: "free" },
+    validPlan: (plan) => ["free", "team", "business"].includes(plan), BILLING_PLANS: { free: { projectLimit: 3, editorLimit: 3 }, team: { projectLimit: 100, editorLimit: 10 }, business: { projectLimit: null, editorLimit: null } }, kstPeriod: () => ({ key: "2026-09", resetsAt: "2026-10-01" }) };
+  const runtime = { DB: d1 };
+  const quota = compile(`const { env } = require('cloudflare:workers'); const { billingEnforcementEnabled, getWorkspaceSubscription, validPlan, BILLING_PLANS, kstPeriod } = require('quota-context');\n${quotaSource}\n${permissionSource}\n${editorPolicySource}`, { "cloudflare:workers": { env: runtime }, "quota-context": quotaContext });
   class BillingLimitError extends Error { constructor(code, message, details) { super(message); this.code = code; this.details = details; } }
   const dependencies = { "cloudflare:workers": { env: { DB: d1 } }, "@/lib/project-review": core, "@/lib/pace-data": pace, "@/lib/billing": { ...quota, BillingLimitError } };
   const writer = compile(writerSource, dependencies);
@@ -104,7 +106,7 @@ function fixture() {
     "@/lib/pace-data": { ...pace, authorizeRequest: async () => auth, ensureWorkspace: async () => {} },
     "@/lib/project-review-writer": writer,
   });
-  return { db, d1, stats, writer, service, propose, approve, route };
+  return { db, d1, stats, writer, service, propose, approve, route, quota, runtime };
 }
 
 test("Proposal is not creation; defaults are visible and same-request retries reuse the pending review", async () => {
@@ -257,6 +259,23 @@ test("Approver membership, role, editor selection and plan are rechecked inside 
   }
 });
 
+test("Atomic editor guard matches the existing policy for plans, explicit selection, fallback order and grace", async () => {
+  for (const plan of ["free", "team", "business", "unknown"]) for (const selected of [false, true]) for (const grace of [false, true]) {
+    const f = fixture();
+    try {
+      f.db.prepare("INSERT INTO workspace_subscriptions (workspace_id,billing_owner_user_id,plan) VALUES ('a','user',?)").run(plan);
+      for (let index = 0; index < 4; index++) f.db.prepare("INSERT INTO workspace_members (id,workspace_id,user_id,role,status) VALUES (?,'a',?,'member','active')").run(`test-${index}`, `test-${index}`);
+      if (selected) f.db.exec("INSERT INTO workspace_editor_selections (workspace_id,member_id,selected) VALUES ('a','peer',1)");
+      if (grace) { f.runtime.BILLING_ENFORCEMENT_STARTED_AT = new Date().toISOString(); f.db.exec("UPDATE workspaces SET created_at = '2020-01-01' WHERE id = 'a'"); }
+      for (const member of f.db.prepare("SELECT user_id,role FROM workspace_members WHERE workspace_id='a'").all()) {
+        const guard = f.quota.reviewedProjectPermissionGuard("a", member.user_id);
+        const actual = Boolean(f.db.prepare(`SELECT ${guard.sql} AS allowed`).get(...guard.bindings).allowed);
+        assert.equal(actual, await f.quota.memberCanWrite("a", member.user_id, member.role), `${plan}/${selected}/${grace}/${member.user_id}`);
+      }
+    } finally { f.db.close(); }
+  }
+});
+
 test("Template precedes the approved description, with fresh block IDs and synchronized plain text", async () => {
   const f = fixture();
   try {
@@ -310,4 +329,14 @@ test("REST integration token cannot bypass Project review by claiming source=web
   });
   const response = await route.POST(new Request("https://okrptr.com/api/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "임의 생성 시도", kind: "project", parentId: "i", source: "web" }) }));
   assert.equal(response.status, 202); assert.equal((await response.json()).created, false); assert.equal(created, 0);
+});
+
+test("Bulk OKR plan cannot bypass Project review or create ancestors before rejecting", async () => {
+  let creates = 0;
+  const route = compile(await readFile(new URL("../app/api/okr-plan/route.ts", import.meta.url), "utf8"), {
+    "@/lib/pace-data": { authorizeRequest: async () => ({ ...identity, apiToken: true }), ensureWorkspace: async () => {}, createOkrPlan: async () => { creates++; } },
+    "@/lib/billing": { BillingLimitError: class extends Error {} },
+  });
+  const response = await route.POST(new Request("https://okrptr.com/api/okr-plan", { method: "POST", body: JSON.stringify({ cycleId: "cycle", objective: "임의 목적", keyResult: "임의 KR", initiative: "임의 연결", project: "우회 생성" }) }));
+  assert.equal(response.status, 409); assert.equal((await response.json()).created, false); assert.equal(creates, 0);
 });

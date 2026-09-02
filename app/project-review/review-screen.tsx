@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import type { InitiativeChoice, ProjectReview } from "@/lib/project-review";
 import "./review.css";
@@ -24,6 +24,7 @@ export default function ProjectReviewScreen() {
   const [selection, setSelection] = useState<InitiativeChoice | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [deferred, setDeferred] = useState(false);
+  const submitting = useRef(false);
 
   const requestDetails = useCallback(() => {
     const params = new URLSearchParams(window.location.search);
@@ -56,7 +57,8 @@ export default function ProjectReviewScreen() {
   }
 
   async function decide(decision: "approve" | "cancel") {
-    if (!data || busy || (decision === "approve" && (!selection || !confirmed))) return;
+    if (!data || submitting.current || (decision === "approve" && (!selection || !confirmed))) return;
+    submitting.current = true;
     setBusy(true); setError("");
     try {
       const { headers } = requestDetails();
@@ -71,7 +73,7 @@ export default function ProjectReviewScreen() {
       }
       setData({ ...data, review: result.review });
     } catch (failure) { setError(failure instanceof Error ? failure.message : "응답이 불확실합니다. 다시 생성하지 말고 처리 결과를 확인해 주세요."); }
-    finally { setBusy(false); }
+    finally { submitting.current = false; setBusy(false); }
   }
 
   function choose(candidate: InitiativeChoice) { setSelection(candidate); setConfirmed(false); setDeferred(false); }
@@ -107,9 +109,9 @@ export default function ProjectReviewScreen() {
           {review.templatePreview !== null && <details><summary>적용할 템플릿 본문 미리보기</summary><p className="review-help">템플릿 뒤에 위의 범위·완료 기준이 이어서 저장됩니다.</p><p className="review-description">{review.templatePreview || "빈 본문"}</p>{review.templatePreview.length === 4000 && <p className="review-help">앞 4,000자만 표시했습니다. 전체 내용은 OKRPTR 템플릿에서 확인해 주세요.</p>}</details>}
           <p className="review-help">이 내용이 다르면 생성하지 말고 GPT에 수정을 요청해 주세요. 미지정 담당자·기한이나 하위 Task를 임의로 추가하지 않습니다.</p>
         </section>
-        {review.state === "created" ? <section className="review-notice" role="status"><h2>확인한 내용으로 생성했습니다</h2><p>{review.selectedParent?.path.join(" → ")}</p><Link href="/?view=projects">Project 목록으로 이동</Link></section>
+        {review.state === "created" ? <section className="review-notice" role="status"><h2>확인한 내용으로 생성했습니다</h2><p>{review.selectedParent?.path.join(" → ")}</p><Link href={`/?project=${encodeURIComponent(review.projectId)}`}>생성한 Project 열기</Link></section>
           : review.state === "cancelled" ? <section className="review-notice" role="status"><h2>생성을 취소했습니다</h2><p>Project를 만들지 않았습니다.</p><Link href="/">OKRPTR로 돌아가기</Link></section>
-            : !pending ? <section className="review-notice" role="status"><h2>저장 결과 확인이 필요합니다</h2><p>처리 상태: {review.state === "creating" ? "처리 중" : "처리 실패"}. 중복 생성을 막기 위해 이 요청을 다시 실행하지 않습니다.{data?.existingProjectId ? " 이 요청의 Project가 있으니 저장된 내용을 확인해 주세요." : " 완료 여부를 확인한 뒤 다음 작업을 진행해 주세요."}</p><button type="button" onClick={() => void reload(query)} disabled={loading}>처리 결과 확인</button><Link href="/?view=projects">Project 목록 확인</Link></section> : <>
+            : !pending ? <section className="review-notice" role="status"><h2>저장 결과 확인이 필요합니다</h2><p>처리 상태: {review.state === "creating" ? "처리 중" : "처리 실패"}. 중복 생성을 막기 위해 이 요청을 다시 실행하지 않습니다.{data?.existingProjectId ? " 이 요청의 Project가 있으니 저장된 내용을 확인해 주세요." : " 완료 여부를 확인한 뒤 다음 작업을 진행해 주세요."}</p><button type="button" onClick={() => void reload(query)} disabled={loading}>처리 결과 확인</button><Link href="/?view=work">Project 목록 확인</Link></section> : <>
               <section className="review-choices" aria-labelledby="initiative-heading">
                 <h2 id="initiative-heading">어느 Initiative에 기여하나요?</h2>
                 <p className="review-help">전체 경로와 근거를 보고 선택하세요. 하나뿐인 후보도 자동 선택하지 않습니다.</p>
