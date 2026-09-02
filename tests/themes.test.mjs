@@ -8,7 +8,7 @@ import postcss from "postcss";
 const source = await readFile(new URL("../lib/themes.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 const { THEMES, DEFAULT_THEME, isThemeMode, themeColorScheme, themeCss, themeBootstrapScript } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
-const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+const css = (await Promise.all(["../app/globals.css", "../app/project-review/review.css"].map((path) => readFile(new URL(path, import.meta.url), "utf8")))).join("\n");
 const luminance = (hex) => {
   const c = hex.slice(1).match(/../g).map((part) => parseInt(part, 16) / 255).map((v) => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4);
   return c[0] * .2126 + c[1] * .7152 + c[2] * .0722;

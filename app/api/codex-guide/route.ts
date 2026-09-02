@@ -2,14 +2,14 @@ import { WORK_CLASSIFICATION, WORK_FIELDS, WORKFLOW_INSTRUCTIONS } from "@/lib/w
 
 const guide = {
   service: "OKRPTR Codex conversation API",
-  version: "1.2",
+  version: "1.3",
   quickStart: {
     classification: WORK_CLASSIFICATION,
     fields: WORK_FIELDS,
     workflow: WORKFLOW_INSTRUCTIONS,
     firstRead: "GET /api/work-context?kind=task|project|routine|objective|key_result|initiative|unsure&query=<short-parent-topic>&memberQuery=<person>",
-    mcp: "prepare_work → one essential clarification only if needed → create_item / create_tasks / create_routine. Skip prepare_work if IDs are already known; do not re-read after a successful save.",
-    note: "prepare_work supplies context, not an LLM classification. The current conversation explains the recommended type and respects the user's choice. Missing optional owner/date values do not block a clear save request.",
+    mcp: "Project: prepare_work if needed → explain relevant Initiative recommendations/alternatives → propose_project → user directly selects and approves at review URL → get_project_review after the user reports approval. Task/Routine: prepare_work if needed → create_item/create_tasks/create_routine. Never bypass Project review even when IDs are known.",
+    note: "prepare_work supplies context, not approval or an LLM relevance ranking. Project requests require final user review regardless of reviewBeforeCreate. No suitable Initiative means offer other search or defer, never choose an unrelated parent. Configured defaults are displayed in the final proposal.",
   },
   authentication: {
     header: "Authorization: Bearer <OKRPTR_ACCESS_TOKEN>",
@@ -28,7 +28,7 @@ const guide = {
     { purpose: "Read shared capture and structure rules", method: "GET", path: "/api/workspace-rules" },
     { purpose: "Update shared rules", method: "PUT", path: "/api/workspace-rules", body: "Any of captureInstruction, structureInstruction, routineInstruction, defaultPriority, defaultCadence, reviewBeforeCreate" },
     { purpose: "List or search active items", method: "GET", path: "/api/items?kind=&status=&cadence=&parentId=&q=&includeArchived=false" },
-    { purpose: "Create an item", method: "POST", path: "/api/items", body: "title required; optional description, kind, cycleId, parentId, routineId, status, priority, cadence, progress, dueDate, driMemberId, workerMemberIds, assigneeMemberId, and Project-only templateId; use source=codex" },
+    { purpose: "Create a non-Project item; token-authenticated Project requests only stage a review (202, created=false)", method: "POST", path: "/api/items", body: "title required; optional description, kind, cycleId, parentId, routineId, status, priority, cadence, progress, dueDate, driMemberId, workerMemberIds, assigneeMemberId, properties and Project-only templateId. For Projects, show returned review URL and wait for the user's direct selection/approval. Do not call the browser approval API with a token." },
     { purpose: "Update or link an item", method: "PATCH", path: "/api/items", body: "id required; include only fields to change, including parentId or routineId" },
     { purpose: "List OKR files/cycles", method: "GET", path: "/api/okr-cycles" },
     { purpose: "Create an OKR cycle", method: "POST", path: "/api/okr-cycles", body: "name, department, startDate, endDate, status" },
@@ -70,7 +70,8 @@ const guide = {
     "Use work-context once when interpreting new work needs workspace context; it already contains workspace rules. Reuse it within the same conversation and workspace.",
     "Classify by completion boundary: one action is Task, a finite deliverable containing independent Tasks is Project, recurring execution is Routine. Ask one short question when ambiguous; respect the user's choice.",
     "Use General only for a clear Task without a known container. A Project without its Initiative remains an unsaved conversation draft; never invent ancestors or silently downgrade it.",
-    "Apply all user-supplied fields in one save. Only ask required gaps, not every optional field. Use the successful write response as confirmation without listing again.",
+    "Project creation always requires recommendations with reasons/ancestor paths, alternatives including defer, and final user approval in the returned review URL. A parent ID alone or general creation intent is never confirmation of an AI-chosen connection. Do not manipulate the approval UI on the user's behalf.",
+    "Preserve all user-supplied fields; show defaulted values in Project review. Other clear writes may save once without optional-field questionnaires. A pending review or HTTP 202 is not successful Project creation.",
     "Treat Project templates as body-only copies: never infer or copy properties, assignments, or Tasks from a template.",
     "List results are bounded: a returned row count is not necessarily the total workspace count. Do not claim completeness without verifying it.",
     "Do not delete cycles, routines, groups, members, or workspace data without immediate user confirmation.",

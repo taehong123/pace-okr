@@ -4871,11 +4871,13 @@ export async function validateItemPropertiesByName(ownerId: string, values: Reco
   const definitions = await listProjectPropertyDefinitions(ownerId);
   const byName = new Map(definitions.map((property) => [property.name.toLocaleLowerCase(), property]));
   const memberIds = new Set<string>();
+  const prepared: { property: PropertyDefinition; value: PropertyValue }[] = [];
   for (const [name, value] of Object.entries(values)) {
     const property = byName.get(name.toLocaleLowerCase());
     if (!property) throw new Error(`Property not found: ${name}`);
     if (property.systemKey) throw new Error("System properties must be changed through the Project fields");
     const normalized = normalizePropertyValue(property, value);
+    prepared.push({ property, value: normalized });
     if ((property.type === "member" || property.type === "members") && normalized !== null) {
       for (const memberId of Array.isArray(normalized) ? normalized : [normalized]) {
         if (typeof memberId === "string") memberIds.add(memberId);
@@ -4884,10 +4886,11 @@ export async function validateItemPropertiesByName(ownerId: string, values: Reco
   }
   if (memberIds.size) {
     const found = await getDb().select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(
-      eq(workspaceMembers.workspaceId, ownerId), eq(workspaceMembers.status, "active"), inArray(workspaceMembers.id, [...memberIds]),
+      eq(workspaceMembers.workspaceId, ownerId), eq(workspaceMembers.status, "active"), sql`${workspaceMembers.id} IN (SELECT value FROM json_each(${JSON.stringify([...memberIds])}))`,
     ));
     if (found.length !== memberIds.size) throw new Error("Property members must be active workspace members");
   }
+  return prepared;
 }
 
 function isReservedAssignmentPropertyName(name: string) {
@@ -5054,6 +5057,19 @@ export async function applyProjectTemplate(ownerId: string, projectId: string, t
     expectedVersion: document.version,
     userId,
   });
+}
+
+/** Preserve template-prepend semantics for a new Project without writing before approval. */
+export function prepareProjectTemplateDocument(template: { content: string; plainText: string }, description: string) {
+  const freshBlock = (block: Record<string, unknown>): Record<string, unknown> => ({
+    ...block, id: crypto.randomUUID(),
+    ...(Array.isArray(block.children) ? { children: block.children.map((child) => freshBlock(child as Record<string, unknown>)) } : {}),
+  });
+  const content = normalizeBlockContent(JSON.stringify([
+    ...parseBlockArray(template.content).map(freshBlock), ...blocksFromPlainText(description).map(freshBlock),
+  ]));
+  const plainText = normalizeDocumentText([template.plainText.trim(), description.trim()].filter(Boolean).join("\n\n"));
+  return { content, plainText };
 }
 
 function serializeProjectDocument(document: ProjectDocument) {

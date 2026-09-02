@@ -39,6 +39,9 @@ function fixture() {
     INSERT INTO routines VALUES ('general-a','a','General','general',1,'2026-01-01'),('r','a','주간 리뷰',NULL,1,'2026-09-02'),('paused','a','중단',NULL,0,'2026-09-02'),('private-r','b','비밀',NULL,1,'2026-09-02');
     INSERT INTO workspace_members VALUES ('me','a','user','태홍','me@example.com','owner','active'),('peer','a','peer-user','민지','peer@example.com','member','active'),('inactive','a','gone','탈퇴','gone@example.com','member','removed'),('other','b','other','타 팀','private@example.com','owner','active');
     INSERT INTO property_definitions VALUES ('budget','a','예산','number','[]','null',NULL,1,0),('off','a','예전','text','[]','null',NULL,0,1),('secret','b','비밀','text','[]','null',NULL,1,0);
+    ALTER TABLE items ADD COLUMN description TEXT NOT NULL DEFAULT '';
+    UPDATE items SET description = '신규 가입자의 온보딩 이탈을 줄인다' WHERE id = 'ini';
+    UPDATE items SET description = '가입 후 첫 핵심행동 완료율' WHERE id = 'kr';
   `);
   const stats = { batches: 0, statements: [] };
   const d1 = {
@@ -91,6 +94,10 @@ test("Project context returns only Initiative parents and active property defini
     db.exec("INSERT INTO property_definitions VALUES ('legacy-dri','a','DRI','text','[]','null',NULL,1,0)");
     const result = await intake.readWorkContext(d1, "a", "user", { kind: "project", includeMembers: false });
     assert.deepEqual(result.parents.map((row) => row.id), ["ini"]);
+    assert.equal(result.parents[0].evidence.initiative, "신규 가입자의 온보딩 이탈을 줄인다");
+    assert.equal(result.parents[0].evidence.keyResult, "가입 후 첫 핵심행동 완료율");
+    const fromEvidence = await intake.readWorkContext(d1, "a", "user", { kind: "project", query: "핵심행동", includeMembers: false });
+    assert.deepEqual(fromEvidence.parents.map((row) => row.id), ["ini"]);
     assert.deepEqual(result.projectProperties.map((row) => row.id), ["budget"]);
     assert.equal(result.projectProperties[0].defaultValue, null);
     assert.deepEqual(result.members, []);
@@ -161,6 +168,12 @@ function mcpFixture() {
     "cloudflare:workers": { env: { DB: fixtureData.d1 } },
     "@/lib/pace-data": data,
     "@/lib/work-intake": intake,
+    "@/lib/project-review": { getProjectReview: async () => ({}) },
+    "@/lib/project-review-service": { stageProjectReview: async (_auth, input, recommendations) => {
+      if (input.properties?.invalid) throw new Error("Property not found");
+      calls.push({ method: "review", input, recommendations });
+      return { id: "review", state: "awaiting_user_confirmation", url: "https://okrptr.com/project-review?id=review", expiresAt: "", summary: {}, selectedInitiative: null, recommendations, nextStep: "User must select and approve" };
+    } },
     "@modelcontextprotocol/sdk/server/mcp.js": { McpServer: FakeServer },
   });
   async function call(name, args) {
@@ -168,6 +181,7 @@ function mcpFixture() {
     const { z } = require("zod");
     const parsed = z.object(definition.inputSchema).parse(args);
     const output = await callback(parsed);
+    if (output.isError) return output;
     z.object(definition.outputSchema).parse(output.structuredContent);
     return output.structuredContent;
   }
@@ -207,7 +221,7 @@ test("Invalid placement, field types, assignments and dates fail before any writ
   try {
     await f.init();
     for (const args of [
-      { kind: "project", title: "개편" },
+      { kind: "project", title: "개편", routine_id: "r" },
       { kind: "task", title: "검토", parent_id: "p", routine_id: "r" },
       { kind: "task", title: "검토", properties: { budget: 1 } },
       { kind: "task", title: "검토", assignee_member_id: "other" },
@@ -216,6 +230,23 @@ test("Invalid placement, field types, assignments and dates fail before any writ
       { kind: "project", title: "개편", parent_id: "ini", properties: { invalid: 1 } },
     ]) await assert.rejects(() => f.call("create_item", args));
     assert.equal(f.calls.length, 0);
+  } finally { f.db.close(); }
+});
+
+test("Even a known or guessed Initiative cannot directly create a Project through legacy MCP", async () => {
+  const f = mcpFixture();
+  try {
+    await f.init();
+    for (const parent_id of [undefined, "ini", "unrelated-id"]) {
+      const result = await f.call("create_item", { kind: "project", title: "결제 개편", parent_id });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /Project NOT created/);
+    }
+    const staged = await f.call("propose_project", { title: "결제 개편", recommended_initiatives: [] });
+    assert.equal(staged.review.selectedInitiative, null);
+    assert.equal(staged.review.state, "awaiting_user_confirmation");
+    assert.equal(f.calls.filter((call) => call.method === "create").length, 0);
+    assert.equal(f.calls.filter((call) => call.method === "review").length, 4);
   } finally { f.db.close(); }
 });
 
