@@ -155,9 +155,10 @@ export async function getSlackDailySettings(authorization: RequestAuthorization)
       WHERE member.workspace_id = ? AND member.status = 'active'
       ORDER BY member.created_at`).bind(authorization.ownerId).all<Record<string, string | number | null>>(),
     env.DB.prepare(`SELECT publication.id, publication.submission_id, publication.channel_id, publication.error,
-        publication.attempts, publication.updated_at, submission.member_name, submission.scrum_date
+        publication.attempts, publication.updated_at, COALESCE(member.display_name, submission.member_name) AS member_name, submission.scrum_date
       FROM slack_daily_publications AS publication
       INNER JOIN daily_submissions AS submission ON submission.id = publication.submission_id
+      LEFT JOIN workspace_members AS member ON member.workspace_id = submission.owner_id AND member.id = submission.member_id
       WHERE publication.owner_id = ? AND publication.status = 'failed'
       ORDER BY publication.updated_at DESC LIMIT 50`).bind(authorization.ownerId).all<Record<string, string | number | null>>(),
   ]);
@@ -667,11 +668,14 @@ async function cancelScheduledReminder(token: string, reminder: Record<string, s
 }
 
 async function loadSubmission(id: string) {
-  const row = await env.DB.prepare("SELECT * FROM daily_submissions WHERE id = ? LIMIT 1").bind(id).first<Record<string, string | number | null>>();
+  const row = await env.DB.prepare(`SELECT submission.*, member.display_name AS current_member_name
+    FROM daily_submissions AS submission
+    LEFT JOIN workspace_members AS member ON member.workspace_id = submission.owner_id AND member.id = submission.member_id
+    WHERE submission.id = ? LIMIT 1`).bind(id).first<Record<string, string | number | null>>();
   if (!row) return null;
   const snapshots = await env.DB.prepare("SELECT * FROM daily_task_snapshots WHERE submission_id = ? ORDER BY sort_order").bind(id).all<Record<string, string | number | null>>();
   return {
-    id: String(row.id), memberId: row.member_id ? String(row.member_id) : null, memberName: String(row.member_name), memberEmail: String(row.member_email),
+    id: String(row.id), memberId: row.member_id ? String(row.member_id) : null, memberName: String(row.current_member_name || row.member_name), memberEmail: String(row.member_email),
     date: String(row.scrum_date), version: Number(row.version), yesterdayNote: String(row.yesterday_note), todayNote: String(row.today_note),
     blockersNote: String(row.blockers_note), noPlannedTasks: Boolean(row.no_planned_tasks),
     skipReason: normalizeDailySkipReason(row.skip_reason), skipNote: String(row.skip_note || ""),
