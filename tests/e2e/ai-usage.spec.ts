@@ -86,8 +86,9 @@ test("AI meters use theme tokens, real self-hosted glyphs, wrap long labels and 
   await installApiMocks(page, { preserveStorage: true });
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/?view=okr");
   for (const theme of ["white", "dark"]) {
-    await page.addInitScript((value) => localStorage.setItem("okrptr.theme", value), theme);
+    await page.evaluate((value) => localStorage.setItem("okrptr.theme", value), theme);
     await openChat(page);
     const meter = page.locator(".chat-ai-usage .ai-usage-meter");
     await expect(meter).toContainText("24% 사용");
@@ -102,7 +103,7 @@ test("AI meters use theme tokens, real self-hosted glyphs, wrap long labels and 
       expect(await track.evaluate((el) => {
         const probe = document.createElement("i");
         probe.style.backgroundColor = "var(--progress-fill)";
-        el.append(probe);
+        el.appendChild(probe);
         const expected = getComputedStyle(probe).backgroundColor;
         probe.remove();
         return getComputedStyle(el.querySelector("i")!).backgroundColor === expected;
