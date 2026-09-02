@@ -42,6 +42,8 @@ function fixture(workspaceId = "sort-workspace", memberId = "sort-member") {
 async function setup(page: Page) {
   let data = fixture();
   const requests: string[] = [];
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => localStorage.setItem("okrptr.intro-language", "ko"));
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -50,17 +52,21 @@ async function setup(page: Page) {
       : path === "/api/items" ? { items: data.items }
       : path === "/api/routines" ? { routines: data.routines }
       : path === "/api/team" ? data.team
+      : path === "/api/checklists" ? { items: [{ id: "check-1", taskId: "Task today high", title: "Existing checklist", completed: true }] }
+      : path === "/api/data-connections" ? { connections: [] }
+      : path === "/api/project-templates" ? { templates: [] }
+      : path === "/api/project-documents" ? { document: { id: "document-1", projectId: "Project earlier", content: JSON.stringify([{ type: "paragraph", content: "Existing project document" }]), plainText: "Existing project document", version: 1, updatedAt: now } }
       : path === "/api/account/marketing-consent" ? { consent: { marketingDataConsent: true, advertisingEmailConsent: true, needsReaffirmation: false, marketingEligible: true } }
       : {};
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   });
-  return { requests, setScope: (workspaceId: string, memberId: string) => { data = fixture(workspaceId, memberId); } };
+  return { requests, errors, setScope: (workspaceId: string, memberId: string) => { data = fixture(workspaceId, memberId); } };
 }
 
 const rows = (page: Page, kind: string) => page.locator(".my-work-section").filter({ has: page.locator("header b", { hasText: new RegExp(`^${kind}$`) }) }).locator(".my-work-item b");
 
 test("my work sorts instantly within Task and Project while preserving filters and details", async ({ page }) => {
-  const { requests } = await setup(page);
+  const { requests, errors } = await setup(page);
   await page.goto("/?view=my_work");
   const due = page.getByRole("button", { name: "기한순", exact: true });
   const priority = page.getByRole("button", { name: "우선순위순", exact: true });
@@ -79,10 +85,16 @@ test("my work sorts instantly within Task and Project while preserving filters a
   await expect(page.locator(".my-work-item").filter({ hasText: /Task archived|Task unassigned|Task other member/ })).toHaveCount(0);
   await page.locator(".my-work-item").filter({ has: page.getByText("Task today high", { exact: true }) }).click();
   await expect(page).toHaveURL(/task=Task(?:%20|\+)today(?:%20|\+)high/);
+  await expect(page.locator(".task-title-input")).toHaveValue("Task today high");
+  await expect(page.locator(".checklist-row")).toContainText("Existing checklist");
+  expect(errors).toEqual([]);
   await page.goto("/?view=my_work");
   await expect(priority).toHaveAttribute("aria-pressed", "true");
   await page.locator(".my-work-item").filter({ has: page.getByText("Project earlier", { exact: true }) }).click();
   await expect(page).toHaveURL(/project=Project(?:%20|\+)earlier/);
+  await expect(page.locator(".project-title-input")).toHaveValue("Project earlier");
+  await expect(page.locator(".project-document-section .bn-editor")).toContainText("Existing project document");
+  expect(errors).toEqual([]);
 });
 
 test("sort preference survives navigation and reload and stays scoped to workspace and member", async ({ page }) => {
