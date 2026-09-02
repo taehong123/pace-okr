@@ -96,7 +96,7 @@ test("provider revoke cannot revoke another AI and account reuse does not claim 
   await expect(dialog.locator(".ai-connection-state")).toHaveText("연결됨");
 });
 
-test("AI modal scrolls at narrow widths without clipping and meets accessible dialog/tab semantics", async ({ page, isMobile }) => {
+test("AI modal scrolls at narrow widths without clipping and meets accessible dialog/tab semantics", async ({ page, isMobile }, testInfo) => {
   const dialog = await openConnections(page, isMobile);
   for (const name of ["ChatGPT", "Claude", "Claude Code"]) {
     await dialog.getByRole("tab", { name, exact: true }).click();
@@ -109,8 +109,26 @@ test("AI modal scrolls at narrow widths without clipping and meets accessible di
     expect(dimensions.body).toBeLessThanOrEqual(dimensions.viewport);
     const tabHeight = await dialog.getByRole("tab", { name, exact: true }).evaluate((element) => element.getBoundingClientRect().height);
     expect(tabHeight).toBeGreaterThanOrEqual(44);
+    const closeSize = await dialog.getByRole("button", { name: "AI 연결 닫기" }).boundingBox();
+    expect(closeSize!.width).toBeGreaterThanOrEqual(44);
+    expect(closeSize!.height).toBeGreaterThanOrEqual(44);
     await expect(dialog.getByRole("button", { name: "닫기", exact: true })).toBeInViewport();
+    if (name === "ChatGPT") await page.screenshot({ path: testInfo.outputPath("ai-connections.png") });
   }
   await dialog.getByRole("button", { name: "닫기", exact: true }).click();
   await expect(dialog).toHaveCount(0);
+});
+
+test("AI connection panels preserve contrast in all six themes", async ({ page, isMobile }) => {
+  test.skip(isMobile);
+  test.setTimeout(90_000);
+  const dialog = await openConnections(page, false);
+  for (const theme of ["white", "beige", "gray", "dark", "neon", "cyberpunk"]) {
+    await page.evaluate((mode) => document.documentElement.setAttribute("data-theme", mode), theme);
+    for (const name of ["ChatGPT", "Claude", "Claude Code"]) {
+      await dialog.getByRole("tab", { name, exact: true }).click();
+      const result = await new AxeBuilder({ page: page as unknown as ConstructorParameters<typeof AxeBuilder>[0]["page"] }).include(".ai-connections").withRules(["color-contrast"]).analyze();
+      expect(result.violations, `${theme} / ${name}`).toEqual([]);
+    }
+  }
 });
