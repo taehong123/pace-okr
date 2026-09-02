@@ -31,6 +31,8 @@ a bot webhook. Unstructured captures land in the protected General routine and c
 
 ## MCP tools
 
+- `prepare_work` — one bounded read for classification criteria, required/optional fields, parent paths, member IDs, workspace rules and Project property definitions
+- `create_tasks` — atomic batch of explicitly supplied Task titles sharing a container and common fields
 - `capture_item`, `create_item`, `list_items`, `update_item`, `link_item`
 - `review_period`
 - `list_properties`, `create_property`, `set_property_value`, `delete_property`
@@ -51,6 +53,20 @@ email. Viewer access is enforced as read-only by the API.
 Private groups are only listed for their members and workspace administrators.
 Group Leads can edit their group and manage its membership; only workspace
 Owners and Admins can create, archive, restore, or permanently delete groups.
+
+### Fast conversational intake
+
+Classify once in the current conversation, fetch missing connection context once,
+ask only essential gaps together, and save all supplied fields in one call. Do not
+use a second LLM to classify, manufacture OKR ancestors, or re-list after success.
+`create_item` supports Task `routine_id` and explicit `cycle_id`; linked children
+inherit the selected parent's cycle. `link_item` preserves status.
+
+The same guide is available through `/api/codex-guide` and the read-only
+`/api/work-context` endpoint. See [the intake contract and evaluation plan](docs/fast-work-intake.md).
+Run `node --test --test-concurrency=1 tests/work-intake.test.mjs` for contract and
+SQLite tests, and `node scripts/benchmark-mcp-intake.mjs` for a read-only workflow
+comparison. The benchmark defaults to localhost and excludes ChatGPT generation.
 
 ## Local development
 
