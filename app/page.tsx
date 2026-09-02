@@ -1085,7 +1085,7 @@ function WorkspaceApp() {
         showNotice("선택한 Slack 워크스페이스를 연결했습니다.");
       } else if (slackResult === "setup_required") {
         setSlackOAuthIssue(null);
-        showNotice("Slack 연결이 완료되었습니다. 데일리 초기 설정을 마쳐 주세요.");
+        showNotice("OKRPTR 연결이 완료되었습니다. 데일리 초기 설정을 마쳐 주세요.");
       } else if (Object.prototype.hasOwnProperty.call(slackOAuthIssueCopy, slackResult)) {
         const issue = slackResult as SlackOAuthIssue;
         setSlackOAuthIssue(issue);
@@ -6794,7 +6794,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
 
   if (!active && !admin) return null;
   if (!connected) return <div className="slack-daily-locked"><LockKeyhole size={18} /><div><b>Slack 연결 후 데일리 봇을 설정할 수 있습니다</b><p>기존 설정은 그대로 유지되며 Slack 연결을 완료하면 다시 사용할 수 있습니다.</p></div></div>;
-  if (!canManage) return <section className="slack-connected-summary"><div><CheckCircle2 size={18} /><p><b>{teamName} 연결 완료</b><span>관리자가 설정한 시간에 내 Slack DM으로 데일리를 받을 수 있습니다.</span></p></div></section>;
+  if (!canManage) return <section className="slack-connected-summary"><div><CheckCircle2 size={18} /><p><b>OKRPTR 연결 완료</b><span>연결된 Slack 워크스페이스: {teamName}</span><span>관리자가 설정한 시간에 내 Slack DM으로 데일리를 받을 수 있습니다.</span></p></div></section>;
   if (loadError) return <section className="integration-state-message error"><AlertTriangle size={17} /><div><b>Slack 설정을 불러오지 못했습니다</b><p>연결은 유지됩니다. 잠시 후 다시 확인해 주세요.</p></div><button onClick={() => { loadedRef.current = false; setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }}>다시 불러오기</button></section>;
   if (!admin) return <div className="slack-daily-loading"><LoaderCircle className="spin" size={15} />데일리 설정 확인 중</div>;
 

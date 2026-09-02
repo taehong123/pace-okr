@@ -4,6 +4,25 @@ import test from "node:test";
 
 const projectRoot = new URL("../", import.meta.url);
 
+test("brands connection completion as OKRPTR while preserving workspace names", async () => {
+  const [promptRoute, slackStatus, page] = await Promise.all([
+    readFile(new URL("../app/api/integration-tokens/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/slack/status/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(promptRoute, /연결 서비스: OKRPTR/);
+  assert.match(promptRoute, /실제 연결 확인에 성공한 경우 완료 안내는 'OKRPTR 연결이 완료되었습니다\.'/);
+  assert.match(promptRoute, /연결된 워크스페이스: …/);
+  assert.match(promptRoute, /확인에 실패하면 완료로 안내하지 않습니다/);
+  assert.match(promptRoute, /워크스페이스: \$\{workspaceName\}/);
+  assert.match(slackStatus, /OKRPTR 연결이 완료되었습니다\./);
+  assert.doesNotMatch(slackStatus, /\$\{connection\?\.teamName[^\n]*연결/);
+  assert.match(slackStatus, /connectedTeam: connection \? \{ id: connection\.teamId, name: connection\.teamName \}/);
+  assert.match(page, /<b>OKRPTR 연결 완료<\/b>/);
+  assert.match(page, /연결된 Slack 워크스페이스: \{teamName\}/);
+  assert.doesNotMatch(page, /\{teamName\} 연결 완료/);
+});
+
 async function render(path = "/") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}-${path}`);

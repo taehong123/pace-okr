@@ -30,8 +30,8 @@ export async function GET(request: Request) {
       : state === "reauthorization_required"
         ? "데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요."
         : state === "setup_required"
-          ? `${connection?.teamName || "Slack"} 연결을 마쳤습니다. 데일리 발송 설정을 완료해 주세요.`
-        : `${connection?.teamName || "Slack"} 워크스페이스가 연결되어 있습니다.`;
+          ? "OKRPTR 연결이 완료되었습니다. 데일리 발송 설정을 완료해 주세요."
+          : "OKRPTR 연결이 완료되었습니다.";
   return Response.json({
     slack: {
       ...serializeSlackConnection(connection, {
