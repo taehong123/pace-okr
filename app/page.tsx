@@ -66,6 +66,8 @@ import { ConfirmationProvider, OverlayDialog, useAppConfirm } from "./overlay-di
 import { OkrFileSurface, type OkrFileCycleSummary } from "./okr-file-surface";
 import BillingView, { ProjectQuotaBadge } from "./billing-view";
 import { readMyWorkSort, saveMyWorkSort, sortMyWorkItems, type MyWorkSort } from "@/lib/my-work-sort";
+import { DEFAULT_THEME, THEME_STORAGE_KEY, isThemeMode, themeColorScheme, type ThemeMode } from "@/lib/themes";
+import { ThemePicker } from "./theme-picker";
 
 type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "data" | "scrum" | "recommendations" | "reviews" | "trash" | "integrations" | "billing";
 const urlViews = new Set<View>(["my_work", "inbox", "work", "routines", "okr", "data", "scrum", "recommendations", "reviews", "trash", "integrations", "billing"]);
@@ -109,15 +111,9 @@ type GroupVisibility = "open" | "private";
 type GroupRole = "lead" | "member";
 type WorkspaceSettingsTab = "general" | "members" | "groups" | "projects" | "summary" | "integrations" | "danger" | "scheduled";
 type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
-type ThemeMode = "beige" | "gray" | "dark";
 type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "local" };
 type AuthState = { status: "loading" | "authenticated" | "unauthenticated"; user: AuthUser | null; reason: string | null };
 
-const THEME_STORAGE_KEY = "okrptr.theme";
-
-function isThemeMode(value: string | null | undefined): value is ThemeMode {
-  return value === "beige" || value === "gray" || value === "dark";
-}
 
 type ItemAssignment = {
   id: string;
@@ -894,9 +890,9 @@ function WorkspaceApp() {
   const [freshWorkspaceDataReady, setFreshWorkspaceDataReady] = useState(false);
   const [workspaceDataAttempt, setWorkspaceDataAttempt] = useState(0);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
-    if (typeof document === "undefined") return "beige";
+    if (typeof document === "undefined") return DEFAULT_THEME;
     const preference = document.documentElement.dataset.themePreference;
-    return isThemeMode(preference) ? preference : "beige";
+    return isThemeMode(preference) ? preference : DEFAULT_THEME;
   });
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
   const assistantAutoHandledWorkspaceRef = useRef<string | null>(null);
@@ -918,10 +914,10 @@ function WorkspaceApp() {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+    try { window.localStorage.setItem(THEME_STORAGE_KEY, themeMode); } catch { /* A blocked preference store must not prevent theme switching. */ }
     document.documentElement.dataset.themePreference = themeMode;
     document.documentElement.dataset.theme = themeMode;
-    document.documentElement.style.colorScheme = themeMode === "dark" ? "dark" : "light";
+    document.documentElement.style.colorScheme = themeColorScheme(themeMode);
   }, [themeMode]);
 
   useEffect(() => {
@@ -1041,7 +1037,8 @@ function WorkspaceApp() {
     const cached = readCachedIntegrationStatuses(integrationWorkspaceId);
     let nextGoogle = cached?.google ?? null;
     let nextSlack = cached?.slack ?? null;
-    // Cached status is provisional while the requests below refresh it.
+    // Cached status is provisional; render it without blocking user interaction
+    // while the authoritative requests below refresh it.
     startTransition(() => {
       setGoogleStatus(cached?.google ?? null);
       setSlackStatus(cached?.slack ?? null);
@@ -5687,12 +5684,7 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
 }
 
 function PropertyPanel({ user, displayName, themeMode, onThemeModeChange, onClose, onSignOut }: { user: AuthUser | null; displayName: string; themeMode: ThemeMode; onThemeModeChange: (mode: ThemeMode) => void; onClose: () => void; onSignOut: () => void }) {
-  const themes: { mode: ThemeMode; label: string }[] = [
-    { mode: "beige", label: "베이지" },
-    { mode: "gray", label: "그레이" },
-    { mode: "dark", label: "다크" },
-  ];
-  return <OverlayDialog title="내 설정" variant="drawer" onRequestClose={() => onClose()}>{(requestClose) => <aside className="property-panel"><header><div><h2>내 설정</h2><p>내 계정과 화면 설정</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section"><h3>내 계정</h3><div className="settings-account-card"><span className="avatar">{displayName.slice(0, 1).toLocaleUpperCase()}</span><div><b>{displayName}</b><small>{user?.email || "로그인 계정"}</small></div></div></section><MarketingConsentSettings email={user?.email ?? ""} /><section className="settings-section appearance-settings"><h3>테마</h3><div className="theme-picker" role="group" aria-label="색상 테마">{themes.map(({ mode, label }) => <button className={themeMode === mode ? "active" : ""} aria-pressed={themeMode === mode} onClick={() => onThemeModeChange(mode)} key={mode}><i className={`theme-swatch theme-swatch-${mode}`} aria-hidden="true" /><span>{label}</span></button>)}</div><p>선택한 테마는 이 브라우저에 저장됩니다.</p></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section></aside>}</OverlayDialog>;
+  return <OverlayDialog title="내 설정" variant="drawer" onRequestClose={() => onClose()}>{(requestClose) => <aside className="property-panel"><header><div><h2>내 설정</h2><p>내 계정과 화면 설정</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section"><h3>내 계정</h3><div className="settings-account-card"><span className="avatar">{displayName.slice(0, 1).toLocaleUpperCase()}</span><div><b>{displayName}</b><small>{user?.email || "로그인 계정"}</small></div></div></section><MarketingConsentSettings email={user?.email ?? ""} /><section className="settings-section appearance-settings"><h3>테마</h3><ThemePicker value={themeMode} onChange={onThemeModeChange} /><p>선택한 테마는 이 브라우저에 저장됩니다.</p></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section></aside>}</OverlayDialog>;
 }
 
 type EmailMarketingConsentSettings = {

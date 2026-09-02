@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+import { THEMES, THEME_STORAGE_KEY } from "../../lib/themes";
 
 const now = "2026-09-02T09:00:00.000Z";
 const longTitle = "아주 긴 업무 제목과 연결 정보가 있어도 기한과 우선순위는 끝까지 표시되어야 하는 업무";
@@ -64,6 +66,23 @@ async function setup(page: Page) {
 }
 
 const rows = (page: Page, kind: string) => page.locator(".my-work-section").filter({ has: page.locator("header b", { hasText: new RegExp(`^${kind}$`) }) }).locator(".my-work-item b");
+
+test("sort controls and priority labels remain readable in every theme", async ({ page }, testInfo) => {
+  test.setTimeout(90_000);
+  await setup(page);
+  await page.goto("/?view=my_work");
+  for (const theme of THEMES) {
+    await page.evaluate(({ key, mode }) => localStorage.setItem(key, mode), { key: THEME_STORAGE_KEY, mode: theme.mode });
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme.mode);
+    await page.getByRole("button", { name: "우선순위순", exact: true }).click();
+    await expect(rows(page, "Task").first()).toHaveText("Task urgent");
+    const contrast = await new AxeBuilder({ page: page as never }).include(".my-work-view").withRules(["color-contrast"]).analyze();
+    expect(contrast.violations, theme.mode).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), theme.mode).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`my-work-${theme.mode}.png`), fullPage: true });
+  }
+});
 
 test("my work sorts instantly within Task and Project while preserving filters and details", async ({ page }) => {
   const { requests, errors } = await setup(page);

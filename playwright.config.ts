@@ -21,6 +21,7 @@ export default defineConfig({
     { name: "desktop-chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
     { name: "mobile-390", use: { ...devices["iPhone 13"], browserName: "chromium", viewport: { width: 390, height: 844 } } },
     { name: "mobile-320", use: { ...devices["iPhone SE"], browserName: "chromium", viewport: { width: 320, height: 568 } } },
+    { name: "desktop-4k-themes", testMatch: "**/themes.spec.ts", use: { ...devices["Desktop Chrome"], viewport: { width: 3840, height: 2160 } } },
   ],
   webServer: externalBaseUrl ? undefined : {
     command: "npm run dev",
