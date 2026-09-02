@@ -22,7 +22,7 @@ for (const width of [320, 390, 768, 1440, 1920, 2560, 3840]) {
     await installApiMocks(page, { teamWorkspace: true, slackState: 'connected', withRoutine: true });
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    const scale = width >= 1800 ? 1.125 : 1;
+    const scale = 1;
     for (const view of views) {
       await page.goto(`/?view=${view}`);
       await expect(page.locator('.workspace')).toBeVisible();

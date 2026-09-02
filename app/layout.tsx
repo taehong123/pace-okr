@@ -1,12 +1,7 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import "./fonts.css";
 import "./globals.css";
 import { themeBootstrapScript, themeCss } from "@/lib/themes";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
 
 const bootstrapScript = themeBootstrapScript + `(() => {
   const now = new Date();
@@ -61,7 +56,7 @@ export default function RootLayout({
         <style id="okrptr-theme-colors" dangerouslySetInnerHTML={{ __html: themeCss }} />
         <script dangerouslySetInnerHTML={{ __html: bootstrapScript }} />
       </head>
-      <body className={`${geistSans.variable} antialiased`}>
+      <body>
         {children}
       </body>
     </html>

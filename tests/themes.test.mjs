@@ -47,17 +47,23 @@ for (const theme of THEMES) {
     for (const state of ["hover-", "active-"]) pair(`button-ghost-${state}fg`, `button-ghost-${state}bg`);
     pair("button-disabled-fg", "button-disabled-bg", 3);
     for (const role of ["success", "warning", "danger", "info", "purple", "orange", "neutral-badge", "selected", "toast"]) pair(`${role}-fg`, `${role}-bg`);
+    pair("objective-badge-text", "objective-badge-bg");
+    pair("project-badge-text", "project-badge-bg");
     pair("kr-badge-text", "kr-badge-bg");
     pair("initiative-badge-text", "initiative-badge-bg");
     pair("kr-rail", "bg-raised", 3);
     pair("initiative-rail", "bg-raised", 3);
+    pair("progress-fill", "progress-track", 3);
+    assert.equal(t["kr-rail"], t["kr-badge-text"]);
+    assert.equal(t["kr-rail"], t["progress-fill"]);
+    assert.equal(t["initiative-rail"], t["initiative-badge-text"]);
   });
 }
 
 test("all stylesheet palette references resolve and no action uses a text token as its fill", () => {
   const declared = new Set([...`${themeCss}\n${css}`.matchAll(/--([\w-]+)\s*:/g)].map((match) => match[1]));
   for (const match of css.matchAll(/var\(--([\w-]+)/g)) {
-    assert.ok(declared.has(match[1]) || ["font-geist-sans", "custom-columns", "custom-column-tracks", "depth"].includes(match[1]), `missing --${match[1]}`);
+    assert.ok(declared.has(match[1]) || ["custom-columns", "custom-column-tracks", "depth"].includes(match[1]), `missing --${match[1]}`);
   }
   const root = postcss.parse(css);
   root.walkDecls((decl) => {
@@ -95,8 +101,41 @@ test("readability uses scalable roles instead of per-screen font patches or CSS 
   }
   root.walkDecls("font-size", (decl) => assert.doesNotMatch(decl.value, /\dpx\b/, `fixed type in ${decl.parent.selector}`));
   root.walkDecls("zoom", () => assert.fail("Do not scale the entire application with zoom"));
-  assert.match(css, /@media \(min-width: 1800px\) \{ html \{ font-size: 112\.5%; \} \}/);
+  root.walkDecls("letter-spacing", (decl) => assert.equal(decl.value, "0"));
+  root.walkRules("html", (rule) => rule.walkDecls("font-size", () => assert.equal(rule.parent.type, "root", "Viewport width must not change the user's text scale")));
   const white = THEMES.find((theme) => theme.mode === "white").tokens;
   assert.equal(white["text-link"], white["text-primary"]);
   assert.equal(white["focus-ring"], white["text-primary"]);
+});
+
+test("hierarchy colors change with each theme instead of sharing fixed rails", () => {
+  assert.equal(new Set(THEMES.map((theme) => theme.tokens["kr-rail"])).size, THEMES.length);
+  for (const theme of THEMES) {
+    assert.equal(theme.tokens["kr-badge-bg"], theme.tokens["selected-bg"]);
+    assert.equal(theme.tokens["kr-badge-text"], theme.tokens["accent-fg"]);
+  }
+});
+
+test("Korean and Latin use the same self-hosted, selectively loaded variable font", async () => {
+  const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
+  const fontCss = await readFile(new URL("../public/fonts/pretendard-1.3.9/pretendardvariable-dynamic-subset.css", import.meta.url), "utf8");
+  assert.match(layout, /import "\.\/fonts\.css"/);
+  const bundledFontCss = await readFile(new URL("../app/fonts.css", import.meta.url), "utf8");
+  assert.match(bundledFontCss, /url\(\/fonts\/pretendard-1\.3\.9\/woff2-dynamic-subset\//);
+  assert.doesNotMatch(layout, /next\/font\/google/);
+  assert.match(css, /font-family: var\(--font-ui\)/);
+  assert.match(fontCss, /font-display: swap/);
+  const faces = postcss.parse(fontCss);
+  const paths = [];
+  faces.walkAtRules("font-face", (face) => {
+    let range = false;
+    face.walkDecls("unicode-range", () => { range = true; });
+    face.walkDecls("src", (decl) => paths.push(decl.value.match(/url\(([^)]+)\)/)[1]));
+    assert.ok(range, "Every font subset has a Unicode range");
+  });
+  assert.equal(paths.length, 92);
+  for (const path of paths) {
+    const data = await readFile(new URL(`../public/fonts/pretendard-1.3.9/${path}`, import.meta.url));
+    assert.equal(data.subarray(0, 4).toString(), "wOF2");
+  }
 });

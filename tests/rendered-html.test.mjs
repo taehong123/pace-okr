@@ -919,7 +919,7 @@ test("uses shared rem typography and large-desktop density without zooming the U
 
   assert.ok(largeDesktop);
   assert.match(styles, /html \{ font-size: 100%; \}/);
-  assert.match(styles, /@media \(min-width: 1800px\) \{ html \{ font-size: 112\.5%; \} \}/);
+  assert.doesNotMatch(styles, /@media[^{}]+\{\s*html\s*\{\s*font-size:/);
   assert.match(largeDesktop, /grid-template-columns: 16rem minmax\(0, 1fr\)/);
   assert.match(largeDesktop, /width: min\(100rem, 100%\)/);
   assert.match(largeDesktop, /workspace-topbar, \.app-loading-topbar \{ min-height: var\(--row-height\)/);
