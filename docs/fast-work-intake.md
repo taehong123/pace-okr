@@ -34,14 +34,17 @@ targets, child Tasks or parent OKRs.
 1. State the likely type and a one-sentence reason promptly. For ambiguity, use
    "한 번 완료할 일인가요, 여러 Task를 묶어 완성할 결과물인가요?" and offer a recommendation.
 2. If IDs/context are missing, call `prepare_work` once. If all IDs and fields
-   are already known, skip straight to the requested save. Discussion alone is
+   are already known, skip straight to the requested Task/Routine save or Project proposal. Discussion alone is
    not authorization to create data.
 3. Ask at most one short round of up to three essential missing details. Carry
    forward facts the user already supplied. Optional fields remain unset or use
    existing workspace defaults; do not turn every field into a question.
-4. Save with `create_item`, `create_tasks`, or `create_routine`. A Project without
-   an Initiative stays an explicitly unsaved conversation draft. General is only
-   a fallback for a clear Task, never a silent Project→Task conversion.
+4. Save Tasks/Routines with `create_item`, `create_tasks`, or `create_routine`.
+   Every Project uses `propose_project`: show evidence-based recommendations,
+   the complete summary and the review link. The user chooses an Initiative and
+   confirms in OKRPTR before creation. No candidate is preselected; search,
+   defer and cancel are available. A known parent ID does not bypass review.
+   General is only a fallback for a clear Task, never a silent Project→Task conversion.
 5. Confirm using the saved record: type, title, actual container, supplied owner
    and deadline. Do not list everything again. Uncertain write failures require
    checking for an existing save before retrying.
@@ -54,8 +57,9 @@ Example (connection options require real returned IDs):
 >
 > After the user's selection: Task 저장 완료 · 결제 화면 문구 수정 · 결제 개선 · 금요일 마감.
 
-If the parent is already unambiguous from the current conversation, do not ask
-again. If no parent is known and the user just wants a quick capture, General is
+For a Task, if the parent is already unambiguous, do not ask again.
+For a Project, the final user review is mandatory even with a known parent.
+If no Task parent is known and the user just wants a quick capture, General is
 valid. Resolve "금요일" from the conversation's current date/timezone; if that
 context is missing or ambiguous, ask rather than inventing a date.
 
@@ -75,8 +79,10 @@ context is missing or ambiguous, ask rather than inventing a date.
   deduplicated by the existing writer.
 - `create_item` accepts Routine and cycle IDs, inherits an explicit parent's
   cycle, validates incompatible fields and member/property inputs before writes,
-  and records the creator. This reduces deterministic failures after a partial
-  save; it is not a claim that the multi-step Project writer is fully atomic.
+  and records the creator. Project calls now stage an unsaved review instead of
+  writing directly. The dedicated reviewed-Project writer commits the Project,
+  assignments, properties, template, audit record, quota and approval receipt in
+  one D1 batch. See [Project confirmation](project-confirmation.md).
 - `link_item` supports Routine placement without resetting status. Non-Task
   cross-cycle moves are rejected to avoid detaching a subtree across cycles.
 - Task responses skip Project-property reads; Project responses fetch values
@@ -117,7 +123,7 @@ be a separate reliability/latency change, not an unawaited fire-and-forget patch
 | User input/context | Expected behavior |
 | --- | --- |
 | 결제 문구 수정해야 해; user asks to save | Task, preserve stated deadline/assignee; known Project or General |
-| 홈 리뉴얼: 디자인·개발·QA를 각 담당자가 진행 | Recommend Project; resolve Initiative, carry scope; do not invent child Tasks |
+| 홈 리뉴얼: 디자인·개발·QA를 각 담당자가 진행 | Recommend Project; evidence + options + final user approval; do not invent child Tasks |
 | 온보딩 개선해야 해 | Ambiguous Task/Project/Initiative; one short completion-boundary question |
 | 매주 월요일 오전 지표 검토 | Routine; preserve trigger; no Initiative required |
 | 이건 Task로 해줘 | Respect choice; internal steps are a checklist |
@@ -126,7 +132,7 @@ be a separate reliability/latency change, not an unawaited fire-and-forget patch
 | 본문/담당/기한이 각기 다른 Task들 | Preserve per-Task data using individual creates; no lossy batch |
 | 담당자가 검색되지 않음 | Ask identity clarification; no invented ID or invitation |
 | 이름이 같은 Project가 여럿 | Show returned ancestor paths and ask which one |
-| Project지만 상위 Initiative 없음 | Explicit unsaved draft; no fake ancestors, no downgrade to Task |
+| Project지만 상위 Initiative 없음 | Unsaved review with search/defer; no fake ancestors, no downgrade to Task |
 | 어떻게 정리하는 게 좋을까? | Explain/prepare read-only; do not write without save intent |
 | 목록 잘림 | Narrow parent/member search; needed missing property only → list_properties |
 | 저장 요청 응답 유실 | Verify possible existing record before retry; avoid duplicate save |

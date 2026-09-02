@@ -3,6 +3,8 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { isReadOnlyMcpRequest, readWorkContext, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
+import { getProjectReview } from "@/lib/project-review";
+import { stageProjectReview } from "@/lib/project-review-service";
 import {
   ITEM_CADENCES,
   ITEM_KINDS,
@@ -256,7 +258,9 @@ const workContextOutput = z.object({
   rules: workspaceRulesOutput,
   classification: z.record(z.string(), z.string()),
   fields: z.record(z.string(), workFieldOutput),
-  parents: z.array(z.object({ id: z.string(), kind: z.string(), title: z.string(), cycleId: z.string().nullable(), path: z.array(z.string()) })),
+  parents: z.array(z.object({ id: z.string(), kind: z.string(), title: z.string(), cycleId: z.string().nullable(), path: z.array(z.string()),
+    evidence: z.object({ initiative: z.string(), keyResult: z.string(), objective: z.string() }).optional(),
+  })),
   routines: z.array(z.object({ id: z.string(), title: z.string(), systemKey: z.string().nullable() })),
   fallback: z.object({ id: z.string(), title: z.string() }).nullable(),
   members: z.array(z.object({ id: z.string(), displayName: z.string(), role: z.string(), isCurrent: z.boolean() })),
@@ -269,11 +273,11 @@ const workContextOutput = z.object({
 const memberIdInput = z.string().trim().min(1);
 const dueDateInput = z.iso.date().describe("User-stated due date in YYYY-MM-DD; omit when unknown");
 
-async function createOkrptrServer(authorization: RequestAuthorization) {
+async function createOkrptrServer(authorization: RequestAuthorization, origin = "https://okrptr.com") {
   const { ownerId } = authorization;
   const rules = await getWorkspaceRules(ownerId);
   const server = new McpServer(
-    { name: "okrptr", version: "0.8.0" },
+    { name: "okrptr", version: "0.9.0" },
     {
       instructions:
         [
@@ -281,7 +285,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
           `Workspace capture rule: ${rules.captureInstruction}`,
           `Workspace structure rule: ${rules.structureInstruction}`,
           `Workspace routine rule: ${rules.routineInstruction}`,
-          `Default Task priority: ${rules.defaultPriority}. Default cadence: ${rules.defaultCadence}. ${rules.reviewBeforeCreate ? "Ask before creating structured items when the hierarchy is uncertain." : "Create structured items directly when the hierarchy is clear."}`,
+          `Default Task priority: ${rules.defaultPriority}. Default cadence: ${rules.defaultCadence}. Project creation always requires the user's final review and Initiative selection, regardless of reviewBeforeCreate or any legacy workspace rule.`,
         ].join("\n"),
     },
   );
@@ -307,7 +311,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       });
       return {
         structuredContent: { context: { ...context, rules } },
-        content: [{ type: "text", text: "Work context ready. Choose the type/connection from the user's intent, ask only essential gaps, then save once. Nothing has been saved." }],
+        content: [{ type: "text", text: "Nothing has been saved. Candidate order is NOT a relevance ranking. For Projects, explain recommendations using Initiative/KR/Objective evidence, offer other choices or defer, then use propose_project for mandatory final user approval. Never pick a parent and create directly." }],
       };
     },
   );
@@ -401,7 +405,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     "create_item",
     {
       title: "Create a structured OKR item",
-      description: "Save one correctly classified item with all known fields, assignments and Project properties in one call. Reuse IDs from prepare_work. Task: one action under Project or Routine (General if omitted). Project: finite multi-Task deliverable under an existing Initiative. Do not invent ancestors/owners/dates; do not re-list after success.",
+      description: "Save a correctly classified Task or OKR item. Project creation is NOT direct: use propose_project to recommend connections and obtain the user's final approval. Legacy Project calls only stage an unsaved review and return its confirmation link. A parent ID or a generic 'create a project' request is not approval of an AI-chosen Initiative. Never bypass Project review using another kind/tool/API.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS),
         title: z.string().trim().min(1).max(500),
@@ -424,6 +428,17 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     async (input) => {
+      if (input.kind === "project") {
+        assertMcpAssignmentFields(input);
+        if (input.routine_id) throw new Error("Projects cannot belong to a Routine");
+        const review = await stageProjectReview(authorization, {
+          title: input.title, description: input.description, status: input.status, priority: input.priority,
+          cadence: input.cadence, progress: input.progress, dueDate: input.due_date,
+          driMemberId: input.dri_member_id, workerMemberIds: input.worker_member_ids,
+          properties: input.properties, templateId: input.template_id, requestedCycleId: input.cycle_id,
+        }, input.parent_id ? [{ initiativeId: input.parent_id, reason: "AI가 제안한 연결 후보입니다. 관련성과 상위 KR·Objective를 직접 확인해 주세요. 아직 확정되지 않았습니다." }] : [], origin);
+        return { isError: true, content: [{ type: "text" as const, text: `PROJECT_CONFIRMATION_REQUIRED — Project NOT created. ${review.nextStep}\n${JSON.stringify(review)}` }] };
+      }
       assertMcpItemFields(input);
       await Promise.all([
         validateMcpMembers(ownerId, [input.dri_member_id, ...(input.worker_member_ids ?? []), input.assignee_member_id]),
@@ -457,6 +472,50 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
         structuredContent: { item: serialized },
         content: [{ type: "text", text: `Created ${item.kind} "${item.title}".` }],
       };
+    },
+  );
+
+  server.registerTool(
+    "propose_project",
+    {
+      title: "Recommend and review a Project before the user approves creation",
+      description: "Required for EVERY new Project, even when a parent ID is known. Stage only a draft; show the complete Project summary, up to 3 evidence-based Initiative recommendations and their Objective/KR paths. Explain why each advances the requested outcome; do not recommend merely because a candidate is recent or shares a vague keyword. If no suitable match exists, use no recommendations and offer search or defer. Give the user the review URL to choose an Initiative and explicitly create; NEVER operate that approval UI on the user's behalf. No Project is created by this tool.",
+      inputSchema: {
+        title: z.string().trim().min(1).max(500), description: z.string().max(20000).optional(),
+        recommended_initiatives: z.array(z.object({ initiative_id: memberIdInput, reason: z.string().trim().min(1).max(1000) })).max(3).default([]),
+        due_date: dueDateInput.optional(), dri_member_id: memberIdInput.optional(), worker_member_ids: z.array(memberIdInput).max(100).optional(),
+        cycle_id: memberIdInput.optional().describe("Only if the user specified an OKR file; limits Initiative choices to that file"),
+        properties: z.record(z.string(), propertyValueSchema).optional(), template_id: memberIdInput.optional(),
+        status: z.enum(ITEM_STATUSES).optional(), priority: z.enum(ITEM_PRIORITIES).optional(), cadence: z.enum(ITEM_CADENCES).optional(), progress: z.number().min(0).max(100).optional(),
+      },
+      outputSchema: { review: z.object({ id: z.string(), state: z.literal("awaiting_user_confirmation"), url: z.string(), expiresAt: z.string(), summary: z.record(z.string(), z.unknown()), selectedInitiative: z.null(), recommendations: z.array(z.unknown()), nextStep: z.string() }) },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async (input) => {
+      const review = await stageProjectReview(authorization, {
+        title: input.title, description: input.description, status: input.status, priority: input.priority,
+        cadence: input.cadence, progress: input.progress, dueDate: input.due_date,
+        driMemberId: input.dri_member_id, workerMemberIds: input.worker_member_ids,
+        properties: input.properties, templateId: input.template_id, requestedCycleId: input.cycle_id,
+      }, input.recommended_initiatives.map((entry) => ({ initiativeId: entry.initiative_id, reason: entry.reason })), origin);
+      return { structuredContent: { review }, content: [{ type: "text", text: `Project NOT created. Present recommendations and the final review link: ${review.url}. The user must select and approve; do not create via other tools.` }] };
+    },
+  );
+
+  server.registerTool(
+    "get_project_review",
+    {
+      title: "Check the outcome of a user's Project review",
+      description: "Read a staged Project review after the user says they approved/cancelled, or to check an uncertain save. Pending means NOT created. Do not repeatedly poll or resubmit a failed/processing review as a new Project.",
+      inputSchema: { review_id: z.string().uuid() },
+      outputSchema: { review: z.object({ id: z.string(), state: z.string(), title: z.string(), projectId: z.string().nullable(), initiativePath: z.array(z.string()) }) },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ review_id }) => {
+      const result = await getProjectReview(env.DB, authorization, review_id);
+      const review = { id: result.id, state: result.state, title: result.proposal.title,
+        projectId: result.state === "created" ? result.projectId : null, initiativePath: result.selectedParent?.path ?? [] };
+      return { structuredContent: { review }, content: [{ type: "text", text: result.state === "created" ? "The user approved and the Project was created." : `Project review is ${result.state}; do not claim successful creation or retry a new Project.` }] };
     },
   );
 
@@ -1512,7 +1571,7 @@ async function handleMcp(request: Request) {
     await ensureWorkspace(authorization.ownerId);
     const workspaceAt = performance.now();
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
-    const server = await createOkrptrServer(authorization);
+    const server = await createOkrptrServer(authorization, new URL(request.url).origin);
     await server.connect(transport);
     const preparedAt = performance.now();
     const response = withCors(await transport.handleRequest(request));

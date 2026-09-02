@@ -42,6 +42,7 @@ export async function deleteAssistantDraft(ownerId: string, userId: string, draf
 
 function normalizeDraftKey(value: string) {
   const key = value.trim();
+  if (key.toLowerCase().startsWith("system:project-review:")) throw new Error("시스템 확인 요청은 일반 임시저장 API로 변경할 수 없습니다.");
   if (!key || key.length > 200 || !/^[\p{L}\p{N}:._-]+$/u.test(key)) throw new Error("임시저장 키가 올바르지 않습니다.");
   return key;
 }

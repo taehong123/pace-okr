@@ -19,6 +19,7 @@ import {
   type ItemStatus,
 } from "@/lib/pace-data";
 import { BillingLimitError } from "@/lib/billing";
+import { stageProjectReview } from "@/lib/project-review-service";
 
 export async function GET(request: Request) {
   const authorization = await authorizeRequest(request);
@@ -80,6 +81,16 @@ export async function POST(request: Request) {
     if (!title) return Response.json({ error: "title is required" }, { status: 400 });
     if (payload.status !== undefined && !asValue(payload.status, ITEM_STATUSES)) {
       return Response.json({ error: "unsupported status" }, { status: 400 });
+    }
+
+    if (authorization.apiToken && payload.kind === "project") {
+      const review = await stageProjectReview(authorization, {
+        title, description: payload.description, status: payload.status, priority: payload.priority,
+        cadence: payload.cadence, progress: payload.progress, dueDate: payload.dueDate,
+        driMemberId: payload.driMemberId, workerMemberIds: payload.workerMemberIds,
+        properties: payload.properties, templateId: payload.templateId, requestedCycleId: payload.cycleId,
+      }, asString(payload.parentId) ? [{ initiativeId: asString(payload.parentId), reason: "연결 도구가 제안한 후보입니다. 최종 내용을 보고 직접 확인해 주세요." }] : [], new URL(request.url).origin);
+      return Response.json({ code: "project_confirmation_required", created: false, review }, { status: 202, headers: { "Cache-Control": "no-store" } });
     }
 
     const item = await createItem(authorization.ownerId, {
