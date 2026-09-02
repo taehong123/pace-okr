@@ -477,6 +477,30 @@ test("Project·Task·Routine 추가 진입과 AI 도우미를 같은 구조로 �
   await expect(routineDialog).toBeHidden();
 });
 
+test("AI 참고 항목 선택은 요청할 때만 열리고 검색과 Escape를 지원한다", async ({ page }) => {
+  await installApiMocks(page, { teamWorkspace: true });
+  await page.goto("/?view=okr");
+  await page.getByRole("button", { name: "AI 대화", exact: true }).first().click();
+  const assistant = page.getByRole("region", { name: "AI 대화", exact: true });
+  const picker = assistant.locator(".assistant-target-picker");
+  const trigger = assistant.getByRole("button", { name: "참고 항목 선택", exact: true });
+  const message = assistant.getByRole("textbox", { name: "메시지", exact: true });
+  await expect(picker).toHaveCount(0);
+  await message.fill("진행 상황을 같이 검토해 주세요");
+  await trigger.click();
+  await expect(picker).toBeVisible();
+  await picker.getByRole("textbox").fill("고객 경험");
+  await expect(picker.locator(".assistant-target-options button")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(picker).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await expect(message).toHaveValue("진행 상황을 같이 검토해 주세요");
+  await trigger.click();
+  await picker.locator(".assistant-target-options button").click();
+  await expect(picker).toHaveCount(0);
+  await expect(assistant.locator(".assistant-message").last()).toContainText("고객 경험 개선");
+});
+
 test("Project 생성창 닫기는 현재 화면을 유지하고 AI 대화 초안은 다시 열린다", async ({ page }) => {
   await installApiMocks(page);
   await page.goto("/?view=work");
