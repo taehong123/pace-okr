@@ -3,6 +3,16 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
+test("backup trigger migrations use LF and uppercase BEGIN for remote D1", async () => {
+  const migration = await readFile(new URL("../drizzle/0036_workspace_backups.sql", import.meta.url), "utf8");
+  const attributes = await readFile(new URL("../.gitattributes", import.meta.url), "utf8");
+  assert.match(attributes, /^drizzle\/\*\.sql text eol=lf$/m);
+  assert.ok(!migration.includes("\r"), "D1's remote splitter rejects CRLF trigger bodies");
+  const triggers = migration.split("--> statement-breakpoint").filter((statement) => /CREATE TRIGGER/i.test(statement));
+  assert.ok(triggers.length > 0);
+  for (const trigger of triggers) assert.match(trigger, /\nBEGIN\n[\s\S]+;\nEND;/);
+});
+
 test("preserves the historical registration migration for legacy database compatibility", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`
