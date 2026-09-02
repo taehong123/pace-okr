@@ -128,6 +128,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /home: "AI 대화"/);
   assert.doesNotMatch(page, /assistant-sidebar-tab/);
   assert.match(page, /\{ id: "home", label: "AI 대화", icon: Bot \}/);
+  assert.ok(page.indexOf('{ id: "my_work", label: "내 업무"') < page.indexOf('{ id: "okr", label: "OKR"'), "내 업무가 OKR보다 먼저 표시되어야 합니다");
+  assert.match(page, /const mobileNavItems = \(\["home", "okr", "my_work", "work", "inbox"\]/);
   assert.match(page, /id="home-okr-chat-title".*AI 대화/);
   assert.match(page, /assistant-target-picker/);
   assert.match(page, /Objective, KR, Initiative, Project 검색/);

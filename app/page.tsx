@@ -752,8 +752,8 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
 
 const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "home", label: "AI 대화", icon: Bot },
-  { id: "okr", label: "OKR", icon: Target },
   { id: "my_work", label: "내 업무", icon: Briefcase },
+  { id: "okr", label: "OKR", icon: Target },
   { id: "work", label: "Project", icon: Table2 },
   { id: "inbox", label: "Task", icon: Inbox },
   { id: "routines", label: "Routine", icon: Repeat2 },
@@ -763,6 +763,9 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "reviews", label: "리뷰", icon: Activity },
   { id: "trash", label: "휴지통", icon: Trash2 },
 ];
+
+const mobileNavItems = (["home", "okr", "my_work", "work", "inbox"] satisfies View[])
+  .map((id) => navItems.find((entry) => entry.id === id)!);
 
 const cadenceLabels: Record<Cadence, string> = { daily: "일간", weekly: "주간", monthly: "월간", quarterly: "분기" };
 const viewTitles: Record<View, string> = {
@@ -2061,7 +2064,7 @@ function WorkspaceApp() {
           })}
         </nav>
         <nav className="mobile-navigation" aria-label="주요 메뉴">
-          {navItems.slice(0, 5).map((entry) => {
+          {mobileNavItems.map((entry) => {
             const Icon = entry.icon;
             return (
               <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} aria-current={activeView === entry.id && !selectedProject && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => entry.id === "home" ? openAssistant() : navigateView(entry.id)}>
