@@ -207,6 +207,8 @@ export const integrationTokens = sqliteTable(
     workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
     userId: text("user_id").notNull(),
     name: text("name").notNull().default("Codex"),
+    provider: text("provider", { enum: ["chatgpt", "claude", "claude_code", "other"] }),
+    scopes: text("scopes"),
     tokenHash: text("token_hash").notNull(),
     tokenPrefix: text("token_prefix").notNull(),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -244,6 +246,21 @@ export const mcpOAuthClients = sqliteTable(
     clientName: text("client_name").notNull().default("ChatGPT"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
+);
+
+export const mcpOAuthApprovals = sqliteTable(
+  "mcp_oauth_approvals",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    requestJson: text("request_json").notNull(),
+    csrfHash: text("csrf_hash").notNull(),
+    createdAt: text("created_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    usedAt: text("used_at"),
+  },
+  (table) => [index("idx_mcp_oauth_approvals_expires").on(table.expiresAt)],
 );
 
 export const mcpOAuthCodes = sqliteTable(

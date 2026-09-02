@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { isReadOnlyOAuthMcpRequest } from "@/lib/mcp-request-access";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import {
@@ -1346,7 +1347,8 @@ async function handleMcp(request: Request) {
     return new Response(null, { status: 204, headers: corsHeaders() });
   }
 
-  const authorization = await authorizeRequest(request);
+  const payload = request.method === "POST" ? await request.clone().json().catch(() => null) : null;
+  const authorization = await authorizeRequest(request, { allowViewerWrite: isReadOnlyOAuthMcpRequest(payload) });
   if (authorization instanceof Response) return withCors(withMcpAuthChallenge(authorization, request));
 
   try {

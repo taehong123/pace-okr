@@ -138,7 +138,9 @@ test("ships product metadata and removes starter assets", async () => {
 
   assert.match(layout, /openGraph/);
   assert.doesNotMatch(layout, /\/og\.png/);
-  assert.match(page, /ChatGPT 연결 문구 복사/);
+  const aiConnections = await readFile(new URL("../app/ai-connections.tsx", import.meta.url), "utf8");
+  assert.match(page, /AIConnectionsDialog/);
+  assert.match(aiConnections, /ChatGPT 연결 문구 복사/);
   assert.match(page, /개인 앱 연동/);
   assert.match(page, /mobile-navigation/);
   assert.match(page, /workspace-mobile-home/);
@@ -203,14 +205,14 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(bootstrapRoute, /okrptr_workspace_id/);
   assert.doesNotMatch(page, /OAuth Redirect URL|Slash Command URL/);
   assert.match(page, /연결 관리/);
-  assert.match(page, /연결됨/);
-  assert.match(page, /연결 대기/);
-  assert.match(page, /연결 없음/);
-  assert.match(page, /발급된 연결 키/);
-  assert.match(page, /lastUsedAt/);
+  assert.match(aiConnections, /연결됨/);
+  assert.match(aiConnections, /연결 대기/);
+  assert.match(aiConnections, /연결 없음/);
+  assert.match(aiConnections, /발급된 연결 키/);
+  assert.match(aiConnections, /lastUsedAt/);
   assert.doesNotMatch(page, /<span>ChatGPT 연동<\/span><i/);
   assert.doesNotMatch(page, /revoke-link/);
-  assert.match(page, /\/api\/integration-tokens/);
+  assert.match(aiConnections, /\/api\/integration-tokens/);
   assert.match(page, /\/api\/okr-organize/);
   assert.match(page, /현재 OKR과 실행 상황을 읽고/);
   assert.match(page, /필요한 다음 질문부터 이어갑니다/);
@@ -260,7 +262,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /개인 OKR/);
   assert.doesNotMatch(page, /루틴부터/);
   assert.match(page, /Routine 도우미/);
-  assert.match(page, /브라우저 제어가 가능한 ChatGPT 대화/);
+  assert.match(aiConnections, /브라우저 제어가 가능한 대화/);
   assert.match(integrationRoute, /현재 로그인된 내 ChatGPT 계정에 아래 OKRPTR MCP를 개인 연결로 지금 추가해 주세요/);
   assert.match(integrationRoute, /최종 실행 지시이자 명시적 사전 승인/);
   assert.match(integrationRoute, /'진행할까요\?' 같은 재확인 질문도 하지 마세요/);
@@ -297,7 +299,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /트리거 포인트/);
   assert.match(page, /무엇을 어떻게/);
   assert.match(page, /연결 해제/);
-  assert.match(page, /Objective → Key Result → Initiative → Project → Task \/ Routine → Task/);
+  assert.match(aiConnections, /"chatgpt", "claude", "claude_code"/);
   assert.match(page, /taskParent/);
   assert.match(page, /parentId: projectItem\.id/);
   assert.match(page, /routineId: routine\.id/);

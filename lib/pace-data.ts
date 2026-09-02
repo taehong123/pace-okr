@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { effectiveIntegrationProvider, type IntegrationProvider } from "@/lib/integration-providers";
 import { and, asc, desc, eq, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { readGoogleSession } from "@/lib/google-session";
@@ -170,9 +171,10 @@ export type RequestAuthorization = {
   displayName: string;
   role: TeamRole;
   apiToken: boolean;
+  oauthScopes?: string;
 };
 
-export type IntegrationTokenSummary = Pick<IntegrationToken, "id" | "name" | "tokenPrefix" | "createdAt" | "lastUsedAt" | "revokedAt">;
+export type IntegrationTokenSummary = Pick<IntegrationToken, "id" | "name" | "tokenPrefix" | "createdAt" | "lastUsedAt" | "revokedAt"> & { provider: IntegrationProvider };
 
 const DEFAULT_PROJECT_EXECUTION_PROPERTIES: { name: string; type: PropertyType; systemKey?: string; options?: string[]; defaultValue?: PropertyValue }[] = [
   { name: "상위 Initiative", type: "text", systemKey: "parent_id" },
@@ -2263,6 +2265,8 @@ function serializeSlackAutomationDelivery(delivery: SlackAutomationDelivery) {
 export async function createIntegrationToken(
   authorization: RequestAuthorization,
   name = "Codex",
+  provider: IntegrationProvider = "other",
+  scopes = "okrptr:read okrptr:write",
 ) {
   await ensureSchema();
   const token = `okrptr_${randomTokenPart(32)}`;
@@ -2272,6 +2276,8 @@ export async function createIntegrationToken(
     workspaceId: authorization.ownerId,
     userId: authorization.userId,
     name: name.trim().slice(0, 50) || "Codex",
+    provider,
+    scopes,
     tokenHash: await hashIntegrationToken(token),
     tokenPrefix: `${token.slice(0, 14)}...`,
     createdAt: now,
@@ -2280,6 +2286,7 @@ export async function createIntegrationToken(
     eq(integrationTokens.workspaceId, authorization.ownerId),
     eq(integrationTokens.userId, authorization.userId),
     isNull(integrationTokens.revokedAt),
+    integrationProviderCondition(provider),
   )).orderBy(desc(integrationTokens.createdAt));
   const staleIds = activeTokens.slice(10).map((entry) => entry.id);
   if (staleIds.length) {
@@ -2288,23 +2295,25 @@ export async function createIntegrationToken(
   return { token, connection: serializeIntegrationToken(record) };
 }
 
-export async function listIntegrationTokens(authorization: RequestAuthorization) {
+export async function listIntegrationTokens(authorization: RequestAuthorization, provider?: IntegrationProvider) {
   await ensureSchema();
   const rows = await getDb().select().from(integrationTokens).where(and(
     eq(integrationTokens.workspaceId, authorization.ownerId),
     eq(integrationTokens.userId, authorization.userId),
     isNull(integrationTokens.revokedAt),
+    provider ? integrationProviderCondition(provider) : undefined,
   )).orderBy(desc(integrationTokens.createdAt));
   return rows.map(serializeIntegrationToken);
 }
 
-export async function revokeIntegrationTokens(authorization: RequestAuthorization, id?: string) {
+export async function revokeIntegrationTokens(authorization: RequestAuthorization, id?: string, provider?: IntegrationProvider) {
   await ensureSchema();
   const now = new Date().toISOString();
   const baseCondition = and(
     eq(integrationTokens.workspaceId, authorization.ownerId),
     eq(integrationTokens.userId, authorization.userId),
     isNull(integrationTokens.revokedAt),
+    provider ? integrationProviderCondition(provider) : undefined,
   );
   const condition = id ? and(baseCondition, eq(integrationTokens.id, id)) : baseCondition;
   const revoked = await getDb().update(integrationTokens).set({ revokedAt: now }).where(condition).returning({ id: integrationTokens.id });
@@ -2315,11 +2324,17 @@ function serializeIntegrationToken(record: IntegrationToken): IntegrationTokenSu
   return {
     id: record.id,
     name: record.name,
+    provider: effectiveIntegrationProvider(record),
     tokenPrefix: record.tokenPrefix,
     createdAt: record.createdAt,
     lastUsedAt: record.lastUsedAt,
     revokedAt: record.revokedAt,
   };
+}
+
+function integrationProviderCondition(provider: IntegrationProvider) {
+  // NULL is a legacy record; preserve every legacy token and classify only the known OAuth name.
+  return sql`COALESCE(${integrationTokens.provider}, CASE WHEN ${integrationTokens.name} = 'ChatGPT OAuth' THEN 'chatgpt' ELSE 'other' END) = ${provider}`;
 }
 
 function randomTokenPart(byteLength: number) {
@@ -2356,7 +2371,6 @@ export async function authorizeRequest(
       .limit(1);
     const token = tokenRow?.token;
     if (token) {
-      await getDb().update(integrationTokens).set({ lastUsedAt: new Date().toISOString() }).where(eq(integrationTokens.id, token.id));
       const [membership] = await getDb().select().from(workspaceMembers).where(and(
         eq(workspaceMembers.workspaceId, token.workspaceId),
         eq(workspaceMembers.userId, token.userId),
@@ -2366,12 +2380,16 @@ export async function authorizeRequest(
         return Response.json({ error: "This OKRPTR connection no longer has workspace access." }, { status: 403 });
       }
       const role = membership.role as TeamRole;
+      if (!options.allowViewerWrite && !["GET", "HEAD", "OPTIONS"].includes(request.method) && token.scopes && !token.scopes.split(" ").includes("okrptr:write")) {
+        return Response.json({ error: "This connection only permits read access." }, { status: 403 });
+      }
       if (!options.allowViewerWrite && role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
         return Response.json({ error: "Viewer access is read-only." }, { status: 403 });
       }
       if (!options.allowViewerWrite && !["GET", "HEAD", "OPTIONS"].includes(request.method) && !(await memberCanWrite(token.workspaceId, token.userId, role))) {
         return Response.json({ error: "플랜에서 선택된 활성 편집자가 아니므로 읽기 전용입니다.", code: "editor_read_only", upgradeUrl: "/?view=billing" }, { status: 403 });
       }
+      await getDb().update(integrationTokens).set({ lastUsedAt: new Date().toISOString() }).where(eq(integrationTokens.id, token.id));
       return {
         ownerId: token.workspaceId,
         userId: token.userId,
@@ -2379,6 +2397,7 @@ export async function authorizeRequest(
         displayName: membership.displayName,
         role,
         apiToken: true,
+        oauthScopes: token.scopes ?? "okrptr:read okrptr:write",
       };
     }
   }
@@ -2823,7 +2842,7 @@ function displayNameForExistingMember(currentName: string, incomingName: string,
 }
 
 export function canManageTeam(authorization: RequestAuthorization) {
-  return authorization.role === "owner" || authorization.role === "admin" || authorization.apiToken;
+  return authorization.role === "owner" || authorization.role === "admin";
 }
 
 function workspaceAvatarUrl(workspaceId: string, avatarKey: string | null, avatarUpdatedAt: string | null) {
