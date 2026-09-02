@@ -1,9 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installApiMocks } from './api-mocks';
+import { installApiMocks, json } from './api-mocks';
 
 const views = ['my_work', 'okr', 'work', 'inbox', 'routines', 'data', 'scrum', 'recommendations', 'reviews', 'trash', 'integrations', 'billing'];
 async function fits(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  const smallFields = await page.evaluate(() => {
+    const baseline = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    return [...document.querySelectorAll('input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=hidden]):not([type=color]):not([type=button]):not([type=submit]), select, textarea')]
+      .filter(el => el.getClientRects().length && parseFloat(getComputedStyle(el).fontSize) < baseline - .01)
+      .map(el => el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.className || el.tagName);
+  });
+  expect(smallFields, 'Editable values use the body text size').toEqual([]);
 }
 
 for (const width of [320, 390, 768, 1440, 1920, 2560, 3840]) {
@@ -12,7 +19,7 @@ for (const width of [320, 390, 768, 1440, 1920, 2560, 3840]) {
     test.setTimeout(180_000);
     page.setDefaultTimeout(8_000);
     await page.setViewportSize({ width, height: width < 768 ? 844 : width >= 2560 ? 1440 : 1000 });
-    await installApiMocks(page, { teamWorkspace: true, slackState: 'connected' });
+    await installApiMocks(page, { teamWorkspace: true, slackState: 'connected', withRoutine: true });
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     const scale = width >= 1800 ? 1.125 : 1;
@@ -23,6 +30,8 @@ for (const width of [320, 390, 768, 1440, 1920, 2560, 3840]) {
       await fits(page);
       expect(await page.locator('body').evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeCloseTo(16 * scale);
       expect(await page.locator('.page-header h1').evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeCloseTo(28 * scale);
+      const navLabel = page.locator('.nav-item span:visible').first();
+      expect(await navLabel.evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeCloseTo(14 * scale);
       if (view === 'my_work') {
         const title = page.locator('.my-work-item b').first();
         await expect(title).toBeVisible();
@@ -69,6 +78,9 @@ test('structure is preserved; focus, zoom and workspace menu stay usable', async
   await page.goto('/?view=work');
   await expect(page.locator('.desktop-navigation .nav-item span')).toHaveText(['AI 대화', '내 업무', 'OKR', 'Project', 'Task', 'Routine', '데이터', '데일리', '추천', '리뷰', '휴지통']);
   await expect(page.locator('.page-create-actions > button')).toHaveText(['AI 대화로 추가', '직접 추가']);
+  await page.getByRole('tab', { name: '카드', exact: true }).click();
+  await page.getByRole('button', { name: '선택', exact: true }).click();
+  await expect(page.locator('.project-card .delete-select')).toBeVisible();
   await page.locator('.workspace-switcher').click();
   await expect(page.locator('.workspace-menu')).toBeVisible();
   expect(await page.locator('.workspace-menu').evaluate(el => {
@@ -85,4 +97,47 @@ test('structure is preserved; focus, zoom and workspace menu stay usable', async
   await fits(page);
   await page.keyboard.press('Escape');
   await expect(create).toBeFocused();
+  await page.goto('/?view=okr');
+  await page.getByRole('button', { name: '파일 수정', exact: true }).click();
+  await expect(page.locator('.okr-file-editor')).toBeVisible();
+  expect(await page.locator('.okr-file-editor').evaluate(el => el.getBoundingClientRect().width)).toBeLessThanOrEqual(44 * 16);
+  expect(await page.locator('.okr-file-editor').evaluate(el => {
+    const frame = el.getBoundingClientRect();
+    return [...el.querySelectorAll('input, select, textarea, button')].filter(control => {
+      const box = control.getBoundingClientRect();
+      return box.width > 0 && (box.left < frame.left - 1 || box.right > frame.right + 1);
+    }).map(control => control.getAttribute('aria-label') || control.textContent);
+  })).toEqual([]);
+  await fits(page);
 });
+
+for (const width of [390, 1440, 3840]) {
+  test(`readability states ${width}: loading, failure, empty and read-only`, async ({ page }, info) => {
+    test.skip(info.project.name !== 'desktop-chromium');
+    await page.setViewportSize({ width, height: 1000 });
+    await installApiMocks(page, { teamWorkspace: true, workspaceRole: 'viewer' });
+    let fail = true;
+    await page.route('**/api/item-trash', async route => {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await json(route, fail ? { error: 'test unavailable' } : { items: [], initiativeOptions: [] }, fail ? 503 : 200);
+    });
+    await page.goto('/?view=trash');
+    await expect(page.getByText('휴지통을 불러오는 중입니다', { exact: true })).toBeVisible();
+    await fits(page);
+    await expect(page.getByText('휴지통을 불러오지 못했습니다', { exact: true })).toBeVisible();
+    await fits(page);
+    fail = false;
+    await page.getByRole('button', { name: '다시 시도', exact: true }).click();
+    await expect(page.getByText('휴지통이 비어 있습니다', { exact: true })).toBeVisible();
+    await page.goto('/?view=okr');
+    await expect(page.locator('.okr-file-read-surface')).toBeVisible();
+    await expect(page.getByRole('button', { name: '파일 수정', exact: true })).toHaveCount(0);
+    const kr = page.locator('button.okr-tree-kr-row').first();
+    await kr.focus();
+    await page.keyboard.press('Enter');
+    await expect(kr).toHaveAttribute('aria-expanded', 'true');
+    await page.keyboard.press('Space');
+    await expect(kr).toHaveAttribute('aria-expanded', 'false');
+    await fits(page);
+  });
+}

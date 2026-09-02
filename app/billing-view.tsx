@@ -172,7 +172,7 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
   if (!billing) return <section className="billing-page"><div className="billing-load-error" role="alert"><CreditCard size={20} /><b>결제 정보를 불러오지 못했습니다</b><p>{error}</p><button onClick={() => void refresh()}>다시 시도</button></div></section>;
 
   return <section className="billing-page" aria-label="요금제 및 결제">
-<header className="billing-hero"><div><h2>{billing.planLabel} 플랜</h2><p>Slack을 포함한 모든 연동, Task, Routine, Viewer는 어떤 플랜에서도 제한하지 않습니다.</p></div><div className={`billing-status billing-status-${billing.status}`}><b>{statusLabel(billing.status)}</b><small>{billing.trialEndsAt ? `체험 종료 ${formatDate(billing.trialEndsAt)}` : billing.nextBillingAt ? `다음 결제 ${formatDate(billing.nextBillingAt)}` : "월간 정액 · VAT 포함"}</small></div></header>
+    <header className="billing-hero"><div><h2>{billing.planLabel} 플랜</h2><p>Slack을 포함한 모든 연동, Task, Routine, Viewer는 어떤 플랜에서도 제한하지 않습니다.</p></div><div className={`billing-status billing-status-${billing.status}`}><b>{statusLabel(billing.status)}</b><small>{billing.trialEndsAt ? `체험 종료 ${formatDate(billing.trialEndsAt)}` : billing.nextBillingAt ? `다음 결제 ${formatDate(billing.nextBillingAt)}` : "월간 정액 · VAT 포함"}</small></div></header>
     {!billing.enforcementEnabled && <div className="billing-rollout-note" role="status"><AlertTriangle size={18} /><div><b>안전한 사전 배포 상태</b><p>Payple 실결제·이메일·예약 청구·환불 검증이 끝날 때까지 Project·편집자·AI 한도는 강제하지 않습니다. 기존 기능은 그대로 사용할 수 있습니다.</p></div></div>}
     {billing.status === "past_due" && <div className="billing-alert" role="alert"><AlertTriangle size={18} /><div><b>결제를 다시 확인해 주세요</b><p>{billing.graceEndsAt ? `${formatDate(billing.graceEndsAt)}까지 현재 플랜을 유지하며 자동으로 재시도합니다.` : "결제수단을 확인해 주세요."}</p></div></div>}
 

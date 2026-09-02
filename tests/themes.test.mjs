@@ -57,7 +57,7 @@ for (const theme of THEMES) {
 test("all stylesheet palette references resolve and no action uses a text token as its fill", () => {
   const declared = new Set([...`${themeCss}\n${css}`.matchAll(/--([\w-]+)\s*:/g)].map((match) => match[1]));
   for (const match of css.matchAll(/var\(--([\w-]+)/g)) {
-    assert.ok(declared.has(match[1]) || ["font-geist-sans", "custom-columns", "depth"].includes(match[1]), `missing --${match[1]}`);
+    assert.ok(declared.has(match[1]) || ["font-geist-sans", "custom-columns", "custom-column-tracks", "depth"].includes(match[1]), `missing --${match[1]}`);
   }
   const root = postcss.parse(css);
   root.walkDecls((decl) => {

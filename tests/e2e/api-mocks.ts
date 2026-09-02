@@ -105,7 +105,7 @@ export async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-export async function installApiMocks(page: Page, options: { preserveStorage?: boolean; failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "member" | "viewer"; teamWorkspace?: boolean } = {}) {
+export async function installApiMocks(page: Page, options: { withRoutine?: boolean; preserveStorage?: boolean; failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "member" | "viewer"; teamWorkspace?: boolean } = {}) {
   let krDataConnections: Array<Record<string, unknown>> = [];
   let slackSetupComplete = options.slackSetupComplete ?? true;
   let slackAutomations: Array<Record<string, unknown>> = [];
@@ -118,6 +118,7 @@ export async function installApiMocks(page: Page, options: { preserveStorage?: b
   const workspaceKind = options.teamWorkspace ? "team" : "personal";
   const bootstrapResponse = {
     ...baseBootstrapResponse,
+    routines: options.withRoutine ? [...baseBootstrapResponse.routines, { ...generalRoutine, id: "routine-1", title: "매주 고객 피드백을 모아 다음 실행을 정리하는 반복 업무", systemKey: "", assigneeMemberId: "member-1", triggerPoint: "금요일 오후", actionSteps: "고객 피드백 확인 · 다음 주 실행 항목 정리" }] : baseBootstrapResponse.routines,
     workspaces: baseBootstrapResponse.workspaces.map((workspace) => ({ ...workspace, kind: workspaceKind, personal: workspaceKind === "personal", role: workspaceRole })),
     team: { ...baseBootstrapResponse.team, workspace: { ...baseBootstrapResponse.team.workspace, kind: workspaceKind }, currentRole: workspaceRole, canManage: workspaceRole === "owner", members: baseBootstrapResponse.team.members.map((member) => ({ ...member, role: workspaceRole })) },
   };
