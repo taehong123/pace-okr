@@ -1,22 +1,14 @@
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import "./globals.css";
+import { themeBootstrapScript, themeCss } from "@/lib/themes";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
 });
 
-const bootstrapScript = `(() => {
-  try {
-    const savedTheme = window.localStorage.getItem("okrptr.theme");
-    const theme = savedTheme === "gray" || savedTheme === "dark" || savedTheme === "beige" ? savedTheme : "beige";
-    document.documentElement.dataset.themePreference = theme;
-    document.documentElement.dataset.theme = theme;
-  } catch {
-    document.documentElement.dataset.themePreference = "beige";
-    document.documentElement.dataset.theme = "beige";
-  }
+const bootstrapScript = themeBootstrapScript + `(() => {
   const now = new Date();
   const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
   const path = "/api/bootstrap?date=" + encodeURIComponent(date);
@@ -64,8 +56,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko">
+    <html lang="ko" suppressHydrationWarning>
       <head>
+        <style id="okrptr-theme-colors" dangerouslySetInnerHTML={{ __html: themeCss }} />
         <script dangerouslySetInnerHTML={{ __html: bootstrapScript }} />
       </head>
       <body className={`${geistSans.variable} antialiased`}>

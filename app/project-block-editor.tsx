@@ -6,6 +6,7 @@ import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import { useCreateBlockNote } from "@blocknote/react";
 import { useEffect, useRef, useState } from "react";
+import { themeColorScheme } from "@/lib/themes";
 
 const projectDocumentSchema = BlockNoteSchema.create({
   blockSpecs: {
@@ -73,7 +74,7 @@ export default function ProjectBlockEditor({ initialContent, editable = true, on
 }
 
 function currentEditorTheme(): "light" | "dark" {
-  return typeof document !== "undefined" && document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+  return themeColorScheme(typeof document !== "undefined" ? document.documentElement.dataset.theme : undefined);
 }
 
 function parseInitialContent(value: string): Record<string, unknown>[] {

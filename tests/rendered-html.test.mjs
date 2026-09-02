@@ -236,15 +236,13 @@ test("ships product metadata and removes starter assets", async () => {
   assert.doesNotMatch(page, /첫 Project를 만들어볼까요\?/);
   assert.match(page, /mode === "project"/);
   assert.match(page, /my_work: "내 업무"/);
-  assert.match(layout, /okrptr\.theme/);
-  assert.match(page, /type ThemeMode = "beige" \| "gray" \| "dark"/);
-  assert.match(page, /베이지.*그레이.*다크/s);
-  assert.match(page, /theme-picker/);
+  assert.match(layout, /themeBootstrapScript/);
+  assert.match(page, /type ThemeMode.*from "@\/lib\/themes"/);
+  assert.match(page, /ThemePicker value=\{themeMode\}/);
   assert.match(page, /chat-send-button/);
   assert.match(page, /메시지 보내기/);
-  assert.match(globals, /--paper: #f3f2ee/);
-  assert.match(globals, /html\[data-theme="gray"\]/);
-  assert.match(globals, /html\[data-theme="dark"\]/);
+  assert.match(globals, /var\(--button-primary-bg\)/);
+  assert.match(globals, /var\(--button-primary-fg\)/);
   const myWorkView = page.match(/function MyWorkView[\s\S]*?function MyWorkSection/)?.[0] ?? "";
   assert.ok(
     myWorkView.indexOf('title="Task"') < myWorkView.indexOf('title="Project"')
@@ -902,20 +900,16 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
 
 test("uses warm-neutral KR and Initiative hierarchy surfaces", async () => {
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-
-  assert.match(styles, /--okr-card-bg: #fdfdfc/);
-  assert.match(styles, /--okr-card-border: #dad9d6/);
-  assert.match(styles, /--kr-badge-bg: #f6edea/);
-  assert.match(styles, /--kr-badge-text: #7d5e54/);
-  assert.match(styles, /--kr-rail: #a18072/);
-  assert.match(styles, /--initiative-badge-bg: #eff1ef/);
-  assert.match(styles, /--initiative-badge-text: #60655f/);
-  assert.match(styles, /--initiative-rail: #898e87/);
+  const themes = await readFile(new URL("../lib/themes.ts", import.meta.url), "utf8");
+  assert.match(themes, /"okr-card-bg": "bg-raised"/);
+  assert.match(themes, /"kr-badge-bg": dark \? "#43302B" : "#F6EDEA"/);
+  assert.match(themes, /"kr-badge-text": dark \? "#D4B3A5" : "#7D5E54"/);
+  assert.match(themes, /"kr-rail": "#A18072"/);
+  assert.match(themes, /"initiative-badge-bg": dark \? "#30322E" : "#EFF1EF"/);
+  assert.match(themes, /"initiative-badge-text": dark \? "#AFB5AD" : "#60655F"/);
   assert.match(styles, /\.hierarchy-kind-key_result \{[^}]*border-left: 2px solid var\(--kr-rail\)[^}]*box-shadow: none/);
   assert.match(styles, /\.hierarchy-kind-initiative \{[^}]*border-left: 2px solid var\(--initiative-rail\)[^}]*box-shadow: none/);
   assert.match(styles, /\.hierarchy-kind-initiative \.initiative-execution-summary \{ color: var\(--muted\); \}/);
-  assert.match(styles, /--kr-badge-bg: #43302b/);
-  assert.match(styles, /--initiative-badge-bg: #30322e/);
   assert.doesNotMatch(styles, /--kr-soft|--initiative-soft|#42627a|#426653|#e8eff4|#e8f0eb/);
 });
 
@@ -993,8 +987,8 @@ test("implements a workspace management bot for data quality and urgency reporti
   assert.match(page, /rawTab === "management" \? "summary"/);
   assert.match(page, /function WorkspaceManagementSummary/);
   assert.match(page, /function WorkspaceManagementBot/);
-  assert.match(page, /<WorkspaceManagementBot active=\{openBot === "management"\}/);
-  assert.match(page, /업무 자동화 봇/);
+  assert.match(page, /<WorkspaceManagementBot\b[^>]*active=\{openBot === "management"\}/);
+  assert.match(page, /title="업무 자동화"/);
   assert.match(page, /워크스페이스 관리 봇 사용/);
   assert.doesNotMatch(page, /LIVE PREVIEW/);
   assert.match(page, /막힘 상태 알림/);
