@@ -14,6 +14,7 @@ async function setup(page: Page, role: "owner" | "admin" | "member" | "viewer" =
   let failList = false;
   let failRestore = false;
   let empty = false;
+  let stallReads = false;
   let reads = 0;
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/api/workspace-backups*", async (route) => {
@@ -28,6 +29,7 @@ async function setup(page: Page, role: "owner" | "admin" | "member" | "viewer" =
       return json(route, { backup: { ...entry, reason: "manual" } });
     }
     reads++;
+    if (stallReads) return;
     if (failList) return json(route, { error: "백업 목록을 불러오지 못했습니다." }, 503);
     if (target.searchParams.has("id")) return json(route, {
       ...entry, current: { ...summary, tasks: 20 },
@@ -40,7 +42,7 @@ async function setup(page: Page, role: "owner" | "admin" | "member" | "viewer" =
       state: { last_success_at: entry.createdAt, last_daily_date: "2026-09-02", last_attempt_at: entry.createdAt, last_error: null },
     });
   });
-  return { errors, writes, reads: () => reads, failList: (value: boolean) => { failList = value; }, failRestore: (value: boolean) => { failRestore = value; }, empty: () => { empty = true; } };
+  return { errors, writes, reads: () => reads, failList: (value: boolean) => { failList = value; }, failRestore: (value: boolean) => { failRestore = value; }, stallReads: (value: boolean) => { stallReads = value; }, empty: () => { empty = true; } };
 }
 
 test("backup preview preserves cancellation and can retry a failed restore", async ({ page }) => {
@@ -92,6 +94,25 @@ test("backup loading errors remain recoverable", async ({ page }) => {
   await page.getByRole("button", { name: "백업 목록 새로고침" }).click();
   await expect(page.locator(".backup-list li")).toHaveCount(1);
   await expect(page.locator(".backup-error[role=alert]")).toHaveCount(0);
+  expect(state.errors).toEqual([]);
+});
+
+test("a stalled backup preview times out and remains retryable without writes", async ({ page }) => {
+  const state = await setup(page);
+  await page.goto(url);
+  await expect(page.locator(".backup-list li")).toHaveCount(1);
+  await page.clock.install();
+  state.stallReads(true);
+  await page.locator(".backup-list button").first().click();
+  await expect(page.locator(".backup-progress")).toBeVisible();
+  await page.clock.fastForward(15_001);
+  await expect(page.locator(".backup-error[role=alert]")).toContainText("백업 조회가 지연되고 있습니다.");
+  await expect(page.locator(".backup-progress")).toHaveCount(0);
+  state.stallReads(false);
+  await page.locator(".backup-list button").first().click();
+  await expect(page.getByRole("table")).toBeVisible();
+  await expect(page.locator(".backup-error[role=alert]")).toHaveCount(0);
+  expect(state.writes).toHaveLength(0);
   expect(state.errors).toEqual([]);
 });
 

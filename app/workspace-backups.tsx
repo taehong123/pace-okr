@@ -13,6 +13,28 @@ const reasons: Record<BackupReason, string> = { daily: "일일 자동 백업", m
 const summaryLabels: Record<keyof BackupSummary, string> = { cycles: "OKR 파일", objectives: "Objective", keyResults: "Key Result", initiatives: "Initiative", projects: "Project", tasks: "Task", routines: "Routine", documents: "프로젝트 본문", dailyReports: "데일리 기록" };
 const formatTime = (value: string) => new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 
+async function requestBackup<T>(workspaceId: string, path = "", method = "GET", body?: unknown, signal?: AbortSignal): Promise<T> {
+  // Only reads time out: losing a write response does not mean the write failed.
+  const controller = method === "GET" ? new AbortController() : null;
+  let timedOut = false;
+  const abort = () => controller?.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
+  const timeout = controller ? setTimeout(() => { timedOut = true; controller.abort(); }, 15_000) : undefined;
+  try {
+    const response = await fetch(`/api/workspace-backups${path}`, { method, headers: { "x-okrptr-workspace-id": workspaceId, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined, cache: "no-store", signal: controller?.signal ?? signal });
+    const data = await response.json() as T & { error?: string };
+    if (!response.ok) throw new Error(data.error || "백업 작업을 완료하지 못했습니다.");
+    return data;
+  } catch (error) {
+    if (timedOut) throw new Error("백업 조회가 지연되고 있습니다. 다시 시도해 주세요.");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
 export default function WorkspaceBackups({ workspaceId, workspaceName, onNotice }: { workspaceId: string; workspaceName: string; onNotice: (message: string) => void }) {
   const [listing, setListing] = useState<Listing | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -23,16 +45,12 @@ export default function WorkspaceBackups({ workspaceId, workspaceName, onNotice 
   const inFlight = useRef(false);
   const confirm = useAppConfirm();
   async function request<T = unknown>(path = "", method = "GET", body?: unknown): Promise<T> {
-    const response = await fetch(`/api/workspace-backups${path}`, { method, headers: { "x-okrptr-workspace-id": workspaceId, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined, cache: "no-store" });
-    const data = await response.json() as T & { error?: string };
-    if (!response.ok) throw new Error(data.error || "백업 작업을 완료하지 못했습니다.");
-    return data;
+    return requestBackup<T>(workspaceId, path, method, body);
   }
   useEffect(() => {
     mounted.current = true;
     const controller = new AbortController();
-    fetch("/api/workspace-backups", { headers: { "x-okrptr-workspace-id": workspaceId }, cache: "no-store", signal: controller.signal })
-      .then(async (response) => { const data = await response.json() as Listing & { error?: string }; if (!response.ok) throw new Error(data.error); return data; })
+    requestBackup<Listing>(workspaceId, "", "GET", undefined, controller.signal)
       .then((data) => { if (mounted.current) setListing(data); })
       .catch((err) => { if (!controller.signal.aborted && mounted.current) setError(err.message || "백업 목록을 불러오지 못했습니다."); })
       .finally(() => { if (mounted.current) setBusy(""); });
@@ -64,11 +82,12 @@ export default function WorkspaceBackups({ workspaceId, workspaceName, onNotice 
   }
 
   return <div className="workspace-backups" aria-busy={Boolean(busy)}>
-    <header className="backup-header"><div><h3>백업 및 복원</h3><p>매일 자동 백업 · 30일 보관 · 한국 시간 기준</p></div><div className="backup-actions"><button type="button" onClick={() => void reload()} disabled={Boolean(busy)} aria-label="백업 목록 새로고침" title="새로고침"><RefreshCw size={15} /></button><button type="button" onClick={() => void create()} disabled={Boolean(busy)}>{busy === "create" ? <LoaderCircle className="spin" size={15} /> : <DatabaseBackup size={15} />}{busy === "create" ? "백업 중" : "지금 백업"}</button></div></header>
+    <header className="backup-header"><div><h3>백업 및 복원</h3><p>30일 보관 · 한국 시간 기준</p></div><div className="backup-actions"><button type="button" onClick={() => void reload()} disabled={Boolean(busy)} aria-label="백업 목록 새로고침" title="새로고침"><RefreshCw size={15} /></button><button type="button" onClick={() => void create()} disabled={Boolean(busy)}>{busy === "create" ? <LoaderCircle className="spin" size={15} /> : <DatabaseBackup size={15} />}{busy === "create" ? "백업 중" : "지금 백업"}</button></div></header>
     {error && <p className="backup-error" role="alert">{error}</p>}
     {listing?.state?.last_error && <p className="backup-error" role="status">최근 백업 작업 실패: {listing.state.last_error}</p>}
     <div className="backup-scope"><ShieldCheck size={17} /><p>OKR·Project·Task·루틴·속성·프로젝트 본문·데일리 기록을 보관합니다. 멤버·그룹·권한·연동·결제·휴지통·첨부파일은 복원 대상에서 제외됩니다.</p></div>
     {listing?.state?.last_success_at && <p className="backup-last">마지막 백업 {formatTime(listing.state.last_success_at)}</p>}
+    {listing && <p className="backup-last">{listing.state?.last_daily_date ? `최근 자동 백업 ${listing.state.last_daily_date}` : "자동 백업 실행 기록이 아직 없습니다."}</p>}
     {busy && <p className="backup-progress" role="status"><LoaderCircle className="spin" size={16} />{busy === "restore" ? "현재 상태를 백업하고 복원하고 있습니다. 완료될 때까지 기다려 주세요." : busy === "create" ? "현재 데이터를 별도 저장소에 백업하고 있습니다." : "백업을 불러오고 있습니다."}</p>}
     {preview ? <section className="backup-preview">
       <button className="backup-back" type="button" disabled={Boolean(busy)} onClick={() => setPreview(null)}><ArrowLeft size={14} />백업 목록</button>
