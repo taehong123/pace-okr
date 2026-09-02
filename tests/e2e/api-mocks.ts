@@ -105,7 +105,7 @@ export async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-export async function installApiMocks(page: Page, options: { preserveStorage?: boolean; failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "member" | "viewer"; teamWorkspace?: boolean } = {}) {
+export async function installApiMocks(page: Page, options: { preserveStorage?: boolean; failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "admin" | "member" | "viewer"; teamWorkspace?: boolean } = {}) {
   let krDataConnections: Array<Record<string, unknown>> = [];
   let slackSetupComplete = options.slackSetupComplete ?? true;
   let slackAutomations: Array<Record<string, unknown>> = [];
@@ -119,7 +119,7 @@ export async function installApiMocks(page: Page, options: { preserveStorage?: b
   const bootstrapResponse = {
     ...baseBootstrapResponse,
     workspaces: baseBootstrapResponse.workspaces.map((workspace) => ({ ...workspace, kind: workspaceKind, personal: workspaceKind === "personal", role: workspaceRole })),
-    team: { ...baseBootstrapResponse.team, workspace: { ...baseBootstrapResponse.team.workspace, kind: workspaceKind }, currentRole: workspaceRole, canManage: workspaceRole === "owner", members: baseBootstrapResponse.team.members.map((member) => ({ ...member, role: workspaceRole })) },
+    team: { ...baseBootstrapResponse.team, workspace: { ...baseBootstrapResponse.team.workspace, kind: workspaceKind }, currentRole: workspaceRole, canManage: workspaceRole === "owner" || workspaceRole === "admin", members: baseBootstrapResponse.team.members.map((member) => ({ ...member, role: workspaceRole })) },
   };
   await page.addInitScript((preserveStorage) => {
     if (!preserveStorage) localStorage.clear();
