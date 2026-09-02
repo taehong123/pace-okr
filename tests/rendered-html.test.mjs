@@ -214,8 +214,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.doesNotMatch(page, /revoke-link/);
   assert.match(aiConnections, /\/api\/integration-tokens/);
   assert.match(page, /\/api\/okr-organize/);
-  assert.match(page, /현재 OKR과 실행 상황을 읽고/);
-  assert.match(page, /필요한 다음 질문부터 이어갑니다/);
+  assert.match(page, /기존 OKR과 업무를 참고해/);
+  assert.match(page, /referencesOpen && targetCandidates.length > 0/);
   assert.match(page, /답변 중/);
   assert.match(page, /보내기/);
   assert.match(page, /Objective 1개.*KR/);
@@ -256,10 +256,10 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(okrOrganizeRoute, /UI will require the user to choose an existing Initiative before saving/);
   assert.match(okrOrganizeRoute, /Always answer in the user's language/);
   assert.match(okrOrganizeRoute, /leave every plan field empty/);
-  assert.match(page, /팀 OKR/);
-  assert.match(page, /개인 OKR/);
+  assert.doesNotMatch(page, /className="chat-presets"/);
+  assert.doesNotMatch(page, /className="assistant-example"/);
   assert.doesNotMatch(page, /루틴부터/);
-  assert.match(page, /Routine 도우미/);
+  assert.match(page, /언제 무엇을 반복할지 설명해 주세요/);
   assert.match(aiConnections, /브라우저 제어가 가능한 대화/);
   assert.match(integrationRoute, /현재 로그인된 내 ChatGPT 계정에 아래 OKRPTR MCP를 개인 연결로 지금 추가해 주세요/);
   assert.match(integrationRoute, /최종 실행 지시이자 명시적 사전 승인/);
@@ -711,10 +711,10 @@ test("uses distinct Project and Routine AI creation flows", async () => {
   ]);
 
   assert.ok((page.match(/AI 대화로 추가/g) ?? []).length >= 3);
-  assert.match(page, /Project 도우미/);
-  assert.match(page, /Routine 도우미/);
+  assert.match(page, /mode === "project" && visibleFields.has\("project"\)/);
+  assert.match(page, /mode === "routine" && visibleFields.has\("routineTitle"\)/);
   assert.match(page, /상위 Initiative/);
-  assert.match(page, /Initiative 연결 없음/);
+  assert.match(page, /참고 항목 선택/);
   assert.match(page, /createOpen=\{routineCreateOpen\}/);
   assert.match(styles, /\.page-create-actions > button[^}]*min-height: var\(--control-height\)/);
   assert.match(styles, /\.page-create-actions > button \{ min-height: 44px/);

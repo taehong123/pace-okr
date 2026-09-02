@@ -4298,13 +4298,15 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   const [plan, setPlan] = useState<OnboardingPlan>({
     ...emptyPlan,
   });
-  const [guideQuestions, setGuideQuestions] = useState<string[]>(() => assistantOpeningGuides(context));
-  const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>(() => [{ id: "initial", role: "assistant", content: assistantOpeningMessage(context, workspaceContext) }]);
+  const [guideQuestions, setGuideQuestions] = useState<string[]>([]);
+  const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>(() => [{ id: "initial", role: "assistant", content: assistantOpeningMessage() }]);
   const [visibleFields, setVisibleFields] = useState<Set<StringPlanField>>(new Set());
   const [mode, setMode] = useState<ConversationMode>(context?.entry === "onboarding" ? "onboarding" : context?.entry === "coach" ? "coach" : context?.entry === "project" ? "project" : context?.entry === "routine" ? "routine" : context?.entry === "task" ? "task" : "okr");
   const [okrTarget, setOkrTarget] = useState<OkrPlanTarget | null>(context?.target ?? null);
   const [targetCandidates, setTargetCandidates] = useState<OkrPlanTarget[]>(context?.targetCandidates ?? []);
   const [targetSearch, setTargetSearch] = useState("");
+  const [referencesOpen, setReferencesOpen] = useState(false);
+  const referenceButtonRef = useRef<HTMLButtonElement>(null);
   const [projectTarget, setProjectTarget] = useState<ProjectChatTarget | null>(null);
   const [projectDriMemberId, setProjectDriMemberId] = useState(defaultDriMemberId ?? members[0]?.id ?? "");
   const [routineAssigneeMemberId, setRoutineAssigneeMemberId] = useState("");
@@ -4373,8 +4375,9 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
         const restored = data.draft.payload;
         setMessage(restored.message);
         setPlan(restored.plan);
-        setGuideQuestions(restored.guideQuestions);
-        setConversationHistory(restored.conversationHistory);
+        const hasUserConversation = restored.conversationHistory.some((entry) => entry.role === "user");
+        setGuideQuestions(hasUserConversation ? restored.guideQuestions : []);
+        setConversationHistory(hasUserConversation ? restored.conversationHistory : [{ id: "initial", role: "assistant", content: assistantOpeningMessage() }]);
         setVisibleFields(new Set(restored.visibleFields));
         setMode(restored.mode);
         setOkrTarget(restored.okrTarget);
@@ -4436,13 +4439,14 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
     clearAssistantDraft();
     setMessage("");
     setPlan({ ...emptyPlan });
-    setGuideQuestions(assistantOpeningGuides(context));
-    setConversationHistory([{ id: "initial-reset", role: "assistant", content: assistantOpeningMessage(context, workspaceContext) }]);
+    setGuideQuestions([]);
+    setConversationHistory([{ id: "initial-reset", role: "assistant", content: assistantOpeningMessage() }]);
     setVisibleFields(new Set());
     setMode(context?.entry === "onboarding" ? "onboarding" : context?.entry === "coach" ? "coach" : context?.entry === "project" ? "project" : context?.entry === "routine" ? "routine" : context?.entry === "task" ? "task" : "okr");
     setOkrTarget(context?.target ?? null);
     setTargetCandidates(context?.targetCandidates ?? []);
     setTargetSearch("");
+    setReferencesOpen(false);
     setProjectTarget(null);
     setProjectDriMemberId(defaultDriMemberId ?? members[0]?.id ?? "");
     setRoutineAssigneeMemberId("");
@@ -4522,7 +4526,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   }
   async function organizeMessage() {
     const text = message.trim();
-    if (!text) return;
+    if (!text || saving) return;
     setConversationHistory((current) => [...current, { id: `user-${Date.now()}`, role: "user", content: text }]);
     setMessage("");
     setSaving(true);
@@ -4562,11 +4566,18 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   function chooseTarget(target: OkrPlanTarget) {
     setOkrTarget(target);
     setTargetSearch("");
+    setReferencesOpen(false);
     setPlan({ ...emptyPlan });
     setVisibleFields(new Set());
     setMode("coach");
     setAssistantResponse(targetPrompt(target));
     setGuideQuestions([]);
+  }
+  function closeReferencesOnEscape(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    setReferencesOpen(false);
+    referenceButtonRef.current?.focus();
   }
   function chooseQuickReply(question: string) {
     if (question.includes("나중에")) {
@@ -4577,25 +4588,6 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
       : question === "개인 성장 목표를 말해볼게요" ? "이번 분기에 개인적으로 이루고 싶은 목표는 "
         : question;
     setMessage(starter);
-  }
-  function chooseGuide(kind: "team" | "personal" | "free") {
-    setPlan({ ...emptyPlan });
-    setVisibleFields(new Set());
-    setMode("okr");
-    setProjectTarget(null);
-    setMessage("");
-    if (kind === "team") {
-      setAssistantResponse("팀 OKR로 시작하겠습니다. 팀이 이번 주기 끝에 달라져야 하는 상태부터 잡고, 공동 지표와 실행 책임을 나눕니다.");
-      setGuideQuestions(["팀이 달성해야 하는 결과는 무엇인가요?", "성공 여부를 숫자나 상태로 어떻게 확인할까요?", "어떤 프로젝트와 담당자가 먼저 움직여야 하나요?"]);
-      return;
-    }
-    if (kind === "personal") {
-      setAssistantResponse("개인 OKR로 시작하겠습니다. 역할 안에서 만들고 싶은 변화, 측정 기준, 바로 실행할 일을 분리합니다.");
-      setGuideQuestions(["이번 주기 동안 본인이 만들고 싶은 변화는 무엇인가요?", "완료가 아니라 성과를 보여주는 기준은 무엇인가요?", "이번 주에 바로 시작할 일은 무엇인가요?"]);
-      return;
-    }
-    setAssistantResponse("좋습니다. 정해진 양식 없이 질문하거나 지금 생각나는 대로 적어 주세요. 실행 계획이 보이면 OKR 구조도 함께 제안합니다.");
-    setGuideQuestions([]);
   }
   async function save() {
     if (mode === "task") {
@@ -4711,46 +4703,36 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   return (
     <section className="home-okr-chat" aria-labelledby="home-okr-chat-title">
       <header>
-        <div><Bot size={16} /><div><h2 id="home-okr-chat-title">{mode === "task" ? "Task 도우미" : mode === "project" ? "Project 도우미" : mode === "routine" ? "Routine 도우미" : "AI 대화"}</h2><p>{mode === "task" ? "할 일을 짧고 명확하게 다듬고, 미선택 시 General에 저장합니다." : mode === "project" ? "결과와 범위를 정리한 뒤 저장 전에 상위 Initiative를 선택합니다." : mode === "routine" ? "반복할 시점과 실행 방법을 독립된 Routine으로 정리합니다." : "현재 OKR과 실행 상황을 읽고, 필요한 다음 질문부터 이어갑니다."}</p></div></div>
+        <div><Bot size={16} /><h2 id="home-okr-chat-title">AI 대화</h2></div>
         <div className="assistant-chat-header-actions">
           <span className={`assistant-draft-status ${draftSaveState}`} aria-live="polite">{draftSaveState === "loading" ? <><LoaderCircle className="spin" size={12} />이전 초안 확인 중</> : draftSaveState === "saving" ? <><LoaderCircle className="spin" size={12} />임시저장 중</> : draftSaveState === "saved" ? <><CheckCircle2 size={12} />임시저장됨</> : draftSaveState === "error" ? <><AlertTriangle size={12} />임시저장 재시도 예정</> : null}</span>
           {hasPersistableDraft && <button type="button" className="assistant-reset-draft" onClick={resetConversationDraft}>새로 시작</button>}
-          {assistantFlow && okrTarget && <span className="assistant-stage">{kindLabel(okrTarget.kind)} 다음 단계</span>}
+          {targetCandidates.length > 0 && <button ref={referenceButtonRef} type="button" className="icon-button" aria-label="참고 항목 선택" title="참고 항목 선택" aria-expanded={referencesOpen} aria-controls={referencesOpen ? "assistant-references" : undefined} onKeyDown={closeReferencesOnEscape} onClick={() => setReferencesOpen((open) => !open)}><Link2 size={15} /></button>}
         </div>
       </header>
       <div className="home-chat-surface">
         <div className="chat-thread">
-          {context && mode !== "task" && mode !== "project" && mode !== "routine" && <div className="chat-okr-context"><Target size={14} /><span><b>{context.cycleName}</b>{context.entry === "onboarding" ? " 첫 OKR 온보딩" : " 상황 기반 대화"}</span></div>}
-          {mode === "task" && <div className="chat-okr-context"><ListChecks size={14} /><span><b>Task 추가</b> Project·Routine 미선택 시 General</span></div>}
-          {mode === "project" && <><div className="chat-okr-context"><Briefcase size={14} /><span><b>{projectTarget?.initiativeTitle ?? "상위 Initiative 미선택"}</b> · 저장 전에 선택</span></div><ProjectQuotaBadge /></>}
-          {mode === "routine" && <div className="chat-okr-context"><Repeat2 size={14} /><span><b>독립 Routine</b> · Initiative 연결 없음</span></div>}
-          {context?.entry === "onboarding" && <div className="assistant-example"><b>간단한 예시</b><span>Objective · 신규 사용자가 제품 가치를 더 빨리 경험하게 한다</span><span>Key Result · 가입 후 7일 내 핵심 기능 사용률을 35%에서 55%로 높인다</span></div>}
           {conversationHistory.map((entry) => <p className={entry.role === "user" ? "user-message" : "assistant-message"} key={entry.id}>{entry.content}</p>)}
-          {mode === "coach" && targetCandidates.length > 0 && <div className="assistant-target-picker" aria-label="대화 대상 선택">
+          {referencesOpen && targetCandidates.length > 0 && <div id="assistant-references" className="assistant-target-picker" aria-label="대화 대상 선택">
             <header>
               <div><Search size={13} /><b>대화 대상</b></div>
               {okrTarget ? <span>{kindLabel(okrTarget.kind)} · {okrTarget.title}</span> : <span>전체 OKR 문맥</span>}
             </header>
             <label>
               <span className="sr-only">Objective, Key Result, Initiative, Project 검색</span>
-              <input value={targetSearch} onChange={(event) => setTargetSearch(event.target.value)} placeholder="Objective, KR, Initiative, Project 검색" />
+              <input value={targetSearch} onKeyDown={closeReferencesOnEscape} onChange={(event) => setTargetSearch(event.target.value)} placeholder="Objective, KR, Initiative, Project 검색" />
             </label>
             {visibleTargetCandidates.length > 0 && <div className="assistant-target-options">
-              {visibleTargetCandidates.map((target) => <button key={target.id} onClick={() => chooseTarget(target)}><span>{kindLabel(target.kind)}</span>{target.title}</button>)}
+              {visibleTargetCandidates.map((target) => <button key={target.id} onKeyDown={closeReferencesOnEscape} onClick={() => chooseTarget(target)}><span>{kindLabel(target.kind)}</span>{target.title}</button>)}
             </div>}
           </div>}
-          {guideQuestions.length > 0 && <div className="assistant-followups">{guideQuestions.map((question) => <button className="followup-message" onClick={() => chooseQuickReply(question)} key={question}>{question}</button>)}</div>}
+          {conversationHistory.some((entry) => entry.role === "user") && guideQuestions.length > 0 && <div className="assistant-followups">{guideQuestions.map((question) => <button className="followup-message" onClick={() => chooseQuickReply(question)} key={question}>{question}</button>)}</div>}
           {!canWrite && <div className="assistant-readonly"><Eye size={14} /><span>Viewer는 대화와 분석을 이용할 수 있지만 항목을 생성할 수 없습니다.</span></div>}
           <div className="chat-input"><label htmlFor="assistant-message">메시지</label><div className="chat-composer"><textarea id="assistant-message" value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void organizeMessage(); }} rows={4} placeholder={mode === "task" ? "해야 할 일을 편하게 설명해 주세요" : mode === "project" ? "만들 Project의 결과와 범위를 설명해 주세요" : mode === "routine" ? "언제 무엇을 반복할지 설명해 주세요" : "지금 이루고 싶은 목표나 막힌 일을 편하게 적어 주세요"} /><button type="button" className="chat-send-button" onClick={() => void organizeMessage()} disabled={saving || !message.trim()} aria-label={saving ? "답변 생성 중" : "메시지 보내기"}>{saving ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}<span>{saving ? "답변 중" : "보내기"}</span></button></div></div>
-          {mode === "okr" && context?.entry !== "onboarding" && <div className="chat-presets">
-            <button onClick={() => chooseGuide("team")}>팀 OKR</button>
-            <button onClick={() => chooseGuide("personal")}>개인 OKR</button>
-            <button onClick={() => chooseGuide("free")}>그냥 말하기</button>
-          </div>}
           <div className="chat-actions">
             {hasDraft && canWrite && <button className="welcome-primary" onClick={() => void save()} disabled={saving || !canApplyDraft}>{saving ? "생성 중" : saveLabel}<ChevronRight size={14} /></button>}
           </div>
-          {assistantFlow && okrTarget && (okrTarget.kind === "key_result" || okrTarget.kind === "initiative") && <button className="assistant-skip" onClick={skipOptionalStep}>지금은 건너뛰기</button>}
+          {hasDraft && assistantFlow && okrTarget && (okrTarget.kind === "key_result" || okrTarget.kind === "initiative") && <button className="assistant-skip" onClick={skipOptionalStep}>지금은 건너뛰기</button>}
         </div>
         {mode !== "task" && hasOkrDraft(plan) && <OkrDraftTree
           plan={plan}
@@ -4765,6 +4747,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
           onMoveInitiative={moveInitiative}
         />}
         {visibleFields.size > 0 && <div className="okr-setup-fields home-draft-fields">
+          {mode === "project" && visibleFields.has("project") && <ProjectQuotaBadge />}
           {mode === "project" && visibleFields.has("project") && <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="결과와 범위가 분명한 첫 Project" /></label>}
           {mode === "project" && visibleFields.has("project") && <label><span>상위 Initiative</span><select value={projectTarget?.initiativeId ?? ""} onChange={(event) => setProjectTarget(projectTargets.find((entry) => entry.initiativeId === event.target.value) ?? null)}><option value="">저장 전에 선택</option>{projectTargets.map((entry) => <option value={entry.initiativeId} key={entry.initiativeId}>{entry.cycleName} · {entry.initiativeTitle}</option>)}</select></label>}
           {mode === "project" && visibleFields.has("project") && members.length > 0 && <label><span>Project DRI</span><select value={projectDriMemberId} onChange={(event) => setProjectDriMemberId(event.target.value)}>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
@@ -4922,40 +4905,8 @@ function deriveAssistantTargeting(context: AssistantWorkspaceContext) {
   return { target: focused, candidates };
 }
 
-function assistantOpeningMessage(context: OkrChatContext | null, workspace: AssistantWorkspaceContext) {
-  if (context?.entry === "task") {
-    return "추가할 Task를 편하게 설명해 주세요. 문구를 실행 가능한 단위로 다듬고, Project나 Routine을 고르지 않으면 General에 저장하겠습니다.";
-  }
-  if (context?.entry === "project") {
-    return "만들 Project의 결과와 범위를 편하게 설명해 주세요. Task까지 말씀하시면 함께 정리하고, 저장 전에 상위 Initiative를 선택하게 하겠습니다.";
-  }
-  if (context?.entry === "routine") {
-    return "반복할 일과 시작 시점, 장소나 도구, 실행 순서를 편하게 설명해 주세요. Routine은 Initiative와 연결하지 않고 독립적으로 만듭니다.";
-  }
-  if (context?.entry === "onboarding") {
-    return "OKR은 이루고 싶은 변화인 Objective와, 그 변화가 일어났는지 확인하는 측정 가능한 Key Result를 연결하는 방식이에요. 이번 주기에 달성하고 싶은 목표가 있나요? 편하게 말해 주세요.";
-  }
-  if (context?.entry === "create") {
-    return `‘${context.cycleName}’에 ${kindLabel(context.sourceKind ?? "objective")}부터 같이 만들어볼게요. 이번 주기 끝에 어떤 상태가 달라져야 하는지 편하게 적어 주세요.`;
-  }
-  if (context?.target) return targetPrompt(context.target);
-  if ((context?.targetCandidates?.length ?? 0) > 1) return "현재 OKR과 Project 전체를 함께 볼 수 있습니다. 특정 항목을 기준으로 이야기하고 싶으면 아래에서 검색해 선택해 주세요.";
-  const focused = workspace.items.find((item) => item.id === workspace.focusedItemId);
-  if (focused?.kind === "project") {
-    return `‘${focused.title}’ Project는 현재 ${statusLabel(focused.status)} 상태입니다. 지금 막힌 점이나 다음으로 정리할 일을 말씀해 주세요.`;
-  }
-  if (!workspace.items.some((item) => item.kind === "objective")) return "현재 워크스페이스에는 활성 Objective가 없습니다. 새 목표를 함께 정리할까요?";
-  if (workspace.blockedTaskCount > 0) return `현재 막힌 Task가 ${workspace.blockedTaskCount}개 있습니다. 가장 먼저 풀어야 할 병목부터 같이 보겠습니다.`;
-  return "현재 OKR 구조를 확인했습니다. 진행 상황, 막힌 점, 다음 우선순위 중 무엇부터 이야기할까요?";
-}
-
-function assistantOpeningGuides(context: OkrChatContext | null) {
-  if (context?.entry === "task") return ["해야 할 일을 한 문장으로 말할게요", "여러 Task를 한꺼번에 정리할게요"];
-  if (context?.entry === "project") return ["Project가 끝났을 때 달라질 결과를 말할게요", "첫 Task까지 함께 정리할게요"];
-  if (context?.entry === "routine") return ["언제 무엇을 반복할지 말할게요", "실행 순서까지 함께 정리할게요"];
-  if (context?.entry === "onboarding") return ["업무 목표를 말해볼게요", "개인 성장 목표를 말해볼게요", "아직 목표가 잘 떠오르지 않아요"];
-  if (context?.entry === "create") return ["달성하고 싶은 변화는 무엇인가요?", "성공 여부는 어떤 숫자나 상태로 확인할까요?"];
-  return [];
+function assistantOpeningMessage() {
+  return "목표나 할 일을 편하게 이야기해 주세요. 기존 OKR과 업무를 참고해 함께 정리할게요.";
 }
 
 function targetPrompt(target: OkrPlanTarget) {

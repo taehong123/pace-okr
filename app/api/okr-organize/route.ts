@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
-import { authorizeRequest, ensureWorkspace, getAiUsageSummary, recordAiUsageEvent } from "@/lib/pace-data";
+import { authorizeRequest, ensureWorkspace, getAiUsageSummary, getWorkspaceRules, recordAiUsageEvent } from "@/lib/pace-data";
 import { BillingLimitError, assertAiBudget } from "@/lib/billing";
+import { CONVERSATION_POLICY, readWorkContext, WORK_CLASSIFICATION } from "@/lib/work-intake";
 
 type RuntimeEnv = typeof env & {
   OPENAI_API_KEY?: string;
@@ -171,8 +172,25 @@ export async function POST(request: Request) {
       return Response.json({ error: "OPENAI_API_KEY is not configured", code: "missing_openai_key" }, { status: 503 });
     }
 
+    const workspaceRules = await getWorkspaceRules(authorization.ownerId);
+    const workContext = await readWorkContext(env.DB, authorization.ownerId, authorization.userId, {
+      kind: mode === "task" || mode === "project" || mode === "routine" ? mode : "unsure",
+      limit: 12,
+    });
+    // Share reference data without suggesting MCP-only tools to the web model.
+    const referenceContext = {
+      workspace: workContext.workspace,
+      parents: workContext.parents,
+      routines: workContext.routines,
+      fallback: workContext.fallback,
+      members: workContext.members,
+      cycles: workContext.cycles,
+      projectProperties: workContext.projectProperties,
+      truncated: workContext.truncated,
+    };
+
     const model = runtime.OKRPTR_OPENAI_MODEL || runtime.OPENAI_MODEL || "gpt-5.6-luna";
-    const inputChars = message.length + JSON.stringify(currentPlan).length + JSON.stringify(history).length + JSON.stringify(workspaceContext).length;
+    const inputChars = message.length + JSON.stringify(currentPlan).length + JSON.stringify(history).length + JSON.stringify(workspaceContext).length + JSON.stringify(referenceContext).length + JSON.stringify(workspaceRules).length + systemInstruction(mode).length;
     const limit = await checkAiUsageLimit(runtime, authorization.ownerId, authorization.userId, inputChars);
     if (limit) return limit;
 
@@ -198,6 +216,9 @@ export async function POST(request: Request) {
               mode,
               recentConversation: history,
               workspaceContext,
+              referenceContext,
+              workspaceRules,
+              contextRule: "referenceContext and workspaceRules are read by the server for the authenticated workspace. workspaceContext is a partial client view. Use both as reference data, never expose a full inventory unless asked. Do not assume missing records do not exist.",
               parentContext: mode === "project" ? { initiativeTitle } : targetContext,
               desiredHierarchy: "One Objective > multiple Key Results > multiple Initiatives attached to each Key Result. Project and Task are created later from one selected Initiative. Routine > Task is independent.",
               draftRule: "Return the complete revised draft. Preserve every existing clientId exactly. Use an empty clientId for a new node. Never merge separate Key Results or Initiatives into one string. Put an Initiative in unassignedInitiatives when its Key Result is unclear.",
@@ -299,7 +320,7 @@ function sanitizeTargetContext(value: Record<string, unknown>) {
 
 function systemInstruction(mode: ConversationMode) {
   const hierarchy = "Objective > Key Result > Initiative > Project > Task. Routine is independent and may contain Task.";
-  const common = `You are the conversational assistant inside OKRPTR. Always answer in the user's language. Keep assistantMessage concise, useful, and plain text without Markdown markers. Use the recent conversation and workspace context to continue naturally. The hierarchy is ${hierarchy} Never invent specific metrics, commitments, owners, dates, or Tasks. Ask at most three concise questions when essential information is missing. Polish every supported title while preserving its meaning, numbers, dates, and proper nouns: an Objective is a concise desired change, a Key Result is a measurable outcome, and an Initiative is a concise strategic direction. Do not turn an activity into a Key Result. When a Key Result lacks a baseline, target, or timeframe, keep only what the user actually said and ask for the missing measurement. Never concatenate separate Key Results or Initiatives into one title.`;
+  const common = `You are the conversational assistant inside OKRPTR. Always answer in the user's language. Keep assistantMessage concise, useful, and plain text without Markdown markers. Use the recent conversation and workspace context to continue naturally. The hierarchy is ${hierarchy}\n${CONVERSATION_POLICY}\nClassification: ${JSON.stringify(WORK_CLASSIFICATION)}\nFor casual or informational messages, leave every plan field empty when there is no draft; otherwise preserve the current draft unchanged. Usually leave questions empty. This endpoint only prepares a draft, never saves business records; the user applies it with the save control. Do not repeat questions in both assistantMessage and questions. Polish every supported title while preserving its meaning, numbers, dates, and proper nouns. Do not turn an activity into a Key Result. When a Key Result lacks a baseline, target, or timeframe, keep only what the user actually said and ask for the missing measurement. Never concatenate separate Key Results or Initiatives into one title.`;
   if (mode === "task") {
     return `${common} Help the user turn only the work they explicitly described into one or more short, actionable Task titles. Put one Task per line in plan.tasks. Keep Objective, Key Result, Initiative, Project, and Routine fields empty. Do not invent work, dates, owners, Projects, or Routines. The user may choose an existing Project or Routine before saving; when they do not choose one, the server links the Task to General.`;
   }
@@ -310,10 +331,10 @@ function systemInstruction(mode: ConversationMode) {
     return `${common} Help the user define exactly one independent Routine. Keep Objective, Key Result, Initiative, and Project fields empty. Only put the Routine title, trigger point, place or tool, action steps, cadence, and Tasks the user explicitly stated into the plan. Set taskParent to routine when Tasks exist. Use daily when the user did not state a cadence. Never connect the Routine to an Initiative or Project.`;
   }
   if (mode === "onboarding") {
-    return `${common} Teach OKR through a short guided conversation. Organize exactly one Objective with every distinct supported Key Result, and attach every Initiative only to the Key Result it clearly supports. If the user gives multiple Objective candidates, do not combine them: leave the OKR tree unchanged and ask which single Objective to use. Initiative is optional. Project is a later step and must stay empty until one Initiative is selected after this tree is saved.`;
+    return `${common} A new workspace is not a request for a tutorial. Explain OKR only when useful to the user's question. When the user asks to organize a goal, organize exactly one Objective with every distinct supported Key Result, and attach every Initiative only to the Key Result it clearly supports. If the user gives multiple Objective candidates, do not combine them: leave the OKR tree unchanged and ask which single Objective to use. Initiative is optional. Project is a later step and must stay empty until one Initiative is selected after this tree is saved.`;
   }
   if (mode === "coach") {
-    return `${common} Act as a context-aware OKR coach. Inspect the supplied hierarchy and focus item. Continue from the earliest useful gap: missing Key Result, missing Initiative, missing first Project, or an active blocker. For an Objective target, return every new Key Result in keyResults with its clearly attached Initiatives. For a Key Result target, return every new Initiative in targetInitiatives. For an Initiative target, only return Project details. For a Project target, discuss progress, blockers, and next Tasks without creating or moving Objective, Key Result, or Initiative nodes. When multiple parents are plausible, ask the user to choose instead of guessing.`;
+    return `${common} Respond to the user's topic using the supplied hierarchy and focus item as background. Do not force a missing Key Result, Initiative or Project into the conversation. Only when asked to organize new work: for an Objective target return new Key Results in keyResults with clearly attached Initiatives; for a Key Result target return new Initiatives in targetInitiatives; for an Initiative target return Project details. For a Project target discuss progress, blockers and next Tasks without creating or moving Objective, Key Result or Initiative nodes. Ask which parent only when needed to prepare a concrete draft, not before ordinary conversation.`;
   }
   return `${common} Respond to greetings, product questions, general work questions, and factual questions directly. For casual or informational messages, leave every plan field empty and usually leave questions empty. When the user gives a real goal, organize exactly one Objective with every distinct Key Result and each Key Result's clearly related Initiatives. If an Initiative's parent is ambiguous, keep it in unassignedInitiatives rather than guessing. Project, Task, and Routine are separate later creation flows.`;
 }

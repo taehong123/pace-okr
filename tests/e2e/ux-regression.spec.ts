@@ -444,9 +444,9 @@ test("연결할 Project·Routine이 없으면 직접 추가와 AI 추가 모두 
 test("Project·Task·Routine 추가 진입과 AI 도우미를 같은 구조로 제공한다", async ({ page, isMobile }) => {
   await installApiMocks(page);
   const flows = [
-    { view: "work", helper: "Project 도우미" },
-    { view: "inbox", helper: "Task 도우미" },
-    { view: "routines", helper: "Routine 도우미" },
+    { view: "work", placeholder: "만들 Project의 결과와 범위를 설명해 주세요" },
+    { view: "inbox", placeholder: "해야 할 일을 편하게 설명해 주세요" },
+    { view: "routines", placeholder: "언제 무엇을 반복할지 설명해 주세요" },
   ];
 
   for (const flow of flows) {
@@ -460,7 +460,10 @@ test("Project·Task·Routine 추가 진입과 AI 도우미를 같은 구조로 �
       expect((await directButton.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
     }
     await aiButton.click();
-    await expect(page.getByRole("region", { name: flow.helper })).toBeVisible();
+    const assistant = page.getByRole("region", { name: "AI 대화", exact: true });
+    await expect(assistant).toBeVisible();
+    await expect(assistant.getByPlaceholder(flow.placeholder)).toBeVisible();
+    await expect(assistant.locator(".assistant-target-picker, .assistant-example, .chat-presets, .assistant-followups")).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   }
 
@@ -485,7 +488,7 @@ test("Project 생성창 닫기는 현재 화면을 유지하고 AI 대화 초안
   await expect(page).toHaveURL(/view=work/);
 
   await page.getByRole("button", { name: "AI 대화로 추가", exact: true }).click();
-  const assistant = page.getByRole("region", { name: "Project 도우미" });
+  const assistant = page.getByRole("region", { name: "AI 대화", exact: true });
   await assistant.getByLabel("메시지", { exact: true }).fill("셀러 쇼핑몰 전체 오더 플로우 안정화 개발");
   await assistant.getByRole("button", { name: "메시지 보내기" }).click();
   await expect(assistant.getByLabel("Project", { exact: true })).toHaveValue("셀러 쇼핑몰 전체 오더 플로우 안정화 개발");
@@ -500,7 +503,7 @@ test("Project 생성창 닫기는 현재 화면을 유지하고 AI 대화 초안
 
   await page.getByRole("button", { name: "Project", exact: true }).first().click();
   await page.getByRole("button", { name: "AI 대화로 추가", exact: true }).click();
-  const restoredAssistant = page.getByRole("region", { name: "Project 도우미" });
+  const restoredAssistant = page.getByRole("region", { name: "AI 대화", exact: true });
   await expect(restoredAssistant.getByLabel("Project", { exact: true })).toHaveValue("셀러 쇼핑몰 전체 오더 플로우 안정화 개발");
   await expect(restoredAssistant.getByText("임시저장됨")).toBeVisible();
 });
