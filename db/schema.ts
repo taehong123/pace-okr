@@ -1060,6 +1060,12 @@ export const emailMarketingConsents = sqliteTable(
   (table) => [index("idx_email_marketing_consents_eligibility").on(table.marketingDataConsent, table.advertisingEmailConsent, table.reaffirmAfter)],
 );
 
+export const emailMarketingPromptState = sqliteTable("email_marketing_prompt_state", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  shownAt: text("shown_at"),
+  respondedAt: text("responded_at"),
+});
+
 export const emailMarketingConsentEvents = sqliteTable(
   "email_marketing_consent_events",
   {

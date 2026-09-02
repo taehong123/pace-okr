@@ -519,9 +519,11 @@ test("uses Google verified email and separates optional email marketing consent"
   assert.match(page, /Google이 확인한 이메일로 바로 시작하세요/);
   assert.doesNotMatch(page, /function RegistrationScreen|\/api\/account\/phone\/send|휴대전화 소유 확인/);
   assert.doesNotMatch(paceData, /registration_required|allowIncompleteRegistration/);
-  assert.match(page, /\/api\/account\/marketing-consent/);
-  assert.match(page, /마케팅 목적 개인정보 이용 설정/);
-  assert.match(page, /광고성 이메일 수신 설정/);
+  const consentUi = await readFile(new URL("../app/marketing-consent.tsx", import.meta.url), "utf8");
+  assert.match(page, /MarketingConsentPrompt/);
+  assert.match(consentUi, /\/api\/account\/marketing-consent/);
+  assert.match(consentUi, /마케팅 목적 개인정보 이용 설정/);
+  assert.match(consentUi, /광고성 이메일 수신 설정/);
   assert.match(marketing, /marketingEligible: marketingDataConsent && advertisingEmailConsent && !needsReaffirmation/);
   assert.match(marketing, /2 \* 365 \* 24 \* 60 \* 60_000/);
   assert.match(marketingRoute, /typeof payload\.marketingDataConsent !== "boolean"/);

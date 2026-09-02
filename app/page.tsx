@@ -66,6 +66,7 @@ import { startTransition, useCallback, useEffect, useId, useMemo, useRef, useSta
 import { ConfirmationProvider, OverlayDialog, useAppConfirm } from "./overlay-dialog";
 import AIConnectionsDialog from "./ai-connections";
 import WorkspaceBackups from "./workspace-backups";
+import { MarketingConsentPrompt, MarketingConsentSettings } from "./marketing-consent";
 import { OkrFileSurface, type OkrFileCycleSummary } from "./okr-file-surface";
 import BillingView, { ProjectQuotaBadge } from "./billing-view";
 import { ChatAiUsage } from "./ai-usage-meter";
@@ -2169,9 +2170,10 @@ function WorkspaceApp() {
           <div><button className="mobile-assistant-trigger" aria-label="AI 대화 열기" title="AI 대화 열기" onClick={openAssistant}><span aria-hidden="true">🤖</span></button><button aria-label="워크스페이스 설정" title="워크스페이스 설정" onClick={() => openWorkspaceSettings("general")}><Settings size={16} /></button><button aria-label="서비스 안내" title="서비스 안내" onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
         </header>
         <div className="page-body">
-          <MarketingConsentNudge
+          <MarketingConsentPrompt
+            key={authState.user?.id ?? ""}
             userId={authState.user?.id ?? ""}
-            onOpenSettings={() => setPropertyPanelOpen(true)}
+            onNotice={(message) => showNotice(message, "error")}
           />
           {activeView !== "home" && !selectedProject && <header className="page-header">
             <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
@@ -5631,117 +5633,9 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
 }
 
 function PropertyPanel({ user, displayName, themeMode, onThemeModeChange, onClose, onSignOut }: { user: AuthUser | null; displayName: string; themeMode: ThemeMode; onThemeModeChange: (mode: ThemeMode) => void; onClose: () => void; onSignOut: () => void }) {
-  return <OverlayDialog title="내 설정" variant="drawer" onRequestClose={() => onClose()}>{(requestClose) => <aside className="property-panel"><header><div><h2>내 설정</h2><p>내 계정과 화면 설정</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section"><h3>내 계정</h3><div className="settings-account-card"><span className="avatar">{displayName.slice(0, 1).toLocaleUpperCase()}</span><div><b>{displayName}</b><small>{user?.email || "로그인 계정"}</small></div></div></section><MarketingConsentSettings email={user?.email ?? ""} /><section className="settings-section appearance-settings"><h3>테마</h3><ThemePicker value={themeMode} onChange={onThemeModeChange} /><p>선택한 테마는 이 브라우저에 저장됩니다.</p></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section></aside>}</OverlayDialog>;
+  return <OverlayDialog title="내 설정" variant="drawer" onRequestClose={() => onClose()}>{(requestClose) => <aside className="property-panel"><header><div><h2>내 설정</h2><p>내 계정과 화면 설정</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section"><h3>내 계정</h3><div className="settings-account-card"><span className="avatar">{displayName.slice(0, 1).toLocaleUpperCase()}</span><div><b>{displayName}</b><small>{user?.email || "로그인 계정"}</small></div></div></section><section className="settings-section appearance-settings"><h3>테마</h3><ThemePicker value={themeMode} onChange={onThemeModeChange} /><p>선택한 테마는 이 브라우저에 저장됩니다.</p></section><MarketingConsentSettings /><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section></aside>}</OverlayDialog>;
 }
 
-type EmailMarketingConsentSettings = {
-  marketingDataConsent: boolean;
-  advertisingEmailConsent: boolean;
-  marketingEligible: boolean;
-  needsReaffirmation: boolean;
-  reaffirmAfter: string | null;
-};
-
-function MarketingConsentNudge({ userId, onOpenSettings }: { userId: string; onOpenSettings: () => void }) {
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    if (!userId) return;
-    const storageKey = `okrptr:marketing-consent-nudge:${userId}`;
-    try {
-      if (window.localStorage.getItem(storageKey)) return;
-    } catch {
-      // Storage is optional; the notice still works when it is unavailable.
-    }
-    const controller = new AbortController();
-    void fetch("/api/account/marketing-consent", { cache: "no-store", signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) return;
-        const data = await response.json() as { consent?: EmailMarketingConsentSettings };
-        if (data.consent && !data.consent.marketingDataConsent && !data.consent.advertisingEmailConsent) setVisible(true);
-      })
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, [userId]);
-
-  function dismiss(openSettings: boolean) {
-    try {
-      window.localStorage.setItem(`okrptr:marketing-consent-nudge:${userId}`, new Date().toISOString());
-    } catch {
-      // Dismissing for this render is enough when storage is unavailable.
-    }
-    setVisible(false);
-    if (openSettings) onOpenSettings();
-  }
-
-  if (!visible) return null;
-  return <aside className="marketing-consent-nudge" aria-labelledby="marketing-consent-nudge-title">
-    <div><b id="marketing-consent-nudge-title">이메일 혜택 안내를 받을까요?</b><p>선택 동의이며 거절해도 모든 기능을 그대로 이용할 수 있습니다. 휴대전화 번호는 수집하지 않습니다.</p></div>
-    <div><button type="button" onClick={() => dismiss(true)}>동의 설정 보기</button><button type="button" className="secondary" onClick={() => dismiss(false)}>나중에</button></div>
-  </aside>;
-}
-
-function MarketingConsentSettings({ email }: { email: string }) {
-  const fieldId = useId();
-  const [consent, setConsent] = useState<EmailMarketingConsentSettings | null>(null);
-  const [marketingDataConsent, setMarketingDataConsent] = useState(false);
-  const [advertisingEmailConsent, setAdvertisingEmailConsent] = useState(false);
-  const [state, setState] = useState<"loading" | "ready" | "saving" | "saved" | "error">("loading");
-  const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void fetch("/api/account/marketing-consent", { cache: "no-store", signal: controller.signal })
-      .then(async (response) => {
-        const data = await response.json() as { consent?: EmailMarketingConsentSettings; error?: string };
-        if (!response.ok || !data.consent) throw new Error(data.error ?? "동의 설정을 불러오지 못했습니다.");
-        setConsent(data.consent);
-        setMarketingDataConsent(data.consent.marketingDataConsent);
-        setAdvertisingEmailConsent(data.consent.advertisingEmailConsent);
-        setState("ready");
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setMessage(error instanceof Error ? error.message : "동의 설정을 불러오지 못했습니다.");
-        setState("error");
-      });
-    return () => controller.abort();
-  }, []);
-
-  async function save() {
-    if (!consent || state === "saving") return;
-    setState("saving");
-    setMessage("");
-    const response = await fetch("/api/account/marketing-consent", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ marketingDataConsent, advertisingEmailConsent }),
-    });
-    const data = await response.json().catch(() => ({})) as { consent?: EmailMarketingConsentSettings; error?: string };
-    if (!response.ok || !data.consent) {
-      setMessage(data.error ?? "동의 설정을 저장하지 못했습니다.");
-      setState("error");
-      return;
-    }
-    setConsent(data.consent);
-    setMessage("동의 설정을 저장했습니다.");
-    setState("saved");
-  }
-
-  return <section className="settings-section marketing-settings">
-    <h3>이메일 마케팅 동의</h3>
-    {state === "loading" ? <p className="marketing-settings-state" role="status"><LoaderCircle className="spin" size={13} />불러오는 중</p>
-      : !consent ? <p className="marketing-settings-state error" role="alert">{message}</p>
-      : <>
-        <div className="marketing-email-summary"><div><b>{email || "Google에서 확인된 이메일"}</b><small>Google에서 확인된 이메일입니다. 휴대전화 번호는 수집하지 않으며, 초대·결제·보안 안내는 아래 선택 동의와 별개입니다.</small></div></div>
-        <label className="marketing-setting-row" htmlFor={`${fieldId}-marketing-data`} aria-label="마케팅 목적 개인정보 이용 설정"><input id={`${fieldId}-marketing-data`} type="checkbox" checked={marketingDataConsent} onChange={(event) => { setMarketingDataConsent(event.target.checked); setState("ready"); setMessage(""); }} /><span><b>마케팅 목적 개인정보 이용</b><small>혜택과 프로모션 대상을 정하는 데 가입 이메일과 서비스 이용 정보를 사용합니다.</small></span></label>
-        <label className="marketing-setting-row" htmlFor={`${fieldId}-marketing-email`} aria-label="광고성 이메일 수신 설정"><input id={`${fieldId}-marketing-email`} type="checkbox" checked={advertisingEmailConsent} onChange={(event) => { setAdvertisingEmailConsent(event.target.checked); setState("ready"); setMessage(""); }} /><span><b>광고성 이메일 수신</b><small>동의한 경우에만 혜택과 프로모션 이메일을 보냅니다. 메일의 수신거부 링크로도 즉시 철회할 수 있습니다.</small></span></label>
-        <div className="marketing-settings-actions"><button type="button" onClick={() => void save()} disabled={state === "saving"}>{state === "saving" ? "저장 중" : "동의 설정 저장"}</button><small>{marketingDataConsent && advertisingEmailConsent ? "두 동의가 모두 유효할 때만 광고 이메일 발송 대상이 됩니다." : "동의하지 않아도 서비스 이용에는 영향이 없습니다."}</small></div>
-        {consent.needsReaffirmation && <p className="marketing-settings-message error" role="status">동의 후 2년이 지나 재확인이 필요합니다. 다시 저장하기 전까지 광고 이메일을 보내지 않습니다.</p>}
-        {message && <p className={`marketing-settings-message ${state === "error" ? "error" : ""}`} role={state === "error" ? "alert" : "status"}>{message}</p>}
-      </>}
-  </section>;
-}
 
 function TeamPanel({ initialTeam, initialTab, initialGroupHandle, embedded = false, onTeamChange, onClose, onNotice }: { initialTeam: TeamData | null; initialTab: "members" | "groups"; initialGroupHandle: string | null; embedded?: boolean; onTeamChange: (team: TeamData | null) => void; onClose: () => void; onNotice: (message: string) => void }) {
   const [team, setTeam] = useState<TeamData | null>(initialTeam);

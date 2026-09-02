@@ -19,6 +19,67 @@ type ConsentRow = {
   updated_at: string;
 };
 
+type PromptRow = { shown_at: string | null; responded_at: string | null };
+let promptSchemaReady: Promise<unknown> | null = null;
+
+async function ensurePromptSchema() {
+  await ensureBillingSchema();
+  if (!promptSchemaReady) {
+    promptSchemaReady = env.DB.prepare(`CREATE TABLE IF NOT EXISTS email_marketing_prompt_state (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      shown_at TEXT,
+      responded_at TEXT
+    )`).run();
+    void promptSchemaReady.catch(() => { promptSchemaReady = null; });
+  }
+  await promptSchemaReady;
+}
+
+async function readPromptState(userId: string) {
+  await ensurePromptSchema();
+  // Existing explicit consent/withdrawal history suppresses the introductory prompt.
+  await env.DB.prepare(`INSERT OR IGNORE INTO email_marketing_prompt_state (user_id, shown_at, responded_at)
+    SELECT user_id, updated_at, updated_at FROM email_marketing_consents c
+    WHERE user_id = ? AND (marketing_data_consent = 1 OR advertising_email_consent = 1
+      OR EXISTS (SELECT 1 FROM email_marketing_consent_events e WHERE e.user_id = c.user_id)
+      OR EXISTS (SELECT 1 FROM account_consent_events e WHERE e.user_id = c.user_id
+        AND e.consent_type IN ('marketing_data', 'electronic_marketing'))
+      OR EXISTS (SELECT 1 FROM account_registrations r WHERE r.user_id = c.user_id
+        AND (r.marketing_data_consent = 1 OR r.electronic_marketing_consent = 1)))`)
+    .bind(userId).run();
+  return env.DB.prepare("SELECT shown_at, responded_at FROM email_marketing_prompt_state WHERE user_id = ?")
+    .bind(userId).first<PromptRow>();
+}
+
+export async function claimEmailMarketingPrompt(userId: string) {
+  await getEmailMarketingConsent(userId);
+  const now = new Date().toISOString();
+  // The conditional update is the cross-tab/device claim, not a consent write.
+  await env.DB.prepare("INSERT OR IGNORE INTO email_marketing_prompt_state (user_id) VALUES (?)").bind(userId).run();
+  const claimed = await env.DB.prepare(`UPDATE email_marketing_prompt_state SET shown_at = ?
+    WHERE user_id = ? AND shown_at IS NULL AND responded_at IS NULL
+      AND EXISTS (SELECT 1 FROM email_marketing_consents c WHERE c.user_id = ?
+        AND c.marketing_data_consent = 0 AND c.advertising_email_consent = 0)
+      AND NOT EXISTS (SELECT 1 FROM email_marketing_consent_events e WHERE e.user_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM account_consent_events e WHERE e.user_id = ?
+        AND e.consent_type IN ('marketing_data', 'electronic_marketing'))
+      AND NOT EXISTS (SELECT 1 FROM account_registrations r WHERE r.user_id = ?
+        AND (r.marketing_data_consent = 1 OR r.electronic_marketing_consent = 1))
+    RETURNING user_id`).bind(now, userId, userId, userId, userId, userId).first();
+  return { showPrompt: Boolean(claimed) };
+}
+
+export async function dismissEmailMarketingPrompt(userId: string) {
+  await ensurePromptSchema();
+  const now = new Date().toISOString();
+  await env.DB.prepare(`INSERT INTO email_marketing_prompt_state (user_id, shown_at, responded_at) VALUES (?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      shown_at = COALESCE(email_marketing_prompt_state.shown_at, excluded.shown_at),
+      responded_at = COALESCE(email_marketing_prompt_state.responded_at, excluded.responded_at)`)
+    .bind(userId, now, now).run();
+  return { showPrompt: false };
+}
+
 export async function getEmailMarketingConsent(userId: string) {
   await ensureBillingSchema();
   const d1 = (env as MarketingRuntimeEnv).DB;
@@ -27,7 +88,8 @@ export async function getEmailMarketingConsent(userId: string) {
     VALUES (?, 0, 0, ?, CURRENT_TIMESTAMP)`).bind(userId, EMAIL_MARKETING_POLICY_VERSION).run();
   const row = await d1.prepare("SELECT * FROM email_marketing_consents WHERE user_id = ? LIMIT 1").bind(userId).first<ConsentRow>();
   if (!row) throw new Error("이메일 마케팅 동의 정보를 불러오지 못했습니다.");
-  return serialize(row);
+  const prompt = await readPromptState(userId);
+  return { ...serialize(row), promptShownAt: prompt?.shown_at ?? null, promptRespondedAt: prompt?.responded_at ?? null };
 }
 
 export async function saveEmailMarketingConsent(userId: string, input: {
@@ -65,14 +127,18 @@ export async function saveEmailMarketingConsent(userId: string, input: {
         reaffirmAfter,
         now.toISOString(),
       ),
+    d1.prepare(`INSERT INTO email_marketing_prompt_state (user_id, shown_at, responded_at) VALUES (?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        shown_at = COALESCE(email_marketing_prompt_state.shown_at, excluded.shown_at),
+        responded_at = excluded.responded_at`).bind(userId, now.toISOString(), now.toISOString()),
   ];
-  if (current.marketingDataConsent !== input.marketingDataConsent) {
+  if (current.marketingDataConsent !== input.marketingDataConsent || !current.promptRespondedAt || current.needsReaffirmation) {
     statements.push(d1.prepare(`INSERT INTO email_marketing_consent_events
       (id, user_id, consent_type, granted, policy_version, source, occurred_at)
       VALUES (?, ?, 'marketing_data', ?, ?, ?, ?)`)
       .bind(crypto.randomUUID(), userId, input.marketingDataConsent ? 1 : 0, EMAIL_MARKETING_POLICY_VERSION, input.source ?? "settings", now.toISOString()));
   }
-  if (current.advertisingEmailConsent !== input.advertisingEmailConsent) {
+  if (current.advertisingEmailConsent !== input.advertisingEmailConsent || !current.promptRespondedAt || current.needsReaffirmation) {
     statements.push(d1.prepare(`INSERT INTO email_marketing_consent_events
       (id, user_id, consent_type, granted, policy_version, source, occurred_at)
       VALUES (?, ?, 'advertising_email', ?, ?, ?, ?)`)
