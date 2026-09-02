@@ -9,7 +9,7 @@
     "dev": "vinext dev",
     "build": "vinext build && node scripts/publish-prerender.mjs",
     "start": "vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs tests/migration.test.mjs tests/themes.test.mjs tests/my-work-sort.test.mjs",
+    "test": "npm run build && node --test tests/rendered-html.test.mjs tests/migration.test.mjs tests/themes.test.mjs tests/my-work-sort.test.mjs tests/work-intake.test.mjs tests/ai-connections.test.mjs",
     "test:e2e": "playwright test",
     "test:mcp": "node scripts/mcp-smoke.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",

@@ -25,7 +25,7 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
     const sidebar = page.locator(".sidebar");
     const workspaceSettings = sidebar.locator(".workspace-settings-trigger");
     await expect(workspaceSettings).toBeVisible();
-    await expect(sidebar.getByText("ChatGPT 연동", { exact: true })).toBeVisible();
+    await expect(sidebar.getByText("AI 연결", { exact: true })).toBeVisible();
     await expect(sidebar.getByText("개인 앱 연동", { exact: true })).toBeVisible();
     await expect(sidebar.getByText("팀 멤버", { exact: true })).toHaveCount(0);
     await expect(sidebar.getByText("그룹 관리", { exact: true })).toHaveCount(0);
