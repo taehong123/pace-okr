@@ -384,7 +384,7 @@ test.describe("공통 오버레이", () => {
 test("상세 URL과 뒤로가기가 UI 상태를 복원한다", async ({ page }) => {
   await installApiMocks(page);
   await page.goto("/?view=work");
-  await page.getByRole("button", { name: "모바일 사용성 개선", exact: true }).click();
+  await page.getByRole("button", { name: "모바일 사용성 개선", exact: true }).or(page.locator(".project-card-open").filter({ hasText: "모바일 사용성 개선" })).click();
   await expect(page).toHaveURL(/view=work.*project=project-1/);
   await expect(page.getByRole("dialog", { name: /모바일 사용성 개선 Project 상세/ })).toBeVisible();
   await page.goBack();
@@ -684,7 +684,7 @@ test("KR과 Project 데이터는 각 대상 진행률만 갱신한다", async ({
   await expect(krCard).toContainText("60%");
 
   await page.goto("/?view=work");
-  await page.getByRole("button", { name: "모바일 사용성 개선", exact: true }).click();
+  await page.getByRole("button", { name: "모바일 사용성 개선", exact: true }).or(page.locator(".project-card-open").filter({ hasText: "모바일 사용성 개선" })).click();
   await expect(page.locator(".project-linked-data")).toContainText("Project 품질 API");
 });
 
