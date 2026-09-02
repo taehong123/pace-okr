@@ -66,6 +66,7 @@ import { ConfirmationProvider, OverlayDialog, useAppConfirm } from "./overlay-di
 import AIConnectionsDialog from "./ai-connections";
 import { OkrFileSurface, type OkrFileCycleSummary } from "./okr-file-surface";
 import BillingView, { ProjectQuotaBadge } from "./billing-view";
+import { readMyWorkSort, saveMyWorkSort, sortMyWorkItems, type MyWorkSort } from "@/lib/my-work-sort";
 import { DEFAULT_THEME, THEME_STORAGE_KEY, isThemeMode, themeColorScheme, type ThemeMode } from "@/lib/themes";
 import { ThemePicker } from "./theme-picker";
 
@@ -2236,7 +2237,7 @@ function WorkspaceApp() {
             />
           ) : (
             <>
-          {activeView === "my_work" && <MyWorkView items={activeItems} routines={routines} currentMember={currentTeamMember ?? null} onOpenProject={openProjectPage} onOpenTask={openTaskDetail} onRoutinesChange={setRoutines} onNotice={showNotice} />}
+          {activeView === "my_work" && <MyWorkView key={`${currentWorkspace?.id ?? ""}:${currentTeamMember?.id ?? ""}`} workspaceId={currentWorkspace?.id ?? ""} items={activeItems} routines={routines} currentMember={currentTeamMember ?? null} onOpenProject={openProjectPage} onOpenTask={openTaskDetail} onRoutinesChange={setRoutines} onNotice={showNotice} />}
           {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={openTaskDetail} onPatch={patchItem} canDeleteItem={(item) => deletableItemIds.has(item.id)} selectedItemIds={selectedDeleteItemIds} onToggleSelect={toggleDeleteSelection} onSelectItems={addDeleteItems} onClearItems={removeDeleteItems} onTrashSelected={() => void moveSelectedItemsToTrash()} trashing={trashingItems} />}
           {activeView === "work" && (
             <section className="project-workspace">
@@ -3995,7 +3996,8 @@ function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRo
   </>);
 }
 
-function MyWorkView({ items, routines, currentMember, onOpenProject, onOpenTask, onRoutinesChange, onNotice }: {
+function MyWorkView({ workspaceId, items, routines, currentMember, onOpenProject, onOpenTask, onRoutinesChange, onNotice }: {
+  workspaceId: string;
   items: OkrptrItem[];
   routines: Routine[];
   currentMember: TeamMember | null;
@@ -4005,12 +4007,13 @@ function MyWorkView({ items, routines, currentMember, onOpenProject, onOpenTask,
   onNotice: (message: string) => void;
 }) {
   const [includeCompleted, setIncludeCompleted] = useState(false);
+  const [sort, setSort] = useState<MyWorkSort>(() => readMyWorkSort(workspaceId, currentMember?.id ?? ""));
   const [savingRoutineId, setSavingRoutineId] = useState<string | null>(null);
   if (!currentMember) return <EmptyState icon={Briefcase} title="현재 멤버 정보를 확인할 수 없습니다" />;
 
   const visible = (status: ItemStatus) => includeCompleted || !isCompletedStatus(status);
-  const projects = items.filter((entry) => entry.kind === "project" && visible(entry.status) && entry.assignments.some((assignment) => assignment.memberId === currentMember.id && (assignment.role === "project_dri" || assignment.role === "project_worker")));
-  const tasks = items.filter((entry) => entry.kind === "task" && visible(entry.status) && entry.assignments.some((assignment) => assignment.memberId === currentMember.id && assignment.role === "task_assignee"));
+  const projects = sortMyWorkItems(items.filter((entry) => entry.kind === "project" && visible(entry.status) && entry.assignments.some((assignment) => assignment.memberId === currentMember.id && (assignment.role === "project_dri" || assignment.role === "project_worker"))), sort);
+  const tasks = sortMyWorkItems(items.filter((entry) => entry.kind === "task" && visible(entry.status) && entry.assignments.some((assignment) => assignment.memberId === currentMember.id && assignment.role === "task_assignee")), sort);
   const assignedRoutines = routines.filter((entry) => entry.systemKey !== "general" && entry.assigneeMemberId === currentMember.id && (includeCompleted || !entry.completed));
   const byId = new Map(items.map((entry) => [entry.id, entry]));
 
@@ -4034,19 +4037,24 @@ function MyWorkView({ items, routines, currentMember, onOpenProject, onOpenTask,
     <section className="my-work-view">
       <header className="my-work-toolbar">
         <div><b>{currentMember.displayName}의 업무</b><span>명시적으로 담당된 항목만 표시합니다.</span></div>
-        <label><input type="checkbox" checked={includeCompleted} onChange={(event) => setIncludeCompleted(event.target.checked)} />완료 포함</label>
+        <div className="my-work-toolbar-actions">
+          <div className="my-work-sort" role="group" aria-label="내 업무 정렬">
+            {([ ["due", "기한순"], ["priority", "우선순위순"] ] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={sort === value} onClick={() => { setSort(value); saveMyWorkSort(workspaceId, currentMember.id, value); }}>{label}</button>)}
+          </div>
+          <label><input type="checkbox" checked={includeCompleted} onChange={(event) => setIncludeCompleted(event.target.checked)} />완료 포함</label>
+        </div>
       </header>
       <MyWorkSection title="Task" count={tasks.length}>
         {tasks.map((task) => {
           const project = task.parentId ? byId.get(task.parentId) : null;
           const routine = task.routineId ? routines.find((entry) => entry.id === task.routineId) : null;
-          return <button className="my-work-item" key={task.id} onClick={() => onOpenTask(task.id)}><span className="type-icon type-task">T</span><span><b>{task.title}</b><small>{statusLabel(task.status)} · {routine?.systemKey === "general" ? "미분류 Task" : routine ? routine.title : project?.title ?? "미분류 Task"} · {dueLabel(task.dueDate)}</small></span><ChevronRight size={15} /></button>;
+          return <button className="my-work-item" key={task.id} onClick={() => onOpenTask(task.id)}><span className="type-icon type-task">T</span><span><b>{task.title}</b><span className="my-work-item-meta"><small>{statusLabel(task.status)} · {routine?.systemKey === "general" ? "미분류 Task" : routine ? routine.title : project?.title ?? "미분류 Task"}</small><span className={`my-work-priority priority-${task.priority}`}>{priorityLabels[task.priority]}</span><span className="my-work-due">{dueLabel(task.dueDate)}</span></span></span><ChevronRight size={15} /></button>;
         })}
       </MyWorkSection>
       <MyWorkSection title="Project" count={projects.length}>
         {projects.map((project) => {
           const roles = project.assignments.filter((assignment) => assignment.memberId === currentMember.id).map((assignment) => assignment.role === "project_dri" ? "주 담당" : "보조 담당");
-          return <button className="my-work-item" key={project.id} onClick={() => onOpenProject(project.id)}><span className="type-icon type-project">P</span><span><b>{project.title}</b><small>{roles.join(" · ")} · {statusLabel(project.status)} · {dueLabel(project.dueDate)}</small></span><ChevronRight size={15} /></button>;
+          return <button className="my-work-item" key={project.id} onClick={() => onOpenProject(project.id)}><span className="type-icon type-project">P</span><span><b>{project.title}</b><span className="my-work-item-meta"><small>{roles.join(" · ")} · {statusLabel(project.status)}</small><span className={`my-work-priority priority-${project.priority}`}>{priorityLabels[project.priority]}</span><span className="my-work-due">{dueLabel(project.dueDate)}</span></span></span><ChevronRight size={15} /></button>;
         })}
       </MyWorkSection>
       <MyWorkSection title="Routine" count={assignedRoutines.length}>

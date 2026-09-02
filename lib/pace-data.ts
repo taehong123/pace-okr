@@ -3856,6 +3856,10 @@ export async function createLinkedTasks(
     routineId?: string | null;
     assigneeMemberId?: string | null;
     createdByUserId: string;
+    dueDate?: string | null;
+    priority?: ItemPriority;
+    cadence?: ItemCadence;
+    source?: string;
   },
 ) {
   await ensureWorkspace(ownerId);
@@ -3892,15 +3896,16 @@ export async function createLinkedTasks(
   const rules = await getWorkspaceRules(ownerId);
   const now = new Date().toISOString();
   const d1 = (env as RuntimeEnv).DB;
+  const source = input.source ?? "web";
   const taskRows = titles.map((title) => ({ id: crypto.randomUUID(), title }));
   await d1.batch(taskRows.flatMap((task) => [
     d1.prepare(`INSERT INTO items
-      (id, owner_id, cycle_id, parent_id, routine_id, kind, title, description, status, priority, cadence, progress, source, created_by_user_id, sort_order, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 'task', ?, '', 'todo', ?, ?, 0, 'web', ?, 0, ?, ?)`)
-      .bind(task.id, ownerId, cycleId, projectId, routineId, task.title, rules.defaultPriority, rules.defaultCadence, input.createdByUserId, now, now),
+      (id, owner_id, cycle_id, parent_id, routine_id, kind, title, description, status, priority, cadence, progress, source, created_by_user_id, sort_order, created_at, updated_at, due_date)
+      VALUES (?, ?, ?, ?, ?, 'task', ?, '', 'todo', ?, ?, 0, ?, ?, 0, ?, ?, ?)`)
+      .bind(task.id, ownerId, cycleId, projectId, routineId, task.title, input.priority ?? rules.defaultPriority, input.cadence ?? rules.defaultCadence, source, input.createdByUserId, now, now, input.dueDate ?? null),
     d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
-      VALUES (?, ?, ?, 'created', 'web', ?, ?)`)
-      .bind(crypto.randomUUID(), ownerId, task.id, JSON.stringify({ kind: "task", status: "todo" }), now),
+      VALUES (?, ?, ?, 'created', ?, ?, ?)`)
+      .bind(crypto.randomUUID(), ownerId, task.id, source, JSON.stringify({ kind: "task", status: "todo" }), now),
     ...(assigneeMemberId ? [d1.prepare(`INSERT INTO item_assignments
       (id, owner_id, item_id, member_id, role, created_at, updated_at)
       VALUES (?, ?, ?, ?, 'task_assignee', ?, ?)`)
@@ -4726,11 +4731,12 @@ export async function setPropertyValue(
   return stored;
 }
 
-export async function getPropertyValueMap(ownerId: string) {
+export async function getPropertyValueMap(ownerId: string, itemIds?: string[]) {
+  if (itemIds?.length === 0) return {} as Record<string, Record<string, PropertyValue>>;
   const rows = await getDb()
     .select()
     .from(itemPropertyValues)
-    .where(eq(itemPropertyValues.ownerId, ownerId));
+    .where(and(eq(itemPropertyValues.ownerId, ownerId), itemIds ? inArray(itemPropertyValues.itemId, itemIds) : undefined));
   const result: Record<string, Record<string, PropertyValue>> = {};
   for (const row of rows) {
     result[row.itemId] ??= {};
@@ -4823,10 +4829,11 @@ export async function setProjectPropertyHidden(
   return { projectId, propertyId, hidden };
 }
 
-export async function getItemPropertiesByName(ownerId: string) {
+export async function getItemPropertiesByName(ownerId: string, itemIds?: string[]) {
+  if (itemIds?.length === 0) return {} as Record<string, Record<string, PropertyValue>>;
   const [definitions, values] = await Promise.all([
     listProjectPropertyDefinitions(ownerId),
-    getPropertyValueMap(ownerId),
+    getPropertyValueMap(ownerId, itemIds),
   ]);
   const names = new Map(definitions.map((property) => [property.id, property.name]));
   const result: Record<string, Record<string, PropertyValue>> = {};
@@ -4851,6 +4858,30 @@ export async function setItemPropertiesByName(
     const property = byName.get(name.toLocaleLowerCase());
     if (!property) throw new Error(`Property not found: ${name}`);
     await setPropertyValue(ownerId, itemId, property.id, value);
+  }
+}
+
+/** Preflight MCP values before creating/updating the item, avoiding partial saves on bad input. */
+export async function validateItemPropertiesByName(ownerId: string, values: Record<string, PropertyValue>) {
+  const definitions = await listProjectPropertyDefinitions(ownerId);
+  const byName = new Map(definitions.map((property) => [property.name.toLocaleLowerCase(), property]));
+  const memberIds = new Set<string>();
+  for (const [name, value] of Object.entries(values)) {
+    const property = byName.get(name.toLocaleLowerCase());
+    if (!property) throw new Error(`Property not found: ${name}`);
+    if (property.systemKey) throw new Error("System properties must be changed through the Project fields");
+    const normalized = normalizePropertyValue(property, value);
+    if ((property.type === "member" || property.type === "members") && normalized !== null) {
+      for (const memberId of Array.isArray(normalized) ? normalized : [normalized]) {
+        if (typeof memberId === "string") memberIds.add(memberId);
+      }
+    }
+  }
+  if (memberIds.size) {
+    const found = await getDb().select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(
+      eq(workspaceMembers.workspaceId, ownerId), eq(workspaceMembers.status, "active"), inArray(workspaceMembers.id, [...memberIds]),
+    ));
+    if (found.length !== memberIds.size) throw new Error("Property members must be active workspace members");
   }
 }
 

@@ -208,20 +208,20 @@ test("DCR rejects spoofed/mixed metadata; existing ChatGPT callback still issues
 
 test("OAuth bearer access stays workspace-bound, revocable, and limited by scope and current role", async () => {
   const f = fixture();
-  const policy = load("lib/mcp-request-access.ts");
+  const policy = load("lib/work-intake.ts");
   try {
     const { token } = await f.tokens.createIntegrationToken(authorization, "Claude OAuth", "claude", "okrptr:read");
     const request = (method = "POST") => new Request("https://okrptr.com/api/mcp?workspaceId=workspace-b", { method, headers: { authorization: `Bearer ${token}`, "x-okrptr-workspace-id": "workspace-b" } });
     assert.equal((await f.realAuth.authorizeRequest(request())).status, 403);
-    const read = await f.realAuth.authorizeRequest(request(), { allowViewerWrite: policy.isReadOnlyOAuthMcpRequest({ method: "tools/call", params: { name: "list_items" } }) });
+    const read = await f.realAuth.authorizeRequest(request(), { allowViewerWrite: policy.isReadOnlyMcpRequest({ method: "tools/call", params: { name: "list_items" } }) });
     assert.equal(read.ownerId, "workspace-a"); assert.equal(read.userId, "user-a");
-    assert.equal(policy.isReadOnlyOAuthMcpRequest({ method: "tools/call", params: { name: "create_item" } }), false);
-    assert.equal(policy.isReadOnlyOAuthMcpRequest([{ method: "tools/list" }]), false);
-    assert.equal(policy.isReadOnlyOAuthMcpRequest({ method: "tools/call", params: { name: "unknown" } }), false);
+    assert.equal(policy.isReadOnlyMcpRequest({ method: "tools/call", params: { name: "create_item" } }), false);
+    assert.equal(policy.isReadOnlyMcpRequest([{ method: "tools/list" }]), false);
+    assert.equal(policy.isReadOnlyMcpRequest({ method: "tools/call", params: { name: "unknown" } }), false);
     f.sql.exec("UPDATE workspace_members SET role='member'");
     assert.equal(f.realAuth.canManageTeam(await f.realAuth.authorizeRequest(request("GET"))), false);
     f.sql.exec("UPDATE workspace_members SET role='viewer'");
-    const viewer = await f.realAuth.authorizeRequest(request(), { allowViewerWrite: policy.isReadOnlyOAuthMcpRequest({ method: "tools/list" }) });
+    const viewer = await f.realAuth.authorizeRequest(request(), { allowViewerWrite: policy.isReadOnlyMcpRequest({ method: "tools/list" }) });
     assert.equal(viewer.role, "viewer");
     f.sql.exec("UPDATE workspace_members SET status='removed'");
     assert.equal((await f.realAuth.authorizeRequest(request("GET"))).status, 403);

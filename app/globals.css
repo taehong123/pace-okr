@@ -1754,6 +1754,11 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .my-work-toolbar b { font-size: 13px; }
 .my-work-toolbar span { color: var(--muted); font-size: 10px; }
 .my-work-toolbar label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
+.my-work-toolbar .my-work-toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.my-work-sort { display: inline-flex; flex-shrink: 0; padding: 2px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg-surface); }
+.my-work-sort button { min-height: 32px; padding: 0 10px; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font: inherit; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.my-work-sort button[aria-pressed="true"] { background: var(--bg-subtle); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.my-work-sort button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .my-work-section { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-container); background: var(--raised); box-shadow: var(--shadow-raised); }
 .my-work-section > header { height: 42px; display: flex; align-items: center; gap: 7px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--bg-surface); }
 .my-work-section > header b { font-size: 11px; }
@@ -1765,6 +1770,11 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .my-work-item b, .my-work-item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .my-work-item b { font-size: 11px; }
 .my-work-item small { color: var(--muted); font-size: 9px; }
+.my-work-item-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; min-width: 0; font-size: 10px; }
+.my-work-item-meta small { flex: 1 1 120px; min-width: 0; }
+.my-work-priority, .my-work-due { flex: none; white-space: nowrap; }
+.my-work-priority { font-weight: 600; }
+.my-work-due { color: var(--muted); }
 .my-work-item > svg { color: var(--faint); }
 .my-work-routine { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
 .my-work-routine:last-child { border-bottom: 0; }
@@ -2648,6 +2658,8 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
   .routine-assignee { width: 100%; }
   .project-nudge-button { width: 100%; min-height: 44px; justify-content: center; }
   .my-work-toolbar { align-items: flex-start; flex-direction: column; }
+  .my-work-sort button { min-height: 40px; }
+  .my-work-toolbar-actions label { min-height: 40px; }
   .my-work-routine { grid-template-columns: 1fr; }
   .my-work-routine p { grid-column: 1; margin-left: 0; }
   .my-work-routine > button { min-height: 44px; grid-column: 1; grid-row: auto; justify-content: center; }
