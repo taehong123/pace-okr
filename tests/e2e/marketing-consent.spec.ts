@@ -45,6 +45,10 @@ test("first prompt is optional; Escape skips and survives another device", async
   const boxes = prompt(page).getByRole("checkbox");
   await expect(boxes).toHaveCount(2);
   await expect(boxes.nth(0)).not.toBeChecked(); await expect(boxes.nth(1)).not.toBeChecked();
+  await expect(prompt(page).getByRole("button", { name: "수신 안내 닫기" })).toBeFocused();
+  await page.keyboard.press("Tab"); await expect(boxes.nth(0)).toBeFocused();
+  await page.keyboard.press("Space"); await expect(boxes.nth(0)).toBeChecked();
+  await page.keyboard.press("Space"); await expect(boxes.nth(0)).not.toBeChecked();
   await page.keyboard.press("Escape");
   await expect(prompt(page)).toHaveCount(0);
   await expect.poll(() => state.dismisses).toBe(1);
@@ -135,13 +139,35 @@ for (const theme of THEMES) {
     expect(fonts.fonts.every((font) => font.isCustomFont && /Pretendard/i.test(font.familyName))).toBe(true);
     await cdp.detach();
     await page.screenshot({ path: testInfo.outputPath(`${theme.mode}-consent.png`), fullPage: false });
+    if (testInfo.project.name === "desktop-chromium" && theme.mode === "white") {
+      await page.setViewportSize({ width: 3840, height: 2160 });
+      await expect(prompt(page).locator(".consent-prompt")).toBeInViewport();
+      expect((await prompt(page).locator(".consent-prompt").boundingBox())?.width).toBeLessThanOrEqual(576);
+      await page.screenshot({ path: testInfo.outputPath("white-consent-wide.png") });
+    }
     await prompt(page).getByRole("button", { name: "동의 없이 계속", exact: true }).click();
     const settings = await openSettings(page); await settings.getByRole("button", { name: "이메일 수신 설정", exact: true }).click();
     await expect(settings.getByRole("checkbox")).toHaveCount(2);
     expect((await new AxeBuilder({ page: page as never }).include(".marketing-preferences").withRules(["color-contrast"]).analyze()).violations).toEqual([]);
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
-    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
-    await expect(settings.getByRole("button", { name: "동의 설정 저장", exact: true })).toBeVisible();
+    const layout = await page.evaluate(() => ({ overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      elements: Array.from(document.querySelectorAll("body *")).map((element) => ({ tag: element.tagName, class: element.className,
+        left: element.getBoundingClientRect().left, right: element.getBoundingClientRect().right, width: element.getBoundingClientRect().width }))
+        .filter((element) => element.right > document.documentElement.clientWidth + 1 || element.left < -1).slice(0, 20) }));
+    expect(layout.overflow, JSON.stringify(layout)).toBeLessThanOrEqual(1);
+    const save = settings.getByRole("button", { name: "동의 설정 저장", exact: true });
+    await save.scrollIntoViewIfNeeded();
+    await expect(save).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath(`${theme.mode}-settings-zoom.png`) });
     await page.keyboard.press("Escape");
+    if (await page.locator(".mobile-navigation").isVisible()) {
+      const labelsFit = await page.locator(".mobile-navigation .nav-item").evaluateAll((buttons) => buttons.every((button) => {
+        const label = button.querySelector("span");
+        if (!label) return true;
+        const outer = button.getBoundingClientRect(); const inner = label.getBoundingClientRect();
+        return inner.left >= outer.left && inner.right <= outer.right && inner.bottom <= outer.bottom;
+      }));
+      expect(labelsFit).toBe(true);
+    }
   });
 }

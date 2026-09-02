@@ -2296,6 +2296,7 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .slack-channel-load-error { grid-column: 1 / -1; min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--red) 28%, var(--line)); border-radius: var(--radius-control); background: color-mix(in srgb, var(--red) 5%, var(--raised)); color: var(--red); font-size: var(--type-meta); }
 .slack-channel-load-error button { min-height: var(--control-height); padding: 0 8px; border: 1px solid currentColor; border-radius: var(--radius-control); background: transparent; color: inherit; font-size: var(--type-label); cursor: pointer; }
 @media (max-width: 700px) {
+  .workspace-topbar { flex-wrap: wrap; }
   .workspace-integration-section .workspace-integration-pane { padding: 10px 12px 22px; }
   .workspace-integration-section .slack-connected-summary dl > div { border-top: 1px solid var(--line); border-left: 0; }
   .workspace-integration-section .slack-connected-summary dl > div:first-child { border-top: 0; }
@@ -2547,14 +2548,14 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
   .app-loading-command { margin-bottom: 20px; }
   .app-loading-table-head, .app-loading-table-row { grid-template-columns: minmax(250px, 1fr) 105px 92px 118px; }
   .app-shell { display: block; }
-  .sidebar { position: fixed; z-index: 20; top: auto; bottom: 0; width: 100%; height: calc(58px + env(safe-area-inset-bottom)); padding: 5px 6px env(safe-area-inset-bottom); border-top: 1px solid var(--line); border-right: 0; }
+  .sidebar { position: fixed; z-index: 20; top: auto; bottom: 0; width: 100%; height: calc(3.625rem + env(safe-area-inset-bottom)); padding: 5px 6px env(safe-area-inset-bottom); border-top: 1px solid var(--line); border-right: 0; }
   .workspace-control, .sidebar-bottom, .desktop-navigation { display: none; }
-  .mobile-navigation { width: 100%; height: 53px; margin: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
-  .nav-item { height: 47px; justify-content: center; display: grid; justify-items: center; gap: 2px; padding: 3px; }
-  .nav-item span { font-size: var(--type-label); }
+  .mobile-navigation { width: 100%; height: calc(3.625rem - 5px); margin: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .nav-item { min-width: 0; height: 100%; justify-content: center; display: grid; grid-template-columns: minmax(0, 1fr); align-content: center; justify-items: center; gap: 2px; padding: 3px; }
+  .nav-item span { max-width: 100%; font-size: var(--type-label); line-height: 1.1; white-space: normal; overflow-wrap: anywhere; text-align: center; }
   .nav-item b { position: absolute; margin: -18px 0 0 22px; }
   .assistant-mobile-tab svg { color: var(--blue); }
-  .mobile-menu-backdrop { position: fixed; z-index: 35; inset: 0 0 calc(58px + env(safe-area-inset-bottom)); display: grid; align-items: end; background: var(--overlay-backdrop); }
+  .mobile-menu-backdrop { position: fixed; z-index: 35; inset: 0 0 calc(3.625rem + env(safe-area-inset-bottom)); display: grid; align-items: end; background: var(--overlay-backdrop); }
   .mobile-menu-dismiss { position: absolute; inset: 0; width: 100%; border: 0; border-radius: 0; background: transparent; }
   .mobile-menu-sheet { position: relative; z-index: 1; width: 100%; max-height: min(72vh, 580px); overflow: auto; border-top: 1px solid var(--line); border-radius: 7px 7px 0 0; background: var(--raised); box-shadow: 0 -12px 36px rgba(0, 0, 0, .14); }
   .mobile-menu-sheet > header { min-height: 58px; display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid var(--line); }
@@ -2611,7 +2612,7 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
   .scheduled-workspace-list { padding: 12px; }
   .scheduled-workspace-list article { grid-template-columns: 32px minmax(0, 1fr); }
   .scheduled-workspace-list article > button { min-height: 44px; }
-  .page-body { --tree-indent: 1rem; padding: var(--space-6) var(--space-4) calc(92px + env(safe-area-inset-bottom)); }
+  .page-body { --tree-indent: 1rem; padding: var(--space-6) var(--space-4) calc(5.75rem + env(safe-area-inset-bottom)); }
   .toast { bottom: calc(72px + env(safe-area-inset-bottom)); }
   .page-header { min-height: 58px; gap: var(--space-3); margin-bottom: var(--space-4); }
   .page-header h1 { font-size: var(--type-page); }
