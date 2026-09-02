@@ -1,5 +1,6 @@
 ﻿"use client";
 /* eslint-disable @next/next/no-img-element */
+import { PropertyValueInput } from "@/app/property-value-input";
 
 import {
   Activity,
@@ -3738,15 +3739,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
 }
 
 function CreatePropertyField({ property, value, members, onChange }: { property: PropertyDefinition; value: PropertyValue; members: TeamMember[]; onChange: (property: PropertyDefinition, value: PropertyValue) => void }) {
-  if (property.type === "checkbox") {
-    return <label><span>{property.name}</span><input type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(property, event.target.checked)} /></label>;
-  }
-  if (property.type === "select") {
-    return <label><span>{property.name}</span><select value={typeof value === "string" ? value : ""} onChange={(event) => onChange(property, event.target.value)}><option value="">선택 안 함</option>{property.options.map((option) => <option key={option}>{option}</option>)}</select></label>;
-  }
-  if (property.type === "member") return <label><span>{property.name}</span><select value={typeof value === "string" ? value : ""} onChange={(event) => onChange(property, event.target.value || null)}><option value="">선택 안 함</option>{members.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>;
-  if (property.type === "members") return <label><span>{property.name}</span><select multiple value={Array.isArray(value) ? value : []} onChange={(event) => onChange(property, Array.from(event.target.selectedOptions, (option) => option.value))}>{members.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>;
-  return <label><span>{property.name}</span><input type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => onChange(property, event.target.value)} /></label>;
+  return <label><span>{property.name}</span><PropertyValueInput type={property.type} value={value} options={property.options} members={members} onChange={(next) => onChange(property, next)} /></label>;
 }
 
 function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRoutinesChange, createOpen, onCreateClose, onCreateWithChat }: { workspaceId: string; initialRoutines: Routine[]; teamMembers: TeamMember[]; onNotice: (message: string) => void; onRoutinesChange: (routines: Routine[]) => void; createOpen: boolean; onCreateClose: () => void; onCreateWithChat: (initialMessage?: string) => void }) {

@@ -3,7 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { isReadOnlyMcpRequest, readWorkContext, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
-import { getProjectReview } from "@/lib/project-review";
+import { getProjectReview, projectReviewSummary } from "@/lib/project-review";
 import { stageProjectReview } from "@/lib/project-review-service";
 import {
   ITEM_CADENCES,
@@ -484,7 +484,7 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
         title: z.string().trim().min(1).max(500), description: z.string().max(20000).optional(),
         recommended_initiatives: z.array(z.object({ initiative_id: memberIdInput, reason: z.string().trim().min(1).max(1000) })).max(3).default([]),
         due_date: dueDateInput.optional(), dri_member_id: memberIdInput.optional(), worker_member_ids: z.array(memberIdInput).max(100).optional(),
-        cycle_id: memberIdInput.optional().describe("Only if the user specified an OKR file; limits Initiative choices to that file"),
+        cycle_id: memberIdInput.optional().describe("Only if the user specified an OKR file; initial candidate filter, which the user can change in the review page"),
         properties: z.record(z.string(), propertyValueSchema).optional(), template_id: memberIdInput.optional(),
         status: z.enum(ITEM_STATUSES).optional(), priority: z.enum(ITEM_PRIORITIES).optional(), cadence: z.enum(ITEM_CADENCES).optional(), progress: z.number().min(0).max(100).optional(),
       },
@@ -498,7 +498,7 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
         driMemberId: input.dri_member_id, workerMemberIds: input.worker_member_ids,
         properties: input.properties, templateId: input.template_id, requestedCycleId: input.cycle_id,
       }, input.recommended_initiatives.map((entry) => ({ initiativeId: entry.initiative_id, reason: entry.reason })), origin);
-      return { structuredContent: { review }, content: [{ type: "text", text: `Project NOT created. Present recommendations and the final review link: ${review.url}. The user must select and approve; do not create via other tools.` }] };
+      return { structuredContent: { review }, content: [{ type: "text", text: `Project는 아직 생성되지 않았습니다. 미지정 속성도 포함해 아래 내용을 요약하세요.\n${JSON.stringify(review.summary)}\n추천 연결: ${JSON.stringify(review.recommendations)}\n[내용 확인·수정 후 생성](${review.url})\n사용자가 연결·속성을 직접 수정하고 최종 확인합니다. 대신 승인하거나 다른 도구로 생성하지 마세요.` }] };
     },
   );
 
@@ -508,13 +508,13 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
       title: "Check the outcome of a user's Project review",
       description: "Read a staged Project review after the user says they approved/cancelled, or to check an uncertain save. Pending means NOT created. Do not repeatedly poll or resubmit a failed/processing review as a new Project.",
       inputSchema: { review_id: z.string().uuid() },
-      outputSchema: { review: z.object({ id: z.string(), state: z.string(), title: z.string(), projectId: z.string().nullable(), initiativePath: z.array(z.string()) }) },
+      outputSchema: { review: z.object({ id: z.string(), state: z.string(), title: z.string(), projectId: z.string().nullable(), initiativePath: z.array(z.string()), summary: z.record(z.string(), z.unknown()) }) },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ review_id }) => {
       const result = await getProjectReview(env.DB, authorization, review_id);
       const review = { id: result.id, state: result.state, title: result.proposal.title,
-        projectId: result.state === "created" ? result.projectId : null, initiativePath: result.selectedParent?.path ?? [] };
+        projectId: result.state === "created" ? result.projectId : null, initiativePath: result.selectedParent?.path ?? [], summary: projectReviewSummary(result) };
       return { structuredContent: { review }, content: [{ type: "text", text: result.state === "created" ? "The user approved and the Project was created." : `Project review is ${result.state}; do not claim successful creation or retry a new Project.` }] };
     },
   );

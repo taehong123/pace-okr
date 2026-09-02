@@ -15,6 +15,7 @@ function compile(source, dependencies = {}) {
 const core = compile(await readFile(new URL("../lib/project-review.ts", import.meta.url), "utf8"));
 const writerSource = await readFile(new URL("../lib/project-review-writer.ts", import.meta.url), "utf8");
 const serviceSource = await readFile(new URL("../lib/project-review-service.ts", import.meta.url), "utf8");
+const editorSource = await readFile(new URL("../lib/project-review-editor.ts", import.meta.url), "utf8");
 const reviewRouteSource = await readFile(new URL("../app/api/project-reviews/route.ts", import.meta.url), "utf8");
 const billingSource = await readFile(new URL("../lib/billing.ts", import.meta.url), "utf8");
 const billingAst = ts.createSourceFile("billing.ts", billingSource, ts.ScriptTarget.Latest, true);
@@ -70,7 +71,7 @@ function fixture() {
     },
   };
   const propertyRows = () => db.prepare("SELECT * FROM property_definitions WHERE owner_id = 'a' AND active = 1").all().map((row) => ({
-    id: row.id, name: row.name, type: row.type, options: row.options, defaultValue: row.default_value, systemKey: row.system_key, updatedAt: row.updated_at,
+    id: row.id, name: row.name, type: row.type, options: row.options, defaultValue: row.default_value, systemKey: row.system_key, sortOrder: row.sort_order, updatedAt: row.updated_at,
   }));
   const pace = {
     ...documentHelpers,
@@ -90,6 +91,8 @@ function fixture() {
   class BillingLimitError extends Error { constructor(code, message, details) { super(message); this.code = code; this.details = details; } }
   const dependencies = { "cloudflare:workers": { env: { DB: d1 } }, "@/lib/project-review": core, "@/lib/pace-data": pace, "@/lib/billing": { ...quota, BillingLimitError } };
   const writer = compile(writerSource, dependencies);
+  const editor = compile(editorSource, dependencies);
+  dependencies["@/lib/project-review-editor"] = editor;
   const service = compile(serviceSource, dependencies);
   const approve = async (review, parentId = "i2") => {
     const parent = await core.getReviewInitiative(d1, "a", parentId);
@@ -106,7 +109,7 @@ function fixture() {
     "@/lib/pace-data": { ...pace, authorizeRequest: async () => auth, ensureWorkspace: async () => {} },
     "@/lib/project-review-writer": writer,
   });
-  return { db, d1, stats, writer, service, propose, approve, route, quota, runtime };
+  return { db, d1, stats, writer, service, propose, approve, route, quota, runtime, editor };
 }
 
 test("Proposal is not creation; defaults are visible and same-request retries reuse the pending review", async () => {
@@ -124,6 +127,150 @@ test("Proposal is not creation; defaults are visible and same-request retries re
     assert.equal(await core.getReviewInitiative(f.d1, "a", "private"), null);
     assert.equal(await core.getReviewInitiative(f.d1, "a", "orphan"), null);
   } finally { f.db.close(); }
+});
+
+function seedEditableFields(f) {
+  f.db.exec(`INSERT INTO property_definitions (id,owner_id,name,type,options,default_value,sort_order,updated_at) VALUES
+    ('text','a','메모','text','[]','null',1,'1'),
+    ('select','a','분류','select','["제품","운영"]','null',2,'1'),
+    ('date','a','출시일','date','[]','null',3,'1'),
+    ('checkbox','a','검토됨','checkbox','[]','null',4,'1'),
+    ('member','a','검토자','member','[]','null',5,'1'),
+    ('members','a','협업자','members','[]','null',6,'1');
+    INSERT INTO okr_cycles (id,owner_id,name,start_date,end_date,status,version) VALUES ('next','a','Q4','2026-10-01','2026-12-31','planned',2);
+    INSERT INTO items (id,owner_id,kind,title,parent_id,cycle_id,status,updated_at) VALUES
+      ('on','a','objective','확장',NULL,'next','todo','1'),
+      ('kn','a','key_result','유지율','on','next','todo','1'),
+      ('in','a','initiative','재방문 개선','kn','next','todo','1');
+    INSERT INTO project_templates (id,owner_id,name,content,plain_text,updated_at) VALUES ('other-template','a','운영 계획','[]','새 템플릿','1');
+  `);
+}
+async function editedRequest(f, review, proposal, revision, parentId = "in") {
+  const parent = await core.getReviewInitiative(f.d1, "a", parentId);
+  return new Request("https://okrptr.com/api/project-reviews", { method: "POST", headers: { Origin: "https://okrptr.com", "Content-Type": "application/json" },
+    body: JSON.stringify({ decision: "approve", id: review.id, version: review.version, confirmed: true,
+      initiativeId: parent.id, initiativeFingerprint: parent.fingerprint, proposal, editorRevision: revision }) });
+}
+
+test("Editable catalog is scoped, ordered and separate from candidate search; unset fields are visible", async () => {
+  const f = fixture();
+  try {
+    seedEditableFields(f);
+    const review = await f.propose({ requestedCycleId: "cycle" });
+    assert.equal(review.proposal.properties.검토됨, null);
+    assert.equal(review.propertyLabels.검토자, "미지정");
+    assert.equal(review.fieldOrigins["properties.예산"], "default");
+    const get = await f.route().GET(new Request(`https://okrptr.com/api/project-reviews?id=${review.id}`));
+    const result = await get.json();
+    assert.deepEqual(result.editor.properties.map((p) => p.type), ["number", "text", "select", "date", "checkbox", "member", "members"]);
+    assert.equal(result.editor.members.some((m) => m.id === "other"), false);
+    assert.equal(result.editor.revision.length, 64);
+    const search = await f.route().GET(new Request(`https://okrptr.com/api/project-reviews?id=${review.id}&mode=candidates&cycleId=next`));
+    assert.deepEqual(Object.keys(await search.clone().json()), ["candidates"]);
+    assert.deepEqual((await search.json()).candidates.choices.map((c) => c.id), ["in"]);
+    assert.equal((await core.getProjectReview(f.d1, identity, review.id)).proposal.requestedCycleId, "cycle");
+  } finally { f.db.close(); }
+});
+
+test("One edited approval saves another file, all seven types, false/0, assignments, document and final receipt", async () => {
+  const f = fixture();
+  try {
+    seedEditableFields(f);
+    const review = await f.propose({ requestedCycleId: "cycle" });
+    const editor = await f.editor.getProjectReviewEditor("a");
+    const proposal = { ...review.proposal, title: "수정한 Project", description: "수정한 범위", requestedCycleId: "next",
+      driMemberId: "peer", workerMemberIds: ["me"], dueDate: "2026-10-15", status: "in_progress", priority: "urgent", progress: 25, cadence: "monthly", templateId: "other-template",
+      properties: { 예산: 0, 메모: "확정 문구", 분류: "운영", 출시일: "2026-10-01", 검토됨: false, 검토자: "peer", 협업자: ["me", "peer"] } };
+    const response = await f.route().POST(await editedRequest(f, review, proposal, editor.revision));
+    const result = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(result));
+    assert.deepEqual(result.review.proposal, proposal);
+    assert.equal(result.review.fieldLabels.dri, "민지"); assert.equal(result.review.fieldLabels.template, "운영 계획");
+    assert.equal(result.review.propertyLabels.검토자, "민지"); assert.equal(result.review.propertyLabels.협업자, "태홍, 민지");
+    assert.equal(result.review.fieldOrigins.title, "edited");
+    const item = f.db.prepare("SELECT * FROM items WHERE id = ?").get(review.projectId);
+    assert.equal(item.title, proposal.title); assert.equal(item.parent_id, "in"); assert.equal(item.cycle_id, "next");
+    assert.equal(item.due_date, proposal.dueDate); assert.equal(item.progress, 25); assert.equal(item.cadence, "monthly");
+    const properties = f.db.prepare("SELECT p.name,v.value FROM item_property_values v JOIN property_definitions p ON p.id=v.property_id WHERE v.item_id=?").all(review.projectId);
+    assert.deepEqual(Object.fromEntries(properties.map((p) => [p.name, JSON.parse(p.value)])), proposal.properties);
+    assert.equal(f.db.prepare("SELECT plain_text FROM project_documents WHERE project_id=?").get(review.projectId).plain_text, "새 템플릿\n\n수정한 범위");
+    const summary = core.projectReviewSummary(await core.getProjectReview(f.d1, identity, review.id));
+    assert.equal(summary.cycleId, "next"); assert.equal(summary.displayProperties.검토자, "민지");
+    // Retry even after the catalog changes returns the original receipt, never a new write.
+    f.db.exec("UPDATE project_templates SET updated_at='later'");
+    assert.equal((await f.route().POST(await editedRequest(f, review, proposal, editor.revision))).status, 200);
+    assert.equal(f.db.prepare("SELECT count(*) n FROM items WHERE kind='project'").get().n, 1);
+  } finally { f.db.close(); }
+});
+
+test("Invalid edited types/options/members and stale catalog return field errors without claiming or losing the draft", async () => {
+  const f = fixture();
+  try {
+    seedEditableFields(f);
+    const review = await f.propose();
+    const editor = await f.editor.getProjectReviewEditor("a");
+    const proposal = { ...review.proposal, requestedCycleId: "next" };
+    for (const [key, value] of [["예산", false], ["메모", 5], ["분류", "없는 옵션"], ["출시일", "2026-02-30"], ["검토됨", 0], ["검토자", "other"], ["협업자", ["other"]]]) {
+      const response = await f.route().POST(await editedRequest(f, review, { ...proposal, properties: { ...proposal.properties, [key]: value } }, editor.revision));
+      const result = await response.json();
+      assert.equal(response.status, 400, key); assert.ok(result.fieldErrors[`properties.${key}`], key);
+    }
+    for (const [key, value] of [["title", ""], ["progress", 101], ["dueDate", "2026-02-30"], ["driMemberId", "other"], ["workerMemberIds", ["other"]], ["templateId", "missing"]]) {
+      const response = await f.route().POST(await editedRequest(f, review, { ...proposal, [key]: value }, editor.revision));
+      assert.equal(response.status, 400, key); assert.ok((await response.json()).fieldErrors[key], key);
+    }
+    f.db.exec(`UPDATE property_definitions SET options='["개발"]',updated_at='changed' WHERE id='select'`);
+    const stale = await f.route().POST(await editedRequest(f, review, { ...proposal, properties: { ...proposal.properties, 분류: "운영" } }, editor.revision));
+    const result = await stale.json();
+    assert.equal(stale.status, 409); assert.equal(result.code, "editor_changed"); assert.ok(result.fieldErrors["properties.분류"]);
+    assert.notEqual(result.editor.revision, editor.revision);
+    assert.deepEqual((await core.getProjectReview(f.d1, identity, review.id)).proposal, review.proposal);
+    assert.equal(f.db.prepare("SELECT count(*) n FROM items WHERE kind='project'").get().n, 0);
+  } finally { f.db.close(); }
+});
+
+test("Edited snapshots allow explicit nulls and never introduce unseen defaults; missing fields are rejected", async () => {
+  const f = fixture();
+  try {
+    seedEditableFields(f);
+    const review = await f.propose(), editor = await f.editor.getProjectReviewEditor("a");
+    const proposal = { ...review.proposal, requestedCycleId: "next", driMemberId: null, workerMemberIds: [], dueDate: null, templateId: null,
+      properties: Object.fromEntries(editor.properties.map((p) => [p.name, null])) };
+    const incomplete = { ...proposal }; delete incomplete.priority;
+    assert.equal((await f.route().POST(await editedRequest(f, review, incomplete, editor.revision))).status, 400);
+    f.db.exec("UPDATE property_definitions SET default_value='99' WHERE id='budget'");
+    const response = await f.route().POST(await editedRequest(f, review, proposal, editor.revision));
+    assert.equal(response.status, 200);
+    assert.equal(f.db.prepare("SELECT value FROM item_property_values WHERE property_id='budget'").get().value, "null");
+    assert.equal(f.db.prepare("SELECT count(*) n FROM item_assignments").get().n, 0);
+    assert.equal(f.db.prepare("SELECT count(*) n FROM project_documents").get().n, 0);
+  } finally { f.db.close(); }
+});
+
+test("Edited approval retains atomic rollback and one-claim behavior under races", async () => {
+  for (const race of ["concurrent", "member", "property", "template", "receipt", "lost-response"]) {
+    const f = fixture();
+    try {
+      seedEditableFields(f);
+      const review = await f.propose(), editor = await f.editor.getProjectReviewEditor("a");
+      const proposal = { ...review.proposal, title: "최종 확정 내용", requestedCycleId: "next", properties: { ...review.proposal.properties, 예산: 0, 검토됨: false } };
+      if (race === "member") f.stats.beforeBatch = () => f.db.exec("UPDATE workspace_members SET status='removed' WHERE id='peer'");
+      if (race === "property") f.stats.beforeBatch = () => f.db.exec("UPDATE property_definitions SET updated_at='changed' WHERE id='budget'");
+      if (race === "template") f.stats.beforeBatch = () => f.db.exec("UPDATE project_templates SET updated_at='changed' WHERE id='template'");
+      if (race === "receipt") f.db.exec(`CREATE TRIGGER failed_receipt BEFORE UPDATE ON assistant_drafts WHEN json_extract(NEW.payload_json,'$.state')='created' BEGIN SELECT RAISE(ABORT,'receipt failure'); END`);
+      if (race === "lost-response") f.stats.loseResponse = true;
+      const request = await editedRequest(f, review, proposal, editor.revision);
+      const responses = race === "concurrent" ? await Promise.all([f.route().POST(request), f.route().POST(await editedRequest(f, review, { ...proposal, title: "두 번째 승인" }, editor.revision))]) : [await f.route().POST(request)];
+      const shouldCreate = ["concurrent", "lost-response"].includes(race);
+      assert.equal(responses.filter((response) => response.status === 200).length, shouldCreate ? 1 : 0, race);
+      assert.equal(f.db.prepare("SELECT count(*) n FROM items WHERE kind='project'").get().n, shouldCreate ? 1 : 0, race);
+      if (!shouldCreate) for (const table of ["item_assignments", "item_property_values", "project_documents", "activity_log", "project_monthly_usage"]) assert.equal(f.db.prepare(`SELECT count(*) n FROM ${table}`).get().n, 0, race + table);
+      else {
+        const saved = await core.getProjectReview(f.d1, identity, review.id);
+        assert.equal(saved.proposal.title, f.db.prepare("SELECT title FROM items WHERE id=?").get(review.projectId).title);
+      }
+    } finally { f.db.close(); }
+  }
 });
 
 test("User can reject a recommendation and select another Initiative; all data and receipt commit once", async () => {

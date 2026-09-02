@@ -34,11 +34,20 @@ export type ProjectReview = {
   templatePreview: string | null;
   requestHash: string;
   propertyVersions: Record<string, string>;
+  fieldOrigins?: Record<string, "draft" | "default" | "edited">;
+  propertyLabels?: Record<string, string>;
+  editorRevision?: string;
   createdAt: string; expiresAt: string; selectedParent: InitiativeChoice | null;
 };
 
 export class ProjectReviewError extends Error {
-  constructor(public code: string, message: string, public status = 409) { super(message); }
+  constructor(public code: string, message: string, public status = 409, public fieldErrors: Record<string, string> = {}) { super(message); }
+}
+
+export function projectReviewSummary(review: ProjectReview) {
+  return { ...review.proposal, ...review.fieldLabels, displayProperties: review.propertyLabels ?? {},
+    fieldOrigins: review.fieldOrigins ?? {}, initiativePath: review.selectedParent?.path ?? [],
+    cycleId: review.selectedParent?.cycleId ?? review.proposal.requestedCycleId };
 }
 
 function fail(code: string, message: string, status = 409): never { throw new ProjectReviewError(code, message, status); }
@@ -113,7 +122,8 @@ export async function validateProjectProposalReferences(db: D1Database, ownerId:
 
 /** This is only a draft. No Project, hierarchy, quota, assignment or notification is created. */
 export async function proposeProjectReview(db: D1Database, identity: ReviewIdentity, input: unknown,
-  recommendations: { initiativeId: string; reason: string }[] = [], propertyVersions: Record<string, string> = {}) {
+  recommendations: { initiativeId: string; reason: string }[] = [], propertyVersions: Record<string, string> = {},
+  display: Pick<ProjectReview, "fieldOrigins" | "propertyLabels"> = {}) {
   const proposal = projectProposalSchema.parse(input);
   const normalizedRecommendations = z.array(z.object({ initiativeId: z.string().min(1), reason: z.string().trim().min(1).max(1000) })).max(3).parse(recommendations);
   for (const recommendation of normalizedRecommendations) {
@@ -125,7 +135,7 @@ export async function proposeProjectReview(db: D1Database, identity: ReviewIdent
   const labels = await validateProjectProposalReferences(db, identity.ownerId, proposal);
   const now = new Date();
   if (new TextEncoder().encode(JSON.stringify(proposal)).byteLength > 64000) fail("proposal_too_large", "생성할 내용이 너무 큽니다. Project 본문을 간결하게 정리해 주세요.", 400);
-  const requestHash = await reviewFingerprint({ proposal, recommendations: normalizedRecommendations, ...labels, propertyVersions });
+  const requestHash = await reviewFingerprint({ proposal, recommendations: normalizedRecommendations, ...labels, propertyVersions, ...display });
   const previous = await db.prepare(`SELECT payload_json FROM assistant_drafts WHERE owner_id = ? AND user_id = ?
     AND draft_key LIKE 'system:project-review:%' AND json_extract(payload_json, '$.state') = 'pending'
     AND json_extract(payload_json, '$.requestHash') = ? AND json_extract(payload_json, '$.expiresAt') > ? LIMIT 1`)
@@ -138,7 +148,7 @@ export async function proposeProjectReview(db: D1Database, identity: ReviewIdent
   const id = crypto.randomUUID();
   const review: ProjectReview = {
     id, version: crypto.randomUUID(), state: "pending", projectId: crypto.randomUUID(), proposal,
-    recommendations: normalizedRecommendations, ...labels, requestHash, propertyVersions,
+    recommendations: normalizedRecommendations, ...labels, requestHash, propertyVersions, ...display,
     createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + MAX_AGE_MS).toISOString(), selectedParent: null,
   };
   await db.prepare(`INSERT INTO assistant_drafts (id, owner_id, user_id, draft_key, payload_json, created_at, updated_at)
@@ -176,19 +186,21 @@ export async function cancelProjectReview(db: D1Database, identity: ReviewIdenti
 /** The caller must have verified a same-origin, non-token browser session before invoking this. */
 export async function approveProjectReview(db: D1Database, identity: ReviewIdentity,
   input: { id: string; version: string; initiativeId: string; initiativeFingerprint: string },
-  create: (review: ProjectReview, parent: InitiativeChoice, completed: ProjectReview) => Promise<void>) {
+  create: (review: ProjectReview, parent: InitiativeChoice, completed: ProjectReview) => Promise<void>,
+  prepareEdit?: (review: ProjectReview, parent: InitiativeChoice) => Promise<ProjectReview>) {
   const review = await getProjectReview(db, identity, input.id);
   if (review.version !== input.version) fail("review_changed", "생성 내용이 변경됐습니다. 최종 내용을 다시 확인해 주세요.");
   if (review.state === "created") return review;
   if (review.state !== "pending") fail("review_not_pending", "이미 처리 중이거나 종료된 요청입니다. 중복 생성하지 말고 기존 결과를 확인해 주세요.");
   const parent = await getReviewInitiative(db, identity.ownerId, input.initiativeId);
-  if (!parent || parent.fingerprint !== input.initiativeFingerprint) fail("initiative_changed", "선택한 Initiative 또는 상위 KR·Objective가 변경됐습니다. 후보를 다시 확인해 주세요.");
-  if (review.proposal.requestedCycleId && parent.cycleId !== review.proposal.requestedCycleId) fail("cycle_mismatch", "요청한 OKR 파일 안의 Initiative를 선택해 주세요.");
-  const references = await validateProjectProposalReferences(db, identity.ownerId, review.proposal);
-  if (references.templateVersion !== review.templateVersion || JSON.stringify(references.fieldLabels) !== JSON.stringify(review.fieldLabels)) {
+  if (!parent || parent.fingerprint !== input.initiativeFingerprint) throw new ProjectReviewError("initiative_changed", "선택한 Initiative 또는 상위 KR·Objective가 변경됐습니다. 후보를 다시 확인해 주세요.", 409, { initiativeId: "현재 경로를 확인하고 다시 선택해 주세요." });
+  const effective = prepareEdit ? await prepareEdit(review, parent) : review;
+  if (effective.proposal.requestedCycleId && parent.cycleId !== effective.proposal.requestedCycleId) fail("cycle_mismatch", "요청한 OKR 파일 안의 Initiative를 선택해 주세요.");
+  const references = await validateProjectProposalReferences(db, identity.ownerId, effective.proposal);
+  if (references.templateVersion !== effective.templateVersion || JSON.stringify(references.fieldLabels) !== JSON.stringify(effective.fieldLabels)) {
     fail("details_changed", "담당자 또는 템플릿 정보가 변경됐습니다. 새 확인 요청을 받아 주세요.");
   }
-  const creating: ProjectReview = { ...review, state: "creating", selectedParent: parent };
+  const creating: ProjectReview = { ...effective, state: "creating", selectedParent: parent };
   await transition(db, identity, review, creating); // One claimant; repeated clicks cannot create twice.
   const created: ProjectReview = { ...creating, state: "created" };
   try {
