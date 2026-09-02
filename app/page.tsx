@@ -6580,6 +6580,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
   const [editing, setEditing] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [sendingMemberId, setSendingMemberId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [result, setResult] = useState<SlackOnboardingResult | null>(null);
@@ -6683,6 +6684,24 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
     }
   }
 
+  async function sendDailyNow(member: SlackDailyAdminData["members"][number]) {
+    setSendingMemberId(member.memberId);
+    try {
+      const response = await fetch("/api/slack/daily/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send_now", memberId: member.memberId }),
+      });
+      const data = await response.json() as { sent?: boolean; error?: string };
+      if (!response.ok || !data.sent) throw new Error(data.error || "데일리 봇 DM을 보내지 못했습니다.");
+      onNotice(`${member.displayName}님에게 데일리 봇 DM을 보냈습니다.`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "데일리 봇 DM을 보내지 못했습니다.");
+    } finally {
+      setSendingMemberId(null);
+    }
+  }
+
   if (!active && !admin) return null;
   if (!connected) return <div className="slack-daily-locked"><LockKeyhole size={18} /><div><b>Slack 연결 후 데일리 봇을 설정할 수 있습니다</b><p>기존 설정은 그대로 유지되며 Slack 연결을 완료하면 다시 사용할 수 있습니다.</p></div></div>;
   if (!canManage) return <section className="slack-connected-summary"><div><CheckCircle2 size={18} /><p><b>{teamName} 연결 완료</b><span>관리자가 설정한 시간에 내 Slack DM으로 데일리를 받을 수 있습니다.</span></p></div></section>;
@@ -6691,6 +6710,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
 
   const showSetup = !admin.setupComplete || editing;
   const targetMembers = admin.members.filter((member) => member.linked && member.preference.enabled);
+  const linkedMembers = admin.members.filter((member) => member.linked);
   const nextReminder = targetMembers.flatMap((member) => member.reminder?.postAt ? [member.reminder.postAt] : []).sort((a, b) => a - b)[0];
   const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -6707,6 +6727,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
     </section> : <section className="slack-connected-summary">
       <div className="slack-connected-title"><CheckCircle2 size={19} /><p><b>{teamName} 연결 완료</b><span>Slack 승인부터 데일리 예약까지 준비되었습니다.</span></p><button type="button" onClick={() => setEditing(true)}>설정 변경</button></div>
       <dl><div><dt>대상</dt><dd>{targetMembers.length}명</dd></div><div><dt>다음 발송</dt><dd>{nextReminder ? new Date(nextReminder * 1000).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "예약 확인 필요"}</dd></div><div><dt>공유 채널</dt><dd>{admin.channels.length ? admin.channels.map((channel) => `#${channel.name}`).join(", ") : "공유 안 함"}</dd></div></dl>
+      <section className="slack-manual-send" aria-labelledby="slack-manual-send-title"><header><b id="slack-manual-send-title">개별 즉시 발송</b><small>예약 시간을 기다리지 않고 선택한 멤버에게 데일리 봇 DM을 보냅니다.</small></header>{linkedMembers.length ? <div className="slack-member-links">{linkedMembers.map((member) => <div key={member.memberId}><span className="linked" /><p><b>{member.displayName}</b><small>{member.slackDisplayName || member.email}{member.preference.enabled ? " · 예약 대상" : " · 수동 발송만"}</small></p><button type="button" disabled={busy || sendingMemberId !== null} onClick={() => void sendDailyNow(member)}>{sendingMemberId === member.memberId ? <><LoaderCircle className="spin" size={13} />발송 중</> : "지금 보내기"}</button></div>)}</div> : <p className="slack-manual-send-empty">Slack에 연결된 멤버가 없습니다. 사용자·예약 재동기화를 먼저 실행해 주세요.</p>}</section>
       {result && <div className="slack-test-results" role="status"><p className={result.tests.dm.status}><span>{result.tests.dm.status === "sent" ? "설치자 테스트 DM 성공" : result.tests.dm.status === "skipped" ? "설치자 DM 테스트 생략" : `테스트 DM 실패 · ${result.tests.dm.error || "다시 시도 필요"}`}</span>{result.tests.dm.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("dm", result.tests.dm.memberId)}>재시도</button>}</p>{result.tests.channels.map((channel) => <p key={channel.channelId} className={channel.status}><span>{channel.status === "sent" ? `#${channel.channelName} 테스트 성공` : `#${channel.channelName} 실패 · ${channel.error || "다시 시도 필요"}`}</span>{channel.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("channel", channel.channelId)}>재시도</button>}</p>)}{result.schedules.filter((entry) => entry.status === "failed").map((entry) => <p key={entry.memberId} className="failed"><span>예약 실패 · {admin.members.find((member) => member.memberId === entry.memberId)?.displayName || entry.memberId}</span><button disabled={busy} onClick={() => void retrySetupResult("schedule", null)}>재시도</button></p>)}</div>}
     </section>}
     {admin.setupComplete && <details className="slack-advanced-settings" onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}><summary>멤버 연결·실패 기록 <ChevronDown size={14} /></summary>{advancedOpen && <SlackDailyAdvancedSettings connected canManage mode="workspace" onNotice={onNotice} />}</details>}

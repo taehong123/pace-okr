@@ -2189,6 +2189,12 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .slack-member-links p, .slack-publication-failures p { min-width: 0; flex: 1; display: grid; margin: 0; }
 .slack-member-links b, .slack-publication-failures b { font-size: 11px; }
 .slack-member-links small, .slack-publication-failures small { color: var(--muted); font-size: 9px; }
+.slack-manual-send { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.slack-manual-send > header { display: grid; gap: 3px; }
+.slack-manual-send > header b { font-size: 11px; }
+.slack-manual-send > header small { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.slack-manual-send .slack-member-links button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.slack-manual-send-empty { margin: 0; padding: 10px; border: 1px dashed var(--line); border-radius: var(--radius-control); color: var(--muted); font-size: 9px; }
 .slack-publication-failures > b { padding: 9px; color: #a04b4b; font-size: 11px; }
 .slack-automation-locked { min-height: 72px; display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: center; gap: 8px; padding: 12px; border: 1px dashed var(--line-strong); border-radius: var(--radius-container); background: #f7f8fa; color: var(--muted); }
 .slack-automation-locked > svg { color: #b16b16; }

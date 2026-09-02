@@ -59,7 +59,8 @@ export function renderSlackAutomationMessage(template: string, context: SlackAut
     workspace: context.workspace,
   };
 
-  return template.replace(/{{\s*(title|status|from_status|priority|kind|workspace)\s*}}/g, (_, key: string) => escapeSlackText(variables[key] ?? ""));
+  const message = template.replace(/{{\s*(title|status|from_status|priority|kind|workspace)\s*}}/g, (_, key: string) => escapeSlackText(variables[key] ?? ""));
+  return `*업무 자동화 봇*\n${message}`;
 }
 
 export function slackAutomationMatches(input: {

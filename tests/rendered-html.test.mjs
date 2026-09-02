@@ -773,7 +773,7 @@ test("connects API data independently to Key Results and Projects", async () => 
 });
 
 test("implements personal daily drafts and the managed Slack daily bot contract", async () => {
-  const [page, styles, dailyDomain, schema, migration, skipMigration, isolationMigration, oauth, interactions, events, slackDaily, manifest, slackStatus, slackCallback, onboardingRoute, channelRoute, operationsGuide, customerGuide] = await Promise.all([
+  const [page, styles, dailyDomain, schema, migration, skipMigration, isolationMigration, oauth, interactions, events, slackDaily, manifest, slackStatus, slackCallback, onboardingRoute, channelRoute, settingsRoute, slackAutomation, operationsGuide, customerGuide] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../lib/daily-bot.ts", import.meta.url), "utf8"),
@@ -790,6 +790,8 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
     readFile(new URL("../app/api/slack/callback/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/onboarding/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/channels/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/slack/daily/settings/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/slack-automation.ts", import.meta.url), "utf8"),
     readFile(new URL("../docs/slack-production-setup.md", import.meta.url), "utf8"),
     readFile(new URL("../docs/slack-customer-connect.md", import.meta.url), "utf8"),
   ]);
@@ -806,9 +808,12 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(page, /채널 공유 안 함/);
   assert.match(page, /설정 완료/);
   assert.match(page, /멤버 연결·실패 기록/);
+  assert.match(page, /개별 즉시 발송/);
+  assert.match(page, /지금 보내기/);
   assert.match(styles, /\.daily-layout/);
   assert.match(styles, /\.integrations-page/);
   assert.match(styles, /\.integration-step/);
+  assert.match(styles, /\.slack-manual-send/);
   assert.match(dailyDomain, /task\.status NOT IN \('done', 'development_done', 'archived'\)/);
   assert.match(dailyDomain, /assignment\.role = 'task_assignee'/);
   assert.match(dailyDomain, /source: "daily"/);
@@ -847,6 +852,10 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(slackDaily, /conversations\.join/);
   assert.match(slackDaily, /chat\.scheduleMessage/);
   assert.match(slackDaily, /testDailyChannel/);
+  assert.match(slackDaily, /sendDailyReminderNow/);
+  assert.match(slackDaily, /\[데일리 봇\]/);
+  assert.match(settingsRoute, /payload\.action === "send_now"/);
+  assert.match(slackAutomation, /업무 자동화 봇/);
   assert.match(channelRoute, /includeJoinablePublic/);
   assert.match(operationsGuide, /apps\.manifest\.create/);
   assert.match(operationsGuide, /일반 고객은 이 절차를 수행하지 않으며/);
@@ -968,6 +977,7 @@ test("implements a workspace management bot for data quality and urgency reporti
   assert.match(domain, /activity_log/);
   assert.match(domain, /listSlackChannels/);
   assert.match(domain, /last_sent_date/);
+  assert.match(domain, /\[관리 봇\]/);
   assert.match(schema, /workspace_management_bot_settings/);
   assert.match(runtimeSchema, /workspace_management_bot_settings/);
   assert.match(migration, /idx_workspace_management_bot_due/);

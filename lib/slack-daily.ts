@@ -271,16 +271,32 @@ export async function listSlackChannels(ownerId: string, options: { includeJoina
   return channels.sort((left, right) => left.name.localeCompare(right.name));
 }
 
+export async function sendDailyReminderNow(ownerId: string, memberId: string) {
+  return deliverDailyReminder(ownerId, memberId, false);
+}
+
 export async function testDailyDm(ownerId: string, memberId: string) {
-  const [connection, link] = await Promise.all([
+  return deliverDailyReminder(ownerId, memberId, true);
+}
+
+async function deliverDailyReminder(ownerId: string, memberId: string, test: boolean) {
+  const [connection, link, member] = await Promise.all([
     getSlackConnection(ownerId),
     getDb().select().from(slackMemberLinks).where(and(eq(slackMemberLinks.ownerId, ownerId), eq(slackMemberLinks.memberId, memberId))).limit(1).then((rows) => rows[0] ?? null),
+    getDb().select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(
+      eq(workspaceMembers.workspaceId, ownerId), eq(workspaceMembers.id, memberId), eq(workspaceMembers.status, "active"),
+    )).limit(1).then((rows) => rows[0] ?? null),
   ]);
-  if (!connection || !link) throw new Error("Slack 사용자 연결이 필요합니다.");
+  if (!connection || !link || !member) throw new Error("활성 워크스페이스 멤버의 Slack 연결이 필요합니다.");
   const token = await slackTokenForConnection(connection);
   const dmChannelId = await ensureDmChannel(token, link.slackUserId, link.dmChannelId);
-  await slackApi(token, "chat.postMessage", { channel: dmChannelId, text: "OKRPTR 데일리 알림 테스트입니다.", blocks: dailyReminderBlocks("test") });
+  await slackApi(token, "chat.postMessage", {
+    channel: dmChannelId,
+    text: `[데일리 봇] ${test ? "테스트 · " : ""}오늘의 데일리를 작성해 주세요.`,
+    blocks: dailyReminderBlocks(`${DAILY_REMINDER_BLOCK_PREFIX}${test ? "test" : "manual"}:${crypto.randomUUID()}`),
+  });
   if (dmChannelId !== link.dmChannelId) await getDb().update(slackMemberLinks).set({ dmChannelId, updatedAt: new Date().toISOString() }).where(eq(slackMemberLinks.id, link.id));
+  return { sent: true, memberId, dmChannelId };
 }
 
 export async function testDailyChannel(ownerId: string, channelId: string) {
@@ -294,7 +310,7 @@ export async function testDailyChannel(ownerId: string, channelId: string) {
   const token = await slackTokenForConnection(connection);
   await slackApi(token, "chat.postMessage", {
     channel: channelId,
-    text: "OKRPTR Slack 연결 테스트입니다. 데일리 공유가 이 채널에 전송됩니다.",
+    text: "[데일리 봇] Slack 연결 테스트입니다. 데일리 공유가 이 채널에 전송됩니다.",
   });
 }
 
@@ -453,7 +469,7 @@ export async function scheduleMemberReminder(ownerId: string, memberId: string, 
   const result = await slackApi<SlackApiResult & { scheduled_message_id?: string }>(token, "chat.scheduleMessage", {
     channel: dmChannelId,
     post_at: postAt,
-    text: "오늘의 OKRPTR 데일리를 작성해 주세요.",
+    text: "[데일리 봇] 오늘의 데일리를 작성해 주세요.",
     blocks: dailyReminderBlocks(blockId),
   });
   if (!result.scheduled_message_id) throw new Error("Slack 예약 메시지 ID를 받지 못했습니다.");
@@ -529,6 +545,7 @@ export async function retryDailyPublication(ownerId: string, publicationId: stri
 
 export function dailyReminderBlocks(blockId: string) {
   return [
+    { type: "context", elements: [{ type: "mrkdwn", text: "*데일리 봇*" }] },
     { type: "section", block_id: blockId, text: { type: "mrkdwn", text: "*오늘의 데일리를 정리할 시간입니다.*\n할당된 Task를 고르거나, 필요한 경우 사유와 함께 오늘 데일리를 스킵할 수 있습니다." } },
     { type: "actions", block_id: blockId, elements: [{ type: "button", action_id: "daily_open", text: { type: "plain_text", text: "데일리 작성" }, style: "primary", value: "daily" }] },
   ];
@@ -670,8 +687,8 @@ function dailyCard(submission: DailySubmissionValue) {
     const reason = dailySkipReasonLabel(submission.skipReason);
     const detail = submission.skipNote ? `\n${escapeSlack(submission.skipNote)}` : "";
     const appUrl = `${String((env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?view=scrum`;
-    return { text: `${submission.memberName}님의 ${submission.date} 데일리 스킵 · ${reason}`, unfurl_links: false, unfurl_media: false, blocks: [
-      { type: "header", text: { type: "plain_text", text: `${submission.memberName} · ${submission.date}`.slice(0, 150) } },
+    return { text: `[데일리 봇] ${submission.memberName}님의 ${submission.date} 데일리 스킵 · ${reason}`, unfurl_links: false, unfurl_media: false, blocks: [
+      { type: "header", text: { type: "plain_text", text: `데일리 봇 · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
       { type: "section", text: { type: "mrkdwn", text: `*⏭️ 오늘 데일리 스킵*\n*사유:* ${reason}${detail}`.slice(0, 2900) } },
       { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRPTR에서 보기" }, url: appUrl }] },
     ] };
@@ -682,9 +699,9 @@ function dailyCard(submission: DailySubmissionValue) {
   const blocker = submission.blockersNote ? `\n*블로커*\n${escapeSlack(submission.blockersNote)}` : "";
   const note = submission.todayNote ? `\n*오늘 메모*\n${escapeSlack(submission.todayNote)}` : "";
   const appUrl = `${String((env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?view=scrum`;
-  const text = `${submission.memberName}님의 ${submission.date} 데일리`;
+  const text = `[데일리 봇] ${submission.memberName}님의 ${submission.date} 데일리`;
   return { text, unfurl_links: false, unfurl_media: false, blocks: [
-    { type: "header", text: { type: "plain_text", text: `${submission.memberName} · ${submission.date}`.slice(0, 150) } },
+    { type: "header", text: { type: "plain_text", text: `데일리 봇 · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
     { type: "section", text: { type: "mrkdwn", text: `*오늘 Task*\n${taskLines}${overflow}${note}${blocker}`.slice(0, 2900) } },
     { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRPTR에서 보기" }, url: appUrl }] },
   ] };
