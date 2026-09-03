@@ -329,8 +329,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /目標を実行に変えるワークスペース/);
   assert.match(page, /把目标变成行动的工作空间/);
   assert.match(page, /convertir objetivos en acción/);
-  assert.match(page, /Google 계정으로 계속/);
-  assert.match(page, /Google로 이동 중/);
+  assert.match(page, /LandingScreen reason=\{authState.reason\} onSignIn=\{startGoogleSignIn\}/);
+  assert.match(await readFile(new URL("../lib/landing-copy.ts", import.meta.url), "utf8"), /Google로 이동 중/);
   assert.match(page, /AppLoadingScreen/);
   assert.doesNotMatch(page, /GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX/);
   assert.doesNotMatch(page, /accounts\.google\.com\/o\/oauth2\/v2\/auth/);
@@ -526,7 +526,7 @@ test("uses Google verified email and separates optional email marketing consent"
     readFile(new URL("../app/terms/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0034_billing_email.sql", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /Google이 확인한 이메일로 바로 시작하세요/);
+  assert.match(page, /api\/auth\/google\?returnTo=/);
   assert.doesNotMatch(page, /function RegistrationScreen|\/api\/account\/phone\/send|휴대전화 소유 확인/);
   assert.doesNotMatch(paceData, /registration_required|allowIncompleteRegistration/);
   const consentUi = await readFile(new URL("../app/marketing-consent.tsx", import.meta.url), "utf8");

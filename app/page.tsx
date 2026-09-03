@@ -36,7 +36,6 @@ import {
   Languages,
   LockKeyhole,
   LoaderCircle,
-  LogIn,
   LogOut,
   Menu,
   MoreHorizontal,
@@ -77,6 +76,7 @@ import { invalidateAiUsage, type AiUsageScope } from "@/lib/ai-usage-client";
 import { readMyWorkSort, saveMyWorkSort, sortMyWorkItems, type MyWorkSort } from "@/lib/my-work-sort";
 import { DEFAULT_THEME, THEME_STORAGE_KEY, isThemeMode, themeColorScheme, type ThemeMode } from "@/lib/themes";
 import { ThemePicker } from "./theme-picker";
+import { LandingScreen } from "./landing";
 
 type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "data" | "scrum" | "recommendations" | "reviews" | "trash" | "integrations" | "billing";
 const urlViews = new Set<View>(["my_work", "inbox", "work", "routines", "okr", "data", "scrum", "recommendations", "reviews", "trash", "integrations", "billing"]);
@@ -509,7 +509,7 @@ function readCachedBootstrap(path: string): BootstrapData | null {
     }
     return cached.data;
   } catch {
-    window.localStorage.removeItem(BOOTSTRAP_CACHE_KEY);
+    clearCachedBootstrap();
     return null;
   }
 }
@@ -518,12 +518,12 @@ function writeCachedBootstrap(path: string, data: BootstrapData) {
   try {
     window.localStorage.setItem(BOOTSTRAP_CACHE_KEY, JSON.stringify({ path, savedAt: Date.now(), data }));
   } catch {
-    window.localStorage.removeItem(BOOTSTRAP_CACHE_KEY);
+    clearCachedBootstrap();
   }
 }
 
 function clearCachedBootstrap() {
-  window.localStorage.removeItem(BOOTSTRAP_CACHE_KEY);
+  try { window.localStorage.removeItem(BOOTSTRAP_CACHE_KEY); } catch { /* Storage is optional, including during sign-in. */ }
 }
 type GroupDetailData = { group: WorkspaceGroup; members: GroupMember[]; canManageMembers: boolean };
 type WorkspaceSummary = {
@@ -910,7 +910,8 @@ function WorkspaceApp() {
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
-      const savedLanguage = window.localStorage.getItem("okrptr.intro-language");
+      let savedLanguage: string | null = null;
+      try { savedLanguage = window.localStorage.getItem("okrptr.intro-language"); } catch { /* Language preferences are optional. */ }
       const language = isIntroLanguage(savedLanguage) ? savedLanguage : preferredIntroLanguage();
       setIntroLanguage(language);
     }, 0);
@@ -2040,7 +2041,7 @@ function WorkspaceApp() {
   }
 
   if (authState.status === "loading") return <AppLoadingScreen />;
-  if (authState.status === "unauthenticated") return <AuthScreen reason={authState.reason} />;
+  if (authState.status === "unauthenticated") return <LandingScreen reason={authState.reason} onSignIn={startGoogleSignIn} />;
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -2496,28 +2497,6 @@ function AppLoadingScreen() {
         </div>
       </section>
       <span className="sr-only" aria-live="polite">OKRPTR 워크스페이스를 불러오고 있습니다.</span>
-    </main>
-  );
-}
-
-function AuthScreen({ reason }: { reason: string | null }) {
-  const [signingIn, setSigningIn] = useState(false);
-  const unavailable = reason === "missing_config";
-  return (
-    <main className="auth-shell">
-      <section className="auth-panel">
-        <header><span className="brand-mark">O</span><div><b>OKRPTR</b><span>목표를 오늘의 실행으로</span></div></header>
-        <div className="auth-content">
-          <h1>로그인 또는 회원가입</h1>
-          <p>Google이 확인한 이메일로 바로 시작하세요. 휴대전화 번호나 별도 본인인증은 요구하지 않습니다.</p>
-          {reason === "failed" && <p className="auth-error">Google 로그인을 완료하지 못했습니다. 다시 시도해 주세요.</p>}
-          {unavailable && <p className="auth-error">Google 로그인 설정을 완료하는 중입니다.</p>}
-          <button disabled={signingIn || unavailable} aria-busy={signingIn} onClick={() => { setSigningIn(true); startGoogleSignIn(); }}>
-            {signingIn ? <LoaderCircle className="spin" size={17} /> : <LogIn size={17} />}
-            {signingIn ? "Google로 이동 중" : "Google 계정으로 계속"}
-          </button>
-        </div>
-      </section>
     </main>
   );
 }

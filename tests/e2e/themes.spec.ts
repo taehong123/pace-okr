@@ -113,7 +113,7 @@ for (const theme of THEMES) {
     await page.route("**/api/auth/session", (route) => json(route, { user: null }, 401));
     await page.route("**/api/bootstrap?**", (route) => json(route, { error: "unauthenticated" }, 401));
     await page.goto("/");
-    await expect(page.locator(".auth-panel")).toBeVisible();
+    await expect(page.locator(".landing-shell")).toBeVisible();
     await readable(page, `${theme.mode}/login`);
     expect(errors, "No runtime errors across theme screens").toEqual([]);
   });
