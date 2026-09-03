@@ -62,7 +62,7 @@ export function MarketingConsentPrompt({ userId, onNotice }: { userId: string; o
     setVisible(false);
     rememberDismissal(userId);
     void requestConsent<PromptResult>({ method: "POST", body: JSON.stringify({ action: "dismiss" }), keepalive: true })
-      .catch(() => noticeRef.current("안내 응답을 기록하지 못했습니다. 수신 동의는 변경하지 않았습니다."));
+      .catch(() => noticeRef.current(t("안내 응답을 기록하지 못했습니다. 수신 동의는 변경하지 않았습니다.")));
   }
 
   if (!visible) return null;
@@ -110,7 +110,7 @@ function ConsentEditor({ onboarding = false, onSkip, onSaved }: { onboarding?: b
       setState("ready");
       setMessage("");
     }).catch(() => {
-      if (active) { setState("error"); setMessage("동의 설정을 불러오지 못했습니다."); }
+      if (active) { setState("error"); setMessage(t("동의 설정을 불러오지 못했습니다.")); }
     }).finally(() => window.clearTimeout(timeout));
     return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
   }, [onboarding, attempt]);
@@ -130,11 +130,11 @@ function ConsentEditor({ onboarding = false, onSkip, onSaved }: { onboarding?: b
       if (!data.consent) throw new Error(t("동의 설정을 저장하지 못했습니다."));
       setConsent(data.consent);
       setState("saved");
-      setMessage("동의 설정을 저장했습니다.");
+      setMessage(t("동의 설정을 저장했습니다."));
       onSaved?.();
     } catch {
       setState("error");
-      setMessage("저장 결과를 확인하지 못했습니다. 선택한 값은 유지했습니다. 설정을 다시 열어 확인해 주세요.");
+      setMessage(t("저장 결과를 확인하지 못했습니다. 선택한 값은 유지했습니다. 설정을 다시 열어 확인해 주세요."));
     } finally { window.clearTimeout(timeout); inFlight.current = false; }
   }
 

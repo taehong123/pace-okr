@@ -22,7 +22,7 @@ const authorization = { ownerId: "workspace-a", userId: "user-a", displayName: "
 test("AI dialog uses defined shared layout tokens, theme colors and paired primary button state colors", () => {
   const css = source("app/ai-connections.css");
   const theme = load("lib/themes.ts");
-  const layoutTokens = source("app/globals.css").match(/^:root\s*\{([^}]*)\}/)?.[1] ?? "";
+  const layoutTokens = source("app/globals.css").match(/:root\s*\{([^}]*)\}/)?.[1] ?? "";
   assert.ok(layoutTokens, "Shared layout tokens must exist");
   const defined = new Set([...`${theme.themeCss}\n${layoutTokens}`.matchAll(/--([a-z-]+):/g)].map((match) => match[1]));
   for (const match of css.matchAll(/var\(--([a-z-]+)/g)) assert.ok(defined.has(match[1]), `Undefined AI color token: ${match[1]}`);

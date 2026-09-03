@@ -1,7 +1,7 @@
 .ai-connections { width: min(36rem, 100%); min-width: 0; max-height: calc(100dvh - 32px); display: flex; flex-direction: column; overflow: hidden; background: var(--raised); color: var(--text-primary, var(--ink)); border: 1px solid var(--line); border-radius: var(--radius-overlay); box-shadow: var(--shadow-overlay); }
 .ai-connections > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px; }
 .ai-connections h2 { margin: 0; font-size: var(--type-section); }
-.ai-connections > header .icon-button { flex: none; width: 44px; min-width: 44px; }
+.ai-connections > header .icon-button { flex: none; width: 44px; min-width: 44px; height: 44px; min-height: 44px; }
 .ai-connections h3 { margin: 0; font-size: var(--type-body); }
 .ai-connections p { margin: 8px 0; font-size: var(--type-meta); line-height: 1.65; overflow-wrap: anywhere; }
 .ai-connections > header p, .ai-connection-note { color: var(--muted); }
@@ -11,7 +11,7 @@
 .ai-connections a { color: var(--text-primary, var(--ink)); text-decoration: underline; text-underline-offset: 3px; }
 .ai-connections .ai-primary { background: var(--button-primary-bg, var(--text-primary, var(--ink))); color: var(--button-primary-fg, var(--raised)); border: 1px solid transparent; text-decoration: none; font-weight: 650; }
 .ai-connection-tabs { display: flex; flex: none; gap: 4px; padding: 0 16px 12px; border-bottom: 1px solid var(--line); }
-.ai-connection-tabs button { flex: 1; min-width: 0; padding-inline: 5px; }
+.ai-connection-tabs button { flex: 1; min-width: 0; min-height: 44px; padding-inline: 5px; }
 .ai-connection-tabs button[aria-selected="true"] { background: var(--surface-muted, var(--bg-page, var(--paper))); border-color: var(--text-primary, var(--ink)); font-weight: 700; }
 .ai-connection-panel { min-height: 0; overflow-y: auto; padding: 20px; }
 .ai-connection-heading { display: flex; gap: 10px; justify-content: space-between; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }

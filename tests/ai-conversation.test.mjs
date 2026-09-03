@@ -25,7 +25,7 @@ const names = new Set(["HomeOkrChat", "countOkrDraft", "planStringFieldsWithValu
 const components = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && names.has(node.name?.text)).map((node) => node.getText(ast)).join("\n");
 const { HomeOkrChat } = compile(`
 import { useState, useMemo, useRef, useEffect } from "react";
-import { t } from "@/lib/client-language";
+import { t, messageValue } from "@/lib/client-language";
 import { Bot, Link2, LoaderCircle, CheckCircle2, AlertTriangle, Eye, Send } from "lucide-react";
 ${components}
 export { HomeOkrChat };

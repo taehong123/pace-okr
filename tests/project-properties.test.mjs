@@ -84,6 +84,6 @@ test("Project surfaces no longer expose cadence; Routine recurrence remains", as
   assert.doesNotMatch(create, /<span>주기<\/span>/);
   assert.doesNotMatch(review, /cadenceNames|검토 주기|담당 DRI/);
   assert.match(create, /cadence: kind === "project" \? undefined : cadence/);
-  assert.match(page, /aria-label="반복 주기"/);
-  assert.match(create, /label="책임자"/);
+  assert.match(page, /aria-label=\{t\("반복 주기"\)\}/);
+  assert.match(create, /label=\{t\("책임자"\)\}/);
 });

@@ -38,6 +38,12 @@ export function apiError(payload: { error?: unknown; code?: unknown; messageCode
   const dictionary = catalogs.get(getClientLanguage());
   // Only complete, known messages are translated; arbitrary backend diagnostics are never shown.
   if (typeof payload.error === "string" && dictionary && Object.hasOwn(dictionary, payload.error)) return t(payload.error);
+  const actionError = typeof payload.code === "string" ? ({
+    creation_rolled_back: "전체 생성을 취소했습니다.",
+    editor_changed: "선택지가 변경되었습니다. 최신 선택지를 확인해 주세요.",
+    initiative_changed: "추천 후보가 변경됐습니다. 다른 후보를 선택해 주세요.",
+  } as const)[payload.code as "creation_rolled_back" | "editor_changed" | "initiative_changed"] : undefined;
+  if (actionError) return t(actionError);
   const code = typeof payload.messageCode === "string" && Object.hasOwn(publicErrorMessages, payload.messageCode)
     ? payload.messageCode as keyof typeof publicErrorMessages : "request_failed";
   return t(fallback && (getClientLanguage() === "ko" || dictionary && Object.hasOwn(dictionary, fallback)) ? fallback : publicErrorMessages[code]);

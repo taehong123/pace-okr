@@ -155,7 +155,7 @@ test("existing sessions and invitations still enter the application without land
   await expect(page.getByRole("dialog", { name: "워크스페이스 초대", exact: true })).toBeVisible();
 });
 
-test("signing out clears the cached session and returns to landing", async ({ page }) => {
+test("signing out clears the cached session and returns to landing", async ({ page }, info) => {
   await installApiMocks(page, { teamWorkspace: true });
   let loggedOut = false;
   await page.route("**/api/bootstrap**", (route) => loggedOut ? route.fulfill({ status: 401, json: {} }) : route.fallback());
@@ -164,7 +164,12 @@ test("signing out clears the cached session and returns to landing", async ({ pa
     return route.fulfill({ status: 302, headers: { location: "/" } });
   });
   await page.goto("/?view=my_work");
-  await page.locator(".profile-row").click();
+  if (info.project.name.startsWith("mobile")) {
+    await page.getByRole("button", { name: "더보기", exact: true }).click();
+    await page.locator(".mobile-account-entry").click();
+  } else {
+    await page.locator(".profile-row").click();
+  }
   await page.getByRole("button", { name: "Google 계정 로그아웃" }).click();
   await expect(page.locator(".landing-shell")).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("okrptr.bootstrap.v1"))).toBeNull();

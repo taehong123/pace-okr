@@ -62,7 +62,7 @@ test("backup preview preserves cancellation and can retry a failed restore", asy
   state.failRestore(true);
   await page.getByRole("button", { name: "이 날짜로 복원", exact: true }).click();
   await confirmation.getByRole("button", { name: "백업 후 복원" }).click();
-  await expect(page.locator(".backup-error[role=alert]")).toContainText("다른 사용자가 데이터를 변경했습니다.");
+  await expect(page.locator(".backup-error[role=alert]")).toContainText("백업 작업을 완료하지 못했습니다.");
   await expect(page.locator(".backup-preview")).toBeVisible();
   expect(state.writes).toEqual([{ method: "PATCH", payload: { action: "restore", id: entry.id, confirmation: "RESTORE WORKSPACE" } }]);
   state.failRestore(false);

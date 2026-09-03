@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 import { formatAiPercent, readAiUsagePercent, type AiUsage } from "@/lib/ai-usage";
 import { invalidateAiUsage, loadAiUsage, type AiUsageScope } from "@/lib/ai-usage-client";
 import "./ai-usage-meter.css";
-import { t } from "@/lib/client-language";
+import { getClientLocale, messageValue, t } from "@/lib/client-language";
 
 export function AiUsageMeter({ usage, compact = false, loading = false }: { usage: AiUsage | null; compact?: boolean; loading?: boolean }) {
   const percent = readAiUsagePercent(usage);
-  const value = percent ? `${formatAiPercent(percent.usedPercent)} 사용` : loading ? "확인 중…" : "확인 불가";
-  const remaining = percent ? `${formatAiPercent(percent.remainingPercent)} 남음` : "사용량을 불러오지 못했습니다.";
+  const value = percent ? t("{value1} 사용", { value1: messageValue(formatAiPercent(percent.usedPercent, getClientLocale(), t)) }) : loading ? t("확인 중…") : t("확인 불가");
+  const remaining = percent ? t("{value1} 남음", { value1: messageValue(formatAiPercent(percent.remainingPercent, getClientLocale(), t)) }) : t("사용량을 불러오지 못했습니다.");
   return <article className={`ai-usage-meter${compact ? " ai-usage-meter-compact" : ""}`} aria-label={t("AI 사용량")}>
     <header><span>{compact ? t("이번 달 AI 사용량") : t("AI 사용량")}</span><b>{value}</b></header>
     <div className="ai-usage-track" role="progressbar" aria-label={t("이번 달 AI 사용량")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent?.usedPercent} aria-valuetext={percent ? `${value}, ${remaining}` : value} aria-busy={loading || undefined}>

@@ -19,6 +19,18 @@ type ReviewData = {
   candidates: Candidates; recommendations: { initiativeId: string; reason: string; initiative: InitiativeChoice | null }[];
 };
 
+const publicReviewFieldErrors = new Set([
+  "값의 형식이나 범위를 확인해 주세요.", "이 항목을 확인해 주세요.", "생성 내용은 64KB 이내로 입력해 주세요.",
+  "활성 멤버를 선택하거나 미지정으로 변경해 주세요.", "사용할 수 없는 참여자를 제외해 주세요.",
+  "현재 템플릿을 선택하거나 미지정으로 변경해 주세요.", "선택한 Initiative와 OKR 파일이 다릅니다. 연결을 다시 선택해 주세요.",
+  "워크스페이스에서 사용하는 현재 선택지를 골라 주세요.", "삭제되거나 이름이 변경된 속성입니다. 해당 값을 비워 주세요.",
+  "현재 유형·선택지에 맞는 값을 입력하거나 미지정으로 변경해 주세요.", "현재 경로를 확인하고 다시 선택해 주세요.",
+]);
+
+function localizeFieldErrors(fieldErrors: Record<string, string> | undefined) {
+  return Object.fromEntries(Object.entries(fieldErrors ?? {}).map(([field, message]) => [field, t(publicReviewFieldErrors.has(message) ? message : "이 항목을 확인해 주세요.")]));
+}
+
 export default function ProjectReviewScreen() {
   useLanguage();
   const [data, setData] = useState<ReviewData | null>(null);
@@ -64,7 +76,7 @@ export default function ProjectReviewScreen() {
       } else if (result.review.state === "pending") setProposal((current) => current && withVisibleProperties(current, result.editor));
       if (result.review.state !== "pending") setDirty(false);
       return true;
-    } catch (failure) { setError(failure instanceof Error ? failure.message : "연결을 확인해 주세요."); return false; }
+    } catch (failure) { setError(failure instanceof Error ? failure.message : t("연결을 확인해 주세요.")); return false; }
     finally { setLoading(false); }
   }, [requestDetails]);
 
@@ -93,7 +105,7 @@ export default function ProjectReviewScreen() {
         const refreshed = result.candidates.choices.find((c) => c.id === selection?.id);
         if (refreshed && refreshed.fingerprint !== selection?.fingerprint) { setSelection(null); setConfirmed(false); }
       }
-    } catch (failure) { if (sequence === searchSequence.current) setError(failure instanceof Error ? failure.message : "후보 검색에 실패했습니다."); }
+    } catch (failure) { if (sequence === searchSequence.current) setError(failure instanceof Error ? failure.message : t("후보 검색에 실패했습니다.")); }
     finally { if (sequence === searchSequence.current) setSearching(false); }
   }
 
@@ -118,7 +130,7 @@ export default function ProjectReviewScreen() {
       });
       const result = await response.json() as { review: ProjectReview; error?: string; code?: string; fieldErrors?: Record<string, string>; editor?: ProjectReviewEditor };
       if (!response.ok) {
-        setConfirmed(false); setFieldErrors(result.fieldErrors ?? {});
+        setConfirmed(false); setFieldErrors(localizeFieldErrors(result.fieldErrors));
         if (result.editor) {
           setData((current) => current && { ...current, editor: result.editor! });
           setProposal((current) => current && withVisibleProperties(current, result.editor!));

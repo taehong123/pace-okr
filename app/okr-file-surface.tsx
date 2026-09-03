@@ -20,7 +20,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { t , apiError } from "@/lib/client-language";
+import { t , apiError , messageValue } from "@/lib/client-language";
 
 type ItemStatus = "backlog" | "todo" | "policy_discussion" | "in_progress" | "developing" | "development_done" | "done" | "blocked";
 type CycleStatus = "planned" | "active" | "closed";
@@ -314,7 +314,7 @@ export function OkrFileSurface({
       setInitialDraft(JSON.stringify({ draft: next, resolutions: {} }));
       setEditing(true);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "편집 정보를 불러오지 못했습니다.");
+      setError(loadError instanceof Error ? loadError.message : t("편집 정보를 불러오지 못했습니다."));
     } finally {
       setEditLoading(false);
     }
@@ -349,14 +349,14 @@ export function OkrFileSurface({
       return !resolution || resolution.action === "move" && !resolution.targetInitiativeRef;
     });
     if (unresolved.length) {
-      setError(`연결된 Project ${unresolved.length}개의 이동 또는 휴지통 처리를 선택해 주세요.`);
+      setError(t("연결된 Project {value1}개의 이동 또는 휴지통 처리를 선택해 주세요.", { value1: messageValue(unresolved.length) }));
       return;
     }
     if (removedKeyResultCount || removedInitiatives.length || impactedProjects.length) {
       const taskCount = impactedProjects.reduce((total, project) => total + project.taskCount, 0);
       const confirmed = await onConfirm({
         title: "OKR 파일 변경사항 저장",
-        message: `KR ${removedKeyResultCount}개와 Initiative ${removedInitiatives.length}개가 삭제됩니다.\n영향받는 Project는 ${impactedProjects.length}개, 하위 Task는 ${taskCount}개입니다.\n선택한 Project 이동·휴지통 처리와 함께 저장할까요?`,
+        message: t("KR {value1}개와 Initiative {value2}개가 삭제됩니다.\n영향받는 Project는 {value3}개, 하위 Task는 {value4}개입니다.\n선택한 Project 이동·휴지통 처리와 함께 저장할까요?", { value1: messageValue(removedKeyResultCount), value2: messageValue(removedInitiatives.length), value3: messageValue(impactedProjects.length), value4: messageValue(taskCount) }),
         confirmLabel: "전체 변경 저장",
         danger: true,
       });
@@ -402,16 +402,16 @@ export function OkrFileSurface({
       setEditing(false);
       onDirtyChange(false);
       onSaved(data.file);
-      onNotice(creating ? "OKR 파일을 만들었습니다." : "OKR 파일 전체를 저장했습니다.");
+      onNotice(creating ? t("OKR 파일을 만들었습니다.") : t("OKR 파일 전체를 저장했습니다."));
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "OKR 파일을 저장하지 못했습니다.");
+      setError(saveError instanceof Error ? saveError.message : t("OKR 파일을 저장하지 못했습니다."));
     } finally {
       setSaving(false);
     }
   }
 
   async function splitFile() {
-    if (!readFile || !await onConfirm({ title: "Objective별 파일 분리", message: `이 파일의 Objective ${readFile.objectiveCount}개를 각각 별도 OKR 파일로 분리합니다. Project와 Task 연결은 그대로 유지됩니다.`, confirmLabel: "파일 분리" })) return;
+    if (!readFile || !await onConfirm({ title: "Objective별 파일 분리", message: t("이 파일의 Objective {value1}개를 각각 별도 OKR 파일로 분리합니다. Project와 Task 연결은 그대로 유지됩니다.", { value1: messageValue(readFile.objectiveCount) }), confirmLabel: "파일 분리" })) return;
     setSaving(true);
     const response = await fetch(`/api/okr-files/${encodeURIComponent(readFile.cycle.id)}/split`, { method: "POST" });
     const data = await response.json() as { split?: boolean; cycles?: OkrFileCycleSummary[]; error?: string };
@@ -539,7 +539,7 @@ function OkrReadKeyResult({
       <span className="okr-tree-count empty">{t("Initiative 없음")}</span>
       <b className="okr-tree-progress">{keyResult.progress}%</b>
     </div>}
-    {hasInitiatives && keyResultExpanded && <div className="okr-tree-initiatives" id={initiativesId} role="group" aria-label={`${keyResult.title}의 Initiative`}>
+    {hasInitiatives && keyResultExpanded && <div className="okr-tree-initiatives" id={initiativesId} role="group" aria-label={t("{value1}의 Initiative", { value1: messageValue(keyResult.title) })}>
       {keyResult.initiatives.map((initiative, initiativeIndex) => {
         const initiativeId = initiative.id ?? initiative.clientId;
         const projects = projectsByInitiative.get(initiativeId) ?? [];
@@ -557,7 +557,7 @@ function OkrReadKeyResult({
             <span className="okr-tree-copy"><small>{t("Initiative")}{initiativeIndex + 1}</small><strong>{initiative.title}</strong></span>
             <span className="okr-tree-count empty">{t("미완료 Project 없음")}</span>
           </div>}
-          {projects.length > 0 && initiativeExpanded && <div className="okr-tree-projects" id={projectsId} role="group" aria-label={`${initiative.title}의 미완료 Project`}>
+          {projects.length > 0 && initiativeExpanded && <div className="okr-tree-projects" id={projectsId} role="group" aria-label={t("{value1}의 미완료 Project", { value1: messageValue(initiative.title) })}>
             {projects.map((project) => {
               const tasks = tasksByProject.get(project.id) ?? [];
               const projectExpanded = expandedRows.has(project.id);
@@ -575,9 +575,9 @@ function OkrReadKeyResult({
                     <span className="okr-tree-copy"><small>{t("Project")}</small><strong className="project-item-title">{project.title}</strong></span>
                     <span className="okr-tree-count empty">{t("미완료 Task 없음")}</span>
                   </div>}
-                  <button type="button" className="okr-tree-open-detail" aria-label={`${project.title} Project 상세 보기`} title={t("Project 상세 보기")} onClick={() => onOpenProject(project.id)}><ExternalLink size={13} /></button>
+                  <button type="button" className="okr-tree-open-detail" aria-label={t("{value1} Project 상세 보기", { value1: messageValue(project.title) })} title={t("Project 상세 보기")} onClick={() => onOpenProject(project.id)}><ExternalLink size={13} /></button>
                 </div>
-                {tasks.length > 0 && projectExpanded && <div className="okr-tree-tasks" id={tasksId} role="group" aria-label={`${project.title}의 미완료 Task`}>
+                {tasks.length > 0 && projectExpanded && <div className="okr-tree-tasks" id={tasksId} role="group" aria-label={t("{value1}의 미완료 Task", { value1: messageValue(project.title) })}>
                   {tasks.map((task) => <button type="button" className="okr-tree-task" key={task.id} onClick={() => onOpenTask(task.id)}><ListChecks size={14} /><span>{task.title}</span><ChevronRight size={13} /></button>)}
                 </div>}
               </section>;

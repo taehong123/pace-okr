@@ -102,7 +102,7 @@ test("Korean and Latin glyphs render from local subsets without viewport font sc
   for (const width of [320, 390, 768, 1440, 1920, 2560, 3840]) {
     await page.setViewportSize({ width, height: 1000 });
     expect(await page.locator("body").evaluate((element) => getComputedStyle(element).fontSize)).toBe("16px");
-    expect(await page.locator(".page-body").evaluate((element) => getComputedStyle(element).paddingLeft)).toBe(width <= 700 ? "16px" : "32px");
+    expect(await page.locator(".page-body").evaluate((element) => getComputedStyle(element).paddingLeft)).toBe(width <= 980 ? "16px" : "32px");
     expect(await heading.evaluate((element) => getComputedStyle(element).letterSpacing)).toBe("normal");
   }
   await client.detach();

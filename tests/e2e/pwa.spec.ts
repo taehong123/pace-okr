@@ -97,6 +97,7 @@ test.describe("installation controls", () => {
     await page.route("**/api/bootstrap?*", route => json(route, { error: "unauthenticated" }, 401));
     await page.goto("/");
     await offerInstall(page);
+    await expect(page.locator(".app-install-button")).toBeVisible();
     for (const theme of ["white", "beige", "gray", "dark", "neon", "cyberpunk"]) {
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
       const results = await new AxeBuilder({ page: page as never }).include(".app-install-button").withRules(["color-contrast"]).analyze();

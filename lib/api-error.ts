@@ -18,7 +18,13 @@ export async function withPublicErrorDetails(response: Response) {
     if (!body || typeof body !== "object" || Array.isArray(body)) return response;
     const code = ({ 400: "invalid_input", 401: "authentication_required", 403: "access_denied", 404: "not_found", 409: "conflict", 410: "expired", 422: "invalid_input", 429: "rate_limited", 503: "unavailable" } as Record<number, keyof typeof publicErrorMessages>)[response.status] ?? "request_failed";
     const headers = new Headers(response.headers);
-    headers.delete("Content-Length"); headers.set("Cache-Control", "private, no-store");
+    // The body is regenerated, so representation metadata from the original
+    // response must not describe the new JSON bytes.
+    headers.delete("Content-Length");
+    headers.delete("Content-Encoding");
+    headers.delete("Content-Range");
+    headers.delete("ETag");
+    headers.set("Cache-Control", "private, no-store");
     return Response.json({ ...body, messageCode: code, messageValues: {} }, { status: response.status, headers });
   } catch { return response; }
 }

@@ -8,7 +8,7 @@ import { useAppConfirm } from "./overlay-dialog";
 import { AiUsageMeter } from "./ai-usage-meter";
 import type { AiUsage } from "@/lib/ai-usage";
 import { invalidateAiUsage } from "@/lib/ai-usage-client";
-import { t , apiError , getClientLocale } from "@/lib/client-language";
+import { t , apiError , getClientLocale , messageValue } from "@/lib/client-language";
 
 type NoticeTone = "success" | "error" | "info";
 type BillingPlanId = "free" | "team" | "business";
@@ -63,7 +63,7 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
       setSelectedPlan(data.plan === "free" ? "team" : data.plan);
       setSelectedEditorIds(data.editorMembers.filter((member) => member.selected).map((member) => member.id));
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "결제 정보를 불러오지 못했습니다.");
+      setError(loadError instanceof Error ? loadError.message : t("결제 정보를 불러오지 못했습니다."));
     } finally {
       setLoading(false);
     }
@@ -80,8 +80,8 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan: selectedPlan, contractAccepted: true }),
       });
-      const session = await response.json() as { error?: string; sessionToken?: string; authUrl?: string; merchantId?: string; returnUrl?: string };
-      if (!response.ok || !session.sessionToken || !session.authUrl) throw new Error(session.error || "카드 등록을 시작하지 못했습니다.");
+      const session = await response.json() as { error?: string; messageCode?: string; sessionToken?: string; authUrl?: string; merchantId?: string; returnUrl?: string };
+      if (!response.ok || !session.sessionToken || !session.authUrl) throw new Error(apiError(session, "카드 등록을 시작하지 못했습니다."));
       await loadExternalScript(session.authUrl);
       if (!window.PaypleCpayAuthCheck) throw new Error(t("Payple 카드 등록 모듈을 불러오지 못했습니다."));
       window.PaypleCpayAuthCheck({
@@ -105,17 +105,17 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
                 paypleTransactionId: String(result.PCD_PAY_AUTHNO || ""),
               }),
             });
-            const completed = await complete.json() as { error?: string };
-            if (!complete.ok) throw new Error(completed.error || "카드 등록을 완료하지 못했습니다.");
+            const completed = await complete.json() as { error?: string; messageCode?: string };
+            if (!complete.ok) throw new Error(apiError(completed, "카드 등록을 완료하지 못했습니다."));
             onNotice(t("카드 등록과 30일 체험을 시작했습니다."), "success");
             await refresh();
           } catch (completeError) {
-            onNotice(completeError instanceof Error ? completeError.message : "카드 등록을 완료하지 못했습니다.", "error");
+            onNotice(completeError instanceof Error ? completeError.message : t("카드 등록을 완료하지 못했습니다."), "error");
           } finally { setWorking(null); }
         },
       }, "prod");
     } catch (checkoutError) {
-      onNotice(checkoutError instanceof Error ? checkoutError.message : "카드 등록을 시작하지 못했습니다.", "error");
+      onNotice(checkoutError instanceof Error ? checkoutError.message : t("카드 등록을 시작하지 못했습니다."), "error");
       setWorking(null);
     }
   }
@@ -123,9 +123,9 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
   async function requestPlanChange(plan: BillingPlanId) {
     if (!billing?.canManage || working) return;
     const approved = await confirmAction({
-      title: plan === "free" ? "Free 플랜으로 변경할까요?" : `${plans.find((entry) => entry.id === plan)?.label} 플랜으로 변경할까요?`,
-      message: plan === "free" ? "현재 결제기간이 끝나면 Free 한도가 적용됩니다. 데이터와 기존 역할은 유지됩니다." : "상향은 결제 승인 후, 하향은 다음 갱신일부터 적용됩니다.",
-      confirmLabel: "변경",
+      title: plan === "free" ? t("Free 플랜으로 변경할까요?") : t("{value1} 플랜으로 변경할까요?", { value1: messageValue(plans.find((entry) => entry.id === plan)?.label) }),
+      message: plan === "free" ? t("현재 결제기간이 끝나면 Free 한도가 적용됩니다. 데이터와 기존 역할은 유지됩니다.") : t("상향은 결제 승인 후, 하향은 다음 갱신일부터 적용됩니다."),
+      confirmLabel: t("변경"),
     });
     if (!approved) return;
     await billingAction("change", "/api/billing/change-plan", { plan }, "플랜 변경을 반영했습니다.");
@@ -133,14 +133,14 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
 
   async function cancel() {
     if (!billing?.canManage || working) return;
-    const approved = await confirmAction({ title: "구독을 해지할까요?", message: "자동 갱신은 즉시 중단되고 현재 결제기간 끝까지 이용한 뒤 Free로 전환됩니다. 데이터는 삭제되지 않습니다.", confirmLabel: "구독 해지", danger: true });
+    const approved = await confirmAction({ title: t("구독을 해지할까요?"), message: t("자동 갱신은 즉시 중단되고 현재 결제기간 끝까지 이용한 뒤 Free로 전환됩니다. 데이터는 삭제되지 않습니다."), confirmLabel: t("구독 해지"), danger: true });
     if (!approved) return;
     await billingAction("cancel", "/api/billing/cancel", undefined, "자동 갱신을 중단했습니다.");
   }
 
   async function refund() {
     if (!billing?.canManage || working) return;
-    const approved = await confirmAction({ title: "첫 결제를 전액 환불할까요?", message: "첫 결제 후 7일 이내이고 결제 후 Project 생성·AI 사용이 없을 때만 가능합니다. 성공하면 즉시 Free로 전환됩니다.", confirmLabel: "환불 요청", danger: true });
+    const approved = await confirmAction({ title: t("첫 결제를 전액 환불할까요?"), message: t("첫 결제 후 7일 이내이고 결제 후 Project 생성·AI 사용이 없을 때만 가능합니다. 성공하면 즉시 Free로 전환됩니다."), confirmLabel: t("환불 요청"), danger: true });
     if (!approved) return;
     await billingAction("refund", "/api/billing/refund", undefined, "전액 환불하고 Free로 전환했습니다.");
   }
@@ -151,10 +151,10 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
       const response = await fetch(url, { method: "POST", headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(apiError(data, "요청을 처리하지 못했습니다."));
-      onNotice(successMessage, "success");
+      onNotice(t(successMessage), "success");
       await refresh();
     } catch (actionError) {
-      onNotice(actionError instanceof Error ? actionError.message : "요청을 처리하지 못했습니다.", "error");
+      onNotice(actionError instanceof Error ? actionError.message : t("요청을 처리하지 못했습니다."), "error");
     } finally { setWorking(null); }
   }
 
@@ -168,7 +168,7 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
       onNotice(t("활성 편집자 선택을 저장했습니다."), "success");
       await refresh();
     } catch (saveError) {
-      onNotice(saveError instanceof Error ? saveError.message : "활성 편집자를 저장하지 못했습니다.", "error");
+      onNotice(saveError instanceof Error ? saveError.message : t("활성 편집자를 저장하지 못했습니다."), "error");
     } finally { setWorking(null); }
   }
 
@@ -176,17 +176,17 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
   if (!billing) return <section className="billing-page"><div className="billing-load-error" role="alert"><CreditCard size={20} /><b>{t("결제 정보를 불러오지 못했습니다")}</b><p>{error}</p><button onClick={() => void refresh()}>{t("다시 시도")}</button></div></section>;
 
   return <section className="billing-page" aria-label={t("요금제 및 결제")}>
-    <header className="billing-hero"><div><h2>{billing.planLabel} {t("플랜")}</h2><p>{t("Slack을 포함한 모든 연동, Task, Routine, Viewer는 어떤 플랜에서도 제한하지 않습니다.")}</p></div><div className={`billing-status billing-status-${billing.status}`}><b>{statusLabel(billing.status)}</b><small>{billing.trialEndsAt ? `체험 종료 ${formatDate(billing.trialEndsAt)}` : billing.nextBillingAt ? `다음 결제 ${formatDate(billing.nextBillingAt)}` : t("월간 정액 · VAT 포함")}</small></div></header>
+    <header className="billing-hero"><div><h2>{billing.planLabel} {t("플랜")}</h2><p>{t("Slack을 포함한 모든 연동, Task, Routine, Viewer는 어떤 플랜에서도 제한하지 않습니다.")}</p></div><div className={`billing-status billing-status-${billing.status}`}><b>{statusLabel(billing.status)}</b><small>{billing.trialEndsAt ? t("체험 종료 {value1}", { value1: messageValue(formatDate(billing.trialEndsAt)) }) : billing.nextBillingAt ? t("다음 결제 {value1}", { value1: messageValue(formatDate(billing.nextBillingAt)) }) : t("월간 정액 · VAT 포함")}</small></div></header>
     {!billing.enforcementEnabled && <div className="billing-rollout-note" role="status"><AlertTriangle size={18} /><div><b>{t("안전한 사전 배포 상태")}</b><p>{t("Payple 실결제·이메일·예약 청구·환불 검증이 끝날 때까지 Project·편집자·AI 한도는 강제하지 않습니다. 기존 기능은 그대로 사용할 수 있습니다.")}</p></div></div>}
-    {billing.status === "past_due" && <div className="billing-alert" role="alert"><AlertTriangle size={18} /><div><b>{t("결제를 다시 확인해 주세요")}</b><p>{billing.graceEndsAt ? `${formatDate(billing.graceEndsAt)}까지 현재 플랜을 유지하며 자동으로 재시도합니다.` : t("결제수단을 확인해 주세요.")}</p></div></div>}
+    {billing.status === "past_due" && <div className="billing-alert" role="alert"><AlertTriangle size={18} /><div><b>{t("결제를 다시 확인해 주세요")}</b><p>{billing.graceEndsAt ? t("{value1}까지 현재 플랜을 유지하며 자동으로 재시도합니다.", { value1: messageValue(formatDate(billing.graceEndsAt)) }) : t("결제수단을 확인해 주세요.")}</p></div></div>}
 
-    <section className="billing-usage-section"><header><div><span>{t("이번 달")}</span><h3>{t("사용량")}</h3></div><small>{t("Project·AI는 한국시간 매월 1일 초기화")}</small></header><div className="billing-usage-grid"><Usage label={t("Project 생성")} used={billing.usage.projects.used} limit={billing.usage.projects.limit} suffix="개" /><Usage label={t("활성 편집자")} used={billing.usage.editors.used} limit={billing.usage.editors.limit} suffix="명" /><AiUsageMeter usage={billing.usage.ai} /></div></section>
+    <section className="billing-usage-section"><header><div><span>{t("이번 달")}</span><h3>{t("사용량")}</h3></div><small>{t("Project·AI는 한국시간 매월 1일 초기화")}</small></header><div className="billing-usage-grid"><Usage label={t("Project 생성")} used={billing.usage.projects.used} limit={billing.usage.projects.limit} unit="items" /><Usage label={t("활성 편집자")} used={billing.usage.editors.used} limit={billing.usage.editors.limit} unit="people" /><AiUsageMeter usage={billing.usage.ai} /></div></section>
 
     {billing.usage.editors.graceEndsAt && !billing.usage.editors.enforced && <div className="billing-editor-grace" role="status"><AlertTriangle size={18} /><div><b>{t("기존 워크스페이스 편집자 정리 유예")}</b><p>{formatDate(billing.usage.editors.graceEndsAt)}{t("까지 편집 권한을 정리할 수 있습니다. 그전에는 초과 멤버를 읽기 전용으로 전환하지 않습니다.")}</p></div></div>}
 
-    {billing.canManage && billing.usage.editors.limit !== null && <section className="billing-editors-section"><header><div><h3>{t("활성 편집자 선택")}</h3></div><p>{t("한도를 넘는 멤버의 역할과 데이터는 유지되고 읽기 전용으로 전환됩니다.")}</p></header><div className="billing-editor-list">{billing.editorMembers.map((member) => { const checked = selectedEditorIds.includes(member.id); const owner = member.role === "owner"; const atLimit = !checked && selectedEditorIds.length >= billing.usage.editors.limit!; return <label aria-label={`${member.displayName} 활성 편집자`} className={checked ? "selected" : ""} key={member.id}><input type="checkbox" checked={checked} disabled={owner || atLimit} onChange={(event) => setSelectedEditorIds((current) => event.target.checked ? [...current, member.id] : current.filter((id) => id !== member.id))} /><span><b>{member.displayName}</b><small>{member.email || member.role} · {owner ? t("Owner는 필수") : checked ? t("편집 가능") : t("읽기 전용")}</small></span></label>; })}</div><footer><small>{selectedEditorIds.length} / {billing.usage.editors.limit}{t("명 선택")}</small><button type="button" onClick={() => void saveEditors()} disabled={Boolean(working)}>{t("선택 저장")}</button></footer></section>}
+    {billing.canManage && billing.usage.editors.limit !== null && <section className="billing-editors-section"><header><div><h3>{t("활성 편집자 선택")}</h3></div><p>{t("한도를 넘는 멤버의 역할과 데이터는 유지되고 읽기 전용으로 전환됩니다.")}</p></header><div className="billing-editor-list">{billing.editorMembers.map((member) => { const checked = selectedEditorIds.includes(member.id); const owner = member.role === "owner"; const atLimit = !checked && selectedEditorIds.length >= billing.usage.editors.limit!; return <label aria-label={t("{value1} 활성 편집자", { value1: messageValue(member.displayName) })} className={checked ? "selected" : ""} key={member.id}><input type="checkbox" checked={checked} disabled={owner || atLimit} onChange={(event) => setSelectedEditorIds((current) => event.target.checked ? [...current, member.id] : current.filter((id) => id !== member.id))} /><span><b>{member.displayName}</b><small>{member.email || member.role} · {owner ? t("Owner는 필수") : checked ? t("편집 가능") : t("읽기 전용")}</small></span></label>; })}</div><footer><small>{selectedEditorIds.length} / {billing.usage.editors.limit}{t("명 선택")}</small><button type="button" onClick={() => void saveEditors()} disabled={Boolean(working)}>{t("선택 저장")}</button></footer></section>}
 
-    <section className="billing-plans-section"><header><div><span>MONTHLY · VAT INCLUDED</span><h3>{t("플랜 비교")}</h3></div><p>{t("연간 결제와 해외 카드는 현재 지원하지 않습니다.")}</p></header><div className="billing-plan-grid">{plans.map((plan) => <article className={`billing-plan-card ${billing.plan === plan.id ? "current" : ""}`} key={plan.id}><header><div><h4>{plan.label}</h4>{billing.plan === plan.id && <span>{t("현재 플랜")}</span>}</div><p><b>{plan.price.toLocaleString(getClientLocale())}{t("원")}</b><small>{t("/ 월")}</small></p></header><ul><li>{plan.projects}</li><li>{plan.editors}</li><li>{plan.ai}</li><li>{t("Task·Routine·Viewer 무제한")}</li><li>{t("Slack 등 모든 연동 포함")}</li></ul>{billing.canManage && billing.paymentMethod && billing.plan !== plan.id && <button type="button" onClick={() => void requestPlanChange(plan.id)} disabled={Boolean(working)}>{working === "change" ? t("변경 중") : `${plan.label}로 변경`}</button>}</article>)}</div></section>
+    <section className="billing-plans-section"><header><div><span>MONTHLY · VAT INCLUDED</span><h3>{t("플랜 비교")}</h3></div><p>{t("연간 결제와 해외 카드는 현재 지원하지 않습니다.")}</p></header><div className="billing-plan-grid">{plans.map((plan) => <article className={`billing-plan-card ${billing.plan === plan.id ? "current" : ""}`} key={plan.id}><header><div><h4>{plan.label}</h4>{billing.plan === plan.id && <span>{t("현재 플랜")}</span>}</div><p><b>{plan.price.toLocaleString(getClientLocale())}{t("원")}</b><small>{t("/ 월")}</small></p></header><ul><li>{t(plan.projects)}</li><li>{t(plan.editors)}</li><li>{t(plan.ai)}</li><li>{t("Task·Routine·Viewer 무제한")}</li><li>{t("Slack 등 모든 연동 포함")}</li></ul>{billing.canManage && billing.paymentMethod && billing.plan !== plan.id && <button type="button" onClick={() => void requestPlanChange(plan.id)} disabled={Boolean(working)}>{working === "change" ? t("변경 중") : t("{value1}로 변경", { value1: messageValue(plan.label) })}</button>}</article>)}</div></section>
 
     <section className="billing-payment-section"><header><div><h3>{t("결제수단과 자동 갱신")}</h3></div>{billing.paymentMethod && <div className="billing-card-chip"><CreditCard size={17} /><span><b>{billing.paymentMethod.cardCompany || t("등록 카드")}</b><small>{billing.paymentMethod.maskedCard}</small></span></div>}</header>
       {!billing.canManage ? <p className="billing-member-note">{t("현재 플랜과 사용량은 모든 멤버가 볼 수 있습니다. 카드·플랜·환불 관리는 워크스페이스 Owner에게 요청해 주세요.")}</p>
@@ -195,21 +195,27 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
         : <div className="billing-owner-actions">{billing.plan !== "free" && <button type="button" onClick={() => void cancel()} disabled={Boolean(working) || billing.cancelAtPeriodEnd}>{billing.cancelAtPeriodEnd ? t("해지 예약됨") : working === "cancel" ? t("해지 중") : t("구독 해지")}</button>}<button type="button" onClick={() => void refund()} disabled={Boolean(working)}>{working === "refund" ? t("환불 처리 중") : t("첫 결제 환불 확인")}</button></div>}
     </section>
 
-    <section className="billing-history"><header><div><span>5 YEAR RECORD</span><h3>{t("결제 기록")}</h3></div><p>{t("계약·결제·해지 기록은 관련 법령에 따라 5년간 보관합니다.")}</p></header>{billing.transactions.length ? <div>{billing.transactions.map((transaction) => <article key={transaction.id}><div><b>{plans.find((plan) => plan.id === transaction.plan)?.label || transaction.plan} · {transactionLabel(transaction.kind)}</b><small>{formatDateTime(transaction.createdAt)}</small></div><strong>{transaction.priceWon.toLocaleString(getClientLocale())}{t("원")}</strong><span>{transaction.status}</span>{transaction.receiptUrl ? <a href={transaction.receiptUrl} target="_blank" rel="noreferrer">{t("영수증")}</a> : <em>{t("영수증 없음")}</em>}</article>)}</div> : <p className="billing-empty-history">{t("아직 결제 기록이 없습니다.")}</p>}</section>
+    <section className="billing-history"><header><div><span>5 YEAR RECORD</span><h3>{t("결제 기록")}</h3></div><p>{t("계약·결제·해지 기록은 관련 법령에 따라 5년간 보관합니다.")}</p></header>{billing.transactions.length ? <div>{billing.transactions.map((transaction) => <article key={transaction.id}><div><b>{plans.find((plan) => plan.id === transaction.plan)?.label || transaction.plan} · {transactionLabel(transaction.kind)}</b><small>{formatDateTime(transaction.createdAt)}</small></div><strong>{transaction.priceWon.toLocaleString(getClientLocale())}{t("원")}</strong><span>{transactionStatusLabel(transaction.status)}</span>{transaction.receiptUrl ? <a href={transaction.receiptUrl} target="_blank" rel="noreferrer">{t("영수증")}</a> : <em>{t("영수증 없음")}</em>}</article>)}</div> : <p className="billing-empty-history">{t("아직 결제 기록이 없습니다.")}</p>}</section>
   </section>;
 }
 
-function Usage({ label, used, limit, suffix }: { label: string; used: number; limit: number | null; suffix: string }) {
+function Usage({ label, used, limit, unit }: { label: string; used: number; limit: number | null; unit: "items" | "people" }) {
   const percentage = limit === null || limit <= 0 ? 0 : Math.min(100, Math.round((used / limit) * 100));
-  return <article className={percentage >= 100 ? "limit" : percentage >= 80 ? "warning" : ""}><header><span>{label}</span><b>{used.toLocaleString(getClientLocale())}{suffix} <small>/ {limit === null ? t("무제한") : `${limit.toLocaleString(getClientLocale())}${suffix}`}</small></b></header><div role="progressbar" aria-label={`${label} 사용량`} aria-valuemin={0} aria-valuemax={limit ?? undefined} aria-valuenow={used}><i style={{ width: limit === null ? "0%" : `${percentage}%` }} /></div><p>{limit === null ? t("제한 없음") : percentage >= 100 ? t("한도 도달") : `${Math.max(0, limit - used).toLocaleString(getClientLocale())}${suffix} 남음`}</p></article>;
+  const format = (value: number) => t(unit === "items" ? "{count}개" : "{count}명", { count: value });
+  return <article className={percentage >= 100 ? "limit" : percentage >= 80 ? "warning" : ""}><header><span>{label}</span><b>{format(used)} <small>/ {limit === null ? t("무제한") : format(limit)}</small></b></header><div role="progressbar" aria-label={t("{value1} 사용량", { value1: messageValue(label) })} aria-valuemin={0} aria-valuemax={limit ?? undefined} aria-valuenow={used}><i style={{ width: limit === null ? "0%" : `${percentage}%` }} /></div><p>{limit === null ? t("제한 없음") : percentage >= 100 ? t("한도 도달") : t(unit === "items" ? "{count}개 남음" : "{count}명 남음", { count: Math.max(0, limit - used) })}</p></article>;
 }
 
 function statusLabel(status: BillingStatusData["status"]) {
-  return { free: "무료 사용 중", trialing: "30일 체험 중", active: "정기결제 이용 중", past_due: "결제 재시도 중", cancel_at_period_end: "해지 예약", canceled: "종료됨" }[status];
+  return t({ free: "무료 사용 중", trialing: "30일 체험 중", active: "정기결제 이용 중", past_due: "결제 재시도 중", cancel_at_period_end: "해지 예약", canceled: "종료됨" }[status]);
 }
 
 function transactionLabel(kind: string) {
-  return ({ charge: "정기결제", prorated_upgrade: "플랜 상향", refund: "환불" } as Record<string, string>)[kind] || kind;
+  const label = ({ charge: "정기결제", prorated_upgrade: "플랜 상향", refund: "환불" } as Record<string, string>)[kind];
+  return label ? t(label) : kind;
+}
+
+function transactionStatusLabel(status: string) {
+  return status === "paid" ? t("결제 완료") : status === "refunded" ? t("환불 완료") : t("확인 필요");
 }
 
 function formatDate(value: string) {

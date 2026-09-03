@@ -90,7 +90,7 @@ test("search and choose another Initiative, review fields, then create only once
   const create = page.getByRole("button", { name: "확인한 내용으로 Project 생성" });
   await expect(create).toBeDisabled();
   await expect(page.locator(".review-summary")).toContainText("태홍");
-  await expect(page.locator(".review-summary")).toContainText("2026-09-15");
+  await expect(page.locator(".review-summary")).toContainText("9월 15일");
   await page.getByText("적용할 템플릿 본문 미리보기", { exact: true }).click();
   await expect(page.getByText("목표 / 완료 기준 / 검증 방법", { exact: true })).toBeVisible();
   await consent(page).check();
@@ -251,7 +251,7 @@ test("search failure and leaving the page preserve the user's edited draft", asy
   await page.getByLabel("Project 제목 (필수)").fill("떠나기 전 수정");
   await page.getByLabel("다른 Initiative 검색").fill("결제");
   await page.getByRole("button", { name: "검색", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("후보 검색 실패");
+  await expect(page.getByRole("alert")).toContainText("후보 검색에 실패했습니다. 수정 내용은 유지됩니다.");
   await expect(page.getByLabel("Project 제목 (필수)")).toHaveValue("떠나기 전 수정");
   const dialog = new Promise<string>((resolve) => page.once("dialog", async (warning) => { const type = warning.type(); await warning.dismiss(); resolve(type); }));
   await page.getByRole("link", { name: "OKRPTR", exact: true }).click({ noWaitAfter: true });

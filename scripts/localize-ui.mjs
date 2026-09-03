@@ -13,7 +13,7 @@ function readKeys(node) {
 readKeys(catalog);
 const check = process.argv.includes("--check");
 const missing = new Map();
-const presentationAttributes = new Set(["title", "aria-label", "placeholder", "alt", "label", "description", "detail", "actionLabel", "emptyLabel", "emptyText", "confirmLabel", "cancelLabel", "discardTitle", "discardMessage"]);
+const presentationAttributes = new Set(["title", "message", "aria-label", "placeholder", "alt", "label", "description", "detail", "actionLabel", "emptyLabel", "emptyText", "confirmLabel", "cancelLabel", "confirmationText", "discardTitle", "discardMessage"]);
 const presentationConstants = new Set(["navItems", "cadenceLabels", "viewTitles", "priorityLabels", "statusLabels", "propertyTypeLabels", "signalLabels", "MANAGEMENT_SIGNALS", "workspaceSettingsTabs", "managementSignalLabels", "statuses", "cycleStatuses", "targetLabels"]);
 const labelFunctions = new Set(["dailySkipLabel", "kindLabel", "propertyTypeLabel", "teamRoleLabel", "groupColorLabel", "pageSubtitle", "routineCadenceLabel"]);
 const skipFiles = new Set(["layout.tsx", "landing.tsx", "language-settings.tsx", "language-load-error.tsx"]);
@@ -33,6 +33,13 @@ for (const file of uiFiles) {
   function constantFor(node) {
     for (let parent = node.parent; parent; parent = parent.parent) {
       if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) return parent.name.text;
+      if (ts.isFunctionLike(parent)) return null;
+    }
+    return null;
+  }
+  function containingCallName(node) {
+    for (let parent = node.parent; parent; parent = parent.parent) {
+      if (ts.isCallExpression(parent)) return parent.expression.getText(tree);
       if (ts.isFunctionLike(parent)) return null;
     }
     return null;
@@ -64,7 +71,7 @@ for (const file of uiFiles) {
     }
     if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
       const name = node.expression.getText(tree);
-      if (/^(Error|showNotice|onNotice|onNoticeRef\.current|set\w*Error|setSaved)$/.test(name)) {
+      if (/^(Error|showNotice|onNotice|onNoticeRef\.current|noticeRef\.current|copyText|set\w*(Error|Message|Notice)|setSaved)$/.test(name)) {
         for (const argument of node.arguments ?? []) {
           if (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) candidate(argument, argument.text, `t(${JSON.stringify(argument.text)})`);
         }
@@ -74,6 +81,7 @@ for (const file of uiFiles) {
       let parent = node.parent;
       while (parent && !ts.isFunctionLike(parent)) parent = parent.parent;
       if (parent && parent.name && labelFunctions.has(parent.name.getText(tree))) {
+        if (ts.isCallExpression(node.expression) && node.expression.expression.getText(tree) === "t") return;
         if (!check) replace(node.expression, `t(${node.expression.getText(tree)})`);
         else {
           function values(entry) {
@@ -98,6 +106,13 @@ for (const file of uiFiles) {
         candidate(node, value, `{t(${JSON.stringify(value)})}`); return;
       }
       if (ts.isJsxAttribute(parent)) return;
+      if (/^(showNotice|onNotice|onNoticeRef\.current|noticeRef\.current|copyText|set\w*(Error|Message|Notice)|setSaved)$/.test(containingCallName(node) ?? "")) {
+        candidate(node, node.text, `t(${JSON.stringify(node.text)})`); return;
+      }
+      if (ts.isPropertyAssignment(parent) && presentationAttributes.has(parent.name.getText(tree))
+        && /^(confirm|confirmAction)$/.test(containingCallName(parent) ?? "")) {
+        candidate(node, node.text, `t(${JSON.stringify(node.text)})`); return;
+      }
       if (ts.isPropertyAssignment(parent) && presentationConstants.has(constantFor(node)) && parent.initializer === node) {
         if (keys.has(node.text) && !check) replace(parent, `get ${parent.name.getText(tree)}() { return t(${JSON.stringify(node.text)}); }`);
         if (check) candidate(node, node.text, "");
@@ -136,4 +151,5 @@ if (check) {
   const offset = Number(process.argv.find((arg) => arg.startsWith("--offset="))?.split("=")[1] ?? 0);
   const count = Number(process.argv.find((arg) => arg.startsWith("--count="))?.split("=")[1] ?? 100);
   console.log(JSON.stringify({ total: missing.size, entries: [...missing].slice(offset, offset + count).map(([text, files]) => ({ text, files: [...new Set(files)] })) }));
+  if (missing.size) process.exitCode = 1;
 }

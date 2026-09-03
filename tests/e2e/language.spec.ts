@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { bootstrap, installApiMocks, json } from "./api-mocks";
 import type { Language, LanguagePreferences } from "../../lib/language";
 
-async function fixture(page: Page, state: { preferences: LanguagePreferences; fail?: boolean }) {
+async function fixture(page: Page, state: { preferences: LanguagePreferences; fail?: boolean; conflict?: boolean }) {
   await installApiMocks(page);
   const requests: string[] = [], writes: unknown[] = [];
   await page.route("**/api/**", async (route) => {
@@ -13,6 +13,11 @@ async function fixture(page: Page, state: { preferences: LanguagePreferences; fa
       if (request.method() === "PATCH") {
         const input = request.postDataJSON(); writes.push(input);
         if (state.fail) return json(route, { code: "preferences_save_failed", error: "mock write rejected" }, 500);
+        if (state.conflict) {
+          state.conflict = false;
+          state.preferences = { ...state.preferences, revision: state.preferences.revision + 1 };
+          return json(route, { code: "preference_conflict", error: "mock concurrent update" }, 409);
+        }
         state.preferences = { language: input.language, resolvedLanguage: input.language === "auto" ? "en" : input.language, revision: state.preferences.revision + 1 };
       }
       return json(route, { preferences: state.preferences });
@@ -81,6 +86,22 @@ test("failed preference save keeps the preview and offers retry without changing
   expect(state.preferences.language).toBe("en");
 });
 
+test("a concurrent preference update keeps the chosen language and retries with the fresh revision", async ({ page }) => {
+  const state = { preferences: { language: "ko", resolvedLanguage: "ko", revision: 0 } as LanguagePreferences, conflict: true };
+  const { writes } = await fixture(page, state);
+  await page.goto("/?view=work");
+  await openPreferences(page);
+  await page.locator(".language-settings select").selectOption("en");
+  await page.locator(".language-settings button.primary-action").click();
+  await expect(page.locator(".language-settings [role=alert]")).toBeVisible();
+  await expect(page.locator(".language-settings select")).toHaveValue("en");
+  expect(state.preferences.language).toBe("ko");
+  await page.locator(".language-settings button.primary-action").click();
+  await expect(page.locator(".language-settings button.primary-action")).toBeDisabled();
+  expect(state.preferences.language).toBe("en");
+  expect(writes).toMatchObject([{ language: "en", revision: 0 }, { language: "en", revision: 1 }]);
+});
+
 test("a language change in another tab preserves the open form and its draft", async ({ page, context }) => {
   const state = { preferences: { language: "ko", resolvedLanguage: "ko", revision: 0 } as LanguagePreferences };
   const { requests } = await fixture(page, state);
@@ -145,4 +166,25 @@ test("cancelling an unsaved language preview restores the saved account choice",
   await expect(page.locator("html")).toHaveAttribute("lang", "ko");
   await expect(page.locator(".language-settings button.primary-action")).toBeDisabled();
   expect(writes).toHaveLength(0);
+});
+
+test("all languages keep the wide layout readable with 200 percent user text and CJK fallbacks", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop-chromium", "Run the wide text matrix once in the desktop project.");
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 3840, height: 2160 });
+  const state = { preferences: { language: "ko", resolvedLanguage: "ko", revision: 0 } as LanguagePreferences };
+  await fixture(page, state);
+  await page.goto("/?view=my_work");
+  await openPreferences(page);
+  await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
+  for (const id of ["ko", "en", "ja", "zh", "es"] as Language[]) {
+    await page.locator(".language-settings select").selectOption(id);
+    await expect(page.locator("html")).toHaveAttribute("lang", id === "zh" ? "zh-Hans" : id);
+    const family = await page.locator("body").evaluate((element) => getComputedStyle(element).fontFamily);
+    expect(family).toContain("Pretendard");
+    if (id === "ja") expect(family).toContain("OKRPTR Japanese");
+    if (id === "zh") expect(family).toContain("OKRPTR Simplified Chinese");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    await expect(page.locator(".my-work-item").first()).toBeVisible();
+  }
 });

@@ -62,7 +62,7 @@ test("Slack identity diagnostics require explicit account selection and keep fai
   expect(attempts).toBe(0);
   await page.getByRole("button", { name: "확인 후 연결" }).focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("alert").filter({ hasText: "연결하지 못했습니다." })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "Slack 연결 상태를 확인하지 못했습니다." })).toBeVisible();
   await expect(select).toHaveValue("U2");
   expect(attempts).toBe(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);

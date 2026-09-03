@@ -4,7 +4,7 @@
 .backup-header h3 { margin: 0 0 6px; font-size: var(--type-section, 1.25rem); }
 .workspace-backups p { line-height: 1.65; overflow-wrap: anywhere; }
 .backup-header p, .backup-last, .backup-preview header p { margin: 0; color: var(--muted); font-size: var(--type-meta, .8125rem); }
-.workspace-backups button { min-width: var(--control-height, 2.75rem); min-height: var(--control-height, 2.75rem); display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: var(--radius-control, 6px); background: var(--raised); color: var(--ink); cursor: pointer; font: inherit; }
+.workspace-backups button { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: var(--radius-control, 6px); background: var(--raised); color: var(--ink); cursor: pointer; font: inherit; }
 .workspace-backups button:hover { background: var(--hover); }
 .workspace-backups button:disabled { cursor: default; opacity: .6; }
 .workspace-backups button:focus-visible, .workspace-backups summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }

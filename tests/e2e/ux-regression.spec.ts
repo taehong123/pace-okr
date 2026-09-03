@@ -248,7 +248,7 @@ test.describe("개인 데일리와 팀 롤업", () => {
   });
 
   test("DRI 무Task Project에서 명시적 Task 생성으로 진입한다", async ({ page }) => {
-    await page.getByRole("button", { name: /실행 항목 없는 Project/ }).click();
+    await page.getByText("새 Task 추가", { exact: true }).click();
     await expect(page.getByLabel("새 Task 상위 항목")).toHaveValue("project:project-empty");
     await page.getByLabel("새 Task 제목").fill("새 실행 Task");
     const createRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/daily-scrum/tasks");
@@ -407,7 +407,7 @@ test("저장 실패 시 가짜 Task나 허위 성공 메시지를 만들지 않�
   await expect(container.locator("option:checked")).toHaveText("선택 안 함 — General에 저장");
   await title.fill("서버에 저장되지 않은 Task");
   await dialog.getByRole("button", { name: "만들기" }).click();
-  await expect(dialog.getByRole("alert")).toContainText("서버 저장 실패");
+  await expect(dialog.getByRole("alert")).toContainText("항목을 만들지 못했습니다.");
   await expect(title).toHaveValue("서버에 저장되지 않은 Task");
   await expect(page.getByRole("status")).toHaveCount(0);
 });
@@ -676,7 +676,7 @@ test("KR과 Project 데이터는 각 대상 진행률만 갱신한다", async ({
   await expect(page.locator(".okr-file-read-initiative")).toHaveCount(2);
   await page.getByRole("button", { name: /핵심 흐름 개편/ }).click();
   await expect(page.getByText("모바일 사용성 개선", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /모바일 사용성 개선.*Task 1개/ }).click();
+  await page.getByRole("button", { name: /모바일 사용성 개선.*Task.*1/ }).click();
   const taskDisclosure = page.getByRole("button", { name: /오버레이 동작 점검/ });
   await expect(taskDisclosure).toBeVisible();
   expect(await taskDisclosure.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);

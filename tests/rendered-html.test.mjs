@@ -11,7 +11,7 @@ test("project quota stays in billing without badges on work and creation surface
   assert.doesNotMatch(page, /ProjectQuotaBadge/);
   assert.doesNotMatch(billing, /ProjectQuotaBadge|이번 달 Project|현재 미적용/);
   assert.doesNotMatch(styles, /project-quota-badge/);
-  assert.match(billing, /<Usage label="Project 생성" used=\{billing\.usage\.projects\.used\}/);
+  assert.match(billing, /<Usage label=\{t\("Project 생성"\)\} used=\{billing\.usage\.projects\.used\}/);
 });
 
 test("brands connection completion as OKRPTR while preserving workspace names", async () => {
@@ -28,8 +28,8 @@ test("brands connection completion as OKRPTR while preserving workspace names", 
   assert.match(slackStatus, /OKRPTR 연결이 완료되었습니다\./);
   assert.doesNotMatch(slackStatus, /\$\{connection\?\.teamName[^\n]*연결/);
   assert.match(slackStatus, /connectedTeam: connection \? \{ id: connection\.teamId, name: connection\.teamName \}/);
-  assert.match(page, /<b>OKRPTR 연결 완료<\/b>/);
-  assert.match(page, /연결된 Slack 워크스페이스: \{teamName\}/);
+  assert.match(page, /<b>\{t\("OKRPTR 연결 완료"\)\}<\/b>/);
+  assert.match(page, /\{t\("연결된 Slack 워크스페이스:"\)\}\{teamName\}/);
   assert.doesNotMatch(page, /\{teamName\} 연결 완료/);
 });
 
@@ -155,17 +155,17 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /mobile-navigation/);
   assert.match(page, /workspace-mobile-home/);
   assert.match(page, /goToMobileHome/);
-  assert.match(page, /aria-label="홈으로 이동"/);
-  assert.match(page, /home: "AI 대화"/);
+  assert.match(page, /aria-label=\{t\("홈으로 이동"\)\}/);
+  assert.match(page, /get home\(\) \{ return t\("AI 대화"\); \}/);
   assert.doesNotMatch(page, /assistant-sidebar-tab/);
-  assert.match(page, /\{ id: "home", label: "AI 대화", icon: Bot \}/);
-  assert.ok(page.indexOf('{ id: "my_work", label: "내 업무"') < page.indexOf('{ id: "okr", label: "OKR"'), "내 업무가 OKR보다 먼저 표시되어야 합니다");
+  assert.match(page, /\{ id: "home", get label\(\) \{ return t\("AI 대화"\); \}, icon: Bot \}/);
+  assert.ok(page.indexOf('{ id: "my_work", get label() { return t("내 업무"); }') < page.indexOf('{ id: "okr", label: "OKR"'), "내 업무가 OKR보다 먼저 표시되어야 합니다");
   assert.match(page, /const mobileNavItems = \(\["home", "okr", "my_work", "work", "inbox"\]/);
   assert.match(page, /id="home-okr-chat-title".*AI 대화/);
   assert.match(page, /assistant-target-picker/);
   assert.match(page, /Objective, KR, Initiative, Project 검색/);
   assert.match(page, /Project를 기준으로 이야기하겠습니다/);
-  assert.match(page, /aria-label="AI 대화 열기"/);
+  assert.match(page, /aria-label=\{t\("AI 대화 열기"\)\}/);
   assert.match(page, /currentWorkspace\.role !== "owner"/);
   assert.match(page, /freshWorkspaceDataReady/);
   assert.match(page, /Project 책임자/);
@@ -245,7 +245,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /mode === "project" && visibleFields\.has\("project"\)/);
   assert.doesNotMatch(page, /첫 Project를 만들어볼까요\?/);
   assert.match(page, /mode === "project"/);
-  assert.match(page, /my_work: "내 업무"/);
+  assert.match(page, /get my_work\(\) \{ return t\("내 업무"\); \}/);
   assert.match(layout, /themeBootstrapScript/);
   assert.match(page, /type ThemeMode.*from "@\/lib\/themes"/);
   assert.match(page, /ThemePicker value=\{themeMode\}/);
@@ -255,8 +255,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(globals, /var\(--button-primary-fg\)/);
   const myWorkView = page.match(/function MyWorkView[\s\S]*?function MyWorkSection/)?.[0] ?? "";
   assert.ok(
-    myWorkView.indexOf('title="Task"') < myWorkView.indexOf('title="Project"')
-      && myWorkView.indexOf('title="Project"') < myWorkView.indexOf('title="Routine"'),
+    myWorkView.indexOf('title={t("Task")}') < myWorkView.indexOf('title={t("Project")}')
+      && myWorkView.indexOf('title={t("Project")}') < myWorkView.indexOf('title={t("Routine")}'),
     "My Work sections must be ordered Task, Project, Routine",
   );
   assert.match(page, /systemKey === "general"/);
@@ -325,10 +325,10 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(okrPlanRoute, /authorization\.userId/);
   assert.doesNotMatch(paceData, /validateRoutineInitiative|idx_routines_owner_initiative/);
   assert.match(page, /OKR이 오늘의 일로 이어지도록/);
-  assert.match(page, /Connect your OKRs to today's work/);
-  assert.match(page, /目標を実行に変えるワークスペース/);
-  assert.match(page, /把目标变成行动的工作空间/);
-  assert.match(page, /convertir objetivos en acción/);
+  assert.match(await readFile(new URL("../lib/locales/en.ts", import.meta.url), "utf8"), /Connect your OKRs to today's work/);
+  assert.match(await readFile(new URL("../lib/locales/ja.ts", import.meta.url), "utf8"), /目標を実行に変えるワークスペース/);
+  assert.match(await readFile(new URL("../lib/locales/zh.ts", import.meta.url), "utf8"), /把目标变成行动的工作空间/);
+  assert.match(await readFile(new URL("../lib/locales/es.ts", import.meta.url), "utf8"), /convertir objetivos en acción/);
   assert.match(page, /LandingScreen reason=\{authState.reason\} onSignIn=\{startGoogleSignIn\}/);
   assert.match(await readFile(new URL("../lib/landing-copy.ts", import.meta.url), "utf8"), /Google로 이동 중/);
   assert.match(page, /AppLoadingScreen/);
@@ -343,12 +343,12 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /워크스페이스 데이터를 불러오지 못했습니다/);
   assert.doesNotMatch(page, /visibleCount.*20/);
   assert.doesNotMatch(page, /더 보기/);
-  assert.match(page, /aria-label="Project 필터"/);
-  assert.match(page, /aria-label="Project 정렬"/);
-  assert.match(page, /aria-label="Project 속성 관리" title="Project 속성 관리"/);
-  assert.match(page, /aria-label="내 설정 닫기" title="내 설정 닫기"/);
+  assert.match(page, /aria-label=\{t\("Project 필터"\)\}/);
+  assert.match(page, /aria-label=\{t\("Project 정렬"\)\}/);
+  assert.match(page, /aria-label=\{t\("Project 속성 관리"\)\} title=\{t\("Project 속성 관리"\)\}/);
+  assert.match(page, /aria-label=\{t\("내 설정 닫기"\)\} title=\{t\("내 설정 닫기"\)\}/);
   assert.match(page, /workspaceNameCounts/);
-  assert.match(page, /생성 \$\{formatDateTime\(workspace\.createdAt\)\}/);
+  assert.match(page, /t\(" · 생성 \{value1\}", \{ value1: messageValue\(formatDateTime\(workspace\.createdAt\)\) \}\)/);
   assert.match(page, /Routine을 불러오지 못했습니다/);
   assert.match(page, /데일리 스크럼을 불러오지 못했습니다/);
   assert.match(page, /추천을 계산하지 못했습니다/);
@@ -624,7 +624,7 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.match(page, /DeleteSelectCheckbox/);
   assert.match(page, /삭제한 Project·Task와 전체 데이터 정리 기록/);
   assert.match(page, /전체 OKR 클린업 기록/);
-  assert.match(page, /confirmationText: "영구 삭제"/);
+  assert.match(page, /confirmationText: t\("영구 삭제"\)/);
   assert.match(page, /연결된 Task/);
   assert.match(page, /템플릿 불러오기/);
   assert.doesNotMatch(page, /window\.(prompt|confirm)/);
@@ -671,10 +671,10 @@ test("keeps Task row structure and the side panel while allowing long titles to 
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /aria-label="Task 목록"/);
+  assert.match(page, /aria-label=\{t\("Task 목록"\)\}/);
   assert.match(page, /task-list-inline-meta/);
   assert.doesNotMatch(page, /task-list-status/);
-  assert.match(page, /aria-label="Task 정보"/);
+  assert.match(page, /aria-label=\{t\("Task 정보"\)\}/);
   assert.match(page, /onPatch\(\{ status:/);
   assert.match(page, /onPatch\(\{ priority:/);
   assert.match(styles, /\.task-list-open[^}]*grid-template-columns:[^}]*minmax\(260px, \.85fr\)/s);
@@ -701,7 +701,7 @@ test("defaults unlinked web Tasks to General and exposes direct bulk deletion", 
   assert.match(page, /dailyScrumMemoryCache/);
   assert.match(page, /recommendationMemoryCache/);
   assert.match(page, /trashMemoryCache/);
-  assert.match(page, /연결 끊긴 Task \{orphanedIds\.length\}개 선택/);
+  assert.match(page, /t\("연결 끊긴 Task"\)\}\{t\("\{count\}개 선택", \{ count: orphanedIds\.length \}\)/);
   assert.match(page, /task-selection-delete/);
   assert.doesNotMatch(page, /할 일을 입력하면 미분류 Task에 저장됩니다/);
   assert.match(styles, /\.task-selection-bar/);
@@ -777,7 +777,7 @@ test("connects API data independently to Key Results and Projects", async () => 
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0025_kr_data_connections.sql", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /id: "data", label: "데이터"/);
+  assert.match(page, /id: "data", get label\(\) \{ return t\("데이터"\); \}/);
   assert.match(page, /rawView === "kr_data" \? "data"/);
   assert.match(page, /function ProjectDataSection/);
   assert.match(page, /tracksProgress = entry\.kind !== "objective" && entry\.kind !== "initiative"/);
@@ -785,8 +785,8 @@ test("connects API data independently to Key Results and Projects", async () => 
   assert.match(view, /item\.kind === "key_result" \|\| item\.kind === "project"/);
   assert.match(view, /API URL/);
   assert.match(view, /connectionMemoryCache\.get\(cacheKey\)/);
-  assert.match(view, /\["project", "Project"\]/);
-  assert.match(view, /이 \{targetLabels\[item\.kind\]\}에 API 연결/);
+  assert.match(view, /\["project", t\("Project"\)\]/);
+  assert.match(view, /t\("이 \{kind\}에 API 연결", \{ kind: targetLabels\[item\.kind\] \}\)/);
   assert.match(view, /숫자 값 경로/);
   assert.match(view, /자동 갱신 주기/);
   assert.match(route, /createDataConnection/);
@@ -853,7 +853,7 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(page, /INTEGRATION_STATUS_CACHE_KEY/);
   assert.ok(page.includes("Promise.allSettled([googleRequest, slackRequest])"));
   assert.match(page, /channelsLoadedRef/);
-  assert.ok(page.includes('member.linked ? "Slack 연결됨" : "Slack 계정 미연결"'));
+  assert.ok(page.includes('member.linked ? t("Slack 연결됨") : t("Slack 계정 미연결")'));
   assert.ok(!page.includes("member.slackDisplayName"));
   assert.match(slackDaily, /member.display_name/);
   assert.ok(slackDaily.includes("COALESCE(member.display_name, submission.member_name) AS member_name"));
@@ -1001,7 +1001,7 @@ test("implements a workspace management bot for data quality and urgency reporti
   assert.match(page, /function WorkspaceManagementSummary/);
   assert.match(page, /function WorkspaceManagementBot/);
   assert.match(page, /<WorkspaceManagementBot\b[^>]*active=\{openBot === "management"\}/);
-  assert.match(page, /title="업무 자동화"/);
+  assert.match(page, /title=\{t\("업무 자동화"\)\}/);
   assert.match(page, /워크스페이스 관리 봇 사용/);
   assert.doesNotMatch(page, /LIVE PREVIEW/);
   assert.match(page, /막힘 상태 알림/);
@@ -1019,7 +1019,7 @@ test("implements a workspace management bot for data quality and urgency reporti
   assert.match(domain, /activity_log/);
   assert.match(domain, /listSlackChannels/);
   assert.match(domain, /last_sent_date/);
-  assert.match(domain, /\[관리 봇\]/);
+  assert.match(domain, /`\[\$\{t\("관리 봇"\)\}\]/);
   assert.match(schema, /workspace_management_bot_settings/);
   assert.match(runtimeSchema, /workspace_management_bot_settings/);
   assert.match(migration, /idx_workspace_management_bot_due/);

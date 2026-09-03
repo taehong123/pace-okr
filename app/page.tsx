@@ -82,7 +82,7 @@ import { DEFAULT_THEME, THEME_STORAGE_KEY, isThemeMode, themeColorScheme, type T
 import { ThemePicker } from "./theme-picker";
 import LanguageSettings from "./language-settings";
 import { systemPropertyLabel } from "@/lib/property-label";
-import { loadLanguage, translateForLanguage } from "@/lib/client-language";
+import { loadLanguage, translateForLanguage , messageValue } from "@/lib/client-language";
 import { applyAccountLanguage, applyGuestLanguage, clearAccountLanguage, displayLanguageHeaders, displayDate, saveAccountLanguage, t, useLanguage, apiError , getClientLocale } from "@/lib/client-language";
 import { languages, type Language } from "@/lib/language";
 import LanguageLoadError from "./language-load-error";
@@ -695,7 +695,7 @@ function scrumNotesSnapshot(scrum: DailyDashboard) {
 }
 
 function dailySkipLabel(reason: DailySkipReason) {
-  return t(t(t({ workload: "본업 과중", vacation: "휴가", personal: "개인 일정", other: "기타" }[reason])));
+  return t({ workload: "본업 과중", vacation: "휴가", personal: "개인 일정", other: "기타" }[reason]);
 }
 
 type IntroLanguage = Language;
@@ -924,8 +924,8 @@ function WorkspaceApp() {
   }, [workspaceDataAttempt]);
 
   useEffect(() => {
-    if (!authState.user || typeof BroadcastChannel === "undefined") return;
-    const userId = authState.user.id;
+    const userId = authState.user?.id;
+    if (!userId || typeof BroadcastChannel === "undefined") return;
     const channel = new BroadcastChannel("okrptr-language");
     const controller = new AbortController();
     channel.onmessage = (event: MessageEvent<{ userId?: string }>) => {
@@ -976,7 +976,7 @@ function WorkspaceApp() {
         setInvitePreview(data.invitation);
       })
       .catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === "AbortError")) setInviteLoadError(error instanceof Error ? error.message : "초대를 불러오지 못했습니다.");
+        if (!(error instanceof DOMException && error.name === "AbortError")) setInviteLoadError(error instanceof Error ? error.message : t("초대를 불러오지 못했습니다."));
       });
     return () => controller.abort();
   }, [authState.status, inviteToken]);
@@ -1056,7 +1056,7 @@ function WorkspaceApp() {
     function syncFromHistory() {
       const next = navigationFromLocation();
       if (activeView === "okr" && next.view !== "okr" && okrEditorDirty) {
-        void confirmAction({ title: "OKR 수정 중", message: "저장하지 않은 OKR 변경사항을 버리고 이동할까요?", confirmLabel: "변경사항 버리기", danger: true }).then((confirmed) => {
+        void confirmAction({ title: t("OKR 수정 중"), message: t("저장하지 않은 OKR 변경사항을 버리고 이동할까요?"), confirmLabel: t("변경사항 버리기"), danger: true }).then((confirmed) => {
           if (!confirmed) {
             window.history.forward();
             return;
@@ -1207,7 +1207,7 @@ function WorkspaceApp() {
 
   function navigateView(view: View, mode: "push" | "replace" = "push") {
     if (activeView === "okr" && view !== "okr" && okrEditorDirty) {
-      void confirmAction({ title: "OKR 수정 중", message: "저장하지 않은 OKR 변경사항을 버리고 이동할까요?", confirmLabel: "변경사항 버리기", danger: true }).then((confirmed) => {
+      void confirmAction({ title: t("OKR 수정 중"), message: t("저장하지 않은 OKR 변경사항을 버리고 이동할까요?"), confirmLabel: t("변경사항 버리기"), danger: true }).then((confirmed) => {
         if (!confirmed) return;
         setOkrCreating(false);
         setOkrEditorDirty(false);
@@ -1355,7 +1355,7 @@ function WorkspaceApp() {
 
   async function deleteWorkspace(workspace: WorkspaceSummary) {
     if (workspace.personal || workspace.role !== "owner" || workspaceSaving) return;
-    if (!await confirmAction({ title: "워크스페이스 삭제 예약", message: `'${workspace.name}' 워크스페이스는 바로 접근할 수 없게 되며 30일 동안 복구할 수 있습니다. 30일 후 모든 데이터가 영구 삭제됩니다.`, confirmLabel: "삭제 예약", danger: true })) return;
+    if (!await confirmAction({ title: t("워크스페이스 삭제 예약"), message: t("'{value1}' 워크스페이스는 바로 접근할 수 없게 되며 30일 동안 복구할 수 있습니다. 30일 후 모든 데이터가 영구 삭제됩니다.", { value1: messageValue(workspace.name) }), confirmLabel: t("삭제 예약"), danger: true })) return;
     setWorkspaceSaving(true);
     const response = await fetch(`/api/workspaces?workspaceId=${encodeURIComponent(workspace.id)}`, { method: "DELETE" });
     if (response.ok) { clearCachedBootstrap(); reloadWithoutWorkspaceSettings(); }
@@ -1384,7 +1384,7 @@ function WorkspaceApp() {
 
   async function permanentlyDeleteWorkspace(workspace: WorkspaceSummary) {
     if (!workspace.scheduledDeletionAt || workspace.role !== "owner" || workspaceSaving) return;
-    if (!await confirmAction({ title: "워크스페이스 영구 삭제", message: `'${workspace.name}' 워크스페이스와 그 안의 모든 데이터를 즉시 영구 삭제합니다. 이 작업은 되돌릴 수 없습니다.`, confirmationText: workspace.name, confirmLabel: "영구 삭제", danger: true })) return;
+    if (!await confirmAction({ title: t("워크스페이스 영구 삭제"), message: t("'{value1}' 워크스페이스와 그 안의 모든 데이터를 즉시 영구 삭제합니다. 이 작업은 되돌릴 수 없습니다.", { value1: messageValue(workspace.name) }), confirmationText: workspace.name, confirmLabel: t("영구 삭제"), danger: true })) return;
     const confirmationName = workspace.name;
     setWorkspaceSaving(true);
     const response = await fetch(`/api/workspaces?workspaceId=${encodeURIComponent(workspace.id)}&permanent=true`, {
@@ -1487,8 +1487,8 @@ function WorkspaceApp() {
       ...childTaskIds,
     ]);
     if (!selected.length) { setSelectedDeleteItemIds(new Set()); return; }
-    const message = `선택한 Project ${projectIds.size}개, 독립 Task ${selectedStandaloneTaskIds.size}개를 휴지통으로 이동할까요?\nProject와 함께 이동하는 하위 Task는 ${childTaskIds.size}개이며, 중복을 제외한 전체 Task는 ${taskIds.size}개입니다.\n휴지통에서 다시 복구할 수 있습니다.`;
-    if (!await confirmAction({ title: "선택 항목을 휴지통으로 이동", message, confirmLabel: "휴지통으로 이동", danger: true })) return;
+    const message = t("선택한 Project {value1}개, 독립 Task {value2}개를 휴지통으로 이동할까요?\nProject와 함께 이동하는 하위 Task는 {value3}개이며, 중복을 제외한 전체 Task는 {value4}개입니다.\n휴지통에서 다시 복구할 수 있습니다.", { value1: messageValue(projectIds.size), value2: messageValue(selectedStandaloneTaskIds.size), value3: messageValue(childTaskIds.size), value4: messageValue(taskIds.size) });
+    if (!await confirmAction({ title: t("선택 항목을 휴지통으로 이동"), message, confirmLabel: t("휴지통으로 이동"), danger: true })) return;
     setTrashingItems(true);
     try {
       const response = await fetch("/api/item-trash", {
@@ -1510,9 +1510,9 @@ function WorkspaceApp() {
       setSelectedProjectId(null);
       setSelectedTaskId(null);
       writeNavigation(activeView === "home" ? "okr" : activeView, null, null, "replace");
-      showNotice(`Project ${data.projectCount ?? projectIds.size}개와 Task ${data.taskCount ?? taskIds.size}개를 휴지통으로 이동했습니다.`);
+      showNotice(t("Project {value1}개와 Task {value2}개를 휴지통으로 이동했습니다.", { value1: messageValue(data.projectCount ?? projectIds.size), value2: messageValue(data.taskCount ?? taskIds.size) }));
     } catch (error) {
-      showNotice(error instanceof Error ? error.message : "선택 항목을 휴지통으로 이동하지 못했습니다.");
+      showNotice(error instanceof Error ? error.message : t("선택 항목을 휴지통으로 이동하지 못했습니다."));
     } finally {
       setTrashingItems(false);
     }
@@ -1524,7 +1524,7 @@ function WorkspaceApp() {
       return;
     }
     const taskCount = activeItems.filter((item) => item.kind === "task" && item.parentId === project.id).length;
-    if (!await confirmAction({ title: "Project를 휴지통으로 이동", message: `'${project.title}' Project와 하위 Task ${taskCount}개를 휴지통으로 이동합니다.\n휴지통에서 다시 복구할 수 있습니다.`, confirmLabel: "휴지통으로 이동", danger: true })) return;
+    if (!await confirmAction({ title: t("Project를 휴지통으로 이동"), message: t("'{value1}' Project와 하위 Task {value2}개를 휴지통으로 이동합니다.\n휴지통에서 다시 복구할 수 있습니다.", { value1: messageValue(project.title), value2: messageValue(taskCount) }), confirmLabel: t("휴지통으로 이동"), danger: true })) return;
     const response = await fetch("/api/project-archives", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1538,7 +1538,7 @@ function WorkspaceApp() {
     setItems((current) => current.filter((entry) => entry.id !== project.id && entry.parentId !== project.id));
     closeDetail();
     clearCachedBootstrap();
-    showNotice(`Project와 하위 Task ${data.archivedTaskCount}개를 휴지통으로 이동했습니다.`);
+    showNotice(t("Project와 하위 Task {value1}개를 휴지통으로 이동했습니다.", { value1: messageValue(data.archivedTaskCount) }));
   }
 
   function openCreateItem(kind: ItemKind, cycleId: string | null = selectedOkrCycle?.id ?? null) {
@@ -1646,10 +1646,10 @@ function WorkspaceApp() {
       setItems((current) => [...current, ...created]);
       setOkrChatContext(null);
       navigateView("inbox");
-      showNotice(container ? `Task ${created.length}개를 연결해 만들었습니다.` : `Task ${created.length}개를 General에 만들었습니다.`);
+      showNotice(container ? t("Task {value1}개를 연결해 만들었습니다.", { value1: messageValue(created.length) }) : t("Task {value1}개를 General에 만들었습니다.", { value1: messageValue(created.length) }));
       return true;
     } catch (error) {
-      showNotice(error instanceof Error ? error.message : "Task를 만들지 못했습니다.", "error");
+      showNotice(error instanceof Error ? error.message : t("Task를 만들지 못했습니다."), "error");
       return false;
     }
   }
@@ -1667,12 +1667,12 @@ function WorkspaceApp() {
       setPropertyValues((current) => ({ ...current, [created.id]: { ...current[created.id], ...initialValues } }));
     }
     setCreateItemOpen(false);
-    showNotice(warning ?? `${kindLabel(created.kind)}를 만들었습니다.`, warning ? "error" : "success");
+    showNotice(warning ?? t("{value1}를 만들었습니다.", { value1: messageValue(kindLabel(created.kind)) }), warning ? "error" : "success");
   }
 
   function createOkrFile() {
     if (okrEditorDirty) {
-      void confirmAction({ title: "새 OKR 파일", message: "저장하지 않은 변경사항을 버리고 새 OKR 파일을 만들까요?", confirmLabel: "변경사항 버리기", danger: true }).then((confirmed) => {
+      void confirmAction({ title: t("새 OKR 파일"), message: t("저장하지 않은 변경사항을 버리고 새 OKR 파일을 만들까요?"), confirmLabel: t("변경사항 버리기"), danger: true }).then((confirmed) => {
         if (!confirmed) return;
         setOkrListOpen(false);
         setOkrEditorDirty(false);
@@ -1690,7 +1690,7 @@ function WorkspaceApp() {
 
   function selectOkrFile(id: string) {
     if (okrEditorDirty) {
-      void confirmAction({ title: "다른 OKR 파일 열기", message: "저장하지 않은 변경사항을 버리고 다른 OKR 파일을 열까요?", confirmLabel: "변경사항 버리기", danger: true }).then((confirmed) => {
+      void confirmAction({ title: t("다른 OKR 파일 열기"), message: t("저장하지 않은 변경사항을 버리고 다른 OKR 파일을 열까요?"), confirmLabel: t("변경사항 버리기"), danger: true }).then((confirmed) => {
         if (!confirmed) return;
         setOkrCreating(false);
         setOkrEditorDirty(false);
@@ -1750,7 +1750,7 @@ function WorkspaceApp() {
       showNotice(t("OKR 파일은 최소 1개가 필요합니다."));
       return;
     }
-    if (!await confirmAction({ title: "OKR 파일 삭제", message: `'${cycle.name}' 파일 연결만 해제합니다. 작업 항목 자체는 삭제하지 않습니다.`, confirmLabel: "파일 삭제", danger: true })) return;
+    if (!await confirmAction({ title: t("OKR 파일 삭제"), message: t("'{value1}' 파일 연결만 해제합니다. 작업 항목 자체는 삭제하지 않습니다.", { value1: messageValue(cycle.name) }), confirmLabel: t("파일 삭제"), danger: true })) return;
     setDeletingOkrCycleIds((current) => new Set(current).add(id));
     const slowTimer = window.setTimeout(() => setSlowDeletingOkrCycleId(id), 800);
     try {
@@ -1859,7 +1859,7 @@ function WorkspaceApp() {
       setVisibleOkrCycleIds((current) => current.includes(data.cycleId) ? current : [data.cycleId, ...current]);
       const krCount = data.keyResultIds?.length ?? 0;
       const initiativeCount = data.initiativeIds?.length ?? 0;
-      showNotice(`KR ${krCount}개 · Initiative ${initiativeCount}개를 만들었습니다. 실행 계획은 Project 탭에서 만들 수 있습니다.`);
+      showNotice(t("KR {value1}개 · Initiative {value2}개를 만들었습니다. 실행 계획은 Project 탭에서 만들 수 있습니다.", { value1: messageValue(krCount), value2: messageValue(initiativeCount) }));
       return data;
     } catch {
       showNotice(t("OKR 구성을 만들지 못했습니다."));
@@ -1886,8 +1886,8 @@ function WorkspaceApp() {
           driMemberId: driMemberId || currentTeamMember?.id || null,
         }),
       });
-      const projectData = await projectResponse.json().catch(() => ({})) as { item?: OkrptrItem; error?: string };
-      if (!projectResponse.ok || !projectData.item) throw new Error(projectData.error ?? "Project를 만들지 못했습니다.");
+      const projectData = await projectResponse.json().catch(() => ({})) as { item?: OkrptrItem; error?: string; messageCode?: string };
+      if (!projectResponse.ok || !projectData.item) throw new Error(apiError(projectData, "Project를 만들지 못했습니다."));
       const projectItem = projectData.item;
       const taskTitles = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean);
       let createdTasks: OkrptrItem[] = [];
@@ -1926,10 +1926,10 @@ function WorkspaceApp() {
         setVisibleOkrCycleIds((current) => current.includes(target.cycleId!) ? current : [target.cycleId!, ...current]);
       }
       navigateView("work");
-      showNotice(createdTasks.length ? `Project와 하위 Task ${createdTasks.length}개를 만들었습니다.` : "Project를 만들었습니다.");
+      showNotice(createdTasks.length ? t("Project와 하위 Task {value1}개를 만들었습니다.", { value1: messageValue(createdTasks.length) }) : t("Project를 만들었습니다."));
       return true;
     } catch (error) {
-      showNotice(error instanceof Error ? error.message : "Project를 만들지 못했습니다.", "error");
+      showNotice(error instanceof Error ? error.message : t("Project를 만들지 못했습니다."), "error");
       return false;
     }
   }
@@ -1981,10 +1981,10 @@ function WorkspaceApp() {
       }
       setOkrChatContext(null);
       navigateView("routines");
-      showNotice(createdTasks.length ? `Routine과 하위 Task ${createdTasks.length}개를 만들었습니다.` : "Routine을 만들었습니다.");
+      showNotice(createdTasks.length ? t("Routine과 하위 Task {value1}개를 만들었습니다.", { value1: messageValue(createdTasks.length) }) : t("Routine을 만들었습니다."));
       return true;
     } catch (error) {
-      showNotice(error instanceof Error ? error.message : "Routine을 만들지 못했습니다.", "error");
+      showNotice(error instanceof Error ? error.message : t("Routine을 만들지 못했습니다."), "error");
       return false;
     }
   }
@@ -2028,7 +2028,7 @@ function WorkspaceApp() {
                   <div className="workspace-row" key={workspace.id}>
                     <button onClick={() => void switchWorkspace(workspace.id)} disabled={workspaceSaving}>
                       <WorkspaceAvatar workspace={workspace} />
-                      <span><b>{workspace.name}</b><small>{workspace.personal ? t("개인") : `${teamRoleLabel(workspace.role)}${(workspaceNameCounts.get(workspace.name.trim().toLocaleLowerCase()) ?? 0) > 1 ? ` · 생성 ${formatDateTime(workspace.createdAt)}` : ""}`}</small></span>
+                      <span><b>{workspace.name}</b><small>{workspace.personal ? t("개인") : `${teamRoleLabel(workspace.role)}${(workspaceNameCounts.get(workspace.name.trim().toLocaleLowerCase()) ?? 0) > 1 ? t(" · 생성 {value1}", { value1: messageValue(formatDateTime(workspace.createdAt)) }) : ""}`}</small></span>
                       {workspace.current && <Check size={14} />}
                     </button>
                   </div>
@@ -2160,7 +2160,7 @@ function WorkspaceApp() {
               onAction={() => { setWorkspaceDataState("loading"); setWorkspaceDataAttempt((attempt) => attempt + 1); }}
             />
           ) : workspaceDataState === "loading" ? (
-            <AsyncState icon={LoaderCircle} title={`${viewTitles[activeView]} 데이터를 불러오는 중입니다`} loading />
+            <AsyncState icon={LoaderCircle} title={t("{value1} 데이터를 불러오는 중입니다", { value1: messageValue(viewTitles[activeView]) })} loading />
           ) : <>
           <div className="assistant-view-shell" hidden={activeView !== "home" || Boolean(selectedProject)}>
             <HomeView
@@ -2824,7 +2824,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
             <header><b className="project-item-title">{entry.title}</b><ChevronRight size={15} /></header>
             <div className="project-card-meta"><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span><span className={`priority-${entry.priority}`}>{priorityLabels[entry.priority]}</span><span><CalendarDays size={12} />{dueLabel(entry.dueDate)}</span><span><Users size={12} />{assignmentLabel(entry, "project_dri")}</span></div>
             <div className="project-card-relation"><Link2 size={12} /><span>{entry.parentId ? byId.get(entry.parentId)?.title ?? t("연결 없음") : t("연결 없음")}</span></div>
-            {previews.length > 0 && <div className="project-card-properties">{previews.map(({ property, value }) => <span key={property.id}><small>{systemPropertyLabel(property, t)}</small><b>{Array.isArray(value) ? `${value.length}명` : typeof value === "boolean" ? value ? t("예") : t("아니오") : String(value)}</b></span>)}</div>}
+            {previews.length > 0 && <div className="project-card-properties">{previews.map(({ property, value }) => <span key={property.id}><small>{systemPropertyLabel(property, t)}</small><b>{Array.isArray(value) ? t("{value1}명", { value1: messageValue(value.length) }) : typeof value === "boolean" ? value ? t("예") : t("아니오") : String(value)}</b></span>)}</div>}
             <div className="project-card-progress"><span><i style={{ width: `${entry.progress}%` }} /></span><b>{entry.progress}%</b></div>
           </button>
         </article>;
@@ -2840,9 +2840,9 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
             {visible.map((entry) => (
               <div className="task-table-row" role="row" key={entry.id}>
                 <div className="name-cell">{selectionMode && canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<button className={`task-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} aria-label={`${entry.title} ${isCompletedStatus(entry.status) ? t("완료 취소") : t("완료 처리")}`} aria-pressed={isCompletedStatus(entry.status)} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })}><Check size={12} /></button>{entry.kind === "project" ? <button className="name-open-button project-item-title" onClick={() => onOpenProject(entry.id)}>{entry.title}</button> : <input defaultValue={entry.title} onBlur={(event) => event.target.value.trim() !== entry.title && void onPatch(entry.id, { title: event.target.value })} />}</div>
-                <select aria-label={`${entry.title} 상태`} className={`status-select status-${entry.status}`} value={entry.status} onChange={(event) => void onPatch(entry.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
-                <select aria-label={`${entry.title} 우선순위`} className={`priority-${entry.priority}`} value={entry.priority} onChange={(event) => void onPatch(entry.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
-                <input aria-label={`${entry.title} 기한`} className="date-cell" type="date" value={entry.dueDate ?? ""} onChange={(event) => void onPatch(entry.id, { dueDate: event.target.value || null })} />
+                <select aria-label={t("{value1} 상태", { value1: messageValue(entry.title) })} className={`status-select status-${entry.status}`} value={entry.status} onChange={(event) => void onPatch(entry.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
+                <select aria-label={t("{value1} 우선순위", { value1: messageValue(entry.title) })} className={`priority-${entry.priority}`} value={entry.priority} onChange={(event) => void onPatch(entry.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
+                <input aria-label={t("{value1} 기한", { value1: messageValue(entry.title) })} className="date-cell" type="date" value={entry.dueDate ?? ""} onChange={(event) => void onPatch(entry.id, { dueDate: event.target.value || null })} />
                 <span className="relation-cell">{entry.parentId ? byId.get(entry.parentId)?.title ?? t("연결 없음") : t("연결 없음")}</span>
                 <span className="relation-cell assignment-cell">{assignmentLabel(entry, "project_dri")}</span>
                 {customProperties.map((property) => (hiddenProperties[entry.id] ?? []).includes(property.id)
@@ -2851,7 +2851,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
                 {entry.kind === "task" ? <button className="row-menu" aria-label="Task detail" title="Task detail" onClick={() => onOpenTask(entry.id)}><MoreHorizontal size={15} /></button> : entry.kind === "project" ? <button className="row-menu" aria-label={t("Project 속성")} title={t("Project 속성")} onClick={() => onOpenProject(entry.id)}><MoreHorizontal size={15} /></button> : <span className="row-menu" />}
               </div>
             ))}
-            {!visible.length && <div className="table-empty">{activeFilterCount || query ? <><span>{t("조건에 맞는 {kind}가 없습니다.", { kind: emptyLabel })}</span><button onClick={() => { resetFilters(); setQuery(""); }}>{t("검색·필터 초기화")}</button></> : `표시할 ${emptyLabel}가 없습니다.`}</div>}
+            {!visible.length && <div className="table-empty">{activeFilterCount || query ? <><span>{t("조건에 맞는 {kind}가 없습니다.", { kind: emptyLabel })}</span><button onClick={() => { resetFilters(); setQuery(""); }}>{t("검색·필터 초기화")}</button></> : t("표시할 {value1}가 없습니다.", { value1: messageValue(emptyLabel) })}</div>}
           </div>
         </div>
       )}
@@ -2862,7 +2862,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
 function PropertyCell({ itemId, property, value, onChange }: { itemId: string; property: PropertyDefinition; value: PropertyValue; onChange: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void> }) {
   if (property.type === "checkbox") return <label className="property-checkbox"><input type="checkbox" checked={Boolean(value)} onChange={(event) => void onChange(itemId, property.id, event.target.checked)} /><span><Check size={11} /></span></label>;
   if (property.type === "select") return <select className="property-input" value={typeof value === "string" ? value : ""} onChange={(event) => void onChange(itemId, property.id, event.target.value || null)}><option value="">-</option>{property.options.map((option) => <option key={option}>{option}</option>)}</select>;
-  if (property.type === "member" || property.type === "members") return <span className="relation-cell assignment-cell">{Array.isArray(value) ? `${value.length}명` : value ? t("1명") : t("미지정")}</span>;
+  if (property.type === "member" || property.type === "members") return <span className="relation-cell assignment-cell">{Array.isArray(value) ? t("{value1}명", { value1: messageValue(value.length) }) : value ? t("1명") : t("미지정")}</span>;
   return <input className="property-input" type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => { const raw = event.target.value; void onChange(itemId, property.id, property.type === "number" ? (raw ? Number(raw) : null) : raw || null); }} />;
 }
 
@@ -2953,7 +2953,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
     onNotice(t("Project에 Task를 추가했습니다."));
   }
   return (
-    <OverlayDialog title={`${project.title} Project 상세`} variant="drawer" dirty={Boolean(quickTaskTitle.trim())} history={false} onRequestClose={() => onClose()}>
+    <OverlayDialog title={t("{value1} Project 상세", { value1: messageValue(project.title) })} variant="drawer" dirty={Boolean(quickTaskTitle.trim())} history={false} onRequestClose={() => onClose()}>
       {(requestClose) => <aside className={`property-panel project-detail-panel ${project.status === "archived" ? "archived" : ""}`}>
         <header className="project-page-head">
           <div>
@@ -3052,27 +3052,27 @@ function ProjectDataSection({ project }: { project: OkrptrItem }) {
           <div><small>{t("최근 결과")}</small><b className={`sync-${connection.lastSyncStatus}`}>{projectDataSyncLabel(connection)}</b></div>
         </div>
         <div className="project-data-progress"><span><i style={{ width: `${project.progress}%` }} /></span><b>{project.progress}%</b></div>
-        {connection.lastError && <p className="kr-data-error"><AlertTriangle size={13} />{connection.lastError}</p>}
+        {connection.lastError && <p className="kr-data-error"><AlertTriangle size={13} />{t("최근 데이터 갱신에 실패했습니다. 연결 설정을 확인해 주세요.")}</p>}
       </> : <div className="project-data-state"><Database size={15} />{t("데이터 화면에서 이 Project에 API를 연결할 수 있습니다.")}</div>}
   </section>;
 }
 
 function formatProjectDataMetric(value: number | null, unit: string) {
-  return value === null ? "아직 값 없음" : `${new Intl.NumberFormat(getClientLocale(), { maximumFractionDigits: 2 }).format(value)}${unit}`;
+  return value === null ? t("아직 값 없음") : `${new Intl.NumberFormat(getClientLocale(), { maximumFractionDigits: 2 }).format(value)}${unit}`;
 }
 
 function projectDataCadenceLabel(cadence: ProjectDataConnection["cadence"]) {
-  return { hourly: "매시간", daily: "매일", weekly: "매주", manual: "수동만" }[cadence];
+  return t({ hourly: "매시간", daily: "매일", weekly: "매주", manual: "수동만" }[cadence]);
 }
 
 function projectDataSyncLabel(connection: ProjectDataConnection) {
-  if (connection.lastSyncStatus === "never") return "업데이트 전";
-  if (connection.lastSyncStatus === "error") return "오류";
-  return connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString(getClientLocale(), { dateStyle: "short", timeStyle: "short" }) : "완료";
+  if (connection.lastSyncStatus === "never") return t("업데이트 전");
+  if (connection.lastSyncStatus === "error") return t("오류");
+  return connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString(getClientLocale(), { dateStyle: "short", timeStyle: "short" }) : t("완료");
 }
 
 function ProjectSystemPropertySlot({ property, readOnly, onHide, children }: { property?: PropertyDefinition; readOnly: boolean; onHide: (propertyId: string, hidden: boolean) => void; children: ReactNode }) {
-  return <div className="project-system-property">{children}{property && !readOnly && <button type="button" className="icon-button" onClick={() => onHide(property.id, true)} aria-label={`${systemPropertyLabel(property, t)} 숨기기`} title={t("이 Project에서 숨기기")}><EyeOff size={13} /></button>}</div>;
+  return <div className="project-system-property">{children}{property && !readOnly && <button type="button" className="icon-button" onClick={() => onHide(property.id, true)} aria-label={t("{value1} 숨기기", { value1: messageValue(systemPropertyLabel(property, t)) })} title={t("이 Project에서 숨기기")}><EyeOff size={13} /></button>}</div>;
 }
 
 type ProjectBlockEditorProps = { initialContent: string; editable?: boolean; onChange?: (change: ProjectBlockEditorChange) => void };
@@ -3157,7 +3157,7 @@ function ProjectDocumentSection({ projectId, readOnly, onNotice }: { projectId: 
     versionRef.current = data.document.version;
     setDocument(data.document);
     setTemplateId("");
-    onNotice(`'${selected?.name ?? "템플릿"}'을 기존 내용 위에 추가했습니다.`);
+    onNotice(t("'{value1}'을 기존 내용 위에 추가했습니다.", { value1: messageValue(selected?.name ?? "템플릿") }));
   }
 
   async function createTemplateFromDocument(event: FormEvent) {
@@ -3197,7 +3197,7 @@ function ProjectPropertyField({ projectId, property, value, members, readOnly, o
           void onChange(projectId, property.id, normalized);
         }} />
       </label>
-      {!readOnly && <button type="button" className="icon-button" onClick={onHide} aria-label={`${systemPropertyLabel(property, t)} 숨기기`} title={t("이 Project에서 숨기기")}><EyeOff size={14} /></button>}
+      {!readOnly && <button type="button" className="icon-button" onClick={onHide} aria-label={t("{value1} 숨기기", { value1: messageValue(systemPropertyLabel(property, t)) })} title={t("이 Project에서 숨기기")}><EyeOff size={14} /></button>}
     </div>
   );
 }
@@ -3301,7 +3301,7 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
 
   async function deleteRow(id: string) {
     const row = rows.find((entry) => entry.id === id);
-    if (!row || !await confirmAction({ title: "체크리스트 삭제", message: `'${row.title}' 항목을 삭제합니다.`, confirmLabel: "삭제", danger: true })) return;
+    if (!row || !await confirmAction({ title: t("체크리스트 삭제"), message: t("'{value1}' 항목을 삭제합니다.", { value1: messageValue(row.title) }), confirmLabel: t("삭제"), danger: true })) return;
     const previous = rows;
     const next = rows.filter((entry) => entry.id !== id);
     setRows(next); updateProgress(next);
@@ -3336,7 +3336,7 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
   }
 
   return (
-    <OverlayDialog title={`${task.title} Task 상세`} variant="drawer" dirty={Boolean(title.trim())} history={false} onRequestClose={() => onClose()}>
+    <OverlayDialog title={t("{value1} Task 상세", { value1: messageValue(task.title) })} variant="drawer" dirty={Boolean(title.trim())} history={false} onRequestClose={() => onClose()}>
       {(requestClose) => <aside className="property-panel task-detail-panel">
         <header><div><p>{lineageTitle}</p><textarea className="task-title-input" defaultValue={task.title} rows={1} aria-label={t("Task 이름")} onBlur={(event) => { const nextTitle = event.currentTarget.value.trim(); if (nextTitle && nextTitle !== task.title) void onPatch({ title: nextTitle }); }} /></div><div className="task-detail-actions">{canDelete && <DeleteSelectCheckbox item={task} selected={selected} onToggle={onToggleSelect} />}<button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("닫기")}><X size={17} /></button></div></header>
         <section className="task-detail-fields" aria-label={t("Task 정보")}>
@@ -3367,7 +3367,7 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
           )}
         </section>
         <div className="task-calendar-action"><button onClick={() => void syncCalendar()} disabled={syncingCalendar || !task.dueDate}><CalendarDays size={13} />{syncingCalendar ? t("동기화 중") : t("Google Calendar에 보내기")}</button></div>
-        <section className="checklist-section"><header><b>{t("체크리스트")}</b><span>{rows.filter((entry) => entry.completed).length}/{rows.length}</span></header>{checklistLoadError && <p className="inline-error" role="alert">{t("체크리스트를 불러오지 못했습니다. 상세 화면을 다시 열어 재시도해 주세요.")}</p>}<div>{rows.map((row) => <div className="checklist-row" key={row.id}><button className={`task-check ${row.completed ? "checked" : ""}`} onClick={() => void toggleRow(row)} aria-label={`${row.title} ${row.completed ? t("완료 취소") : t("완료")}`}><Check size={12} /></button><span className={row.completed ? "completed" : ""}>{row.title}</span><button className="icon-button" onClick={() => void deleteRow(row.id)} aria-label={`${row.title} 삭제`}><Trash2 size={13} /></button></div>)}</div><form className="checklist-form" onSubmit={addRow}><Plus size={14} /><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("항목 추가")} aria-label={t("체크리스트 항목")} disabled={savingChecklist} /><button disabled={!title.trim() || savingChecklist}>{savingChecklist ? t("추가 중") : t("추가")}</button></form></section>
+        <section className="checklist-section"><header><b>{t("체크리스트")}</b><span>{rows.filter((entry) => entry.completed).length}/{rows.length}</span></header>{checklistLoadError && <p className="inline-error" role="alert">{t("체크리스트를 불러오지 못했습니다. 상세 화면을 다시 열어 재시도해 주세요.")}</p>}<div>{rows.map((row) => <div className="checklist-row" key={row.id}><button className={`task-check ${row.completed ? "checked" : ""}`} onClick={() => void toggleRow(row)} aria-label={`${row.title} ${row.completed ? t("완료 취소") : t("완료")}`}><Check size={12} /></button><span className={row.completed ? "completed" : ""}>{row.title}</span><button className="icon-button" onClick={() => void deleteRow(row.id)} aria-label={t("{value1} 삭제", { value1: messageValue(row.title) })}><Trash2 size={13} /></button></div>)}</div><form className="checklist-form" onSubmit={addRow}><Plus size={14} /><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("항목 추가")} aria-label={t("체크리스트 항목")} disabled={savingChecklist} /><button disabled={!title.trim() || savingChecklist}>{savingChecklist ? t("추가 중") : t("추가")}</button></form></section>
       </aside>}
     </OverlayDialog>
   );
@@ -3491,7 +3491,7 @@ function MemberMentionPicker({
       <span id={`${pickerId}-label`}>{label}</span>
       <div className={`member-mention-box ${open ? "active" : ""} ${disabled ? "disabled" : ""}`}>
         {selectedMembers.map((member) => (
-          <button type="button" className="member-chip" key={member.id} onClick={() => remove(member.id)} disabled={disabled} title={`${member.displayName} 제거`}>
+          <button type="button" className="member-chip" key={member.id} onClick={() => remove(member.id)} disabled={disabled} title={t("{value1} 제거", { value1: messageValue(member.displayName) })}>
             <span className="team-avatar">{memberInitial(member)}</span>
             <b>@{member.displayName}</b>
             <X size={11} />
@@ -3518,7 +3518,7 @@ function MemberMentionPicker({
         )}
       </div>
       {open && !disabled && !atLimit && (
-        <div className="member-mention-menu" id={`${pickerId}-listbox`} role="listbox" aria-label={`${label} 후보`}>
+        <div className="member-mention-menu" id={`${pickerId}-listbox`} role="listbox" aria-label={t("{value1} 후보", { value1: messageValue(label) })}>
           {candidates.length ? candidates.map((member) => (
             <button type="button" role="option" aria-selected="false" key={member.id} onClick={() => add(member.id)}>
               <span className="team-avatar">{memberInitial(member)}</span>
@@ -3616,8 +3616,8 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
           templateId: kind === "project" ? templateId || undefined : undefined,
         }),
       });
-      const responseData = await response.json().catch(() => ({})) as { item?: OkrptrItem; error?: string };
-      if (!response.ok || !responseData.item) throw new Error(responseData.error ?? "항목을 만들지 못했습니다.");
+      const responseData = await response.json().catch(() => ({})) as { item?: OkrptrItem; error?: string; messageCode?: string };
+      if (!response.ok || !responseData.item) throw new Error(apiError(responseData, "항목을 만들지 못했습니다."));
       const filledValues = Object.fromEntries(Object.entries(customValues).filter(([, value]) => value !== null && value !== ""));
       const propertyResults = await Promise.all((kind === "project" ? Object.entries(filledValues) : []).map(async ([propertyId, value]) => fetch("/api/property-values", {
         method: "PATCH",
@@ -3627,7 +3627,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
       const propertySaveFailed = propertyResults.some((result) => !result.ok);
       onCreated(responseData.item, propertySaveFailed ? {} : filledValues, propertySaveFailed ? "항목은 만들었지만 일부 속성을 저장하지 못했습니다." : undefined);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "항목을 만들지 못했습니다.");
+      setError(submitError instanceof Error ? submitError.message : t("항목을 만들지 못했습니다."));
     } finally {
       setSaving(false);
     }
@@ -3645,7 +3645,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
           ) : (
             <p className="task-container-empty task-container-general">{t("연결할 Project·Routine이 없어 General(기본)에 저장됩니다.")}</p>
           ) : parentKind && (
-            <label><span>{t("상위")}{kindLabel(parentKind)}</span><select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">{t("선택")}</option>{parentOptions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>
+            <label><span>{t("상위 {kind}", { kind: kindLabel(parentKind) })}</span><select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">{t("선택")}</option>{parentOptions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>
           )}
           {kind === "project" && (
             <section className="create-project-fields">
@@ -3771,7 +3771,7 @@ function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRo
       onCreateClose();
       onNotice(t("Routine을 추가했습니다."));
     } catch (createError) {
-      onNotice(createError instanceof Error ? createError.message : "Routine을 추가하지 못했습니다.");
+      onNotice(createError instanceof Error ? createError.message : t("Routine을 추가하지 못했습니다."));
     } finally {
       setSaving(false);
     }
@@ -3797,7 +3797,7 @@ function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRo
       });
     } catch (toggleError) {
       setRows(previous);
-      onNotice(toggleError instanceof Error ? toggleError.message : "Routine 완료 상태를 저장하지 못했습니다.");
+      onNotice(toggleError instanceof Error ? toggleError.message : t("Routine 완료 상태를 저장하지 못했습니다."));
     }
   }
 
@@ -3821,7 +3821,7 @@ function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRo
       });
     } catch (toggleError) {
       setRows(previous);
-      onNotice(toggleError instanceof Error ? toggleError.message : "Routine 활성 상태를 저장하지 못했습니다.");
+      onNotice(toggleError instanceof Error ? toggleError.message : t("Routine 활성 상태를 저장하지 못했습니다."));
     }
   }
 
@@ -3859,7 +3859,7 @@ function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRo
       body: JSON.stringify({ id: routine.id, date, ...draft, properties: propertyDrafts[routine.id] }),
     });
     setSaving(false);
-    if (!response.ok) { const failure = await response.json() as { error?: string }; onNotice(failure.error ?? "Routine을 저장하지 못했습니다."); return; }
+    if (!response.ok) { const failure = await response.json() as { error?: string; code?: string; messageCode?: string; messageValues?: unknown }; onNotice(apiError(failure, "Routine을 저장하지 못했습니다.")); return; }
     const data = await response.json() as { routine: Routine };
     setRows((current) => {
       const next = current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? [];
@@ -3880,7 +3880,7 @@ function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRo
   async function remove(id: string) {
     const routine = rows?.find((entry) => entry.id === id);
     if (!routine || routine.systemKey === "general") return;
-    if (!await confirmAction({ title: "Routine 삭제", message: `'${routine.title}' Routine을 삭제합니다.`, confirmLabel: "Routine 삭제", danger: true })) return;
+    if (!await confirmAction({ title: t("Routine 삭제"), message: t("'{value1}' Routine을 삭제합니다.", { value1: messageValue(routine.title) }), confirmLabel: t("Routine 삭제"), danger: true })) return;
     const response = await fetch(`/api/routines?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     if (response.ok) {
       setRows((current) => {
@@ -3939,7 +3939,7 @@ function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRo
                 <label><span>{t("목적/메모")}</span><input value={draft.description} onChange={(event) => updateDraft(routine, "description", event.target.value)} placeholder={t("왜 반복하는지")} /></label>
                 <label className="routine-steps"><span>{t("무엇을 어떻게")}</span><textarea value={draft.actionSteps} onChange={(event) => updateDraft(routine, "actionSteps", event.target.value)} placeholder={t("1. 확인할 것\n2. 실행할 것\n3. 끝났다고 판단하는 기준")} rows={3} /></label>
               </div>
-              <section className="routine-property-values" aria-label={`${routine.title} 속성 값`}><h3>{t("속성 값")}</h3>{activeProperties.length ? propertyInputs({ ...routine.properties, ...propertyDrafts[routine.id] }, (id, value) => setPropertyDrafts((current) => ({ ...current, [routine.id]: { ...current[routine.id], [id]: value } }))) : <p>{propertiesReady ? t("아직 루틴 속성이 없습니다. 루틴 속성 관리에서 추가할 수 있습니다.") : t("루틴 속성을 불러오는 중입니다.")}</p>}</section>
+              <section className="routine-property-values" aria-label={t("{value1} 속성 값", { value1: messageValue(routine.title) })}><h3>{t("속성 값")}</h3>{activeProperties.length ? propertyInputs({ ...routine.properties, ...propertyDrafts[routine.id] }, (id, value) => setPropertyDrafts((current) => ({ ...current, [routine.id]: { ...current[routine.id], [id]: value } }))) : <p>{propertiesReady ? t("아직 루틴 속성이 없습니다. 루틴 속성 관리에서 추가할 수 있습니다.") : t("루틴 속성을 불러오는 중입니다.")}</p>}</section>
               <footer>
                 <label className="routine-assignee"><span>{t("담당자")}</span><select value={routine.assigneeMemberId ?? ""} onChange={(event) => void updateAssignee(routine, event.target.value)}><option value="">{t("담당자 없음")}</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>
                 <button className="primary-action" disabled={readOnly || !hasDraftChange(routine) || saving} aria-busy={saving} onClick={() => void saveRoutineGuide(routine)}><Check size={14} />{t("저장")}</button>
@@ -4064,7 +4064,7 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
     window.history.replaceState(window.history.state, "", `${window.location.pathname}${params.size ? `?${params}` : ""}`);
     void fetch("/api/slack/link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) })
       .then(async (response) => { const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(apiError(result, "Slack 사용자를 연결하지 못했습니다.")); onNotice(t("Slack 사용자 연결을 완료했습니다.")); })
-      .catch((error: unknown) => onNotice(error instanceof Error ? error.message : "Slack 사용자를 연결하지 못했습니다."));
+      .catch((error: unknown) => onNotice(error instanceof Error ? error.message : t("Slack 사용자를 연결하지 못했습니다.")));
   }, [onNotice]);
   useEffect(() => {
     let active = true;
@@ -4097,7 +4097,7 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
       if (showNotice) onNotice(t("데일리 초안을 저장했습니다."));
       return data;
     } catch (saveError) {
-      onNotice(saveError instanceof Error ? saveError.message : "데일리 초안을 저장하지 못했습니다.");
+      onNotice(saveError instanceof Error ? saveError.message : t("데일리 초안을 저장하지 못했습니다."));
       return null;
     } finally {
       setSaving(null);
@@ -4112,7 +4112,7 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(apiError(result, "데일리를 확정하지 못했습니다."));
       await reload(); onNotice(t("데일리를 확정했습니다. Slack 공유는 백그라운드에서 진행됩니다."));
-    } catch (error) { onNotice(error instanceof Error ? error.message : "데일리를 확정하지 못했습니다."); }
+    } catch (error) { onNotice(error instanceof Error ? error.message : t("데일리를 확정하지 못했습니다.")); }
     finally { setSaving(null); }
   }
   async function reload() {
@@ -4126,7 +4126,7 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
       const response = await fetch("/api/daily-scrum/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, title: newTaskTitle, parentKind, parentId: parentId || null, requestId: crypto.randomUUID() }) });
       const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(apiError(result, "Task를 만들지 못했습니다."));
       await reload(); setNewTaskTitle(""); onNotice(t("오늘 기한의 Task를 만들고 데일리에 선택했습니다."));
-    } catch (error) { onNotice(error instanceof Error ? error.message : "Task를 만들지 못했습니다."); }
+    } catch (error) { onNotice(error instanceof Error ? error.message : t("Task를 만들지 못했습니다.")); }
     finally { setSaving(null); }
   }
   function updateDraft(patch: Partial<DailyDashboard["draft"]>) { setScrum({ ...currentScrum, draft: { ...currentScrum.draft, ...patch } }); }
@@ -4193,7 +4193,7 @@ function RecommendationsView({ workspaceId, items, onOpenTask, onOpenProject, on
     else if (target?.kind === "project") onOpenProject(target.id);
     else onNavigate(row.kind === "empty_project" ? "okr" : "work");
   }
-  return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{t("{count}개 항목 · 우선순위 {score}", { count: row.itemIds.length, score: row.score })}</small></div><button aria-label={`${row.title} 관련 항목 열기`} title={t("관련 항목 열기")} onClick={() => openRecommendation(row)}><ChevronRight size={15} /></button></article>)}</section>;
+  return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{t("{count}개 항목 · 우선순위 {score}", { count: row.itemIds.length, score: row.score })}</small></div><button aria-label={t("{value1} 관련 항목 열기", { value1: messageValue(row.title) })} title={t("관련 항목 열기")} onClick={() => openRecommendation(row)}><ChevronRight size={15} /></button></article>)}</section>;
 }
 
 function HomeView({ onCreatePlan, onCreateProject, onCreateRoutine, onApplyOkrPlan, onCreateTasks, onFinish, onNavigateToOkr, context, usageScope, workspaceContext, canWrite, members, taskContainers, projectTargets, defaultDriMemberId, defaultCycleId }: {
@@ -4307,11 +4307,11 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
     if (!query) return candidates.slice(0, 12);
     return candidates.filter((target) => `${kindLabel(target.kind)} ${target.title}`.toLocaleLowerCase().includes(query)).slice(0, 12);
   }, [okrTarget?.id, targetCandidates, targetSearch]);
-  const saveLabel = mode === "task" ? `Task ${taskDraftCount}개 만들기` : mode === "routine" ? "Routine 만들기" : assistantFlow
-    ? !okrTarget ? `Objective 1개 · KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`
-      : okrTarget.kind === "objective" ? `KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`
-        : okrTarget.kind === "key_result" ? `Initiative ${plan.targetInitiatives.length}개 만들기` : "Project 탭에서 계속"
-    : mode === "project" ? "Project 만들기" : `Objective 1개 · KR ${draftCounts.keyResults}개 · Initiative ${draftCounts.initiatives}개 만들기`;
+  const saveLabel = mode === "task" ? t("Task {value1}개 만들기", { value1: messageValue(taskDraftCount) }) : mode === "routine" ? "Routine 만들기" : assistantFlow
+    ? !okrTarget ? t("Objective 1개 · KR {value1}개 · Initiative {value2}개 만들기", { value1: messageValue(draftCounts.keyResults), value2: messageValue(draftCounts.initiatives) })
+      : okrTarget.kind === "objective" ? t("KR {value1}개 · Initiative {value2}개 만들기", { value1: messageValue(draftCounts.keyResults), value2: messageValue(draftCounts.initiatives) })
+        : okrTarget.kind === "key_result" ? t("Initiative {value1}개 만들기", { value1: messageValue(plan.targetInitiatives.length) }) : "Project 탭에서 계속"
+    : mode === "project" ? "Project 만들기" : t("Objective 1개 · KR {value1}개 · Initiative {value2}개 만들기", { value1: messageValue(draftCounts.keyResults), value2: messageValue(draftCounts.initiatives) });
   const hasDraft = hasPlanContent(plan);
   const hasPersistableDraft = Boolean(message.trim() || hasDraft || conversationHistory.some((entry) => entry.role === "user"));
   const assistantDraftPayload = useMemo<AssistantConversationDraft>(() => ({
@@ -4797,8 +4797,8 @@ function OkrDraftTree({ plan, target, onPatchObjective, onAddKeyResult, onPatchK
                   <Hash size={13} />
                   <label><span>{t("Key Result")}{keyResultIndex + 1}</span><textarea rows={2} value={keyResult.title} onChange={(event) => onPatchKeyResult(keyResult.clientId, event.target.value)} placeholder={t("달성 여부를 확인할 측정 가능한 결과")} /></label>
                   <div>
-                    <button type="button" className="icon-button" onClick={() => onAddInitiative(keyResult.clientId)} aria-label={`${keyResultIndex + 1}번 KR에 Initiative 추가`} title={t("Initiative 추가")}><Plus size={13} /></button>
-                    <button type="button" className="icon-button" onClick={() => onRemoveKeyResult(keyResult.clientId)} aria-label={`${keyResultIndex + 1}번 KR 제거`} title={t("Key Result 제거")}><Trash2 size={13} /></button>
+                    <button type="button" className="icon-button" onClick={() => onAddInitiative(keyResult.clientId)} aria-label={t("{value1}번 KR에 Initiative 추가", { value1: messageValue(keyResultIndex + 1) })} title={t("Initiative 추가")}><Plus size={13} /></button>
+                    <button type="button" className="icon-button" onClick={() => onRemoveKeyResult(keyResult.clientId)} aria-label={t("{value1}번 KR 제거", { value1: messageValue(keyResultIndex + 1) })} title={t("Key Result 제거")}><Trash2 size={13} /></button>
                   </div>
                 </div>
                 <div className="okr-draft-initiatives">
@@ -4806,7 +4806,7 @@ function OkrDraftTree({ plan, target, onPatchObjective, onAddKeyResult, onPatchK
                     <div className="okr-draft-initiative-row" key={initiative.clientId}>
                       <Zap size={13} />
                       <label><span>{t("Initiative")}{initiativeIndex + 1}</span><textarea rows={2} value={initiative.title} onChange={(event) => onPatchInitiative(initiative.clientId, event.target.value)} placeholder={t("이 KR을 움직일 실행 방향")} /></label>
-                      {plan.keyResults.length > 1 && <select value={keyResult.clientId} onChange={(event) => onMoveInitiative(initiative.clientId, event.target.value)} aria-label={`${initiative.title || t("Initiative")}의 Key Result`}>
+                      {plan.keyResults.length > 1 && <select value={keyResult.clientId} onChange={(event) => onMoveInitiative(initiative.clientId, event.target.value)} aria-label={t("{value1}의 Key Result", { value1: messageValue(initiative.title || t("Initiative")) })}>
                         {plan.keyResults.map((candidate, index) => <option value={candidate.clientId} key={candidate.clientId}>KR {index + 1}</option>)}
                       </select>}
                       <button type="button" className="icon-button" onClick={() => onRemoveInitiative(initiative.clientId)} aria-label={t("Initiative 제거")} title={t("Initiative 제거")}><Trash2 size={13} /></button>
@@ -4823,7 +4823,7 @@ function OkrDraftTree({ plan, target, onPatchObjective, onAddKeyResult, onPatchK
               <div className="okr-draft-initiative-row" key={initiative.clientId}>
                 <Zap size={13} />
                 <label><span>{t("Initiative")}</span><textarea rows={2} value={initiative.title} onChange={(event) => onPatchInitiative(initiative.clientId, event.target.value)} /></label>
-                <select value="" onChange={(event) => event.target.value && onMoveInitiative(initiative.clientId, event.target.value)} aria-label={`${initiative.title || t("Initiative")}를 연결할 Key Result`}>
+                <select value="" onChange={(event) => event.target.value && onMoveInitiative(initiative.clientId, event.target.value)} aria-label={t("{value1}를 연결할 Key Result", { value1: messageValue(initiative.title || t("Initiative")) })}>
                   <option value="">{t("KR 선택")}</option>
                   {plan.keyResults.map((candidate, index) => <option value={candidate.clientId} key={candidate.clientId}>KR {index + 1}</option>)}
                 </select>
@@ -4888,18 +4888,18 @@ function deriveAssistantTargeting(context: AssistantWorkspaceContext) {
 }
 
 function assistantOpeningMessage() {
-  return "목표나 할 일을 편하게 이야기해 주세요. 기존 OKR과 업무를 참고해 함께 정리할게요.";
+  return t("목표나 할 일을 편하게 이야기해 주세요. 기존 OKR과 업무를 참고해 함께 정리할게요.");
 }
 
 function targetPrompt(target: OkrPlanTarget) {
-  if (target.kind === "objective") return `${target.title} Objective를 기준으로 이야기하겠습니다. 이 목표의 성공을 확인할 Key Result부터 정리할까요?`;
-  if (target.kind === "key_result") return `${target.title} Key Result를 기준으로 이야기하겠습니다. 이 결과를 움직일 Initiative를 정리할까요?`;
-  if (target.kind === "project") return `${target.title} Project를 기준으로 이야기하겠습니다. 진행 상황, 막힌 일, 다음 Task 중 무엇부터 정리할까요?`;
-  return `${target.title} Initiative를 기준으로 이야기하겠습니다. 이 실행 방향을 실제로 움직일 Project를 정리할까요?`;
+  if (target.kind === "objective") return t("{value1} Objective를 기준으로 이야기하겠습니다. 이 목표의 성공을 확인할 Key Result부터 정리할까요?", { value1: messageValue(target.title) });
+  if (target.kind === "key_result") return t("{value1} Key Result를 기준으로 이야기하겠습니다. 이 결과를 움직일 Initiative를 정리할까요?", { value1: messageValue(target.title) });
+  if (target.kind === "project") return t("{value1} Project를 기준으로 이야기하겠습니다. 진행 상황, 막힌 일, 다음 Task 중 무엇부터 정리할까요?", { value1: messageValue(target.title) });
+  return t("{value1} Initiative를 기준으로 이야기하겠습니다. 이 실행 방향을 실제로 움직일 Project를 정리할까요?", { value1: messageValue(target.title) });
 }
 
 function aiLimitMessage(error: OrganizeError) {
-  return aiUsageLimitMessage(error);
+  return aiUsageLimitMessage(error, t, getClientLocale());
 }
 
 function OkrFileManager({
@@ -4981,12 +4981,12 @@ function OkrFileRow({
 }) {
   return (
     <article className={`okr-file-row ${selected ? "active" : ""}`}>
-      <button className="okr-file-open" type="button" onClick={() => onSelect(cycle.id)} aria-label={`${cycle.name} 열기`}><Archive size={15} /><span><b>{cycle.name}</b><small>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {cycle.department || t("부서 미지정")} · {t("{count}개 항목", { count: itemCount })}{slowDeleting ? ` · ${t("삭제 중")}` : ""}</small></span></button>
+      <button className="okr-file-open" type="button" onClick={() => onSelect(cycle.id)} aria-label={t("{value1} 열기", { value1: messageValue(cycle.name) })}><Archive size={15} /><span><b>{cycle.name}</b><small>v{cycle.version} · {cycle.startDate} - {cycle.endDate} · {cycle.department || t("부서 미지정")} · {t("{count}개 항목", { count: itemCount })}{slowDeleting ? ` · ${t("삭제 중")}` : ""}</small></span></button>
       <div className="okr-file-row-actions">
         {selected && <em>{t("열림")}</em>}
         {cycle.status === "active" ? <em>{t("기본")}</em> : <button type="button" onClick={() => onSetDefault(cycle.id)}>{t("기본")}</button>}
         {latest && <em>{t("최신")}</em>}
-        <button type="button" className={deleting ? "is-loading" : ""} onClick={() => onDelete(cycle.id)} disabled={!canDelete || deleting} aria-label={`${cycle.name} 삭제`} title={deleting ? t("삭제 중") : canDelete ? t("삭제") : t("마지막 파일은 삭제할 수 없습니다")}>{deleting ? <LoaderCircle size={12} /> : <Trash2 size={12} />}</button>
+        <button type="button" className={deleting ? "is-loading" : ""} onClick={() => onDelete(cycle.id)} disabled={!canDelete || deleting} aria-label={t("{value1} 삭제", { value1: messageValue(cycle.name) })} title={deleting ? t("삭제 중") : canDelete ? t("삭제") : t("마지막 파일은 삭제할 수 없습니다")}>{deleting ? <LoaderCircle size={12} /> : <Trash2 size={12} />}</button>
       </div>
     </article>
   );
@@ -4994,8 +4994,8 @@ function OkrFileRow({
 
 function DeleteSelectCheckbox({ item, selected, onToggle }: { item: Pick<OkrptrItem, "id" | "kind" | "title">; selected: boolean; onToggle: (id: string) => void }) {
   return (
-    <label className="delete-select" title={`${item.title} 삭제 선택`}>
-      <input type="checkbox" checked={selected} onChange={() => onToggle(item.id)} aria-label={`${item.kind === "project" ? t("Project") : t("Task")} ${item.title} 삭제 선택`} />
+    <label className="delete-select" title={t("{value1} 삭제 선택", { value1: messageValue(item.title) })}>
+      <input type="checkbox" checked={selected} onChange={() => onToggle(item.id)} aria-label={t("{value1} {value2} 삭제 선택", { value1: messageValue(item.kind === "project" ? t("Project") : t("Task")), value2: messageValue(item.title) })} />
       <span><Check size={11} /></span>
     </label>
   );
@@ -5031,7 +5031,7 @@ function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDelet
       <div className="task-list-summary"><span>{t("{kind} · {count}", { kind: t("Task"), count: items.length })}</span>{deletableItems.length > 0 && <button aria-pressed={selectionMode} onClick={() => { if (selectionMode) onClearItems(taskIds); setSelectionMode((current) => !current); }}>{selectionMode ? <X size={13} /> : <ListChecks size={13} />}{selectionMode ? t("선택 종료") : t("선택")}</button>}</div>
       {selectionMode && deletableItems.length > 0 && <div className="task-selection-bar">
         <label><input type="checkbox" checked={allSelected} onChange={() => allSelected ? onClearItems(taskIds) : onSelectItems(taskIds)} /><span>{allSelected ? t("전체 선택 해제") : t("전체 선택")}</span></label>
-        <b>{selectedTaskCount ? `${selectedTaskCount}개 선택` : `삭제 가능 ${deletableItems.length}개`}</b>
+        <b>{selectedTaskCount ? t("{value1}개 선택", { value1: messageValue(selectedTaskCount) }) : t("삭제 가능 {value1}개", { value1: messageValue(deletableItems.length) })}</b>
         {orphanedIds.length > 0 && <button className="orphan-task-select" onClick={() => onSelectItems(orphanedIds)}><AlertTriangle size={13} />{t("연결 끊긴 Task")}{t("{count}개 선택", { count: orphanedIds.length })}</button>}
         <button className="task-selection-delete" disabled={!selectedTaskCount || trashing} onClick={onTrashSelected}><Trash2 size={13} />{trashing ? t("이동 중") : t("선택 삭제")}</button>
       </div>}
@@ -5048,7 +5048,7 @@ function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDelet
               <b>{entry.title}</b>
               <span className="task-list-inline-meta"><i className={`status-dot status-${entry.status}`} />{statusLabel(entry.status)}<em>·</em>{assignee}<em>·</em>{relation}{entry.dueDate && <><em>·</em>{dueLabel(entry.dueDate)}</>}</span>
             </button>
-            <button className="task-list-chevron" onClick={() => onOpenTask(entry.id)} aria-label={`${entry.title} 상세 열기`}><ChevronRight size={15} /></button>
+            <button className="task-list-chevron" onClick={() => onOpenTask(entry.id)} aria-label={t("{value1} 상세 열기", { value1: messageValue(entry.title) })}><ChevronRight size={15} /></button>
           </article>
         );
       })}
@@ -5108,7 +5108,7 @@ function TrashView({ workspaceId, onNotice, canDeleteRecords, canRestore }: { wo
   }, [initiativeOptions, records, trashedItems, workspaceId]);
 
   async function permanentlyDeleteRecord(record: TrashRecord) {
-    if (!await confirmAction({ title: "휴지통 기록 영구 삭제", message: `'${record.title}' 기록은 복구할 수 없게 됩니다.`, confirmationText: "영구 삭제", confirmLabel: "영구 삭제", danger: true })) return;
+    if (!await confirmAction({ title: t("휴지통 기록 영구 삭제"), message: t("'{value1}' 기록은 복구할 수 없게 됩니다.", { value1: messageValue(record.title) }), confirmationText: t("영구 삭제"), confirmLabel: t("영구 삭제"), danger: true })) return;
     const response = await fetch(`/api/trash?id=${encodeURIComponent(record.id)}`, { method: "DELETE" });
     if (!response.ok) {
       onNotice(t("휴지통 기록을 삭제하지 못했습니다."));
@@ -5153,8 +5153,8 @@ function TrashView({ workspaceId, onNotice, canDeleteRecords, canRestore }: { wo
   }
 
   async function permanentlyDeleteItem(entry: TrashedItem) {
-    const taskCopy = entry.kind === "project" ? `와 하위 Task ${entry.trashedTaskCount}개` : "";
-    if (!await confirmAction({ title: "항목 영구 삭제", message: `'${entry.title}'${taskCopy}를 영구 삭제합니다.\n체크리스트, 담당자, 속성값, 문서와 활동 기록도 삭제되며 복구할 수 없습니다.`, confirmationText: "영구 삭제", confirmLabel: "영구 삭제", danger: true })) return;
+    const taskCopy = entry.kind === "project" ? t("와 하위 Task {value1}개", { value1: messageValue(entry.trashedTaskCount) }) : "";
+    if (!await confirmAction({ title: t("항목 영구 삭제"), message: t("'{value1}'{value2}를 영구 삭제합니다.\n체크리스트, 담당자, 속성값, 문서와 활동 기록도 삭제되며 복구할 수 없습니다.", { value1: messageValue(entry.title), value2: messageValue(taskCopy) }), confirmationText: t("영구 삭제"), confirmLabel: t("영구 삭제"), danger: true })) return;
     const confirmationText = "영구 삭제";
     const response = await fetch("/api/item-trash", {
       method: "DELETE",
@@ -5167,7 +5167,7 @@ function TrashView({ workspaceId, onNotice, canDeleteRecords, canRestore }: { wo
       return;
     }
     setTrashedItems((current) => current?.filter((item) => item.id !== entry.id) ?? []);
-    onNotice(`${entry.kind === "project" ? "Project 묶음" : "Task"}을 영구 삭제했습니다.`);
+    onNotice(t("{value1}을 영구 삭제했습니다.", { value1: messageValue(entry.kind === "project" ? "Project 묶음" : "Task") }));
   }
 
   if (loadError) return <AsyncState icon={AlertTriangle} title={t("휴지통을 불러오지 못했습니다")} detail={t("삭제 항목과 클린업 기록은 그대로 보존되어 있습니다.")} actionLabel={t("다시 시도")} onAction={() => { setRecords(null); setTrashedItems(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} />;
@@ -5183,7 +5183,7 @@ function TrashView({ workspaceId, onNotice, canDeleteRecords, canRestore }: { wo
             <span className="trash-icon"><Trash2 size={15} /></span>
             <div>
               <h3>{entry.title}</h3>
-              <p>{entry.kind === "project" ? `Project · 하위 Task ${entry.trashedTaskCount}개` : t("독립 삭제한 Task")}</p>
+              <p>{entry.kind === "project" ? t("Project · 하위 Task {value1}개", { value1: messageValue(entry.trashedTaskCount) }) : t("독립 삭제한 Task")}</p>
               <small>{entry.archivedAt ? formatDateTime(entry.archivedAt) : t("삭제됨")}</small>
               {canRestore && entry.restoreParentRequired && <label className="trash-restore-parent"><span>{t("복구할 Initiative")}</span><select value={restoreParents[entry.id] ?? ""} onChange={(event) => setRestoreParents((current) => ({ ...current, [entry.id]: event.target.value }))}><option value="">{t("Initiative 선택")}</option>{initiativeOptions.map((initiative) => <option value={initiative.id} key={initiative.id}>{initiative.title}</option>)}</select></label>}
             </div>
@@ -5283,12 +5283,12 @@ function ProjectPropertyManager({ workspaceId, properties, teamMembers, readOnly
     setOptions("");
     setDefaultValue(null);
     setShowRemoved(false);
-    onNotice(`모든 ${targetName}에 새 속성을 추가했습니다.`);
+    onNotice(t("모든 {value1}에 새 속성을 추가했습니다.", { value1: messageValue(targetName) }));
   }
 
   async function deactivate(property: PropertyDefinition) {
-    const detail = property.valueCount > 0 ? `\n${property.valueCount}개 ${targetName}의 값은 보존되며 화면에서만 숨겨집니다.` : "";
-    if (!await confirmAction({ title: `${targetName} 속성 제거`, message: `'${systemPropertyLabel(property, t)}' 속성을 화면에서 제거합니다.${detail}`, confirmLabel: "속성 제거", danger: true })) return;
+    const detail = property.valueCount > 0 ? t("\n{value1}개 {value2}의 값은 보존되며 화면에서만 숨겨집니다.", { value1: messageValue(property.valueCount), value2: messageValue(targetName) }) : "";
+    if (!await confirmAction({ title: t("{value1} 속성 제거", { value1: messageValue(targetName) }), message: t("'{value1}' 속성을 화면에서 제거합니다.{value2}", { value1: messageValue(systemPropertyLabel(property, t)), value2: messageValue(detail) }), confirmLabel: t("속성 제거"), danger: true })) return;
     const response = await fetch(`${endpoint}?id=${encodeURIComponent(property.id)}`, { method: "DELETE" });
     if (!response.ok) { onNotice(t("속성을 삭제하지 못했습니다.")); return; }
     applyCatalog(catalog.map((entry) => entry.id === property.id ? { ...entry, active: false } : entry));
@@ -5301,7 +5301,7 @@ function ProjectPropertyManager({ workspaceId, properties, teamMembers, readOnly
       const previewResponse = await fetch(endpoint, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: property.id, type: draft.type, options: draft.options, preview: true }) });
       const preview = await previewResponse.json() as { analysis?: { convertibleCount: number; incompatibleCount: number } };
       if (!previewResponse.ok || !preview.analysis) { setSaving(false); onNotice(t("속성 유형 변경을 확인하지 못했습니다.")); return; }
-      if (!await confirmAction({ title: "속성 유형 변경", message: `변환 가능 ${preview.analysis.convertibleCount}개 · 보존할 기존 값 ${preview.analysis.incompatibleCount}개`, confirmLabel: "유형 변경" })) { setSaving(false); return; }
+      if (!await confirmAction({ title: t("속성 유형 변경"), message: t("변환 가능 {value1}개 · 보존할 기존 값 {value2}개", { value1: messageValue(preview.analysis.convertibleCount), value2: messageValue(preview.analysis.incompatibleCount) }), confirmLabel: t("유형 변경") })) { setSaving(false); return; }
     }
     const response = await fetch(endpoint, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: property.id, name: draft.name, type: draft.type, options: draft.options, defaultValue: draft.defaultValue, sortOrder: draft.sortOrder, active: draft.active }) });
     setSaving(false);
@@ -5332,7 +5332,7 @@ function ProjectPropertyManager({ workspaceId, properties, teamMembers, readOnly
     applyCatalog(catalog.map((entry) => entry.id === property.id ? { ...entry, sortOrder: target.sortOrder } : entry.id === target.id ? { ...entry, sortOrder: property.sortOrder } : entry));
   }
 
-  return <section className="project-property-manager"><header><div><h2>{targetName} {t("속성")}</h2><p>{t("기본 속성과 커스텀 속성의 이름, 유형, 기본값과 순서를 관리합니다.")}</p></div><button disabled={readOnly} onClick={() => { setCreatingNew(true); setSelectedId(null); }}><Plus size={13} />{t("새 속성")}</button></header><div className="project-property-layout"><div className="project-property-catalog"><button type="button" className="property-removed-toggle secondary" aria-pressed={showRemoved} onClick={() => { setShowRemoved((value) => !value); setSelectedId(null); setCreatingNew(false); }}>{showRemoved ? t("사용 중인 속성 보기") : `제거한 속성 (${catalog.filter((property) => !property.active).length})`}</button>{!visibleCatalog.length && <p className="my-work-empty">{showRemoved ? t("제거한 속성이 없습니다.") : t("사용 중인 속성이 없습니다. 새 속성을 추가해 주세요.")}</p>}{visibleCatalog.map((property) => <article className={`project-property-item ${selected?.id === property.id ? "selected" : ""} ${property.active ? "" : "inactive"}`} key={property.id}><button type="button" className="project-property-select" onClick={() => { setSelectedId(property.id); setCreatingNew(false); }}><span className="property-type-icon">{property.type === "number" ? <Hash size={14} /> : property.type === "member" || property.type === "members" ? <Users size={14} /> : <TextCursorInput size={14} />}</span><div><b>{systemPropertyLabel(property, t)}{property.systemKey && <em>{t("기본")}</em>}</b><small>{propertyTypeLabel(property.type)} · {t("값 {count}개", { count: property.valueCount })}{!property.active && ` · ${t("제거됨")}`}</small></div></button><div className="property-order-actions"><button className="icon-button rotate-up" disabled={readOnly} onClick={() => void move(property, -1)} aria-label={`${systemPropertyLabel(property, t)} 위로`} title={t("위로")}><ChevronDown size={13} /></button><button className="icon-button" disabled={readOnly} onClick={() => void move(property, 1)} aria-label={`${systemPropertyLabel(property, t)} 아래로`} title={t("아래로")}><ChevronDown size={13} /></button></div></article>)}</div><div className="project-property-editor">{creatingNew ? <form className="project-property-create" onSubmit={create}><h3>{t("새 속성")}</h3><label><span>{t("이름")}</span><input disabled={readOnly} value={name} onChange={(event) => setName(event.target.value)} placeholder={t("예: 리스크, 예산, 출시일")} /></label><label><span>{t("유형")}</span><select disabled={readOnly} value={type} onChange={(event) => { setType(event.target.value as PropertyType); setDefaultValue(null); }}>{(["text", "number", "select", "date", "checkbox", "member", "members"] as PropertyType[]).map((entry) => <option value={entry} key={entry}>{propertyTypeLabel(entry)}</option>)}</select></label>{type === "select" && <label><span>{t("선택 옵션")}</span><input value={options} onChange={(event) => setOptions(event.target.value)} placeholder={t("쉼표로 구분")} /></label>}<PropertyDefaultInput type={type} options={options.split(",").map((entry) => entry.trim()).filter(Boolean)} value={defaultValue} members={teamMembers} disabled={readOnly} onChange={setDefaultValue} /><button className="primary-action" disabled={readOnly || !name.trim() || saving}><Plus size={14} />{saving ? t("추가 중") : t("속성 추가")}</button></form> : selected ? <PropertyDefinitionEditor key={`${selected.id}:${selected.name}:${selected.type}:${selected.active}:${String(selected.defaultValue)}`} property={selected} members={teamMembers} readOnly={readOnly} saving={saving} onSave={(draft) => void saveProperty(selected, draft)} onDeactivate={() => void deactivate(selected)} onRestore={() => void restore(selected)} /> : <EmptyState icon={Settings2} title={t("편집할 속성을 선택하세요")} />}</div></div></section>;
+  return <section className="project-property-manager"><header><div><h2>{targetName} {t("속성")}</h2><p>{t("기본 속성과 커스텀 속성의 이름, 유형, 기본값과 순서를 관리합니다.")}</p></div><button disabled={readOnly} onClick={() => { setCreatingNew(true); setSelectedId(null); }}><Plus size={13} />{t("새 속성")}</button></header><div className="project-property-layout"><div className="project-property-catalog"><button type="button" className="property-removed-toggle secondary" aria-pressed={showRemoved} onClick={() => { setShowRemoved((value) => !value); setSelectedId(null); setCreatingNew(false); }}>{showRemoved ? t("사용 중인 속성 보기") : t("제거한 속성 ({value1})", { value1: messageValue(catalog.filter((property) => !property.active).length) })}</button>{!visibleCatalog.length && <p className="my-work-empty">{showRemoved ? t("제거한 속성이 없습니다.") : t("사용 중인 속성이 없습니다. 새 속성을 추가해 주세요.")}</p>}{visibleCatalog.map((property) => <article className={`project-property-item ${selected?.id === property.id ? "selected" : ""} ${property.active ? "" : "inactive"}`} key={property.id}><button type="button" className="project-property-select" onClick={() => { setSelectedId(property.id); setCreatingNew(false); }}><span className="property-type-icon">{property.type === "number" ? <Hash size={14} /> : property.type === "member" || property.type === "members" ? <Users size={14} /> : <TextCursorInput size={14} />}</span><div><b>{systemPropertyLabel(property, t)}{property.systemKey && <em>{t("기본")}</em>}</b><small>{propertyTypeLabel(property.type)} · {t("값 {count}개", { count: property.valueCount })}{!property.active && ` · ${t("제거됨")}`}</small></div></button><div className="property-order-actions"><button className="icon-button rotate-up" disabled={readOnly} onClick={() => void move(property, -1)} aria-label={t("{value1} 위로", { value1: messageValue(systemPropertyLabel(property, t)) })} title={t("위로")}><ChevronDown size={13} /></button><button className="icon-button" disabled={readOnly} onClick={() => void move(property, 1)} aria-label={t("{value1} 아래로", { value1: messageValue(systemPropertyLabel(property, t)) })} title={t("아래로")}><ChevronDown size={13} /></button></div></article>)}</div><div className="project-property-editor">{creatingNew ? <form className="project-property-create" onSubmit={create}><h3>{t("새 속성")}</h3><label><span>{t("이름")}</span><input disabled={readOnly} value={name} onChange={(event) => setName(event.target.value)} placeholder={t("예: 리스크, 예산, 출시일")} /></label><label><span>{t("유형")}</span><select disabled={readOnly} value={type} onChange={(event) => { setType(event.target.value as PropertyType); setDefaultValue(null); }}>{(["text", "number", "select", "date", "checkbox", "member", "members"] as PropertyType[]).map((entry) => <option value={entry} key={entry}>{propertyTypeLabel(entry)}</option>)}</select></label>{type === "select" && <label><span>{t("선택 옵션")}</span><input value={options} onChange={(event) => setOptions(event.target.value)} placeholder={t("쉼표로 구분")} /></label>}<PropertyDefaultInput type={type} options={options.split(",").map((entry) => entry.trim()).filter(Boolean)} value={defaultValue} members={teamMembers} disabled={readOnly} onChange={setDefaultValue} /><button className="primary-action" disabled={readOnly || !name.trim() || saving}><Plus size={14} />{saving ? t("추가 중") : t("속성 추가")}</button></form> : selected ? <PropertyDefinitionEditor key={`${selected.id}:${selected.name}:${selected.type}:${selected.active}:${String(selected.defaultValue)}`} property={selected} members={teamMembers} readOnly={readOnly} saving={saving} onSave={(draft) => void saveProperty(selected, draft)} onDeactivate={() => void deactivate(selected)} onRestore={() => void restore(selected)} /> : <EmptyState icon={Settings2} title={t("편집할 속성을 선택하세요")} />}</div></div></section>;
 }
 
 function PropertyDefinitionEditor({ property, members, readOnly, saving, onSave, onDeactivate, onRestore }: { property: PropertyDefinition; members: TeamMember[]; readOnly: boolean; saving: boolean; onSave: (property: PropertyDefinition) => void; onDeactivate: () => void; onRestore: () => void }) {
@@ -5403,9 +5403,9 @@ function ProjectTemplateManager({ workspaceId, readOnly, onNotice }: { workspace
   }
 
   async function duplicateTemplate(template: ProjectTemplate) {
-    let name = `${template.name} 복사본`;
+    let name = t("{value1} 복사본", { value1: messageValue(template.name) });
     let suffix = 2;
-    while (templates?.some((entry) => entry.name === name)) name = `${template.name} 복사본 ${suffix++}`;
+    while (templates?.some((entry) => entry.name === name)) name = t("{value1} 복사본 {value2}", { value1: messageValue(template.name), value2: messageValue(suffix++) });
     const response = await fetch("/api/project-templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, description: template.description, content: template.content, plainText: template.plainText }) });
     const data = await response.json() as { template?: ProjectTemplate };
     if (!response.ok || !data.template) { onNotice(t("템플릿을 복제하지 못했습니다.")); return; }
@@ -5414,7 +5414,7 @@ function ProjectTemplateManager({ workspaceId, readOnly, onNotice }: { workspace
   }
 
   async function removeTemplate(template: ProjectTemplate) {
-    if (!await confirmAction({ title: "본문 템플릿 삭제", message: `'${template.name}' 템플릿을 삭제합니다.\n이미 적용된 Project 문서는 바뀌지 않습니다.`, confirmLabel: "템플릿 삭제", danger: true })) return;
+    if (!await confirmAction({ title: t("본문 템플릿 삭제"), message: t("'{value1}' 템플릿을 삭제합니다.\n이미 적용된 Project 문서는 바뀌지 않습니다.", { value1: messageValue(template.name) }), confirmLabel: t("템플릿 삭제"), danger: true })) return;
     const response = await fetch(`/api/project-templates?id=${encodeURIComponent(template.id)}`, { method: "DELETE" });
     if (!response.ok) { onNotice(t("템플릿을 삭제하지 못했습니다.")); return; }
     setTemplates((current) => current?.filter((entry) => entry.id !== template.id) ?? []);
@@ -5460,7 +5460,7 @@ function WorkspaceAvatarDialog({ workspace, onClose, onChanged, onNotice }: {
         return { blob, url: URL.createObjectURL(blob) };
       });
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "이미지를 읽지 못했습니다.");
+      setError(loadError instanceof Error ? loadError.message : t("이미지를 읽지 못했습니다."));
     } finally {
       if (inputRef.current) inputRef.current.value = "";
     }
@@ -5480,7 +5480,7 @@ function WorkspaceAvatarDialog({ workspace, onClose, onChanged, onNotice }: {
       setPreview(null);
       onNotice(t("워크스페이스 이미지를 적용했습니다."), "success");
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "이미지를 저장하지 못했습니다.");
+      setError(uploadError instanceof Error ? uploadError.message : t("이미지를 저장하지 못했습니다."));
     } finally {
       setBusy(null);
     }
@@ -5502,7 +5502,7 @@ function WorkspaceAvatarDialog({ workspace, onClose, onChanged, onNotice }: {
       setPreview(null);
       onNotice(t("AI 이미지를 만들어 바로 적용했습니다."), "success");
     } catch (generationError) {
-      setError(generationError instanceof Error ? generationError.message : "AI 이미지를 만들지 못했습니다.");
+      setError(generationError instanceof Error ? generationError.message : t("AI 이미지를 만들지 못했습니다."));
     } finally {
       setBusy(null);
     }
@@ -5510,7 +5510,7 @@ function WorkspaceAvatarDialog({ workspace, onClose, onChanged, onNotice }: {
 
   async function removeImage() {
     if (busy || !workspace.avatarUrl) return;
-    if (!await confirmAction({ title: "워크스페이스 이미지 초기화", message: "현재 이미지를 지우고 워크스페이스 이름의 첫 글자로 되돌립니다.", confirmLabel: "이미지 지우기", danger: true })) return;
+    if (!await confirmAction({ title: t("워크스페이스 이미지 초기화"), message: t("현재 이미지를 지우고 워크스페이스 이름의 첫 글자로 되돌립니다."), confirmLabel: t("이미지 지우기"), danger: true })) return;
     setBusy("remove");
     setError("");
     try {
@@ -5521,7 +5521,7 @@ function WorkspaceAvatarDialog({ workspace, onClose, onChanged, onNotice }: {
       setPreview(null);
       onNotice(t("워크스페이스 이미지를 초기화했습니다."), "success");
     } catch (removeError) {
-      setError(removeError instanceof Error ? removeError.message : "이미지를 지우지 못했습니다.");
+      setError(removeError instanceof Error ? removeError.message : t("이미지를 지우지 못했습니다."));
     } finally {
       setBusy(null);
     }
@@ -5598,7 +5598,7 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
     <div className="workspace-settings-layout">
       <nav className="workspace-settings-nav" aria-label={t("워크스페이스 설정 메뉴")}>{visibleTabs.map((entry) => { const Icon = entry.icon; return <button key={entry.id} className={activeTab === entry.id ? "active" : ""} aria-current={activeTab === entry.id ? "page" : undefined} onClick={() => onTabChange(entry.id)}><Icon size={15} /><span>{entry.label}</span>{entry.count !== undefined && <b>{entry.count}</b>}</button>; })}</nav>
       <section className="workspace-settings-content">
-        {activeTab === "general" && <div className="workspace-settings-section"><header><h3>{t("일반")}</h3></header><div className="workspace-profile-card"><WorkspaceAvatar workspace={currentWorkspace} className="workspace-profile-avatar" /><div><b>{currentWorkspace.name}</b><span>{currentWorkspace.personal ? t("개인 워크스페이스") : t("팀 워크스페이스")}</span><small>{t("내 권한 · {role}", { role: teamRoleLabel(currentWorkspace.role) })}</small></div>{!currentWorkspace.personal && canManageWorkspace && <button onClick={onOpenAvatar}><ImageIcon size={14} />{t("이미지 변경")}</button>}</div><WorkspaceIdentity workspaceId={currentWorkspace.id} onNameChanged={onIdentityChanged} />{!canManageWorkspace && <div className="workspace-settings-note"><Eye size={16} /><p>{t("이름과 주소 변경은 소유자 또는 관리자에게 요청해 주세요.")}</p></div>}</div>}
+        {activeTab === "general" && <div className="workspace-settings-section"><header><h3>{t("일반")}</h3></header><div className="workspace-profile-card"><WorkspaceAvatar workspace={currentWorkspace} className="workspace-profile-avatar" /><div><b>{currentWorkspace.name}</b><span>{currentWorkspace.personal ? t("개인 워크스페이스") : t("팀 워크스페이스")}</span><small>{t("내 권한 · {role}", { role: teamRoleLabel(currentWorkspace.role) })}</small></div>{!currentWorkspace.personal && canManageWorkspace && <button onClick={onOpenAvatar}><ImageIcon size={14} />{t("이미지 변경")}</button>}</div><WorkspaceIdentity workspaceId={currentWorkspace.id} onNameChanged={onIdentityChanged} />{!canManageWorkspace && <div className="workspace-settings-note"><Eye size={16} /><p>{t("읽기 전용")} · {t("이름과 주소 변경은 소유자 또는 관리자에게 요청해 주세요.")}</p></div>}</div>}
         {activeTab === "members" && <div className="workspace-settings-section team-settings-section"><header><h3>{t("멤버")}</h3><p>{t("초대, 역할과 워크스페이스 구성원을 관리합니다.")}</p></header><TeamPanel key={`${currentWorkspace.id}:members`} initialTeam={teamData} initialTab="members" initialGroupHandle={null} embedded onTeamChange={onTeamChange} onClose={onClose} onNotice={onNotice} /></div>}
         {activeTab === "groups" && <div className="workspace-settings-section team-settings-section"><header><h3>{t("그룹")}</h3><p>{t("조직 그룹과 구성원, Lead 권한을 관리합니다.")}</p></header><TeamPanel key={`${currentWorkspace.id}:groups`} initialTeam={teamData} initialTab="groups" initialGroupHandle={requestedGroupHandle} embedded onTeamChange={onTeamChange} onClose={onClose} onNotice={onNotice} /></div>}
         {activeTab === "projects" && <div className="workspace-project-settings"><header className="workspace-settings-section-header"><div><h3>{t("Project 설정")}</h3><p>{t("모든 Project에서 함께 사용하는 속성과 본문 템플릿입니다.")}</p></div><div className="workspace-project-tabs" role="tablist" aria-label={t("Project 설정")}><button role="tab" aria-selected={projectSettingsTab === "properties"} className={projectSettingsTab === "properties" ? "active" : ""} onClick={() => setProjectSettingsTab("properties")}><Settings2 size={14} />{t("속성")}</button><button role="tab" aria-selected={projectSettingsTab === "templates"} className={projectSettingsTab === "templates" ? "active" : ""} onClick={() => setProjectSettingsTab("templates")}><BookTemplate size={14} />{t("템플릿")}</button></div></header>{projectSettingsTab === "properties" ? <ProjectPropertyManager workspaceId={currentWorkspace.id} properties={properties} teamMembers={teamMembers} readOnly={!canManageWorkspace} onChanged={(next) => onPropertiesChanged([...next].sort((left, right) => left.sortOrder - right.sortOrder))} onNotice={onNotice} /> : <ProjectTemplateManager workspaceId={currentWorkspace.id} readOnly={!canManageWorkspace} onNotice={onNotice} />}</div>}
@@ -5729,7 +5729,7 @@ function TeamPanel({ initialTeam, initialTab, initialGroupHandle, embedded = fal
     setEmail("");
     setInviteDisplayName("");
     setError("");
-    onNotice(data.invitation.deliveryStatus === "sent" ? "초대메일을 보냈습니다." : "초대는 만들었지만 메일을 보내지 못했습니다. 링크를 복사해 전달해 주세요.");
+    onNotice(data.invitation.deliveryStatus === "sent" ? t("초대메일을 보냈습니다.") : t("초대는 만들었지만 메일을 보내지 못했습니다. 링크를 복사해 전달해 주세요."));
   }
 
   async function invitationAction(invitation: TeamInvitation, action: "resend" | "link") {
@@ -5748,7 +5748,7 @@ function TeamPanel({ initialTeam, initialTab, initialGroupHandle, embedded = fal
       await navigator.clipboard.writeText(data.inviteUrl);
       onNotice(t("30일 동안 유효한 새 초대 링크를 복사했습니다."));
     } else {
-      onNotice(data.invitation.deliveryStatus === "sent" ? "초대메일을 다시 보냈습니다." : "메일 발송에 실패했습니다. 링크 복사를 이용해 주세요.");
+      onNotice(data.invitation.deliveryStatus === "sent" ? t("초대메일을 다시 보냈습니다.") : t("메일 발송에 실패했습니다. 링크 복사를 이용해 주세요."));
     }
   }
 
@@ -5803,7 +5803,7 @@ function TeamPanel({ initialTeam, initialTab, initialGroupHandle, embedded = fal
     applyMembers((team?.members ?? []).map((entry) => entry.id === data.member!.id ? data.member! : entry));
     cancelMemberNameEdit();
     setError("");
-    onNotice(data.member.isCurrent ? "내 실명을 저장했습니다." : "멤버 실명을 저장했습니다.");
+    onNotice(data.member.isCurrent ? t("내 실명을 저장했습니다.") : t("멤버 실명을 저장했습니다."));
   }
 
   async function remove(member: TeamMember) {
@@ -5846,7 +5846,7 @@ function TeamPanel({ initialTeam, initialTab, initialGroupHandle, embedded = fal
   const panelContent = (requestClose?: (reason?: "close-button") => void) => (
       <aside className={`property-panel team-panel ${embedded ? "team-panel-embedded" : ""}`}>
         {!embedded && <header>
-          <div className="team-panel-heading">{team && <WorkspaceAvatar workspace={team.workspace} />}<span><h2>{t("팀")}</h2><p>{team ? `${team.workspace.name} · ${team.members.length}명 · ${activeGroupCount}개 그룹` : t("불러오는 중")}</p></span></div>
+          <div className="team-panel-heading">{team && <WorkspaceAvatar workspace={team.workspace} />}<span><h2>{t("팀")}</h2><p>{team ? t("{value1} · {value2}명 · {value3}개 그룹", { value1: messageValue(team.workspace.name), value2: messageValue(team.members.length), value3: messageValue(activeGroupCount) }) : t("불러오는 중")}</p></span></div>
           <button className="icon-button" onClick={() => requestClose?.("close-button")} aria-label={t("닫기")}><X size={17} /></button>
         </header>}
         {!embedded && <div className="team-tabs" role="tablist" aria-label={t("팀 관리")}>
@@ -5873,19 +5873,19 @@ function TeamPanel({ initialTeam, initialTab, initialGroupHandle, embedded = fal
                     <div className="team-member-identity">
                       {editingName ? (
                         <form className="member-name-editor" onSubmit={(event) => void saveMemberName(event, member)}>
-                          <input ref={memberNameInputRef} value={memberNameDraft} onChange={(event) => setMemberNameDraft(event.target.value)} maxLength={80} aria-label={`${member.displayName} 실명 편집`} />
+                          <input ref={memberNameInputRef} value={memberNameDraft} onChange={(event) => setMemberNameDraft(event.target.value)} maxLength={80} aria-label={t("{value1} 실명 편집", { value1: messageValue(member.displayName) })} />
                           <button disabled={!memberNameDraft.trim() || saving} aria-label={t("실명 저장")} title={t("실명 저장")}><Check size={12} /></button>
                           <button type="button" onClick={cancelMemberNameEdit} aria-label={t("수정 취소")} title={t("수정 취소")}><X size={12} /></button>
                         </form>
                       ) : canEditName ? (
-                        <button className="member-name-button" onClick={() => editMemberName(member)} aria-label={`${member.displayName} 실명 수정`} title={t("실명 수정")}>
+                        <button className="member-name-button" onClick={() => editMemberName(member)} aria-label={t("{value1} 실명 수정", { value1: messageValue(member.displayName) })} title={t("실명 수정")}>
                           <span>{member.displayName}{member.isCurrent && <em>{t("나")}</em>}</span><Pencil size={11} />
                         </button>
                       ) : <b>{member.displayName}{member.isCurrent && <em>{t("나")}</em>}</b>}
                       <small>{member.email || (member.role === "owner" ? "Workspace owner" : t("이메일 없음"))}</small>
                     </div>
                     <span className="member-status member-active">{t("활성")}</span>
-                    {team.canManage && member.role !== "owner" ? <select value={member.role} onChange={(event) => void changeRole(member, event.target.value as Exclude<TeamRole, "owner">)} aria-label={`${member.displayName} 역할`}><option value="admin">{t("Admin")}</option><option value="member">{t("Member")}</option><option value="viewer">{t("Viewer")}</option></select> : <span className="member-role">{teamRoleLabel(member.role)}</span>}
+                    {team.canManage && member.role !== "owner" ? <select value={member.role} onChange={(event) => void changeRole(member, event.target.value as Exclude<TeamRole, "owner">)} aria-label={t("{value1} 역할", { value1: messageValue(member.displayName) })}><option value="admin">{t("Admin")}</option><option value="member">{t("Member")}</option><option value="viewer">{t("Viewer")}</option></select> : <span className="member-role">{teamRoleLabel(member.role)}</span>}
                     <div className="team-member-actions">
                       {team.canManage && member.role !== "owner" && !member.isCurrent && <button className="icon-button danger" onClick={() => void remove(member)} aria-label={t("팀에서 제거")} title={t("팀에서 제거")}><Trash2 size={13} /></button>}
                     </div>
@@ -5901,9 +5901,9 @@ function TeamPanel({ initialTeam, initialTab, initialGroupHandle, embedded = fal
                   <div><b>{invitation.displayName}</b><small>{invitation.email} · {teamRoleLabel(invitation.role)}</small></div>
                   <span className={`invitation-delivery delivery-${invitation.deliveryStatus}`}>{invitation.status === "expired" ? t("만료됨") : invitation.deliveryStatus === "sent" ? t("메일 발송됨") : invitation.deliveryStatus === "failed" ? t("발송 실패") : invitation.deliveryStatus === "unavailable" ? t("링크 전달 필요") : t("미발송")}</span>
                   {team.canManage && <div className="team-member-actions">
-                    <button className="icon-button" onClick={() => void invitationAction(invitation, "link")} aria-label={`${invitation.displayName} 초대 링크 복사`} title={t("새 초대 링크 복사")}><Copy size={13} /></button>
-                    <button className="icon-button" onClick={() => void invitationAction(invitation, "resend")} aria-label={`${invitation.displayName} 초대메일 재전송`} title={t("초대메일 재전송")}><RotateCcw size={13} /></button>
-                    <button className="icon-button danger" onClick={() => void revokeInvitation(invitation)} aria-label={`${invitation.displayName} 초대 취소`} title={t("초대 취소")}><Trash2 size={13} /></button>
+                    <button className="icon-button" onClick={() => void invitationAction(invitation, "link")} aria-label={t("{value1} 초대 링크 복사", { value1: messageValue(invitation.displayName) })} title={t("새 초대 링크 복사")}><Copy size={13} /></button>
+                    <button className="icon-button" onClick={() => void invitationAction(invitation, "resend")} aria-label={t("{value1} 초대메일 재전송", { value1: messageValue(invitation.displayName) })} title={t("초대메일 재전송")}><RotateCcw size={13} /></button>
+                    <button className="icon-button danger" onClick={() => void revokeInvitation(invitation)} aria-label={t("{value1} 초대 취소", { value1: messageValue(invitation.displayName) })} title={t("초대 취소")}><Trash2 size={13} /></button>
                   </div>}
                 </div>
               ))}</div>
@@ -5959,11 +5959,11 @@ function GroupDetail({ detail, team, onBack, onChange, onGroupChange, onDeleted,
     const response = await fetch("/api/groups", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: detail.group.id, archived }) });
     const data = await response.json() as { group?: WorkspaceGroup; error?: string };
     if (!response.ok || !data.group) { setError(apiError(data, "그룹 상태를 변경하지 못했습니다.")); return; }
-    onGroupChange(data.group); onChange({ ...detail, group: data.group, canManageMembers: !archived && (team.canManage || data.group.isLead) }); onNotice(archived ? "그룹을 보관했습니다." : "그룹을 복구했습니다.");
+    onGroupChange(data.group); onChange({ ...detail, group: data.group, canManageMembers: !archived && (team.canManage || data.group.isLead) }); onNotice(archived ? t("그룹을 보관했습니다.") : t("그룹을 복구했습니다."));
   }
 
   async function permanentlyDelete() {
-    if (!await confirmAction({ title: "그룹 삭제", message: `'${detail.group.name}' 그룹의 멤버와 설정이 함께 삭제됩니다.`, confirmLabel: "그룹 삭제", danger: true })) return;
+    if (!await confirmAction({ title: t("그룹 삭제"), message: t("'{value1}' 그룹의 멤버와 설정이 함께 삭제됩니다.", { value1: messageValue(detail.group.name) }), confirmLabel: t("그룹 삭제"), danger: true })) return;
     setError("");
     if (!detail.group.archived) {
       const archiveResponse = await fetch("/api/groups", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: detail.group.id, archived: true }) });
@@ -5985,7 +5985,7 @@ function GroupDetail({ detail, team, onBack, onChange, onGroupChange, onDeleted,
       added.push(data.member);
     }
     const next = { ...detail, group: { ...detail.group, memberCount: detail.group.memberCount + added.length }, members: [...detail.members, ...added] };
-    onChange(next); onGroupChange(next.group); setMemberIds([]); onNotice(`${added.length}명을 그룹에 추가했습니다.`);
+    onChange(next); onGroupChange(next.group); setMemberIds([]); onNotice(t("{value1}명을 그룹에 추가했습니다.", { value1: messageValue(added.length) }));
   }
 
   async function changeGroupRole(member: GroupMember, role: GroupRole) {
@@ -6010,7 +6010,7 @@ function GroupDetail({ detail, team, onBack, onChange, onGroupChange, onDeleted,
       const next = { ...detail, group, canManageMembers: !group.archived && (team.canManage || group.isLead), members: detail.members.filter((entry) => entry.memberId !== member.memberId) };
       onChange(next); onGroupChange(group);
     }
-    onNotice(member.isCurrent ? "그룹에서 나갔습니다." : "그룹에서 멤버를 제거했습니다.");
+    onNotice(member.isCurrent ? t("그룹에서 나갔습니다.") : t("그룹에서 멤버를 제거했습니다."));
   }
 
   return (
@@ -6077,8 +6077,8 @@ function GroupDetail({ detail, team, onBack, onChange, onGroupChange, onDeleted,
           {detail.members.map((member) => (
             <div className="group-member-row" key={member.memberId}>
               <span className="team-avatar">{memberInitial(member)}</span>
-              <div><b>{member.displayName}{member.isCurrent && <em>{t("나")}</em>}</b><small>{member.status === "invited" ? `${member.email} · 초대 대기` : member.email || teamRoleLabel(member.workspaceRole)}</small></div>
-              {detail.canManageMembers ? <select value={member.groupRole} onChange={(event) => void changeGroupRole(member, event.target.value as GroupRole)} aria-label={`${member.displayName} 그룹 역할`}><option value="lead" disabled={member.workspaceRole === "viewer"}>Lead</option><option value="member">{t("Member")}</option></select> : <span className="member-role">{member.groupRole === "lead" ? "Lead" : t("Member")}</span>}
+              <div><b>{member.displayName}{member.isCurrent && <em>{t("나")}</em>}</b><small>{member.status === "invited" ? t("{value1} · 초대 대기", { value1: messageValue(member.email) }) : member.email || teamRoleLabel(member.workspaceRole)}</small></div>
+              {detail.canManageMembers ? <select value={member.groupRole} onChange={(event) => void changeGroupRole(member, event.target.value as GroupRole)} aria-label={t("{value1} 그룹 역할", { value1: messageValue(member.displayName) })}><option value="lead" disabled={member.workspaceRole === "viewer"}>Lead</option><option value="member">{t("Member")}</option></select> : <span className="member-role">{member.groupRole === "lead" ? "Lead" : t("Member")}</span>}
               {detail.canManageMembers && <button className="icon-button danger" onClick={() => void removeMember(member)} aria-label={t("그룹에서 제거")} title={t("그룹에서 제거")}><X size={13} /></button>}
             </div>
           ))}
@@ -6139,7 +6139,7 @@ const managementBotSignalMeta: Record<ManagementBotSignal, { label: string; deta
 function managementScheduleSummary(settings: Pick<ManagementBotSettings, "weekdays" | "reportTime" | "channelId" | "channelName" | "signals">) {
   const weekdays = settings.weekdays.join(",") === "1,2,3,4,5" ? "평일" : settings.weekdays.map((day) => ["일", "월", "화", "수", "목", "금", "토"][day]).join("·");
   const channel = settings.channelId ? `#${settings.channelName || settings.channelId}` : "채널 미선택";
-  return `${weekdays} ${settings.reportTime} · ${channel} · ${settings.signals.length}개 점검`;
+  return t("{value1} {value2} · {value3} · {value4}개 점검", { value1: messageValue(weekdays), value2: messageValue(settings.reportTime), value3: messageValue(channel), value4: messageValue(settings.signals.length) });
 }
 
 function WorkspaceManagementSummary() {
@@ -6161,7 +6161,7 @@ function WorkspaceManagementSummary() {
         if (loadError instanceof DOMException && loadError.name === "AbortError") {
           return;
         }
-        setError(loadError instanceof Error ? loadError.message : "관리 요약을 불러오지 못했습니다.");
+        setError(loadError instanceof Error ? loadError.message : t("관리 요약을 불러오지 못했습니다."));
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -6225,18 +6225,18 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: draft.enabled, weekdays: draft.weekdays, reportTime: draft.reportTime, timezone: draft.timezone, channelId: draft.channelId, signals: draft.signals }),
       });
-      const next = await response.json() as ManagementBotData & { error?: string };
-      if (!response.ok || !next.settings) throw new Error(next.error || "관리 봇 설정을 저장하지 못했습니다.");
+      const next = await response.json() as ManagementBotData & { error?: string; messageCode?: string };
+      if (!response.ok || !next.settings) throw new Error(apiError(next, "관리 봇 설정을 저장하지 못했습니다."));
       setData(next);
       setDraft(next.settings);
       onSummary(!next.slackConnected ? "연결 필요" : next.settings.enabled ? next.settings.lastError ? "전송 확인 필요" : "사용 중" : "중지", managementScheduleSummary(next.settings));
       if (sendTest) {
         const testResponse = await fetch("/api/workspace-management-bot", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "test" }) });
-        const testData = await testResponse.json() as { sent?: boolean; snapshot?: ManagementBotSnapshot; error?: string };
-        if (!testResponse.ok || !testData.sent) throw new Error(testData.error || "테스트 리포트를 보내지 못했습니다.");
+        const testData = await testResponse.json() as { sent?: boolean; snapshot?: ManagementBotSnapshot; error?: string; messageCode?: string };
+        if (!testResponse.ok || !testData.sent) throw new Error(apiError(testData, "테스트 리포트를 보내지 못했습니다."));
         onNotice(t("선택한 Slack 채널로 관리 리포트 테스트를 보냈습니다."));
       } else {
-        onNotice(next.settings.enabled ? "워크스페이스 관리 봇을 저장했습니다." : "워크스페이스 관리 봇을 껐습니다.");
+        onNotice(next.settings.enabled ? t("워크스페이스 관리 봇을 저장했습니다.") : t("워크스페이스 관리 봇을 껐습니다."));
       }
     } catch (saveError) {
       setError(slackErrorMessage(saveError, "관리 봇 설정을 처리하지 못했습니다."));
@@ -6269,7 +6269,7 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
         <div className="management-bot-toggle"><div><b>{t("매일 워크스페이스 관리 리포트")}</b><p>{t("선택한 요일과 시간에 최신 데이터를 다시 계산합니다.")}</p></div><label><input type="checkbox" aria-label={t("워크스페이스 관리 봇 사용")} checked={draft.enabled} disabled={!canManage || !data.slackConnected} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /><span aria-hidden="true" /><span className="sr-only">{t("워크스페이스 관리 봇 사용")}</span></label></div>
         <div className="management-schedule-grid core"><label><span>{t("발송 시간")}</span><input type="time" step="900" value={draft.reportTime} disabled={!canManage} onChange={(event) => setDraft({ ...draft, reportTime: event.target.value })} /></label><label className="management-channel-field"><span>{t("Slack 발송 대상")}</span><select aria-label={t("Slack 발송 채널")} value={draft.channelId} disabled={!canManage || !data.slackConnected} onChange={(event) => setDraft({ ...draft, channelId: event.target.value })}><option value="">{t("채널 선택")}</option>{draft.channelId && !data.channels.some((channel) => channel.id === draft.channelId) && <option value={draft.channelId}>#{draft.channelName || draft.channelId}</option>}{data.channels.map((channel) => <option value={channel.id} key={channel.id}>#{channel.name}{channel.isPrivate ? ` · ${t("비공개")}` : ""}</option>)}</select></label></div>
         <div className="management-weekdays" aria-label={t("관리 리포트 발송 요일")}>{weekdayLabels.map((label, day) => <button type="button" className={draft.weekdays.includes(day) ? "active" : ""} aria-pressed={draft.weekdays.includes(day)} disabled={!canManage} onClick={() => toggleDay(day)} key={label}>{label}</button>)}</div>
-        <details className="bot-advanced-settings"><summary>{t("고급 설정")}<ChevronDown size={14} /></summary><div><label className="management-timezone-field"><span>{t("시간대")}</span><select value={draft.timezone} disabled={!canManage} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label><fieldset className="management-signal-picker"><legend>{t("정리할 정보와 Urgency")}</legend>{(Object.keys(managementBotSignalMeta) as ManagementBotSignal[]).map((signal) => { const meta = managementBotSignalMeta[signal]; return <label key={signal} className={meta.tone}><input type="checkbox" checked={draft.signals.includes(signal)} disabled={!canManage} onChange={() => toggleSignal(signal)} /><span><b>{meta.label}</b><small>{meta.detail}</small></span><span className="sr-only">{t("관리 리포트 정리 항목 선택")}</span></label>; })}</fieldset>{(draft.lastSentAt || draft.lastError) && <p className={`management-bot-last ${draft.lastError ? "error" : ""}`}>{draft.lastError ? `최근 전송 실패 · ${slackErrorMessage(draft.lastError)}` : `최근 전송 · ${formatDateTime(draft.lastSentAt!)}`}</p>}</div></details>
+        <details className="bot-advanced-settings"><summary>{t("고급 설정")}<ChevronDown size={14} /></summary><div><label className="management-timezone-field"><span>{t("시간대")}</span><select value={draft.timezone} disabled={!canManage} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label><fieldset className="management-signal-picker"><legend>{t("정리할 정보와 Urgency")}</legend>{(Object.keys(managementBotSignalMeta) as ManagementBotSignal[]).map((signal) => { const meta = managementBotSignalMeta[signal]; return <label key={signal} className={meta.tone}><input type="checkbox" checked={draft.signals.includes(signal)} disabled={!canManage} onChange={() => toggleSignal(signal)} /><span><b>{meta.label}</b><small>{meta.detail}</small></span><span className="sr-only">{t("관리 리포트 정리 항목 선택")}</span></label>; })}</fieldset>{(draft.lastSentAt || draft.lastError) && <p className={`management-bot-last ${draft.lastError ? "error" : ""}`}>{draft.lastError ? t("최근 전송 실패 · {value1}", { value1: messageValue(slackErrorMessage(draft.lastError)) }) : t("최근 전송 · {value1}", { value1: messageValue(formatDateTime(draft.lastSentAt!)) })}</p>}</div></details>
         {error && <p className="management-bot-error" role="alert">{error}</p>}
         {canManage && <div className="management-bot-actions"><button onClick={() => void save(false)} disabled={saving || draft.signals.length === 0 || draft.weekdays.length === 0}>{saving ? t("저장 중") : t("설정 저장")}</button><button onClick={() => void save(true)} disabled={saving || !draft.channelId || draft.signals.length === 0}>{t("테스트 보내기")}</button></div>}
     </div>
@@ -6356,7 +6356,7 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
     </header>
     <div className="workspace-integration-pane">
       <section className="integration-service-card slack-service-card" aria-labelledby="workspace-slack-heading">
-      <header><span className="integration-service-icon slack"><Hash size={19} /></span><div><h3 id="workspace-slack-heading">Slack</h3><p>{slackConnected ? connectedSlackName : `${workspaceName}에 사용할 Slack 워크스페이스`}</p></div><strong className={`integration-status-badge ${slackState}`}>{loading && !slack ? t("확인 중") : slackAction}</strong></header>
+      <header><span className="integration-service-icon slack"><Hash size={19} /></span><div><h3 id="workspace-slack-heading">Slack</h3><p>{slackConnected ? connectedSlackName : t("{value1}에 사용할 Slack 워크스페이스", { value1: messageValue(workspaceName) })}</p></div><strong className={`integration-status-badge ${slackState}`}>{loading && !slack ? t("확인 중") : slackAction}</strong></header>
       {slackOAuthIssue && <div className={`integration-state-message ${slackOAuthIssueCopy[slackOAuthIssue].tone}`} role="alert"><AlertTriangle size={17} /><div><b>{slackOAuthIssueCopy[slackOAuthIssue].title}</b><p>{slackOAuthIssueCopy[slackOAuthIssue].detail}</p></div></div>}
       {!slackConnected && <section className="slack-one-button-connect" aria-label={t("Slack 팀 연결")}>
         <div><b>{slackState === "service_unavailable" || slackState === "error" ? t("Slack 연결을 준비하고 있습니다") : t("팀 Slack을 연결하세요")}</b><p>{slackState === "error" ? t("연결 상태를 불러오지 못했습니다.") : slack?.statusMessage || t("Slack 사용자와 채널은 승인 후 자동으로 불러옵니다.")}</p></div>
@@ -6433,7 +6433,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
       setChannels(nextAdmin.channels);
       const targetCount = nextAdmin.members.filter((member) => member.linked && member.preference.enabled).length;
       const days = nextAdmin.settings.weekdays.join(",") === "1,2,3,4,5" ? "평일" : nextAdmin.settings.weekdays.map((day) => ["일", "월", "화", "수", "목", "금", "토"][day]).join("·");
-      onSummary(dailyDeliveryLabel((nextAdmin.delivery ?? dailyDeliveryHealth(nextAdmin.settings, nextAdmin.members)).status), `${days} ${nextAdmin.settings.reminderTime} · ${targetCount}명 · ${nextAdmin.channels.length ? nextAdmin.channels.map((channel) => `#${channel.name}`).join(", ") : "DM 전용"}`);
+      onSummary(dailyDeliveryLabel((nextAdmin.delivery ?? dailyDeliveryHealth(nextAdmin.settings, nextAdmin.members)).status), t("{value1} {value2} · {value3}명 · {value4}", { value1: messageValue(days), value2: messageValue(nextAdmin.settings.reminderTime), value3: messageValue(targetCount), value4: messageValue(nextAdmin.channels.length ? nextAdmin.channels.map((channel) => `#${channel.name}`).join(", ") : "DM 전용") }));
       setLoadError(false);
     }).catch((error: unknown) => {
       if (error instanceof DOMException && error.name === "AbortError") return;
@@ -6504,9 +6504,9 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
       setEditing(false);
       const targetCount = data.admin.members.filter((member) => member.linked && member.preference.enabled).length;
       const days = data.admin.settings.weekdays.join(",") === "1,2,3,4,5" ? "평일" : data.admin.settings.weekdays.map((day) => ["일", "월", "화", "수", "목", "금", "토"][day]).join("·");
-      onSummary(dailyDeliveryLabel((data.admin.delivery ?? dailyDeliveryHealth(data.admin.settings, data.admin.members)).status), `${days} ${data.admin.settings.reminderTime} · ${targetCount}명 · ${data.admin.channels.length ? data.admin.channels.map((channel) => `#${channel.name}`).join(", ") : "DM 전용"}`);
+      onSummary(dailyDeliveryLabel((data.admin.delivery ?? dailyDeliveryHealth(data.admin.settings, data.admin.members)).status), t("{value1} {value2} · {value3}명 · {value4}", { value1: messageValue(days), value2: messageValue(data.admin.settings.reminderTime), value3: messageValue(targetCount), value4: messageValue(data.admin.channels.length ? data.admin.channels.map((channel) => `#${channel.name}`).join(", ") : "DM 전용") }));
       const failed = data.schedules.some((entry) => entry.status === "failed") || data.tests.dm.status === "failed" || data.tests.channels.some((entry) => entry.status === "failed");
-      onNotice(failed ? "설정은 저장했지만 예약 또는 테스트가 실패했습니다. 아래 실패 상태를 확인해 주세요." : "Slack 연결과 데일리 테스트를 완료했습니다.");
+      onNotice(failed ? t("설정은 저장했지만 예약 또는 테스트가 실패했습니다. 아래 실패 상태를 확인해 주세요.") : t("Slack 연결과 데일리 테스트를 완료했습니다."));
     } catch (error) {
       onNotice(slackErrorMessage(error, "데일리 설정을 저장하지 못했습니다."));
     } finally {
@@ -6551,7 +6551,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
       });
       const data = await response.json() as { sent?: boolean; error?: string };
       if (!response.ok || !data.sent) throw new Error(apiError(data, "데일리 봇 DM을 보내지 못했습니다."));
-      onNotice(`${member.displayName}님에게 데일리 봇 DM을 보냈습니다.`);
+      onNotice(t("{value1}님에게 데일리 봇 DM을 보냈습니다.", { value1: messageValue(member.displayName) }));
     } catch (error) {
       onNotice(slackErrorMessage(error, "데일리 봇 DM을 보내지 못했습니다."));
     } finally {
@@ -6568,7 +6568,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
       setAdmin(data);
       loadedRef.current = false;
       setLoadAttempt((attempt) => attempt + 1);
-      onNotice(data.delivery?.status === "ready" ? "설정된 시간의 발송 예약을 복구했습니다." : "예약 상태를 확인했습니다. 아직 예약되지 않은 멤버가 있습니다.");
+      onNotice(data.delivery?.status === "ready" ? t("설정된 시간의 발송 예약을 복구했습니다.") : t("예약 상태를 확인했습니다. 아직 예약되지 않은 멤버가 있습니다."));
     } catch (error) { onNotice(slackErrorMessage(error, "예약을 복구하지 못했습니다.")); }
     finally { setBusy(false); }
   }
@@ -6595,14 +6595,14 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
         <label><span>{t("발송 시간")}</span><input aria-label={t("Slack 데일리 발송 시간")} type="time" value={admin.settings.reminderTime} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, reminderTime: event.target.value } })} /></label>
       </div>
       <fieldset className="slack-onboarding-weekdays"><legend>{t("발송 요일")}</legend><div>{weekdayLabels.map((label, day) => <label key={label}><input type="checkbox" checked={admin.settings.weekdays.includes(day)} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, weekdays: event.target.checked ? [...admin.settings.weekdays, day].sort() : admin.settings.weekdays.filter((entry) => entry !== day) } })} /><span>{label}</span></label>)}</div></fieldset>
-      <fieldset className="slack-onboarding-members"><legend>{t("알림 받을 멤버")}</legend><div className="bot-target-shortcut"><p>{t("이메일이 같은 Slack 계정을 연결합니다.")}</p><button type="button" onClick={() => setAdmin({ ...admin, members: admin.members.map((member) => member.linked ? { ...member, preference: { ...member.preference, enabled: true } } : member) })}>{t("연결 멤버 전체 선택")}</button></div><div>{admin.members.map((member) => <label key={member.memberId} className={member.linked ? "" : "disabled"}><input aria-label={`${member.displayName} Slack 알림 대상`} type="checkbox" disabled={!member.linked} checked={member.linked && member.preference.enabled} onChange={(event) => setAdmin({ ...admin, members: admin.members.map((entry) => entry.memberId === member.memberId ? { ...entry, preference: { ...entry.preference, enabled: event.target.checked } } : entry) })} /><span><b>{member.displayName}</b><small>{member.linked ? t("Slack 연결됨") : t("Slack 계정 미연결")}</small></span></label>)}</div></fieldset>
-      <fieldset className="slack-onboarding-channels"><legend>{t("공유 채널")}</legend>{channelsLoading && <div className="integration-inline-loading"><LoaderCircle className="spin" size={13} />{t("채널 확인 중")}</div>}{channelLoadError && <div className="slack-channel-load-error"><span>{t("채널을 불러오지 못했습니다.")}</span><button type="button" onClick={() => { channelsLoadedRef.current = false; setChannelLoadError(false); setChannelLoadAttempt((attempt) => attempt + 1); }}>{t("다시 불러오기")}</button></div>}<label className="slack-no-channel"><input aria-label={t("채널 공유 안 함")} type="radio" name="slack-channel-sharing" checked={admin.channels.length === 0} onChange={() => setAdmin({ ...admin, channels: [] })} /><span><b>{t("공유 안 함")}</b><small>{t("개인 DM만 발송")}</small></span></label>{channels.map((channel) => <label key={channel.id}><input aria-label={`${channel.name} Slack 공유 채널`} type="checkbox" checked={admin.channels.some((entry) => entry.id === channel.id)} onChange={(event) => setAdmin({ ...admin, channels: event.target.checked ? [...admin.channels, channel] : admin.channels.filter((entry) => entry.id !== channel.id) })} /><span><b>#{channel.name}</b><small>{channel.isPrivate ? t("비공개 · 봇 참여 중") : channel.isMember ? t("공개 · 봇 참여 중") : t("공개 · 선택 시 참여")}</small></span></label>)}</fieldset>
+      <fieldset className="slack-onboarding-members"><legend>{t("알림 받을 멤버")}</legend><div className="bot-target-shortcut"><p>{t("이메일이 같은 Slack 계정을 연결합니다.")}</p><button type="button" onClick={() => setAdmin({ ...admin, members: admin.members.map((member) => member.linked ? { ...member, preference: { ...member.preference, enabled: true } } : member) })}>{t("연결 멤버 전체 선택")}</button></div><div>{admin.members.map((member) => <label key={member.memberId} className={member.linked ? "" : "disabled"}><input aria-label={t("{value1} Slack 알림 대상", { value1: messageValue(member.displayName) })} type="checkbox" disabled={!member.linked} checked={member.linked && member.preference.enabled} onChange={(event) => setAdmin({ ...admin, members: admin.members.map((entry) => entry.memberId === member.memberId ? { ...entry, preference: { ...entry.preference, enabled: event.target.checked } } : entry) })} /><span><b>{member.displayName}</b><small>{member.linked ? t("Slack 연결됨") : t("Slack 계정 미연결")}</small></span></label>)}</div></fieldset>
+      <fieldset className="slack-onboarding-channels"><legend>{t("공유 채널")}</legend>{channelsLoading && <div className="integration-inline-loading"><LoaderCircle className="spin" size={13} />{t("채널 확인 중")}</div>}{channelLoadError && <div className="slack-channel-load-error"><span>{t("채널을 불러오지 못했습니다.")}</span><button type="button" onClick={() => { channelsLoadedRef.current = false; setChannelLoadError(false); setChannelLoadAttempt((attempt) => attempt + 1); }}>{t("다시 불러오기")}</button></div>}<label className="slack-no-channel"><input aria-label={t("채널 공유 안 함")} type="radio" name="slack-channel-sharing" checked={admin.channels.length === 0} onChange={() => setAdmin({ ...admin, channels: [] })} /><span><b>{t("공유 안 함")}</b><small>{t("개인 DM만 발송")}</small></span></label>{channels.map((channel) => <label key={channel.id}><input aria-label={t("{value1} Slack 공유 채널", { value1: messageValue(channel.name) })} type="checkbox" checked={admin.channels.some((entry) => entry.id === channel.id)} onChange={(event) => setAdmin({ ...admin, channels: event.target.checked ? [...admin.channels, channel] : admin.channels.filter((entry) => entry.id !== channel.id) })} /><span><b>#{channel.name}</b><small>{channel.isPrivate ? t("비공개 · 봇 참여 중") : channel.isMember ? t("공개 · 봇 참여 중") : t("공개 · 선택 시 참여")}</small></span></label>)}</fieldset>
       <details className="bot-advanced-settings"><summary>{t("고급 설정")}<ChevronDown size={14} /></summary><div><label className="daily-timezone-field"><span>{t("시간대")}</span><select aria-label={t("Slack 데일리 시간대")} value={admin.settings.timezone} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, timezone: event.target.value } })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label></div></details><footer><button className="slack-primary-action" type="button" disabled={busy || admin.settings.weekdays.length === 0} onClick={() => void completeSetup()}>{busy ? <LoaderCircle className="spin" size={14} /> : <CheckCircle2 size={14} />}{busy ? t("설정·테스트 중") : t("설정 완료")}</button></footer>
     </section> : <section className="slack-connected-summary">
       <div className="slack-connected-title">{delivery.status === "ready" ? <CheckCircle2 size={19} /> : <span><AlertTriangle size={19} /></span>}<p><b>{t("데일리 봇")}{dailyDeliveryLabel(delivery.status)}</b><span>{teamName}</span></p><button type="button" onClick={() => setEditing(true)}>{t("설정")}</button></div>
       <dl><div><dt>{t("대상")}</dt><dd>{t("{count}명", { count: targetMembers.length })}</dd></div><div><dt>{t("다음 발송")}</dt><dd>{nextReminder ? new Date(nextReminder * 1000).toLocaleString(getClientLocale(), { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : t("예약 확인 필요")}</dd></div><div><dt>{t("공유 채널")}</dt><dd>{admin.channels.length ? admin.channels.map((channel) => `#${channel.name}`).join(", ") : t("공유 안 함")}</dd></div></dl>
       <section className="slack-manual-send" aria-labelledby="slack-manual-send-title"><header><b id="slack-manual-send-title">{t("즉시 발송")}</b><small>{t("멤버에게 데일리 DM을 바로 보냅니다.")}</small></header>{linkedMembers.length ? <div className="slack-member-links">{linkedMembers.map((member) => <div key={member.memberId}><span className="linked" /><p><b>{member.displayName}</b><small>{member.preference.enabled ? t("예약 대상") : t("수동 발송만")}</small></p><button type="button" disabled={busy || sendingMemberId !== null} onClick={() => void sendDailyNow(member)}>{sendingMemberId === member.memberId ? <><LoaderCircle className="spin" size={13} />{t("발송 중")}</> : t("지금 보내기")}</button></div>)}</div> : <p className="slack-manual-send-empty">{t("Slack에 연결된 멤버가 없습니다.")}</p>}</section>
-      {result && <div className="slack-test-results" role="status"><p className={result.tests.dm.status}><span>{result.tests.dm.status === "sent" ? t("설치자 테스트 DM 성공") : result.tests.dm.status === "skipped" ? t("설치자 DM 테스트 생략") : `테스트 DM 실패 · ${slackErrorMessage(result.tests.dm.error)}`}</span>{result.tests.dm.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("dm", result.tests.dm.memberId)}>{t("재시도")}</button>}</p>{result.tests.channels.map((channel) => <p key={channel.channelId} className={channel.status}><span>{channel.status === "sent" ? `#${channel.channelName} 테스트 성공` : `#${channel.channelName} 실패 · ${slackErrorMessage(channel.error)}`}</span>{channel.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("channel", channel.channelId)}>{t("재시도")}</button>}</p>)}{result.schedules.filter((entry) => entry.status === "failed").map((entry) => <p key={entry.memberId} className="failed"><span>{t("예약 실패 · {name}", { name: admin.members.find((member) => member.memberId === entry.memberId)?.displayName || t("미지정") })}</span><button disabled={busy} onClick={() => void retrySetupResult("schedule", null)}>{t("재시도")}</button></p>)}</div>}
+      {result && <div className="slack-test-results" role="status"><p className={result.tests.dm.status}><span>{result.tests.dm.status === "sent" ? t("설치자 테스트 DM 성공") : result.tests.dm.status === "skipped" ? t("설치자 DM 테스트 생략") : t("테스트 DM 실패 · {value1}", { value1: messageValue(slackErrorMessage(result.tests.dm.error)) })}</span>{result.tests.dm.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("dm", result.tests.dm.memberId)}>{t("재시도")}</button>}</p>{result.tests.channels.map((channel) => <p key={channel.channelId} className={channel.status}><span>{channel.status === "sent" ? t("#{value1} 테스트 성공", { value1: messageValue(channel.channelName) }) : t("#{value1} 실패 · {value2}", { value1: messageValue(channel.channelName), value2: messageValue(slackErrorMessage(channel.error)) })}</span>{channel.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("channel", channel.channelId)}>{t("재시도")}</button>}</p>)}{result.schedules.filter((entry) => entry.status === "failed").map((entry) => <p key={entry.memberId} className="failed"><span>{t("예약 실패 · {name}", { name: admin.members.find((member) => member.memberId === entry.memberId)?.displayName || t("미지정") })}</span><button disabled={busy} onClick={() => void retrySetupResult("schedule", null)}>{t("재시도")}</button></p>)}</div>}
     </section>}
     {admin.setupComplete && <details className="slack-advanced-settings" onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}><summary>{t("멤버 연결·발송 관리")}<ChevronDown size={14} /></summary>{advancedOpen && <SlackDailyAdvancedSettings connected canManage mode="workspace" onNotice={onNotice} />}</details>}
   </div>;
@@ -6681,7 +6681,7 @@ function SlackDailyAdvancedSettings({ connected, canManage, mode = "workspace", 
 
     <section className="integration-step" aria-labelledby="slack-step-test">
       <span className="integration-step-number">5</span><div className="integration-step-copy"><h4 id="slack-step-test">{t("테스트 DM과 작동 확인")}</h4><p>{t("사용자 연결과 다음 알림 예약을 확인하고 실제 테스트 DM을 보냅니다.")}</p></div>
-      <div className="integration-step-body">{canManage && admin ? <><div className="slack-admin-actions"><button disabled={busy} onClick={() => void patchAdmin({ action: "resync" }, "Slack 사용자와 예약을 재동기화했습니다.")}><RefreshCw size={13} />{t("사용자·예약 재동기화")}</button></div><div className="slack-member-links slack-test-list">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? member.reminder ? `다음 알림 · ${slackReminderLabel(member.reminder.status)}` : t("알림 예약 확인 필요") : t("Slack 미연결")}</small></p>{member.linked && <button disabled={busy} onClick={() => void patchAdmin({ action: "test_dm", memberId: member.memberId }, `${member.displayName}님에게 테스트 DM을 보냈습니다.`)}>{t("테스트 DM")}</button>}</div>)}</div>{admin.failedPublications.length > 0 && <div className="slack-publication-failures"><b>{t("채널 전송 실패")}</b>{admin.failedPublications.map((failure) => <div key={failure.id}><p>{failure.memberName} · {failure.date} · {admin.channels.find((channel) => channel.id === failure.channelId)?.name ?? t("공유 채널")}<small>{slackErrorMessage(failure.error)}</small></p><button disabled={busy} onClick={() => void patchAdmin({ action: "retry_publication", publicationId: failure.id }, "채널 전송을 다시 시도했습니다.")}>{t("재시도")}</button></div>)}</div>}</> : <div className="integration-connected-note"><CheckCircle2 size={15} />{t("연결된 사용자는 Slack에서 `/okrptr daily`로 언제든 데일리를 열 수 있습니다.")}</div>}</div>
+      <div className="integration-step-body">{canManage && admin ? <><div className="slack-admin-actions"><button disabled={busy} onClick={() => void patchAdmin({ action: "resync" }, t("Slack 사용자와 예약을 재동기화했습니다."))}><RefreshCw size={13} />{t("사용자·예약 재동기화")}</button></div><div className="slack-member-links slack-test-list">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? member.reminder ? t("다음 알림 · {value1}", { value1: messageValue(slackReminderLabel(member.reminder.status)) }) : t("알림 예약 확인 필요") : t("Slack 미연결")}</small></p>{member.linked && <button disabled={busy} onClick={() => void patchAdmin({ action: "test_dm", memberId: member.memberId }, t("{value1}님에게 테스트 DM을 보냈습니다.", { value1: messageValue(member.displayName) }))}>{t("테스트 DM")}</button>}</div>)}</div>{admin.failedPublications.length > 0 && <div className="slack-publication-failures"><b>{t("채널 전송 실패")}</b>{admin.failedPublications.map((failure) => <div key={failure.id}><p>{failure.memberName} · {failure.date} · {admin.channels.find((channel) => channel.id === failure.channelId)?.name ?? t("공유 채널")}<small>{slackErrorMessage(failure.error)}</small></p><button disabled={busy} onClick={() => void patchAdmin({ action: "retry_publication", publicationId: failure.id }, t("채널 전송을 다시 시도했습니다."))}>{t("재시도")}</button></div>)}</div>}</> : <div className="integration-connected-note"><CheckCircle2 size={15} />{t("연결된 사용자는 Slack에서 `/okrptr daily`로 언제든 데일리를 열 수 있습니다.")}</div>}</div>
     </section></>}
   </div>;
 }
@@ -6764,7 +6764,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
         setMessageLanguage(data.messageLanguage);
         setChannels(nextChannels);
         const activeCount = data.automations.filter((entry) => entry.active).length;
-        onSummary(slackAutomationHealthLabel(data.automations), `활성 규칙 ${activeCount}개 · 전체 ${data.automations.length}개`);
+        onSummary(slackAutomationHealthLabel(data.automations), t("활성 규칙 {value1}개 · 전체 {value2}개", { value1: messageValue(activeCount), value2: messageValue(data.automations.length) }));
       })
       .catch((error: unknown) => {
         completed = true;
@@ -6790,7 +6790,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       setDeliveries(data.deliveries);
       setMessageLanguage(data.messageLanguage);
       const activeCount = data.automations.filter((entry) => entry.active).length;
-      onSummary(slackAutomationHealthLabel(data.automations), `활성 규칙 ${activeCount}개 · 전체 ${data.automations.length}개`);
+      onSummary(slackAutomationHealthLabel(data.automations), t("활성 규칙 {value1}개 · 전체 {value2}개", { value1: messageValue(activeCount), value2: messageValue(data.automations.length) }));
     } catch (error) {
       onNotice(slackErrorMessage(error, "자동화를 불러오지 못했습니다."));
     } finally {
@@ -6814,7 +6814,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
     const channelId = recommendedChannels[recommendation.id];
     if (!channelId) { onNotice(t("추천 자동화를 보낼 Slack 채널을 선택해 주세요.")); return; }
     const duplicate = automations.find((entry) => entry.channelId === channelId && entry.triggerType === recommendation.triggerType && entry.triggerStatus === recommendation.triggerStatus);
-    if (duplicate) { onNotice(`같은 채널에 '${duplicate.name}' 규칙이 이미 있습니다.`); return; }
+    if (duplicate) { onNotice(t("같은 채널에 '{value1}' 규칙이 이미 있습니다.", { value1: messageValue(duplicate.name) })); return; }
     setBusyId(`recommended:${recommendation.id}`);
     try {
       const response = await fetch("/api/slack/automations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: recommendation.name, triggerType: recommendation.triggerType, triggerStatus: recommendation.triggerStatus, channelId, messageTemplate: recommendation.messageTemplate, messageTemplateKind: recommendation.id === "blocked" ? "blocked" : "default", active: true }) });
@@ -6822,8 +6822,8 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       if (!response.ok || !data.automation) throw new Error(apiError(data, "추천 자동화를 만들지 못했습니다."));
       const next = [data.automation, ...automations];
       setAutomations(next);
-      onSummary(slackAutomationHealthLabel(next), `활성 규칙 ${next.filter((entry) => entry.active).length}개 · 전체 ${next.length}개`);
-      onNotice(`'${recommendation.name}' 추천 자동화를 만들었습니다.`);
+      onSummary(slackAutomationHealthLabel(next), t("활성 규칙 {value1}개 · 전체 {value2}개", { value1: messageValue(next.filter((entry) => entry.active).length), value2: messageValue(next.length) }));
+      onNotice(t("'{value1}' 추천 자동화를 만들었습니다.", { value1: messageValue(recommendation.name) }));
     } catch (error) {
       onNotice(slackErrorMessage(error, "추천 자동화를 만들지 못했습니다."));
     } finally {
@@ -6846,12 +6846,12 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       setAutomations((current) => {
         const next = editingId ? current.map((entry) => entry.id === editingId ? data.automation! : entry) : [data.automation!, ...current];
         const activeCount = next.filter((entry) => entry.active).length;
-        onSummary(slackAutomationHealthLabel(next), `활성 규칙 ${activeCount}개 · 전체 ${next.length}개`);
+        onSummary(slackAutomationHealthLabel(next), t("활성 규칙 {value1}개 · 전체 {value2}개", { value1: messageValue(activeCount), value2: messageValue(next.length) }));
         return next;
       });
       setFormOpen(false);
       setEditingId(null);
-      onNotice(editingId ? "Slack 자동화를 수정했습니다." : "Slack 자동화를 만들었습니다. 테스트 전송으로 확인해 보세요.");
+      onNotice(editingId ? t("Slack 자동화를 수정했습니다.") : t("Slack 자동화를 만들었습니다. 테스트 전송으로 확인해 보세요."));
     } catch (error) {
       onNotice(slackErrorMessage(error, "자동화를 저장하지 못했습니다."));
     } finally {
@@ -6868,7 +6868,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       setAutomations((current) => {
         const next = current.map((entry) => entry.id === automation.id ? data.automation! : entry);
         const activeCount = next.filter((entry) => entry.active).length;
-        onSummary(slackAutomationHealthLabel(next), `활성 규칙 ${activeCount}개 · 전체 ${next.length}개`);
+        onSummary(slackAutomationHealthLabel(next), t("활성 규칙 {value1}개 · 전체 {value2}개", { value1: messageValue(activeCount), value2: messageValue(next.length) }));
         return next;
       });
     } catch (error) {
@@ -6884,7 +6884,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       const response = await fetch("/api/slack/automations/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: automation.id }) });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(apiError(data, "테스트 전송에 실패했습니다."));
-      onNotice(`#${automation.channelId} 채널로 테스트 메시지를 보냈습니다.`);
+      onNotice(t("#{value1} 채널로 테스트 메시지를 보냈습니다.", { value1: messageValue(automation.channelId) }));
     } catch (error) {
       onNotice(slackErrorMessage(error, "테스트 전송에 실패했습니다."));
     } finally {
@@ -6894,7 +6894,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
   }
 
   async function removeAutomation(automation: SlackAutomation) {
-    if (!await confirmAction({ title: "Slack 자동화 삭제", message: `'${automation.name}' 자동화와 전송 기록을 삭제합니다.`, confirmLabel: "자동화 삭제", danger: true })) return;
+    if (!await confirmAction({ title: t("Slack 자동화 삭제"), message: t("'{value1}' 자동화와 전송 기록을 삭제합니다.", { value1: messageValue(automation.name) }), confirmLabel: t("자동화 삭제"), danger: true })) return;
     setBusyId(automation.id);
     try {
       const response = await fetch(`/api/slack/automations?id=${encodeURIComponent(automation.id)}`, { method: "DELETE" });
@@ -6903,7 +6903,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       setAutomations((current) => {
         const next = current.filter((entry) => entry.id !== automation.id);
         const activeCount = next.filter((entry) => entry.active).length;
-        onSummary(slackAutomationHealthLabel(next), `활성 규칙 ${activeCount}개 · 전체 ${next.length}개`);
+        onSummary(slackAutomationHealthLabel(next), t("활성 규칙 {value1}개 · 전체 {value2}개", { value1: messageValue(activeCount), value2: messageValue(next.length) }));
         return next;
       });
       setDeliveries((current) => current.filter((entry) => entry.automationId !== automation.id));
@@ -6919,7 +6919,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
   if (!connected) return <div className="slack-automation-locked"><Zap size={16} /><div><b>{t("Slack 연결 후 업무 자동화 봇을 설정할 수 있습니다")}</b><p>{t("연결을 완료하면 업무 생성과 상태 변경을 채널로 자동 전송할 수 있습니다.")}</p></div></div>;
 
   return <div className="slack-automation-manager">
-    {canManage && <section className="automation-recommendations"><header><h3>{t("추천 자동화")}</h3><p>{t("발송 채널만 고르면 추천 조건과 메시지로 바로 시작합니다.")}</p></header><div>{slackAutomationRecommendations.map((recommendation) => <article key={recommendation.id}><div><b>{recommendation.name}</b><p>{recommendation.description}</p></div><select aria-label={`${recommendation.name} Slack 채널`} value={recommendedChannels[recommendation.id]} onChange={(event) => setRecommendedChannels((current) => ({ ...current, [recommendation.id]: event.target.value }))}><option value="">{t("채널 선택")}</option>{channels.map((channel) => <option value={channel.id} key={channel.id}>#{channel.name}{channel.isPrivate ? ` · ${t("비공개")}` : ""}</option>)}</select><button type="button" disabled={busyId === `recommended:${recommendation.id}`} onClick={() => void createRecommendedAutomation(recommendation)}>{busyId === `recommended:${recommendation.id}` ? <LoaderCircle className="spin" size={13} /> : <Plus size={13} />}{t("추가")}</button></article>)}</div></section>}
+    {canManage && <section className="automation-recommendations"><header><h3>{t("추천 자동화")}</h3><p>{t("발송 채널만 고르면 추천 조건과 메시지로 바로 시작합니다.")}</p></header><div>{slackAutomationRecommendations.map((recommendation) => <article key={recommendation.id}><div><b>{recommendation.name}</b><p>{recommendation.description}</p></div><select aria-label={t("{value1} Slack 채널", { value1: messageValue(recommendation.name) })} value={recommendedChannels[recommendation.id]} onChange={(event) => setRecommendedChannels((current) => ({ ...current, [recommendation.id]: event.target.value }))}><option value="">{t("채널 선택")}</option>{channels.map((channel) => <option value={channel.id} key={channel.id}>#{channel.name}{channel.isPrivate ? ` · ${t("비공개")}` : ""}</option>)}</select><button type="button" disabled={busyId === `recommended:${recommendation.id}`} onClick={() => void createRecommendedAutomation(recommendation)}>{busyId === `recommended:${recommendation.id}` ? <LoaderCircle className="spin" size={13} /> : <Plus size={13} />}{t("추가")}</button></article>)}</div></section>}
     <div className="slack-automation-heading"><div><h3>{t("현재 자동화")}</h3><p>{t("{workspace}에서 작동하는 규칙입니다.", { workspace: workspaceName })}</p></div>{canManage && <button type="button" onClick={startCreate}><Plus size={14} />{t("직접 규칙 만들기")}</button>}</div>
     <div className="slack-bot-note"><Bot size={15} /><p>{t("각 자동화는 독립된 규칙으로 작동하며, 메시지는 연결된 OKRPTR 봇 이름으로 전송됩니다.")}</p></div>
     {formOpen && <form className="slack-automation-form" onSubmit={(event) => void saveAutomation(event)}>
@@ -6938,8 +6938,8 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
     </form>}
     {loading ? <div className="slack-automation-loading"><LoaderCircle className="spin" size={16} />{t("자동화를 불러오는 중")}</div> : automations.length === 0 ? <div className="slack-automation-empty"><Zap size={18} /><b>{t("아직 자동화가 없습니다.")}</b><p>{canManage ? t("새 자동화를 만들어 첫 Slack 알림을 보내보세요.") : t("워크스페이스 관리자가 자동화를 만들 수 있습니다.")}</p></div> : <div className="slack-automation-list">{automations.map((automation) => <article key={automation.id} className={automation.active ? "" : "inactive"}>
       <div className="slack-automation-main"><span className={`slack-delivery-dot ${automation.lastDeliveryStatus}`} /><div><b>{automation.name}</b><p>{slackTriggerLabel(automation)} · #{automation.channelId}</p></div><span className={`slack-automation-state ${automation.active ? "active" : ""}`}>{automation.active ? t("활성") : t("중지")}</span></div>
-      <div className="slack-automation-meta">{automation.lastDeliveryStatus === "never" ? t("아직 전송 이력 없음") : automation.lastDeliveryStatus === "sent" ? `${formatSlackAutomationTime(automation.lastTriggeredAt)} 전송 성공` : automation.lastError ? slackErrorMessage(automation.lastError) : (automation.lastDeliveryStatus === "pending" ? t("발송 처리 중") : t("최근 전송 실패"))}</div>
-      {canManage && <div className="slack-automation-actions"><button type="button" onClick={() => void testSend(automation)} disabled={busyId === automation.id}>{busyId === automation.id ? <LoaderCircle className="spin" size={12} /> : <Send size={12} />}{t("테스트")}</button><button type="button" onClick={() => void toggleAutomation(automation)} disabled={busyId === automation.id}>{automation.active ? t("중지") : t("활성화")}</button><button type="button" onClick={() => startEdit(automation)}><Pencil size={12} />{t("수정")}</button><button type="button" className="danger" onClick={() => void removeAutomation(automation)} disabled={busyId === automation.id} aria-label={`${automation.name} 삭제`}><Trash2 size={12} /></button></div>}
+      <div className="slack-automation-meta">{automation.lastDeliveryStatus === "never" ? t("아직 전송 이력 없음") : automation.lastDeliveryStatus === "sent" ? t("{value1} 전송 성공", { value1: messageValue(formatSlackAutomationTime(automation.lastTriggeredAt)) }) : automation.lastError ? slackErrorMessage(automation.lastError) : (automation.lastDeliveryStatus === "pending" ? t("발송 처리 중") : t("최근 전송 실패"))}</div>
+      {canManage && <div className="slack-automation-actions"><button type="button" onClick={() => void testSend(automation)} disabled={busyId === automation.id}>{busyId === automation.id ? <LoaderCircle className="spin" size={12} /> : <Send size={12} />}{t("테스트")}</button><button type="button" onClick={() => void toggleAutomation(automation)} disabled={busyId === automation.id}>{automation.active ? t("중지") : t("활성화")}</button><button type="button" onClick={() => startEdit(automation)}><Pencil size={12} />{t("수정")}</button><button type="button" className="danger" onClick={() => void removeAutomation(automation)} disabled={busyId === automation.id} aria-label={t("{value1} 삭제", { value1: messageValue(automation.name) })}><Trash2 size={12} /></button></div>}
     </article>)}</div>}
     {deliveries.length > 0 && <details className="slack-delivery-history"><summary>{t("최근 전송 기록")}<span>{deliveries.length}</span><ChevronDown size={13} /></summary><div>{deliveries.slice(0, 8).map((delivery) => <div key={delivery.id}><span className={`slack-delivery-dot ${delivery.status}`} /><p><b>{delivery.status === "sent" ? t("전송 성공") : delivery.status === "failed" ? t("전송 실패") : t("전송 중")}</b><small>#{delivery.channelId} · {formatSlackAutomationTime(delivery.sentAt || delivery.createdAt)}</small>{delivery.error && <em>{slackErrorMessage(delivery.error)}</em>}</p></div>)}</div></details>}
   </div>;
@@ -6947,7 +6947,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
 
 function slackTriggerLabel(automation: SlackAutomation) {
   if (automation.triggerType === "task_created") return "업무 생성";
-  return automation.triggerStatus ? `상태 변경 → ${statusLabel(automation.triggerStatus as ItemStatus)}` : "모든 상태 변경";
+  return automation.triggerStatus ? t("상태 변경 → {value1}", { value1: messageValue(statusLabel(automation.triggerStatus as ItemStatus)) }) : "모든 상태 변경";
 }
 
 function formatSlackAutomationTime(value: string | null) {
@@ -6963,24 +6963,24 @@ const statusLabels: Record<ItemStatus, string> = { get backlog() { return t("백
 const priorityLabels: Record<Priority, string> = { get low() { return t("낮음"); }, get medium() { return t("보통"); }, get high() { return t("높음"); }, get urgent() { return t("긴급"); } };
 const groupColors: GroupColor[] = ["gray", "blue", "green", "yellow", "orange", "red", "purple"];
 
-function kindLabel(kind: ItemKind) { return t(t(t({ objective: "Objective", key_result: "Key Result", initiative: "Initiative", project: "Project", task: "Task" }[kind]))); }
+function kindLabel(kind: ItemKind) { return t({ objective: "Objective", key_result: "Key Result", initiative: "Initiative", project: "Project", task: "Task" }[kind]); }
 function statusLabel(status: ItemStatus) { return statusLabels[status]; }
 function isCompletedStatus(status: ItemStatus) { return status === "done" || status === "development_done"; }
 function sourceLabel(source: string) { return { mcp: "MCP", codex: "Codex", slack: "Slack", discord: "Discord", telegram: "Telegram", web: "Web" }[source] ?? "Bot"; }
-function propertyTypeLabel(type: PropertyType) { return t(t(t({ text: "텍스트", number: "숫자", select: "선택", date: "날짜", checkbox: "체크박스", member: "멤버 1명", members: "멤버 여러 명" }[type]))); }
+function propertyTypeLabel(type: PropertyType) { return t({ text: "텍스트", number: "숫자", select: "선택", date: "날짜", checkbox: "체크박스", member: "멤버 1명", members: "멤버 여러 명" }[type]); }
 function propertySystemDefault(properties: PropertyDefinition[], systemKey: string, fallback: string) { const value = properties.find((property) => property.systemKey === systemKey && property.active)?.defaultValue; return typeof value === "string" ? value : fallback; }
-function teamRoleLabel(role: TeamRole) { return t(t(t({ owner: "Owner", admin: "Admin", member: "Member", viewer: "Viewer" }[role]))); }
+function teamRoleLabel(role: TeamRole) { return t({ owner: "Owner", admin: "Admin", member: "Member", viewer: "Viewer" }[role]); }
 function workspaceDeletionLabel(value: string | null) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "30일 후 영구 삭제";
   const days = Math.max(0, Math.ceil((date.getTime() - Date.now()) / 86_400_000));
   const deletionDate = date.toLocaleDateString(getClientLocale(), { month: "numeric", day: "numeric" });
-  return `${days}일 남음 · ${deletionDate} 영구 삭제`;
+  return t("{value1}일 남음 · {value2} 영구 삭제", { value1: messageValue(days), value2: messageValue(deletionDate) });
 }
-function groupColorLabel(color: GroupColor) { return t(t(t({ gray: "회색", blue: "파랑", green: "초록", yellow: "노랑", orange: "주황", red: "빨강", purple: "보라" }[color]))); }
+function groupColorLabel(color: GroupColor) { return t({ gray: "회색", blue: "파랑", green: "초록", yellow: "노랑", orange: "주황", red: "빨강", purple: "보라" }[color]); }
 function dueLabel(value: string | null) { return value ? displayDate(value) : t("기한 없음"); }
-function trashSummary(record: TrashRecord) { return `OKR ${record.cycleCount}개, 작업 ${record.itemCount}개, Routine ${record.routineCount}개 보관`; }
+function trashSummary(record: TrashRecord) { return t("OKR {value1}개, 작업 {value2}개, Routine {value3}개 보관", { value1: messageValue(record.cycleCount), value2: messageValue(record.itemCount), value3: messageValue(record.routineCount) }); }
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;

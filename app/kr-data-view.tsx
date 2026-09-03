@@ -3,7 +3,7 @@
 import { AlertTriangle, Check, Database, Link2, LoaderCircle, Pencil, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { OverlayDialog, useAppConfirm } from "./overlay-dialog";
-import { t , apiError , getClientLocale } from "@/lib/client-language";
+import { t , apiError , getClientLocale , messageValue } from "@/lib/client-language";
 
 type DataTargetKind = "key_result" | "project";
 export type DataItem = {
@@ -175,7 +175,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
     markConnectionCacheFresh(cacheKey);
     setConnections(next);
     setEditing(null);
-    onNotice(editing === "new" ? "데이터 연결을 만들었습니다." : "데이터 연결을 저장했습니다.");
+    onNotice(editing === "new" ? t("데이터 연결을 만들었습니다.") : t("데이터 연결을 저장했습니다."));
   }
 
   async function sync(connection: DataConnection) {
@@ -197,22 +197,22 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
     markConnectionCacheFresh(cacheKey);
     setConnections(next);
     onProgressChange(connection.itemId, data.progress);
-    onNotice(`${targetLabels[connection.targetKind]} 진행률을 ${data.progress}%로 업데이트했습니다.`);
+    onNotice(t("{value1} 진행률을 {value2}%로 업데이트했습니다.", { value1: messageValue(targetLabels[connection.targetKind]), value2: messageValue(data.progress) }));
   }
 
   async function remove(connection: DataConnection) {
     const target = itemById.get(connection.itemId);
-    if (!await confirmAction({ title: "데이터 연결 삭제", message: `'${connection.name}' 연결을 삭제합니다. ${targetLabels[connection.targetKind]} 자체와 현재 진행률은 유지됩니다.`, confirmLabel: "연결 삭제", danger: true })) return;
+    if (!await confirmAction({ title: t("데이터 연결 삭제"), message: t("'{value1}' 연결을 삭제합니다. {value2} 자체와 현재 진행률은 유지됩니다.", { value1: messageValue(connection.name), value2: messageValue(targetLabels[connection.targetKind]) }), confirmLabel: t("연결 삭제"), danger: true })) return;
     const response = await fetch(`/api/data-connections?id=${encodeURIComponent(connection.id)}`, { method: "DELETE" });
     if (!response.ok) { onNotice(t("데이터 연결을 삭제하지 못했습니다.")); return; }
     const next = (connections ?? []).filter((entry) => entry.id !== connection.id);
     connectionMemoryCache.set(cacheKey, next);
     markConnectionCacheFresh(cacheKey);
     setConnections(next);
-    onNotice(`${target?.title ?? targetLabels[connection.targetKind]}의 데이터 연결을 삭제했습니다.`);
+    onNotice(t("{value1}의 데이터 연결을 삭제했습니다.", { value1: messageValue(target?.title ?? targetLabels[connection.targetKind]) }));
   }
 
-  if (loadError) return <DataState icon={AlertTriangle} title={t("데이터 연결을 불러오지 못했습니다")} action="다시 시도" onAction={() => { setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} />;
+  if (loadError) return <DataState icon={AlertTriangle} title={t("데이터 연결을 불러오지 못했습니다")} action={t("다시 시도")} onAction={() => { setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} />;
   if (connections === null) return <DataState icon={LoaderCircle} title={t("데이터 연결을 불러오는 중입니다")} loading />;
 
   const hasAvailableTarget = targets.some((item) => !byItem.has(item.id));
@@ -231,14 +231,14 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
       <section className="kr-data-list" aria-label={t("데이터 연결 목록")}>
         {filtered.map((item) => {
           const connection = byItem.get(item.id);
-          const contextLabel = item.kind === "project" ? itemById.get(item.parentId ?? "")?.title ?? "상위 Initiative 미연결" : cycleById.get(item.cycleId ?? "") ?? "OKR 파일";
+          const contextLabel = item.kind === "project" ? itemById.get(item.parentId ?? "")?.title ?? t("상위 Initiative 미연결") : cycleById.get(item.cycleId ?? "") ?? t("OKR 파일");
           return <article className={`kr-data-card ${connection ? "connected" : "unconnected"}`} key={item.id}>
             <header><span className={`type-icon type-${item.kind}`}>{targetLabels[item.kind]}</span><div><small>{contextLabel}</small><h2>{item.title}</h2></div><strong>{item.progress}%</strong></header>
             {connection ? <>
               <div className="kr-data-progress"><span><i style={{ width: `${item.progress}%` }} /></span><b>{formatDataMetric(connection.lastValue, connection.unit)} <em>/ {formatDataMetric(connection.targetValue, connection.unit)}</em></b></div>
               <dl><div><dt>{t("데이터 소스")}</dt><dd><Link2 size={12} />{connection.name}</dd></div><div><dt>{t("값 경로")}</dt><dd>{connection.valuePath || t("응답 자체")}</dd></div><div><dt>{t("갱신")}</dt><dd>{cadenceLabels[connection.cadence]}{connection.active ? t(" · 활성") : t(" · 일시정지")}</dd></div><div><dt>{t("최근 결과")}</dt><dd className={`sync-${connection.lastSyncStatus}`}>{dataSyncStatusLabel(connection)}</dd></div></dl>
-              {connection.lastError && <p className="kr-data-error"><AlertTriangle size={13} />{connection.lastError}</p>}
-              <footer><button disabled={readOnly || syncingId === connection.id} onClick={() => void sync(connection)}><RefreshCw className={syncingId === connection.id ? "spinning" : ""} size={13} />{syncingId === connection.id ? t("업데이트 중") : t("지금 업데이트")}</button><button disabled={readOnly} onClick={() => openEdit(connection)}><Pencil size={13} />{t("설정")}</button><button className="danger" disabled={readOnly} onClick={() => void remove(connection)} aria-label={`${item.title} 데이터 연결 삭제`}><Trash2 size={13} /></button></footer>
+              {connection.lastError && <p className="kr-data-error"><AlertTriangle size={13} />{t("최근 데이터 갱신에 실패했습니다. 연결 설정을 확인해 주세요.")}</p>}
+              <footer><button disabled={readOnly || syncingId === connection.id} onClick={() => void sync(connection)}><RefreshCw className={syncingId === connection.id ? "spinning" : ""} size={13} />{syncingId === connection.id ? t("업데이트 중") : t("지금 업데이트")}</button><button disabled={readOnly} onClick={() => openEdit(connection)}><Pencil size={13} />{t("설정")}</button><button className="danger" disabled={readOnly} onClick={() => void remove(connection)} aria-label={t("{value1} 데이터 연결 삭제", { value1: messageValue(item.title) })}><Trash2 size={13} /></button></footer>
             </> : <div className="kr-data-unconnected"><p>{t("아직 연결된 데이터가 없습니다.")}</p><button disabled={readOnly} onClick={() => openCreate(item)}><Plus size={13} />{t("이 {kind}에 API 연결", { kind: targetLabels[item.kind] })}</button></div>}
           </article>;
         })}
@@ -265,8 +265,8 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
 function emptyDraft(targetKind: DataTargetKind, itemId: string): Draft { return { targetKind, itemId, name: "", endpointUrl: "", valuePath: "", baselineValue: "0", targetValue: "", unit: "", cadence: "daily", active: true }; }
 function cadenceOrder(value?: DataCadence) { return value ? { hourly: 0, daily: 1, weekly: 2, manual: 3 }[value] : 4; }
 function statusOrder(connection?: DataConnection) { return !connection ? 3 : connection.lastSyncStatus === "error" ? 0 : connection.lastSyncStatus === "never" ? 1 : 2; }
-export function formatDataMetric(value: number | null, unit: string) { return value === null ? "아직 값 없음" : `${new Intl.NumberFormat(getClientLocale(), { maximumFractionDigits: 2 }).format(value)}${unit}`; }
-export function dataSyncStatusLabel(connection: DataConnection) { if (connection.lastSyncStatus === "never") return "업데이트 전"; if (connection.lastSyncStatus === "error") return "오류"; return connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString(getClientLocale(), { dateStyle: "short", timeStyle: "short" }) : "완료"; }
+export function formatDataMetric(value: number | null, unit: string) { return value === null ? t("아직 값 없음") : `${new Intl.NumberFormat(getClientLocale(), { maximumFractionDigits: 2 }).format(value)}${unit}`; }
+export function dataSyncStatusLabel(connection: DataConnection) { if (connection.lastSyncStatus === "never") return t("업데이트 전"); if (connection.lastSyncStatus === "error") return t("오류"); return connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString(getClientLocale(), { dateStyle: "short", timeStyle: "short" }) : t("완료"); }
 
 function DataState({ icon: Icon, title, detail, action, onAction, loading = false }: { icon: typeof Database; title: string; detail?: string; action?: string; onAction?: () => void; loading?: boolean }) {
   return <section className="kr-data-state"><Icon className={loading ? "spinning" : ""} size={20} /><div><b>{title}</b>{detail && <p>{detail}</p>}</div>{action && onAction && <button onClick={onAction}>{action}</button>}</section>;

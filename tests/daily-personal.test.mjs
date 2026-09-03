@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import ts from "typescript";
+import { serverLanguage } from "./helpers/language-fixture.mjs";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 function compile(source, deps = {}) {
@@ -146,6 +147,20 @@ test("Slack modal lists checkboxes before notes, never preselects new work or in
   assert.ok(modal.blocks.length < 100);
 });
 
+test("Slack modal translates system copy per recipient without translating user-authored work", async () => {
+  const translate = await serverLanguage.serverTranslator("en");
+  const modal = form.dailyForm({
+    work: [{ key: "task:user", id: "user", title: "고객이 작성한 제목", kind: "task", parentTitle: "사용자 Project", dueDate: null }],
+    memberName: "Taeho", date, selected: [], todayNote: "", blockersNote: "", skipReason: null, skipNote: "", metadata: "{}", noPlannedTasks: false,
+  }, translate);
+  const rendered = JSON.stringify(modal);
+  assert.equal(modal.title.text, "Today's work");
+  assert.equal(modal.close.text, "Cancel");
+  assert.match(rendered, /고객이 작성한 제목/);
+  assert.match(rendered, /사용자 Project/);
+  assert.doesNotMatch(rendered, /오늘 할 업무|오늘 메모|데일리 스킵/);
+});
+
 test("Slack email matching preserves explicit links and does not match people by name", () => {
   const members = [{ id: "me", email: " ME@example.test ", display_name: "Same" }, { id: "other", email: "other@example.test", display_name: "Same" }];
   const users = [{ id: "U1", profile: { email: "me@example.test", display_name: "Same" } }, { id: "U2", profile: { display_name: "Same" } }];
@@ -219,11 +234,13 @@ test("member diagnostics and manual linking enforce admin, CSRF and explicit con
 
 test("signed Slack submission passes every personal checklist and rejects other-member metadata", async () => {
   const saved = [], submitted = [], pending = [];
-  const state = { memberId: "me", fail: false, signature: true, role: "owner" };
+  const state = { memberId: "me", fail: false, signature: true, role: "owner", language: "en" };
   const route = compile(await read("../app/api/slack/interactions/route.ts"), {
     "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: { prepare: () => ({ bind: () => ({ first: async () => ({ yesterday_note: "Yesterday" }) }) }) } }, waitUntil: (p) => pending.push(p) },
     "@/lib/pace-data": { getSlackConnectionByTeam: async () => ({ ownerId: "w" }) },
     "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => state.signature },
+    "@/lib/language-preferences": { memberMessageLanguage: async () => state.language, workspaceMessageLanguage: async () => "ko" },
+    "@/lib/server-language": serverLanguage,
     "@/lib/slack-daily": { dailyMemberBySlack: async () => ({ authorization: { ...authorization, role: state.role } }), publishDailySubmission: async () => {}, reconcileDailyReminders: async () => {} },
     "@/lib/daily-bot": { currentDailyMember: async () => ({ id: "me" }), normalizeDailySkipReason: (v) => v || null,
       saveDailyDraft: async (...args) => { if (state.fail) throw new Error("저장 실패"); saved.push(args); },
@@ -250,6 +267,31 @@ test("signed Slack submission passes every personal checklist and rejects other-
   assert.equal((await (await route.POST(request())).json()).response_action, "errors");
   assert.equal(submitted.length, 1);
   state.role = "viewer";
-  assert.equal((await (await route.POST(request())).json()).response_action, "errors");
+  const viewerError = await (await route.POST(request())).json();
+  assert.equal(viewerError.response_action, "errors");
+  assert.match(Object.values(viewerError.errors).join(" "), /Read-only members/);
   state.signature = false; assert.equal((await route.POST(request())).status, 401);
+});
+
+test("Slack slash commands use the linked member language and preserve authored Task titles", async () => {
+  const created = [];
+  const route = compile(await read("../app/api/slack/commands/route.ts"), {
+    "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: {} } },
+    "@/lib/pace-data": {
+      ensureWorkspace: async () => {}, getSlackConnectionByTeam: async () => ({ ownerId: "w", userId: "creator" }),
+      createItem: async (_ownerId, input) => { created.push(input); return { title: input.title }; }, serializeItem: (item) => item,
+    },
+    "@/lib/slack-daily": { dailyMemberBySlack: async () => ({ authorization, memberId: "me" }), reconcileDailyReminders: async () => {} },
+    "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => true },
+    "@/lib/language-preferences": { memberMessageLanguage: async () => "en", workspaceMessageLanguage: async () => "ko" },
+    "@/lib/server-language": serverLanguage,
+  });
+  const request = (text) => new Request("https://example.test/api/slack/commands", { method: "POST", body: new URLSearchParams({
+    team_id: "T", user_id: "U", user_name: "Me", channel_id: "C", channel_name: "general", text,
+  }) });
+  const help = await (await route.POST(request("help"))).json();
+  assert.match(help.text, /How to use/);
+  const task = await (await route.POST(request("고객 인터뷰 정리"))).json();
+  assert.equal(task.text, "Saved as a Task: 고객 인터뷰 정리");
+  assert.equal(created[0].title, "고객 인터뷰 정리");
 });

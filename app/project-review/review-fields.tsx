@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import type { ProjectProposal, ProjectReview, InitiativeChoice } from "@/lib/project-review";
 import type { ProjectReviewEditor } from "@/lib/project-review-editor";
 import { PropertyValueInput, type EditablePropertyValue } from "@/app/property-value-input";
-import { t, displayDate, getClientLocale } from "@/lib/client-language";
+import { t, displayDate, getClientLocale , messageValue } from "@/lib/client-language";
 import { systemPropertyLabel } from "@/lib/property-label";
 
 const priorityNames = { low: "낮음", medium: "보통", high: "높음", urgent: "긴급" };
@@ -62,7 +62,7 @@ export function ReviewFields({ review, proposal: p, editor, errors, disabled, on
         return <div key={property.id}><Field id={id} title={property.name} hint={provenance === display ? display : `${provenance} · ${display}`} error={errors[key]}>
           <PropertyValueInput id={id} disabled={disabled} invalid={Boolean(errors[key])} describedBy={`${id}-hint`} type={property.type} options={property.options} members={editor.members} value={value}
             onChange={(v) => onChange({ ...p, properties: { ...p.properties, [property.name]: empty(v) ? null : property.type === "number" ? Number(v) : v } }, key)} />
-        </Field>{!empty(value) && <button className="review-clear" type="button" disabled={disabled} onClick={() => onChange({ ...p, properties: { ...p.properties, [property.name]: null } }, key)} aria-label={`${property.name} 미지정으로 변경`}>{t("미지정으로 변경")}</button>}</div>;
+        </Field>{!empty(value) && <button className="review-clear" type="button" disabled={disabled} onClick={() => onChange({ ...p, properties: { ...p.properties, [property.name]: null } }, key)} aria-label={t("{value1} 미지정으로 변경", { value1: messageValue(property.name) })}>{t("미지정으로 변경")}</button>}</div>;
       })}
     </div>
     {Object.keys(p.properties).filter((name) => !custom.some((property) => property.name === name)).map((name) => <div className="review-error" key={name}><p>{name}: {review.propertyLabels?.[name] ?? t("기존 값 있음")} {t("— 현재 사용하지 않는 속성입니다.")}</p><button disabled={disabled} type="button" onClick={() => { const next = { ...p.properties }; delete next[name]; onChange({ ...p, properties: next }, `properties.${name}`); }}>{name} {t("값 제외")}</button></div>)}

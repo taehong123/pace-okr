@@ -164,3 +164,25 @@ Do not add another page-specific input palette or density override.
 References: [VS Code role-based theme colors](https://code.visualstudio.com/api/references/theme-color#button-control),
 [Dark Modern palette](https://github.com/microsoft/vscode/blob/main/extensions/theme-defaults/themes/dark_modern.json),
 [WCAG text contrast](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html).
+
+## Global language typography
+
+The interface supports Korean, English, Japanese, Simplified Chinese and
+Spanish without changing the layout scale or the theme palette. Korean, Latin
+and numeral glyphs always remain on the self-hosted Pretendard family. Japanese
+and Simplified Chinese may use an installed system CJK family only for their
+own Unicode ranges; do not add a font CDN, location request or viewport-based
+font-size override.
+
+- Set the active document language on `html` (`zh-Hans` for Simplified Chinese)
+  so assistive technology and the scoped CJK fallback use the same language.
+- Long translations wrap and grow their existing row or field. Never reduce
+  font size, apply nonzero letter spacing, hide an existing action, or move it
+  to another menu to make a translation fit.
+- System labels use the typed message catalogs. User-authored titles, text,
+  property names, option values, templates and custom bot messages are not
+  translated. A renamed default property is user-authored from that point on.
+- Language changes must preserve the current view, scroll, selection, drafts,
+  editor history and theme. They must not invalidate or refetch business data.
+- Browser checks cover all five languages at 320, 390, 1440 and 3840px, 200%
+  text zoom, keyboard operation, all six themes and actual rendered glyphs.

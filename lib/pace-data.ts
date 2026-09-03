@@ -2537,8 +2537,9 @@ async function canonicalUserIdForGoogle(subject: string, emailInput: string, dis
 
 async function ensureWorkspaceShell(ownerId: string, email: string | null = null, displayName = "Workspace Owner") {
   const now = new Date().toISOString();
-  const workspaceName = displayName && displayName !== "Workspace Owner" ? `${displayName}의 개인 워크스페이스` : "개인 워크스페이스";
   const { resolvedLanguage } = await readLanguagePreferences(env.DB, ownerId);
+  const t = await serverTranslator(resolvedLanguage);
+  const workspaceName = displayName && displayName !== "Workspace Owner" ? t("{name}의 개인 워크스페이스", { name: displayName }) : t("개인 워크스페이스");
   await getDb().insert(workspaces).values({ id: ownerId, name: workspaceName, ownerUserId: ownerId, kind: "personal", messageLanguage: resolvedLanguage, createdAt: now, updatedAt: now }).onConflictDoNothing();
   await getDb().insert(workspaceMembers).values({
     id: crypto.randomUUID(),

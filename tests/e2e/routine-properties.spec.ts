@@ -58,7 +58,7 @@ test("routine values support every type, save and reload, and remain on failure"
   state.fail = true;
   await values.getByLabel("점검 수", { exact: true }).fill("12");
   await page.locator(".routine-card").getByRole("button", { name: "저장", exact: true }).click();
-  await expect(page.getByText("저장 실패: 입력 내용은 유지됩니다.")).toBeVisible();
+  await expect(page.getByText("Routine을 저장하지 못했습니다.")).toBeVisible();
   await expect(values.getByLabel("점검 수", { exact: true })).toHaveValue("12");
   await expect(page.locator(".routine-card").getByRole("button", { name: "저장", exact: true })).toBeEnabled();
 });

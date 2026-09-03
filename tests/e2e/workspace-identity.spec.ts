@@ -6,7 +6,7 @@ import { THEME_STORAGE_KEY } from "../../lib/themes";
 async function setup(page: Page, canManage = true) {
   await installApiMocks(page, { teamWorkspace: true, workspaceRole: canManage ? "owner" : "viewer" });
   const state = {
-    profile: { id: "workspace-1", name: "테스트 워크스페이스", address: null as string | null, revision: 0, canManage, subdomainsEnabled: false, url: null as string | null },
+    profile: { id: "workspace-1", name: "테스트 워크스페이스", address: null as string | null, messageLanguage: "ko", revision: 0, canManage, subdomainsEnabled: false, url: null as string | null },
     reads: 0, writes: [] as Record<string, unknown>[], failure: false,
   };
   await page.route("**/api/workspaces/profile", async (route) => {
@@ -58,7 +58,7 @@ test("failed save preserves edits and does not claim success; read-only members 
   await page.goto("/?settings=workspace&tab=general");
   await page.getByLabel("워크스페이스 이름", { exact: true }).fill("저장할 입력");
   await page.getByRole("button", { name: "이름 저장", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("다른 곳에서 변경");
+  await expect(page.getByRole("alert")).toContainText("저장하지 못했습니다. 다시 시도해 주세요.");
   await expect(page.getByLabel("워크스페이스 이름", { exact: true })).toHaveValue("저장할 입력");
   await expect(page.getByText("이름을 저장했습니다.")).toHaveCount(0);
   state.profile.canManage = false;
@@ -66,6 +66,23 @@ test("failed save preserves edits and does not claim success; read-only members 
   await expect(page.getByLabel("워크스페이스 이름", { exact: true })).toBeDisabled();
   await expect(page.getByLabel("워크스페이스 주소", { exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "이름 저장", exact: true })).toHaveCount(0);
+});
+
+test("shared message language is independent, saved by owners and read-only for viewers", async ({ page }) => {
+  const state = await setup(page);
+  await page.goto("/?settings=workspace&tab=general");
+  const select = page.getByLabel("공용 메시지 언어");
+  await select.selectOption("en");
+  await page.getByRole("button", { name: "언어 저장", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("언어를 저장했습니다.");
+  expect(state.profile.messageLanguage).toBe("en");
+  expect(state.writes.at(-1)).toMatchObject({ messageLanguage: "en", revision: 0 });
+
+  state.profile.canManage = false;
+  await page.reload();
+  await expect(page.getByLabel("공용 메시지 언어")).toHaveValue("en");
+  await expect(page.getByLabel("공용 메시지 언어")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "언어 저장", exact: true })).toHaveCount(0);
 });
 
 test("workspace identity fits narrow/wide screens, long names, real fonts, light/dark and 200 percent text", async ({ page, context }, info) => {

@@ -140,10 +140,12 @@ test("default property labels localize while renamed properties and custom value
 test("error envelopes preserve legacy fields and headers, with stable safe customer codes", async () => {
   const { withPublicErrorDetails, publicErrorMessages } = compileLanguageModule(await readFile(new URL("../lib/api-error.ts", import.meta.url), "utf8"));
   for (const [status, code] of [[400, "invalid_input"], [401, "authentication_required"], [403, "access_denied"], [409, "conflict"], [429, "rate_limited"], [500, "request_failed"]]) {
-    const response = await withPublicErrorDetails(Response.json({ error: "database diagnostic", code: "legacy", fieldErrors: { title: "required" } }, { status, headers: { "X-Test": "preserved" } }));
+    const response = await withPublicErrorDetails(Response.json({ error: "database diagnostic", code: "legacy", fieldErrors: { title: "required" } }, { status, headers: { "X-Test": "preserved", "Content-Encoding": "gzip", ETag: '"old"' } }));
     assert.equal(response.status, status);
     assert.equal(response.headers.get("X-Test"), "preserved");
     assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    assert.equal(response.headers.get("Content-Encoding"), null);
+    assert.equal(response.headers.get("ETag"), null);
     assert.deepEqual(await response.json(), { error: "database diagnostic", code: "legacy", fieldErrors: { title: "required" }, messageCode: code, messageValues: {} });
     for (const id of ["en", "ja", "zh", "es"]) assert.ok(catalogs[id].default[publicErrorMessages[code]], `Missing ${id} error ${code}`);
   }

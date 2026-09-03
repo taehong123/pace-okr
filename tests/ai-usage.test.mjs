@@ -5,6 +5,7 @@ import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import { serverLanguage } from "./helpers/language-fixture.mjs";
 
 const require = createRequire(import.meta.url);
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
@@ -16,7 +17,9 @@ function compile(source, dependencies = {}) {
 }
 const usage = compile(await read("../lib/ai-usage.ts"));
 const clientSource = await read("../lib/ai-usage-client.ts");
-const meter = compile(await read("../app/ai-usage-meter.tsx"), { "@/lib/ai-usage": usage, "@/lib/ai-usage-client": {}, "./ai-usage-meter.css": {} });
+const clientLanguage = { getClientLocale: () => "ko-KR", messageValue: (value) => value,
+  t: (key, values) => key.replace(/\{(\w+)\}/g, (match, name) => values && Object.hasOwn(values, name) ? String(values[name]) : match) };
+const meter = compile(await read("../app/ai-usage-meter.tsx"), { "@/lib/ai-usage": usage, "@/lib/ai-usage-client": {}, "@/lib/client-language": clientLanguage, "./ai-usage-meter.css": {} });
 const billingSource = await read("../lib/billing.ts");
 const routeSource = await read("../app/api/billing/ai-usage/route.ts");
 
@@ -36,6 +39,17 @@ test("percent formatting never says zero or full for positive, unfinished usage"
   assert.deepEqual(usage.readAiUsagePercent({ usedPercent: 24, usedWon: 500, limitWon: 500 }), { usedPercent: 24, remainingPercent: 76 });
   assert.equal(usage.readAiUsagePercent({ usedPercent: null, usedWon: 0, limitWon: 500 }), null);
   assert.equal(usage.readAiUsagePercent({ usedWon: 120, limitWon: 500 }).usedPercent, 24);
+});
+
+test("AI usage thresholds and limit guidance use the active language and locale", async () => {
+  const translate = await serverLanguage.serverTranslator("en");
+  assert.equal(usage.formatAiPercent(0.05, "en-US", translate), "Less than 0.1%");
+  assert.equal(usage.formatAiPercent(12.5, "de-DE", translate), "12,5%");
+  assert.match(usage.aiUsageLimitMessage({ code: "ai_rate_limited" }, translate, "en-US"), /too quickly/i);
+  const limited = usage.aiUsageLimitMessage({ code: "ai_budget_exceeded", spentWon: 495, limitWon: 500 }, translate, "en-US");
+  assert.match(limited, /99%/);
+  assert.match(limited, /1%/);
+  assert.doesNotMatch(limited, /이번 달|작성 중인/);
 });
 
 test("meter renders percent-only labels with valid 0–100 accessibility and honest unknown state", () => {

@@ -35,7 +35,7 @@ export default function WorkspaceIdentity({ workspaceId, onNameChanged }: { work
         if (!response.ok || !data.profile || data.profile.id !== workspaceId) throw new Error(apiError(data, "워크스페이스 정보를 불러오지 못했습니다."));
         if (!controller.signal.aborted) apply(data.profile);
       }).catch((failure: unknown) => {
-        if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "워크스페이스 정보를 불러오지 못했습니다.");
+        if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : t("워크스페이스 정보를 불러오지 못했습니다."));
       }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [workspaceId, attempt, apply]);
@@ -43,7 +43,7 @@ export default function WorkspaceIdentity({ workspaceId, onNameChanged }: { work
   async function save(event: FormEvent, kind: "name" | "address" | "messageLanguage") {
     event.preventDefault();
     if (!profile || busy || !profile.canManage) return;
-    if (kind === "address" && profile.address && !await confirm({ title: "워크스페이스 주소 변경", message: "이전 주소도 계속 이 워크스페이스로 연결됩니다.", confirmLabel: "주소 변경" })) return;
+    if (kind === "address" && profile.address && !await confirm({ title: t("워크스페이스 주소 변경"), message: t("이전 주소도 계속 이 워크스페이스로 연결됩니다."), confirmLabel: t("주소 변경") })) return;
     setBusy(kind); setError(""); setSaved(""); setCopied(false);
     try {
       const value = kind === "name" ? name.trim() : kind === "address" ? address.trim().toLowerCase() : messageLanguage;
@@ -54,8 +54,8 @@ export default function WorkspaceIdentity({ workspaceId, onNameChanged }: { work
       if (kind === "name") { setName(data.profile.name); onNameChanged(data.profile.name); }
       else if (kind === "address") setAddress(data.profile.address ?? "");
       else setMessageLanguage(data.profile.messageLanguage);
-      setSaved(kind === "name" ? "이름을 저장했습니다." : kind === "address" ? "주소를 저장했습니다." : "언어를 저장했습니다.");
-    } catch (failure) { setError(failure instanceof Error ? failure.message : "저장하지 못했습니다."); }
+      setSaved(kind === "name" ? t("이름을 저장했습니다.") : kind === "address" ? t("주소를 저장했습니다.") : t("언어를 저장했습니다."));
+    } catch (failure) { setError(failure instanceof Error ? failure.message : t("저장하지 못했습니다.")); }
     finally { setBusy(null); }
   }
 
