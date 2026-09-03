@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent }
 import { ArrowLeft, ArrowRight, ArrowUpRight, Languages, LoaderCircle, LogIn } from "lucide-react";
 import { LANDING_LANGUAGE_KEY, landingCopy, landingLanguages, resolveLandingLanguage, type LandingLanguage } from "@/lib/landing-copy";
 import { DEFAULT_THEME, isThemeMode } from "@/lib/themes";
+import { AppInstallButton } from "./app-install-button";
 import "./landing.css";
 
 const productSizes = [
@@ -171,6 +172,7 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
             <span>{signingIn ? copy.loggingIn : copy.login}</span>
           </button>
         </div>
+        <AppInstallButton placement="login" />
       </footer>
     </main>
   );
