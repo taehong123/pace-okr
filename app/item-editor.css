@@ -1,0 +1,238 @@
+/* Shared create/edit contract. Keep fields independent of their page or drawer. */
+:is(.property-panel, .okr-file-editor, .routine-card, .project-property-manager, .project-template-manager) {
+  --editor-inset: var(--space-6);
+}
+
+:is(.property-form, .project-property-create, .task-detail-fields, .project-property-field, .routine-guide-grid, .routine-assignee, .okr-file-metadata-editor) {
+  min-width: 0;
+  gap: var(--space-4);
+}
+
+:is(.property-form, .project-property-create, .task-detail-fields, .routine-guide-grid, .okr-file-metadata-editor) label,
+.project-property-field,
+.routine-assignee,
+.property-panel .member-mention-field {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
+:is(.property-form, .project-property-create, .task-detail-fields, .routine-guide-grid, .okr-file-metadata-editor) label > span,
+.project-property-field > span,
+.routine-assignee > span,
+.property-panel .member-mention-field > span {
+  color: var(--text-secondary);
+  font-size: var(--type-label);
+  font-weight: 500;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+:is(.property-form, .project-property-create, .project-template-meta, .task-detail-fields, .project-property-field, .routine-guide-grid, .routine-assignee, .okr-file-editor)
+:is(input:where(:not([type="checkbox"]):not([type="radio"]):not([type="range"])), select, textarea) {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--field-height);
+  box-sizing: border-box;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--type-body);
+  line-height: 1.6;
+}
+
+:is(.property-form, .project-property-create, .project-template-meta, .task-detail-fields, .project-property-field, .routine-guide-grid, .routine-assignee, .okr-file-editor)
+:is(input:where(:not([type="checkbox"]):not([type="radio"]):not([type="range"])), select:where(:not([multiple]))) {
+  padding-block: var(--space-1);
+}
+
+:is(.property-form, .project-property-create, .project-template-meta, .task-detail-fields, .project-property-field, .routine-guide-grid, .routine-assignee, .okr-file-editor)
+:is(input, select, textarea):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+:is(.property-form, .project-property-create) :is(input[type="checkbox"], input[type="radio"]),
+.project-property-field input[type="checkbox"] {
+  width: 1.125rem;
+  min-height: 0;
+  height: 1.125rem;
+  margin: calc((var(--field-height) - 1.125rem) / 2) 0;
+  padding: 0;
+  accent-color: var(--button-primary-bg);
+  justify-self: start;
+}
+
+.property-panel {
+  height: 100dvh;
+  max-height: 100dvh;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  padding-bottom: env(safe-area-inset-bottom);
+  box-sizing: border-box;
+  scroll-padding-block: var(--space-4);
+}
+
+.property-panel > header {
+  min-width: 0;
+  height: auto;
+  min-height: calc(var(--field-height) + 2 * var(--space-4));
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--editor-inset);
+  background: var(--bg-surface);
+}
+
+.property-panel > header > div { min-width: 0; padding: 0; }
+.property-panel > header > div:first-child { flex: 1; }
+.property-panel > header :is(h2, p) { overflow-wrap: anywhere; }
+.property-panel > header h2 { font-size: var(--type-section); line-height: 1.4; }
+.property-panel > header p { margin: 0 0 var(--space-1); }
+.property-panel > header > .icon-button { flex: 0 0 auto; }
+
+.property-panel :is(.project-title-input, .task-title-input) {
+  min-height: var(--field-height);
+  max-height: none;
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  background: var(--input-bg);
+  font-size: var(--type-section);
+  font-weight: 600;
+  line-height: 1.6;
+  overflow-y: auto;
+}
+.property-panel :is(.project-title-input, .task-title-input):focus { box-shadow: none; }
+
+:is(.project-page-actions, .task-detail-actions) { gap: var(--space-1); flex-shrink: 0; }
+.project-page-actions > button.icon-button { border: 0; background: var(--button-ghost-bg); color: var(--button-ghost-fg); }
+.project-page-actions > button.icon-button:hover { background: var(--button-ghost-hover-bg); color: var(--button-ghost-hover-fg); }
+.project-page-actions > button.icon-button:active { background: var(--button-ghost-active-bg); color: var(--button-ghost-active-fg); }
+.project-page-actions > button.icon-button.danger { color: var(--danger-fg); }
+.project-page-actions > button.icon-button.danger:hover { background: var(--danger-bg); color: var(--danger-fg); }
+
+.property-form,
+.project-property-create,
+.project-template-meta,
+.property-panel :is(.task-detail-fields, .task-assignee-editor, .task-lineage, .checklist-section, .project-custom-properties, .project-linked-data, .project-linked-tasks) {
+  padding: var(--space-6) var(--editor-inset);
+  background: var(--bg-surface);
+}
+
+.property-panel :is(.project-custom-properties, .project-linked-data, .project-linked-tasks) { display: grid; gap: var(--space-4); }
+.property-panel section > header { gap: var(--space-2); flex-wrap: wrap; }
+.property-panel section > header :is(b, span) { overflow-wrap: anywhere; }
+.property-panel .task-calendar-action { padding: var(--space-3) var(--editor-inset); }
+
+.project-field-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.create-project-fields {
+  gap: var(--space-4);
+  padding: var(--space-4) 0 0;
+  border: 0;
+  border-top: 1px solid var(--border-default);
+  border-radius: 0;
+  background: transparent;
+}
+.create-project-fields > header { gap: var(--space-2); flex-wrap: wrap; }
+.custom-project-fields { padding-top: var(--space-4); }
+
+/* An action owns its own column, never the input's text or native select arrow. */
+:is(.project-system-property, .project-property-field-row) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
+  gap: var(--space-2);
+  min-width: 0;
+}
+:is(.project-system-property, .project-property-field-row):has(> .icon-button) {
+  grid-template-columns: minmax(0, 1fr) 2.75rem;
+}
+:is(.project-system-property, .project-property-field-row) > .icon-button {
+  position: static;
+  width: 2.75rem;
+  min-height: var(--field-height);
+  margin: 0;
+  color: var(--button-ghost-fg);
+}
+.hidden-property-list { gap: var(--space-2); padding-top: var(--space-4); }
+.hidden-property-list > span { flex-basis: 100%; margin: 0; }
+.hidden-property-list button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+
+.property-panel .member-mention-box {
+  min-height: var(--field-height);
+  gap: var(--space-1);
+  border-color: var(--border-control);
+  border-radius: var(--radius-control);
+  background: var(--input-bg);
+}
+.property-panel .member-mention-input input {
+  min-height: var(--control-height);
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.property-panel .member-chip { gap: var(--space-1); }
+.property-panel .member-mention-menu button { gap: var(--space-2); padding: var(--space-2); }
+
+.task-progress-field > div { min-height: var(--field-height); height: auto; grid-template-columns: minmax(0, 1fr) auto; }
+.task-progress-field b { color: var(--progress-text); }
+.task-detail-panel .checklist-row { grid-template-columns: 1.125rem minmax(0, 1fr) var(--control-height); gap: var(--space-2); }
+.task-detail-panel .lineage-row { gap: var(--space-3); grid-template-columns: 6rem minmax(0, 1fr); }
+.property-panel .lineage-row b { white-space: normal; overflow-wrap: anywhere; }
+
+.project-task-quick-add { grid-template-columns: minmax(0, 1fr) var(--field-height); margin: 0; min-height: var(--field-height); border-radius: var(--radius-control); }
+.project-task-table { max-width: 100%; }
+.project-task-row { min-width: 53rem; }
+.project-document-section > header { padding: var(--space-4) var(--editor-inset); }
+.project-document-actions { flex-wrap: wrap; gap: var(--space-2) !important; min-width: 0; }
+.project-document-actions select { min-width: 0; max-width: 100%; flex: 1 1 10rem; }
+.project-document-actions button { white-space: normal; }
+.project-document-template-create { gap: var(--space-2); grid-template-columns: minmax(0, 1fr) auto var(--control-height); padding: var(--space-4) var(--editor-inset); }
+.project-block-editor { padding: var(--space-4) 0 var(--space-8); }
+.project-block-editor .bn-editor { padding-inline: var(--editor-inset); font-size: var(--type-body); line-height: 1.6; }
+
+.routine-card { gap: var(--space-4); padding: var(--space-4); }
+.routine-guide-grid { gap: var(--space-4); }
+.routine-card > footer { gap: var(--space-4); flex-wrap: wrap; }
+.routine-assignee { flex: 1; }
+.project-property-item { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); }
+.property-editor-actions { gap: var(--space-2); flex-wrap: wrap; }
+.project-template-create { grid-template-columns: minmax(0, 1fr) var(--control-height) var(--control-height); gap: var(--space-2); }
+.project-template-meta { gap: var(--space-4); }
+
+.okr-file-metadata-editor { gap: var(--space-4); padding: var(--space-4); border: 0; border-bottom: 1px solid var(--border-default); border-radius: 0; background: transparent; }
+.okr-file-objective-editor, .okr-file-key-result-editor { border: 0; border-radius: 0; background: transparent; }
+.okr-file-key-result-editor { border-left: 2px solid var(--kr-rail); }
+.okr-file-editor :is(.okr-file-objective-editor > header, .okr-file-key-result-editor > header) { gap: var(--space-3); padding: var(--space-4); }
+.okr-file-key-results { gap: var(--space-4); padding: var(--space-4); }
+.okr-file-initiatives { gap: var(--space-2); padding: var(--space-4); }
+.okr-file-initiative-editor { gap: var(--space-2); padding: var(--space-3); }
+.okr-file-editor textarea { font-weight: 500; }
+
+@media (max-width: 700px) {
+  :is(.property-panel, .okr-file-editor, .routine-card, .project-property-manager, .project-template-manager) { --editor-inset: var(--space-4); }
+  .property-panel > header { flex-wrap: wrap; }
+  .project-detail-panel > header.project-page-head { display: flex; }
+  .property-panel.project-detail-panel > header > div:first-child,
+  .property-panel.task-detail-panel > header > div:first-child { flex-basis: 100%; }
+  .property-panel :is(.project-page-actions, .task-detail-actions) { order: -1; max-width: 100%; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+  .property-panel .task-detail-fields { grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); }
+  .project-field-grid { grid-template-columns: minmax(0, 1fr); }
+  .property-panel :is(.project-document-actions, .project-document-section > header > div) { width: 100%; }
+  .project-document-actions select { flex-basis: 100%; }
+  .project-document-template-create { grid-template-columns: minmax(0, 1fr) var(--control-height); }
+  .project-document-template-create input { grid-column: 1 / -1; }
+}

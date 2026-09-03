@@ -119,6 +119,25 @@ Do not apply desktop sidebar padding or navigation margins to the mobile bar.
   actual Korean/Latin/numeral fonts, long titles, 200% user text, unclipped mobile
   navigation, settings header separation and keyboard close, and six-theme
   conversation contrast. All application requests use fictional fixtures.
+### Create and edit surfaces
+
+`app/item-editor.css` is the shared field/layout layer loaded after `globals.css`
+and `workspace-design.css`.
+Project creation, Project detail, property definitions, templates, Task detail,
+Routine fields and the OKR editor use the same label, field and focus tokens.
+Do not add another page-specific input palette or density override.
+
+- Project create/edit custom values use `PropertyValueInput`; the caller retains
+  responsibility for draft state, typed persistence and write permissions.
+- Hide controls occupy a separate column, never absolute positions over fields.
+  Hiding preserves values; read-only controls must remain visibly non-editable.
+- Use `--field-height`, `--space-*` and container-fitting grid tracks. Long
+  titles and labels grow vertically, including at 200% user text size.
+- Project detail keeps properties, linked Task navigation and the document.
+  Sections share an inset; the Task table owns its horizontal scroll region.
+- `tests/e2e/item-editor.spec.ts` checks create/edit parity, typed value and member
+  preservation, hide/restore, Viewer controls, six palettes, actual font glyphs,
+  keyboard operation and 320 through 3840px layouts with larger user text.
 
 - `tests/e2e/design-balance.spec.ts`: desktop density stays stable through 4K;
   editable values and mobile touch targets retain their size, search/date values

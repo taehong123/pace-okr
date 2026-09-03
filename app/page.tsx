@@ -2999,7 +2999,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
       {(requestClose) => <aside className={`property-panel project-detail-panel ${project.status === "archived" ? "archived" : ""}`}>
         <header className="project-page-head">
           <div>
-            <p>Project page</p>
+            <p>Project</p>
             <textarea
               className="project-title-input"
               defaultValue={project.title}
@@ -3011,7 +3011,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
           </div>
           <div className="project-page-actions">
             {canDeleteItem(project) && <DeleteSelectCheckbox item={project} selected={selectedItemIds.has(project.id)} onToggle={onToggleSelect} />}
-            {canDeleteItem(project) && <button type="button" className="danger" onClick={onArchive}><Trash2 size={13} />휴지통으로 이동</button>}
+            {canDeleteItem(project) && <button type="button" className="icon-button danger" onClick={onArchive} aria-label="Project 휴지통으로 이동" title="Project 휴지통으로 이동"><Trash2 size={16} /></button>}
             <button className="icon-button" onClick={() => requestClose("close-button")} aria-label="닫기"><X size={17} /></button>
           </div>
         </header>
@@ -3022,15 +3022,15 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
             {systemPropertyVisible("status") && <ProjectSystemPropertySlot property={systemProperty("status")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemProperty("status")?.name ?? "상태"}</span><select disabled={readOnly} value={project.status} onChange={(event) => void onPatch(project.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></ProjectSystemPropertySlot>}
             {systemPropertyVisible("due_date") && <ProjectSystemPropertySlot property={systemProperty("due_date")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemProperty("due_date")?.name ?? "기한"}</span><input disabled={readOnly} type="date" value={project.dueDate ?? ""} onChange={(event) => void onPatch(project.id, { dueDate: event.target.value || null })} /></label></ProjectSystemPropertySlot>}
           </div>
-          {teamMembers.length > 0 && systemPropertyVisible("project_dri") && <ProjectSystemPropertySlot property={systemProperty("project_dri")} readOnly={readOnly} onHide={onPropertyVisibility}><MemberMentionPicker label={systemProperty("project_dri")?.name ?? "책임자"} members={teamMembers} selectedIds={driIds} onChange={(ids) => !readOnly && void saveAssignments("project_dri", ids)} placeholder="@실명으로 찾기" maxSelected={1} /></ProjectSystemPropertySlot>}
-          {teamMembers.length > 0 && systemPropertyVisible("project_workers") && <ProjectSystemPropertySlot property={systemProperty("project_workers")} readOnly={readOnly} onHide={onPropertyVisibility}><MemberMentionPicker label={systemProperty("project_workers")?.name ?? "하위 업무자"} members={teamMembers} selectedIds={workerIds} onChange={(ids) => !readOnly && void saveAssignments("project_worker", ids)} placeholder="@실명으로 여러 명 태그" /></ProjectSystemPropertySlot>}
+          {teamMembers.length > 0 && systemPropertyVisible("project_dri") && <ProjectSystemPropertySlot property={systemProperty("project_dri")} readOnly={readOnly} onHide={onPropertyVisibility}><MemberMentionPicker label={systemProperty("project_dri")?.name ?? "책임자"} members={teamMembers} selectedIds={driIds} disabled={readOnly} onChange={(ids) => !readOnly && void saveAssignments("project_dri", ids)} placeholder="@실명으로 찾기" maxSelected={1} /></ProjectSystemPropertySlot>}
+          {teamMembers.length > 0 && systemPropertyVisible("project_workers") && <ProjectSystemPropertySlot property={systemProperty("project_workers")} readOnly={readOnly} onHide={onPropertyVisibility}><MemberMentionPicker label={systemProperty("project_workers")?.name ?? "하위 업무자"} members={teamMembers} selectedIds={workerIds} disabled={readOnly} onChange={(ids) => !readOnly && void saveAssignments("project_worker", ids)} placeholder="@실명으로 여러 명 태그" /></ProjectSystemPropertySlot>}
         </form>
         <section className="project-custom-properties">
-          <header><b>Project 속성</b><span>변경 즉시 저장</span></header>
-          {visibleProperties.length ? visibleProperties.map((property) => <ProjectPropertyField key={property.id} projectId={project.id} property={property} value={propertyValues[project.id]?.[property.id] ?? null} members={teamMembers} readOnly={readOnly} onChange={onPropertyChange} onHide={() => onPropertyVisibility(property.id, true)} />) : <EmptyState icon={Settings2} title="표시 중인 커스텀 속성이 없습니다" />}
-          {hiddenPropertyDefinitions.length > 0 && <div className="hidden-property-list"><span>숨긴 속성 {hiddenPropertyDefinitions.length}</span>{hiddenPropertyDefinitions.map((property) => <button key={property.id} onClick={() => onPropertyVisibility(property.id, false)}><Eye size={13} />{property.name}</button>)}</div>}
+          <header><b>Project 속성</b><span>{readOnly ? "읽기 전용" : "변경 즉시 저장"}</span></header>
+          {visibleProperties.length ? <div className="project-field-grid">{visibleProperties.map((property) => <ProjectPropertyField key={property.id} projectId={project.id} property={property} value={propertyValues[project.id]?.[property.id] ?? null} members={teamMembers} readOnly={readOnly} onChange={onPropertyChange} onHide={() => onPropertyVisibility(property.id, true)} />)}</div> : <EmptyState icon={Settings2} title="표시 중인 커스텀 속성이 없습니다" />}
+          {hiddenPropertyDefinitions.length > 0 && <div className="hidden-property-list"><span>숨긴 속성 {hiddenPropertyDefinitions.length}</span>{hiddenPropertyDefinitions.map((property) => <button type="button" disabled={readOnly} key={property.id} onClick={() => onPropertyVisibility(property.id, false)}><Eye size={13} />{property.name}</button>)}</div>}
         </section>
-        <ProjectDataSection key={project.id} project={project} />
+        <ProjectDataSection key={`data:${project.id}`} project={project} />
         <section className="task-lineage project-lineage-compact">
           <header><b>상위 OKR</b><span>Objective → KR → Initiative</span></header>
           <LineageRow label="Objective" value={objective?.title ?? "미연결"} />
@@ -3040,7 +3040,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
         <section className="project-linked-tasks">
           <header><div><b>연결된 Task</b><span>{linkedTasks.length}개</span></div>{deletableLinkedTasks.length > 0 && <button onClick={() => deletableLinkedTasks.forEach((task) => { if (!selectedItemIds.has(task.id)) onToggleSelect(task.id); })}><ListChecks size={13} />삭제 가능 Task 선택</button>}</header>
           <form className="project-task-quick-add" onSubmit={createLinkedTask}>
-            <input value={quickTaskTitle} onChange={(event) => setQuickTaskTitle(event.target.value)} placeholder="새 Task 빠른 추가" disabled={readOnly || creatingTask} />
+            <input value={quickTaskTitle} onChange={(event) => setQuickTaskTitle(event.target.value)} aria-label="새 Task 이름" placeholder="새 Task 빠른 추가" disabled={readOnly || creatingTask} />
             <button disabled={readOnly || creatingTask || !quickTaskTitle.trim()} aria-label="Task 추가" title="Task 추가"><Plus size={15} /></button>
           </form>
           <div className="project-task-table">
@@ -3058,7 +3058,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
             {!linkedTasks.length && <div className="project-task-empty">연결된 Task가 없습니다.</div>}
           </div>
         </section>
-        <ProjectDocumentSection key={project.id} projectId={project.id} readOnly={readOnly} onNotice={onNotice} />
+        <ProjectDocumentSection key={`document:${project.id}`} projectId={project.id} readOnly={readOnly} onNotice={onNotice} />
       </aside>}
     </OverlayDialog>
   );
@@ -3229,23 +3229,17 @@ function ProjectDocumentSection({ projectId, readOnly, onNotice }: { projectId: 
 
 function ProjectPropertyField({ projectId, property, value, members, readOnly, onChange, onHide }: { projectId: string; property: PropertyDefinition; value: PropertyValue; members: TeamMember[]; readOnly: boolean; onChange: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void>; onHide: () => void }) {
   const memberIds = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+  const inputValue = property.type === "member" ? memberIds[0] ?? null : property.type === "members" ? memberIds : value;
   return (
     <div className="project-property-field-row">
       <label className="project-property-field">
         <span>{property.name}</span>
-        {property.type === "checkbox" ? (
-          <input disabled={readOnly} type="checkbox" checked={Boolean(value)} onChange={(event) => void onChange(projectId, property.id, event.target.checked)} />
-        ) : property.type === "member" ? (
-          <select disabled={readOnly} value={memberIds[0] ?? ""} onChange={(event) => void onChange(projectId, property.id, event.target.value || null)}><option value="">선택 안 함</option>{members.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select>
-        ) : property.type === "members" ? (
-          <select disabled={readOnly} multiple value={memberIds} onChange={(event) => void onChange(projectId, property.id, Array.from(event.target.selectedOptions, (option) => option.value))}>{members.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select>
-        ) : property.type === "select" ? (
-          <select disabled={readOnly} value={typeof value === "string" ? value : ""} onChange={(event) => void onChange(projectId, property.id, event.target.value || null)}><option value="">선택 안 함</option>{property.options.map((option) => <option key={option}>{option}</option>)}</select>
-        ) : (
-          <input disabled={readOnly} type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => { const raw = event.target.value; void onChange(projectId, property.id, property.type === "number" ? (raw ? Number(raw) : null) : raw || null); }} />
-        )}
+        <PropertyValueInput type={property.type} value={inputValue} options={property.options} members={members} disabled={readOnly} onChange={(next) => {
+          const normalized = property.type === "number" ? (next === "" || next === null ? null : Number(next)) : next === "" ? null : next;
+          void onChange(projectId, property.id, normalized);
+        }} />
       </label>
-      {!readOnly && <button className="icon-button" onClick={onHide} aria-label={`${property.name} 숨기기`} title="이 Project에서 숨기기"><EyeOff size={14} /></button>}
+      {!readOnly && <button type="button" className="icon-button" onClick={onHide} aria-label={`${property.name} 숨기기`} title="이 Project에서 숨기기"><EyeOff size={14} /></button>}
     </div>
   );
 }
@@ -3457,6 +3451,7 @@ function assignmentLabel(item: OkrptrItem, role: ItemAssignmentRole) {
 }
 
 function canUserDeleteItem(item: OkrptrItem, currentMember: TeamMember | undefined, userId: string | null) {
+  if (currentMember?.role === "viewer") return false;
   if (userId && item.createdByUserId === userId) return true;
   if (!currentMember) return false;
   const accountableRole: ItemAssignmentRole | null = item.kind === "project"

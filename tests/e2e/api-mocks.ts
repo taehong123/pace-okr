@@ -35,7 +35,7 @@ const generalRoutine = {
   updatedAt: now,
 };
 
-const bootstrap = {
+export const bootstrap = {
   user: { id: "user-1", email: "owner@example.com", displayName: "테스트 사용자", provider: "local" },
   workspaces: [{
     id: "workspace-1",

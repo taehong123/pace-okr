@@ -9,7 +9,7 @@ type Props = {
   id?: string; disabled?: boolean; invalid?: boolean; describedBy?: string;
 };
 
-/** Shared native control for unsaved Project fields; it never writes to the server. */
+/** Shared Project field control; callers own draft state or persistence. */
 export function PropertyValueInput({ type, value, options, members, onChange, id, disabled, invalid, describedBy }: Props) {
   const common = { id, disabled, "aria-invalid": invalid || undefined, "aria-describedby": describedBy };
   const active = members.filter((m) => !m.status || m.status === "active");
