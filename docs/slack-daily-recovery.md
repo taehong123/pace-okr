@@ -49,6 +49,11 @@ from the active recipients and confirmed future reservations.
 Recovery does not send past-due DMs retrospectively. A same-day manual send is a
 separate existing action, to avoid surprising or duplicate messages.
 
+Delivery health counts linked recipients and explicitly selected or previously
+scheduled members whose links are missing. An unlinked member with neither a
+saved preference nor a reminder is not a failed recipient. This affects only
+health reporting; it never changes recipients, preferences or message schedules.
+
 `tests/slack-daily.test.mjs` validates real SQLite claim SQL with two independent
 workspace/token/timezone fixtures, recipient cooldowns, opt-outs, removal, account
 replacement, cancellation locks, lost responses, external receipt deletion,
@@ -73,3 +78,20 @@ post. Historical failed sends without receipts are not blindly replayed.
 Current submission version, member, workspace, connection and sharing channel
 are checked before delivery. Tests use mocked Slack; this is not a claim of
 exactly-once delivery across an external API and database.
+
+## Production recovery — 2026-09-03
+
+- The approved bot-only release restored all three existing recipients' Slack
+  reservations for 2026-09-04 09:00 Asia/Seoul. Each has a scheduled-message ID;
+  workspace and recipient errors are empty. Preferences were not changed and
+  no test/immediate messages were sent.
+- The Slack app's existing `message.im` subscription was enabled, but its
+  `https://okrptr.com/api/slack/events` request URL showed a verification failure.
+  Re-verification succeeded and the same URL was saved. The signed validation
+  POST appears in hosting logs. No scopes or event subscriptions were added.
+- The examined hosting logs contained fetch invocations, not scheduled ones.
+  Slack's scheduled receipts and delivered-message event are the verified
+  configured path; actual next-day delivery/event renewal remains to be observed.
+  The separate hosting cron registration cannot be verified or configured with
+  the current Sites tools. Do not describe bootstrap fallback as an always-on
+  replacement for a scheduler.

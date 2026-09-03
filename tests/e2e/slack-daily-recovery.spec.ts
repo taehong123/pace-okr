@@ -45,6 +45,26 @@ test(`failed reservation remains visible until repair succeeds (${repairFails ? 
 });
 }
 
+test("an unlinked member never selected for daily delivery does not create a false failure", async ({ page }) => {
+  await installApiMocks(page, { slackState: "connected", teamWorkspace: true });
+  await page.route("**/api/slack/daily/settings", (route) => {
+    expect(route.request().method()).toBe("GET");
+    return route.fulfill({ json: {
+      connected: true, teamName: "팀 Slack", setupComplete: true, needsReauthorization: false,
+      settings: { enabled: true, weekdays: [1, 2, 3, 4, 5], reminderTime: "09:00", timezone: "Asia/Seoul", installStatus: "connected", onboardingCompletedAt: "2026-09-02T00:00:00Z", lastError: "" },
+      channels: [], failedPublications: [],
+      members: [
+        { memberId: "member-1", displayName: "예약 대상", linked: true, preference: { enabled: true, configured: true }, reminder: { status: "scheduled", postAt: Math.floor(Date.now() / 1000) + 86_400, error: "" } },
+        { memberId: "member-2", displayName: "미연결 구성원", linked: false, preference: { enabled: true, configured: false }, reminder: null },
+      ],
+    } });
+  });
+  await page.goto("/?view=work&settings=workspace&tab=integrations&bot=daily");
+  await expect(page.locator(".slack-connected-title")).toContainText("사용 중");
+  await expect(page.getByText("데일리 발송 예약에 문제가 있습니다")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "예약 복구", exact: true })).toHaveCount(0);
+});
+
 test("failed disconnect keeps the installation visible and allows retry", async ({ page }) => {
   await installApiMocks(page, { slackState: "connected", teamWorkspace: true });
   let calls = 0;

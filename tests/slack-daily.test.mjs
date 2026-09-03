@@ -145,6 +145,40 @@ test("failed/missing/overdue/partial reservations never appear as ready", () => 
   assert.equal(status.dailyDeliveryHealth(settings, []).status, "failed");
 });
 
+test("health excludes never-selected unlinked members but retains selected or lost recipients", () => {
+  const settings = { enabled: true, onboardingCompletedAt: "configured", installStatus: "connected" };
+  const ready = { linked: true, preference: { enabled: true, configured: true }, reminder: { status: "scheduled", postAt: 2000, error: "" } };
+  const unlinked = { linked: false, preference: { enabled: true, configured: false }, reminder: null };
+  assert.deepEqual(status.dailyDeliveryHealth(settings, [ready, unlinked], 1_000_000), {
+    status: "ready", targetCount: 1, scheduledCount: 1, pendingCount: 0, failedCount: 0,
+  });
+  for (const lost of [
+    { ...unlinked, preference: { enabled: true, configured: true } },
+    { ...unlinked, reminder: ready.reminder },
+  ]) assert.equal(status.dailyDeliveryHealth(settings, [ready, lost], 1_000_000).failedCount, 1);
+});
+
+test("settings API uses actual recipient preferences, without adding an unlinked member to failures", async (t) => {
+  const { api, db } = harness(t);
+  db.exec(`ALTER TABLE workspace_members ADD COLUMN display_name TEXT;
+    ALTER TABLE workspace_members ADD COLUMN email TEXT;
+    ALTER TABLE workspace_members ADD COLUMN role TEXT;
+    ALTER TABLE workspace_members ADD COLUMN created_at TEXT;
+    ALTER TABLE slack_member_links ADD COLUMN slack_email TEXT;
+    ALTER TABLE slack_member_links ADD COLUMN slack_display_name TEXT;
+    ALTER TABLE slack_member_links ADD COLUMN matched_by TEXT;
+    CREATE TABLE daily_submissions(id TEXT, owner_id TEXT, member_id TEXT, member_name TEXT, scrum_date TEXT);
+    CREATE TABLE slack_daily_publications(id TEXT, owner_id TEXT, submission_id TEXT, channel_id TEXT, error TEXT, attempts INTEGER, updated_at TEXT, status TEXT);
+    INSERT INTO workspace_members(id,workspace_id,status) VALUES('unlinked','workspace','active');`);
+  await api.scheduleMemberReminder("workspace", "member");
+  const result = await api.getSlackDailySettings({ ownerId: "workspace" });
+  assert.equal(result.members.length, 2);
+  assert.equal(result.members.find((member) => member.memberId === "unlinked").preference.configured, false);
+  assert.equal(result.delivery.targetCount, 1);
+  assert.equal(result.delivery.failedCount, 0);
+  assert.equal(result.delivery.status, "ready");
+});
+
 test("concurrent repair creates exactly one confirmed future reservation", async (t) => {
   const { api, calls, reminder } = harness(t);
   await Promise.all([api.scheduleMemberReminder("workspace", "member"), api.scheduleMemberReminder("workspace", "member")]);

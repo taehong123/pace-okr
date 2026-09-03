@@ -1,11 +1,14 @@
 type DailyMember = {
   linked: boolean;
-  preference: { enabled: boolean };
+  preference: { enabled: boolean; configured?: boolean };
   reminder: { status: string; postAt: number; error: string } | null;
 };
 
 export function dailyDeliveryHealth(settings: { enabled: boolean; onboardingCompletedAt: string | null; installStatus: string }, members: DailyMember[], now = Date.now()) {
-  const targets = members.filter((member) => member.preference.enabled);
+  // An unlinked member with no saved preference has never been a delivery
+  // target. Keep explicitly selected or previously scheduled lost links visible.
+  const targets = members.filter((member) => member.preference.enabled &&
+    (member.linked || member.preference.configured !== false || member.reminder !== null));
   const scheduled = targets.filter((member) => member.linked && member.reminder?.status === "scheduled" && member.reminder.postAt > now / 1000).length;
   const pending = targets.filter((member) => member.linked && member.reminder?.status === "scheduling").length;
   const failed = targets.length - scheduled - pending;

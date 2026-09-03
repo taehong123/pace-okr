@@ -158,7 +158,7 @@ export async function getSlackDailySettings(authorization: RequestAuthorization)
     getDb().select().from(slackDailyChannels).where(eq(slackDailyChannels.ownerId, authorization.ownerId)),
     env.DB.prepare(`SELECT member.id, member.display_name, member.email, member.role,
         link.slack_user_id, link.slack_email, link.slack_display_name, link.matched_by,
-        preference.enabled, preference.reminder_time, preference.timezone,
+        preference.member_id AS preference_member_id, preference.enabled, preference.reminder_time, preference.timezone,
         reminder.status AS reminder_status, reminder.post_at, reminder.last_error AS reminder_error
       FROM workspace_members AS member
       LEFT JOIN slack_member_links AS link ON link.owner_id = member.workspace_id AND link.member_id = member.id
@@ -178,7 +178,7 @@ export async function getSlackDailySettings(authorization: RequestAuthorization)
     memberId: String(row.id), displayName: String(row.display_name || row.email || "멤버"), email: String(row.email || ""), role: String(row.role),
     linked: Boolean(row.slack_user_id), slackUserId: row.slack_user_id ? String(row.slack_user_id) : null,
     slackDisplayName: row.slack_display_name ? String(row.slack_display_name) : null, matchedBy: row.matched_by ? String(row.matched_by) : null,
-    preference: { enabled: row.enabled === null ? true : Boolean(row.enabled), reminderTime: row.reminder_time ? String(row.reminder_time) : null, timezone: row.timezone ? String(row.timezone) : null },
+    preference: { enabled: row.enabled === null ? true : Boolean(row.enabled), configured: Boolean(row.preference_member_id), reminderTime: row.reminder_time ? String(row.reminder_time) : null, timezone: row.timezone ? String(row.timezone) : null },
     reminder: row.reminder_status ? { status: String(row.reminder_status), postAt: Number(row.post_at), error: String(row.reminder_error || "") } : null,
   }));
   return {
