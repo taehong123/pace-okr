@@ -28,6 +28,7 @@ export async function PUT(request: Request) {
       todayNote: asText(payload.todayNote),
       blockersNote: asText(payload.blockersNote),
       selectedTaskIds: Array.isArray(payload.selectedTaskIds) ? payload.selectedTaskIds.filter((value): value is string => typeof value === "string") : [],
+      selectedWorkIds: Array.isArray(payload.selectedWorkIds) ? payload.selectedWorkIds as string[] : undefined,
       noPlannedTasks: payload.noPlannedTasks === true,
       skipReason: typeof payload.skipReason === "string" ? payload.skipReason as "workload" | "vacation" | "personal" | "other" : null,
       skipNote: asText(payload.skipNote),

@@ -1,5 +1,8 @@
 ﻿"use client";
 /* eslint-disable @next/next/no-img-element */
+import { DailyWorkPicker } from "@/app/daily-work-picker";
+import { SlackMemberConnections } from "@/app/slack-member-connections";
+import type { DailyWork } from "@/lib/daily-work";
 import { PropertyValueInput } from "@/app/property-value-input";
 import { dailyDeliveryHealth, dailyDeliveryLabel } from "@/lib/slack-daily-status";
 import { slackErrorMessage, slackReminderLabel } from "@/lib/slack-display";
@@ -219,13 +222,13 @@ type TrashInitiativeOption = { id: string; title: string; cycleId: string };
 type ChecklistItem = { id: string; taskId: string; title: string; completed: boolean; sortOrder: number };
 type DailySkipReason = "workload" | "vacation" | "personal" | "other";
 type DailyTaskCandidate = { id: string; title: string; status: ItemStatus; dueDate: string | null; parentKind: "project" | "routine" | "general"; parentId: string | null; parentTitle: string };
-type DailySubmission = { id: string; memberId: string | null; memberName: string; memberEmail: string; date: string; version: number; yesterdayNote: string; todayNote: string; blockersNote: string; noPlannedTasks: boolean; skipReason: DailySkipReason | null; skipNote: string; source: string; submittedAt: string; tasks: Array<{ id: string; taskId: string | null; taskTitle: string; parentKind: string; parentId: string | null; parentTitle: string; status: string; isNew: boolean; sortOrder: number }> };
+type DailySubmission = { work?: DailyWork[]; id: string; memberId: string | null; memberName: string; memberEmail: string; date: string; version: number; yesterdayNote: string; todayNote: string; blockersNote: string; noPlannedTasks: boolean; skipReason: DailySkipReason | null; skipNote: string; source: string; submittedAt: string; tasks: Array<{ id: string; taskId: string | null; taskTitle: string; parentKind: string; parentId: string | null; parentTitle: string; status: string; isNew: boolean; sortOrder: number }> };
 type DailyDashboard = {
   date: string;
   member: { id: string; displayName: string; email: string; role: TeamRole };
-  draft: { id: string | null; date: string; yesterdayNote: string; todayNote: string; blockersNote: string; noPlannedTasks: boolean; skipReason: DailySkipReason | null; skipNote: string; selectedTaskIds: string[]; source: string; updatedAt: string | null };
+  draft: { id: string | null; date: string; yesterdayNote: string; todayNote: string; blockersNote: string; noPlannedTasks: boolean; skipReason: DailySkipReason | null; skipNote: string; selectedTaskIds: string[]; selectedWorkIds?: string[]; source: string; updatedAt: string | null };
   latestSubmission: DailySubmission | null;
-  candidates: { tasks: DailyTaskCandidate[]; groups: Array<{ key: string; kind: string; id: string | null; title: string; tasks: DailyTaskCandidate[] }> };
+  candidates: { work?: DailyWork[]; tasks: DailyTaskCandidate[]; groups: Array<{ key: string; kind: string; id: string | null; title: string; tasks: DailyTaskCandidate[] }> };
   createTargets: { projects: Array<{ id: string; title: string; needsTask: boolean }>; routines: Array<{ id: string; title: string }>; allowGeneral: boolean };
   team: Array<{ memberId: string; displayName: string; email: string; role: TeamRole; status: "submitted" | "skipped" | "writing" | "missing"; slackConnected: boolean; submission: DailySubmission | null }>;
   legacyWorkspaceNote: { yesterdayNote: string; todayNote: string; blockersNote: string; updatedAt: string } | null;
@@ -2309,7 +2312,7 @@ function WorkspaceApp() {
               </section>
             </section>
           )}
-          {activeView === "scrum" && <DailyScrumView workspaceId={currentWorkspace?.id ?? ""} onOpenTask={openTaskDetail} onNotice={showNotice} />}
+          {activeView === "scrum" && <DailyScrumView workspaceId={currentWorkspace?.id ?? ""} onOpenProject={openProjectPage} onNavigate={navigateView} onOpenTask={openTaskDetail} onNotice={showNotice} />}
           {activeView === "integrations" && <AppIntegrationsView google={googleStatus} slack={slackStatus} loading={integrationStatusRefreshing || !integrationStatusesLoaded} loadError={integrationStatusError} onGoogleChange={setGoogleStatus} onRefresh={refreshIntegrationStatuses} onNotice={showNotice} />}
           {activeView === "billing" && <BillingView onNotice={showNotice} />}
           {activeView === "recommendations" && <RecommendationsView workspaceId={currentWorkspace?.id ?? ""} items={activeItems} onOpenTask={openTaskDetail} onOpenProject={openProjectPage} onNavigate={navigateView} />}
@@ -4090,7 +4093,7 @@ function MyWorkSection({ title, count, children }: { title: string; count: numbe
   return <section className="my-work-section"><header><b>{title}</b><span>{count}</span></header><div>{count ? children : <p className="my-work-empty">담당된 {title}가 없습니다.</p>}</div></section>;
 }
 
-function DailyScrumView({ workspaceId, onOpenTask, onNotice }: { workspaceId: string; onOpenTask: (id: string) => void; onNotice: (message: string) => void }) {
+function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, onNotice }: { workspaceId: string; onOpenProject: (id: string) => void; onNavigate: (view: View) => void; onOpenTask: (id: string) => void; onNotice: (message: string) => void }) {
   const initialDate = localDate();
   const initialCacheKey = `daily:${workspaceId}:${initialDate}`;
   const initialScrum = dailyScrumMemoryCache.get(initialCacheKey) ?? null;
@@ -4151,7 +4154,7 @@ function DailyScrumView({ workspaceId, onOpenTask, onNotice }: { workspaceId: st
   }
 
   async function submit() {
-    if (notesDirty && !await save(false)) return;
+    if ((notesDirty || !currentScrum.draft.id) && !await save(false)) return;
     setSaving("submit");
     try {
       const response = await fetch("/api/daily-scrum/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date }) });
@@ -4176,24 +4179,30 @@ function DailyScrumView({ workspaceId, onOpenTask, onNotice }: { workspaceId: st
     finally { setSaving(null); }
   }
   function updateDraft(patch: Partial<DailyDashboard["draft"]>) { setScrum({ ...currentScrum, draft: { ...currentScrum.draft, ...patch } }); }
-  function toggleTask(id: string) {
-    const selectedTaskIds = currentScrum.draft.selectedTaskIds.includes(id) ? currentScrum.draft.selectedTaskIds.filter((entry) => entry !== id) : [...currentScrum.draft.selectedTaskIds, id];
-    updateDraft({ selectedTaskIds, noPlannedTasks: false, skipReason: null, skipNote: "" });
+  function selectWork(selectedWorkIds: string[]) {
+    updateDraft({ selectedWorkIds, selectedTaskIds: selectedWorkIds.filter((key) => key.startsWith("task:")).map((key) => key.slice(5)), noPlannedTasks: false, skipReason: null, skipNote: "" });
+  }
+  function openWork(work: DailyWork) {
+    if (work.kind === "task") onOpenTask(work.id);
+    else if (work.kind === "project") onOpenProject(work.id);
+    else onNavigate("routines");
   }
   function toggleSkip(checked: boolean) {
     updateDraft(checked
-      ? { skipReason: currentScrum.draft.skipReason ?? "workload", selectedTaskIds: [], noPlannedTasks: false }
+      ? { skipReason: currentScrum.draft.skipReason ?? "workload", selectedTaskIds: [], selectedWorkIds: [], noPlannedTasks: false }
       : { skipReason: null, skipNote: "" });
   }
   const isSkipped = Boolean(currentScrum.draft.skipReason);
   const skipNeedsNote = currentScrum.draft.skipReason === "other" && !currentScrum.draft.skipNote.trim();
-  const noTaskProjects = currentScrum.createTargets.projects.filter((project) => project.needsTask);
+  const selectedWorkIds = currentScrum.draft.selectedWorkIds ?? currentScrum.draft.selectedTaskIds.map((id) => `task:${id}`);
+  const work = currentScrum.candidates.work ?? currentScrum.candidates.tasks.map((task): DailyWork => ({ ...task, key: `task:${task.id}`, kind: "task", priority: "medium" }));
   return <section className="daily-workspace">
     <div className="scrum-toolbar">
       <label><CalendarDays size={14} /><span className="sr-only">데일리 날짜</span><input aria-label="데일리 날짜" type="date" value={date} onChange={(event) => { const nextDate = event.target.value; const cached = dailyScrumMemoryCache.get(`daily:${workspaceId}:${nextDate}`) ?? null; setScrum(cached); setSavedNotes(cached ? scrumNotesSnapshot(cached) : ""); setLoadError(false); setDate(nextDate); }} /></label>
       <div><button onClick={() => void save()} disabled={Boolean(saving) || !notesDirty}>{saving === "draft" ? "저장 중" : notesDirty ? "초안 저장" : "저장됨"}</button><button className="primary-action" onClick={() => void submit()} disabled={Boolean(saving) || skipNeedsNote}><Send size={14} />{saving === "submit" ? "확정 중" : isSkipped ? "스킵 확정 및 공유" : "확정 및 공유"}</button></div>
     </div>
-    <div className="daily-layout"><section className="daily-editor" aria-labelledby="my-daily-heading"><header><div><h2 id="my-daily-heading">내 데일리</h2><p>조회와 선택은 Task 상태·기한·담당자를 바꾸지 않습니다.</p></div>{currentScrum.latestSubmission && <small>{currentScrum.latestSubmission.skipReason ? "스킵" : "제출"} v{currentScrum.latestSubmission.version} · {formatDateTime(currentScrum.latestSubmission.submittedAt)}</small>}</header>
+    <div className="daily-layout"><section className="daily-editor" aria-labelledby="my-daily-heading"><header><div><h2 id="my-daily-heading">내 데일리</h2></div>{currentScrum.latestSubmission && <small>{currentScrum.latestSubmission.skipReason ? "스킵" : "제출"} v{currentScrum.latestSubmission.version} · {formatDateTime(currentScrum.latestSubmission.submittedAt)}</small>}</header>
+      <DailyWorkPicker work={work} selected={selectedWorkIds} disabled={isSkipped || Boolean(saving)} noPlanned={currentScrum.draft.noPlannedTasks} onChange={selectWork} onNoPlanned={(value) => updateDraft({ noPlannedTasks: value, selectedTaskIds: value ? [] : currentScrum.draft.selectedTaskIds, selectedWorkIds: value ? [] : selectedWorkIds })} onOpen={openWork} />
       <fieldset className={`daily-skip-panel ${isSkipped ? "active" : ""}`}>
         <legend>오늘 데일리 스킵</legend>
         <label className="daily-skip-toggle" htmlFor="daily-skip-toggle"><input id="daily-skip-toggle" type="checkbox" checked={isSkipped} onChange={(event) => toggleSkip(event.target.checked)} />오늘은 데일리를 스킵합니다<small>확정하면 선택한 사유가 팀과 Slack 채널에 공유됩니다.</small></label>
@@ -4201,12 +4210,8 @@ function DailyScrumView({ workspaceId, onOpenTask, onNotice }: { workspaceId: st
         {skipNeedsNote && <p role="alert">기타 스킵 사유를 입력해 주세요.</p>}
       </fieldset>
       <div className="daily-notes"><label><span>어제</span><textarea value={currentScrum.draft.yesterdayNote} onChange={(event) => updateDraft({ yesterdayNote: event.target.value })} placeholder="어제 마무리한 일" /></label><label><span>오늘</span><textarea value={currentScrum.draft.todayNote} onChange={(event) => updateDraft({ todayNote: event.target.value })} placeholder="오늘의 초점과 메모" /></label><label><span>블로커</span><textarea value={currentScrum.draft.blockersNote} onChange={(event) => updateDraft({ blockersNote: event.target.value })} placeholder="도움이 필요한 문제" /></label></div>
-      <section className={`daily-task-picker ${isSkipped ? "daily-work-disabled" : ""}`}><header><div><b>오늘 할 Task</b><span>{isSkipped ? "스킵을 해제하면 Task를 선택할 수 있습니다." : "본인에게 할당된 미완료 Task만 표시합니다."}</span></div><strong>{currentScrum.draft.selectedTaskIds.length}/50</strong></header><label className="daily-none"><input type="checkbox" disabled={isSkipped} checked={currentScrum.draft.noPlannedTasks} onChange={(event) => updateDraft({ noPlannedTasks: event.target.checked, selectedTaskIds: event.target.checked ? [] : currentScrum.draft.selectedTaskIds })} />오늘 예정 없음</label>
-        {currentScrum.candidates.groups.length ? <div className="daily-task-groups">{currentScrum.candidates.groups.map((group) => <section key={group.key}><h3>{group.kind === "project" ? "Project" : group.kind === "routine" ? "Routine" : "General"} · {group.title}</h3>{group.tasks.map((task) => <div className="daily-task-option" key={task.id}><label aria-label={`${task.title} 선택`}><input type="checkbox" aria-label={`${task.title} 선택`} checked={currentScrum.draft.selectedTaskIds.includes(task.id)} disabled={isSkipped || currentScrum.draft.noPlannedTasks || (!currentScrum.draft.selectedTaskIds.includes(task.id) && currentScrum.draft.selectedTaskIds.length >= 50)} onChange={() => toggleTask(task.id)} /><span><b>{task.title}</b><small>{statusLabel(task.status)} · {dueLabel(task.dueDate)}</small></span></label><button onClick={() => onOpenTask(task.id)} aria-label={`${task.title} 열기`}><ChevronRight size={15} /></button></div>)}</section>)}</div> : <p className="daily-empty">할당된 미완료 Task가 없습니다.</p>}
-      </section>
-      {!isSkipped && noTaskProjects.length > 0 && <div className="daily-dri-alert"><Target size={18} /><div><b>책임자이지만 미완료 Task가 없는 Project</b><p>실행 항목을 바로 추가할 수 있습니다.</p><div>{noTaskProjects.map((project) => <button key={project.id} onClick={() => setNewTaskParent(`project:${project.id}`)}>{project.title}<Plus size={13} /></button>)}</div></div></div>}
-      <form className={`daily-new-task ${isSkipped ? "daily-work-disabled" : ""}`} onSubmit={(event) => void createDailyTask(event)}><header><b>새 Task 만들기</b><span>{isSkipped ? "스킵을 해제하면 Task를 만들 수 있습니다." : "이 양식을 제출할 때만 실제 Task가 생성됩니다."}</span></header><div><select aria-label="새 Task 상위 항목" disabled={isSkipped} value={newTaskParent} onChange={(event) => setNewTaskParent(event.target.value)}>{currentScrum.createTargets.projects.map((project) => <option key={project.id} value={`project:${project.id}`}>Project · {project.title}</option>)}{currentScrum.createTargets.routines.map((routine) => <option key={routine.id} value={`routine:${routine.id}`}>Routine · {routine.title}</option>)}{currentScrum.createTargets.allowGeneral && <option value="general:">General</option>}</select><input aria-label="새 Task 제목" disabled={isSkipped} value={newTaskTitle} onChange={(event) => setNewTaskTitle(event.target.value)} maxLength={240} placeholder="오늘 할 Task 제목" /><button disabled={isSkipped || !newTaskTitle.trim() || !newTaskParent || Boolean(saving)}>{saving === "task" ? "생성 중" : "Task 생성"}</button></div></form>
-    </section><section className="daily-rollup" aria-labelledby="daily-rollup-heading"><header><h2 id="daily-rollup-heading">팀 데일리</h2><p>작성 중인 초안은 상태만 표시하고, 확정된 스킵 사유만 공개합니다.</p></header><div>{currentScrum.team.map((member) => <article key={member.memberId} className={`daily-member-card ${member.status}`}><header><div><b>{member.displayName}</b><small>{member.slackConnected ? "Slack 연결" : "Slack 미연결"}</small></div><span>{member.status === "skipped" ? "스킵" : member.status === "submitted" ? "제출 완료" : member.status === "writing" ? "작성 중" : "미제출"}</span></header>{member.submission ? member.submission.skipReason ? <div className="daily-skip-summary"><b>오늘 데일리 스킵</b><span>사유 · {dailySkipLabel(member.submission.skipReason)}</span>{member.submission.skipNote && <p>{member.submission.skipNote}</p>}</div> : <div><ul>{member.submission.tasks.map((task) => <li key={task.id}>{task.isNew && <em>신규</em>}<button disabled={!task.taskId} onClick={() => task.taskId && onOpenTask(task.taskId)}>{task.taskTitle}</button><small>{task.parentTitle}</small></li>)}{member.submission.noPlannedTasks && !member.submission.tasks.length && <li>오늘 예정 없음</li>}</ul>{member.submission.todayNote && <p><b>오늘</b>{member.submission.todayNote}</p>}{member.submission.blockersNote && <p className="blocker"><b>블로커</b>{member.submission.blockersNote}</p>}</div> : <p className="daily-private-draft">{member.status === "writing" ? "초안을 작성 중입니다. 내용은 제출 후 공개됩니다." : "아직 제출된 데일리가 없습니다."}</p>}</article>)}</div>{currentScrum.legacyWorkspaceNote && <details className="daily-legacy"><summary>기존 워크스페이스 메모</summary><p>{currentScrum.legacyWorkspaceNote.todayNote || currentScrum.legacyWorkspaceNote.yesterdayNote || currentScrum.legacyWorkspaceNote.blockersNote}</p></details>}</section></div>
+      <details className="daily-legacy"><summary>새 Task 추가</summary><form className={`daily-new-task ${isSkipped ? "daily-work-disabled" : ""}`} onSubmit={(event) => void createDailyTask(event)}><header><b>새 Task 만들기</b><span>{isSkipped ? "스킵을 해제하면 Task를 만들 수 있습니다." : "이 양식을 제출할 때만 실제 Task가 생성됩니다."}</span></header><div><select aria-label="새 Task 상위 항목" disabled={isSkipped} value={newTaskParent} onChange={(event) => setNewTaskParent(event.target.value)}>{currentScrum.createTargets.projects.map((project) => <option key={project.id} value={`project:${project.id}`}>Project · {project.title}</option>)}{currentScrum.createTargets.routines.map((routine) => <option key={routine.id} value={`routine:${routine.id}`}>Routine · {routine.title}</option>)}{currentScrum.createTargets.allowGeneral && <option value="general:">General</option>}</select><input aria-label="새 Task 제목" disabled={isSkipped} value={newTaskTitle} onChange={(event) => setNewTaskTitle(event.target.value)} maxLength={240} placeholder="오늘 할 Task 제목" /><button disabled={isSkipped || !newTaskTitle.trim() || !newTaskParent || Boolean(saving)}>{saving === "task" ? "생성 중" : "Task 생성"}</button></div></form></details>
+    </section><section className="daily-rollup" aria-labelledby="daily-rollup-heading"><header><h2 id="daily-rollup-heading">팀 데일리</h2><p>작성 중인 초안은 상태만 표시하고, 확정된 스킵 사유만 공개합니다.</p></header><div>{currentScrum.team.map((member) => <article key={member.memberId} className={`daily-member-card ${member.status}`}><header><div><b>{member.displayName}</b><small>{member.slackConnected ? "Slack 연결" : "Slack 미연결"}</small></div><span>{member.status === "skipped" ? "스킵" : member.status === "submitted" ? "제출 완료" : member.status === "writing" ? "작성 중" : "미제출"}</span></header>{member.submission ? member.submission.skipReason ? <div className="daily-skip-summary"><b>오늘 데일리 스킵</b><span>사유 · {dailySkipLabel(member.submission.skipReason)}</span>{member.submission.skipNote && <p>{member.submission.skipNote}</p>}</div> : <div><ul>{member.submission.tasks.map((task) => <li key={task.id}>{task.isNew && <em>신규</em>}<button disabled={!task.taskId} onClick={() => task.taskId && onOpenTask(task.taskId)}>{task.taskTitle}</button><small>{task.parentTitle}</small></li>)}{member.submission.work?.map((entry) => <li key={entry.key}><button onClick={() => openWork(entry)}>{entry.title}</button><small>{entry.kind === "project" ? "Project" : "Routine"} · {entry.parentTitle}</small></li>)}{member.submission.noPlannedTasks && !member.submission.tasks.length && !member.submission.work?.length && <li>오늘 예정 없음</li>}</ul>{member.submission.todayNote && <p><b>오늘</b>{member.submission.todayNote}</p>}{member.submission.blockersNote && <p className="blocker"><b>블로커</b>{member.submission.blockersNote}</p>}</div> : <p className="daily-private-draft">{member.status === "writing" ? "초안을 작성 중입니다. 내용은 제출 후 공개됩니다." : "아직 제출된 데일리가 없습니다."}</p>}</article>)}</div>{currentScrum.legacyWorkspaceNote && <details className="daily-legacy"><summary>기존 워크스페이스 메모</summary><p>{currentScrum.legacyWorkspaceNote.todayNote || currentScrum.legacyWorkspaceNote.yesterdayNote || currentScrum.legacyWorkspaceNote.blockersNote}</p></details>}</section></div>
   </section>;
 }
 
@@ -6629,6 +6634,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
   const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 
   return <div className="slack-one-button-flow">
+    <SlackMemberConnections onChanged={() => { void fetch("/api/slack/daily/settings", { cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(); return response.json() as Promise<SlackDailyAdminData>; }).then((latest) => setAdmin((current) => current ? { ...current, members: latest.members.map((member) => ({ ...member, preference: current.members.find((entry) => entry.memberId === member.memberId)?.preference ?? member.preference })) } : latest)).catch(() => onNotice("계정 연결은 저장했지만 멤버 상태를 갱신하지 못했습니다. 다시 열어 확인해 주세요.")); }} />
     {delivery.status === "failed" && <section className="integration-state-message error" role="alert"><AlertTriangle size={17} /><div><b>데일리 발송 예약에 문제가 있습니다</b><p>{delivery.targetCount}명 중 {delivery.scheduledCount}명 예약됨 · {delivery.failedCount}명 예약 확인 필요</p><p>{slackErrorMessage(admin.settings.lastError, "다음 발송 예약을 확인하지 못했습니다. 예약 복구를 눌러 다시 확인해 주세요.")}</p></div><button type="button" disabled={busy} onClick={() => void repairReservations()}>예약 복구</button></section>}
     {showSetup ? <section className="slack-onboarding-card" aria-labelledby="slack-onboarding-title">
       <header><div><h4 id="slack-onboarding-title">데일리 설정</h4><p>발송 시간, 멤버와 공유 채널을 정합니다.</p></div>{admin.setupComplete && <button type="button" onClick={() => setEditing(false)}>취소</button>}</header>
@@ -7030,6 +7036,6 @@ function preferredIntroLanguage(): IntroLanguage {
   if (language.startsWith("es")) return "es";
   return "en";
 }
-function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", data: "Key Result와 Project에 외부 API 수치 연결", scrum: "내 Task를 기준으로 어제, 오늘, 막힘 정리", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "삭제한 Project·Task와 전체 데이터 정리 기록", integrations: "내 Google Calendar와 개인 Slack DM 연결", billing: "워크스페이스 플랜, 사용량, 카드와 결제 기록 관리" }[view]; }
+function pageSubtitle(view: View) { return { home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", data: "Key Result와 Project에 외부 API 수치 연결", scrum: "내게 배정된 업무와 오늘의 진행 계획", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "삭제한 Project·Task와 전체 데이터 정리 기록", integrations: "내 Google Calendar와 개인 Slack DM 연결", billing: "워크스페이스 플랜, 사용량, 카드와 결제 기록 관리" }[view]; }
 function routineCadenceLabel(cadence: RoutineCadence) { return { daily: "매일", weekly: "매주", monthly: "매월" }[cadence]; }
 function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "due_soon") return "3"; return "P"; }

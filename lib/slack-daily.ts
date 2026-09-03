@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
@@ -9,7 +9,10 @@ import {
   workspaceMembers,
   type SlackConnection,
 } from "@/db/schema";
-import { dailySkipReasonLabel, getDailyDashboard, normalizeDailySkipReason, type DailySkipReason, type DailySubmissionValue } from "@/lib/daily-bot";
+import { currentDailyMember, dailySkipReasonLabel, getDailyDashboard, normalizeDailySkipReason, type DailySubmissionValue } from "@/lib/daily-bot";
+import { dailyWorkSnapshots, listDailyWork } from "@/lib/daily-work";
+import { dailyForm, dailyWorkOption } from "@/lib/slack-daily-form";
+import { attachSlackMember, readSlackMemberMatches, synchronizeSlackMembers } from "@/lib/slack-member-matching";
 import { ensureWorkspace, getSlackConnection, getSlackConnectionByTeam, type RequestAuthorization } from "@/lib/pace-data";
 import { decryptSlackSecret, slackScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { dailyDeliveryHealth } from "@/lib/slack-daily-status";
@@ -21,6 +24,7 @@ type SlackUser = {
   id: string;
   deleted?: boolean;
   is_bot?: boolean;
+  is_app_user?: boolean;
   profile?: { email?: string; display_name?: string; real_name?: string };
 };
 
@@ -71,40 +75,38 @@ export async function syncSlackDailyInstallation(ownerId: string) {
   }
   const token = await slackTokenForConnection(connection);
   const users = await listAllSlackUsers(token);
-  const members = await getDb().select().from(workspaceMembers).where(and(
-    eq(workspaceMembers.workspaceId, ownerId),
-    eq(workspaceMembers.status, "active"),
-  ));
-  const memberByEmail = new Map(members.flatMap((member) => member.email ? [[member.email.trim().toLocaleLowerCase(), member] as const] : []));
-  const matched = users.flatMap((user) => {
-    const email = user.profile?.email?.trim() ?? "";
-    const member = email ? memberByEmail.get(email.toLocaleLowerCase()) : null;
-    return member ? [{ user, member, email }] : [];
-  });
-  await getDb().delete(slackMemberLinks).where(and(eq(slackMemberLinks.ownerId, ownerId), eq(slackMemberLinks.matchedBy, "email")));
+  const matchResult = await synchronizeSlackMembers(env.DB, ownerId, connection.teamId, users);
   const now = new Date().toISOString();
-  for (const { user, member, email } of matched) {
-    await getDb().insert(slackMemberLinks).values({
-      id: crypto.randomUUID(), ownerId, memberId: member.id, teamId: connection.teamId, slackUserId: user.id,
-      slackEmail: email, slackDisplayName: user.profile?.display_name || user.profile?.real_name || member.displayName,
-      matchedBy: "email", createdAt: now, updatedAt: now,
-    }).onConflictDoUpdate({
-      target: [slackMemberLinks.ownerId, slackMemberLinks.memberId],
-      set: { teamId: connection.teamId, slackUserId: user.id, slackEmail: email,
-        slackDisplayName: user.profile?.display_name || user.profile?.real_name || member.displayName, updatedAt: now },
-    });
-  }
-  const unmatched = users.filter((user) => {
-    const email = user.profile?.email?.trim().toLocaleLowerCase();
-    return !email || !memberByEmail.has(email);
-  });
   const currentSettings = await ensureDailySettingsRow(ownerId, connection);
   await upsertSlackDailySettings(ownerId, {
     enabled: currentSettings.onboardingCompletedAt ? currentSettings.enabled : false,
     installStatus: "connected", requiredScopes: "", lastSyncedAt: now, lastError: "",
   });
   await reconcileDailyReminders(ownerId);
-  return { linked: matched.length, unmatched: unmatched.length, status: "connected" };
+  return { ...matchResult, status: "connected" };
+}
+
+export async function manageSlackMemberConnections(authorization: RequestAuthorization, action?: { type: "sync" } | { type: "link"; memberId: string; slackUserId: string }) {
+  const connection = await getSlackConnection(authorization.ownerId);
+  if (!connection) throw new Error("Slack을 먼저 연결해 주세요.");
+  const users = await listAllSlackUsers(await slackTokenForConnection(connection));
+  if (action?.type === "sync") await synchronizeSlackMembers(env.DB, authorization.ownerId, connection.teamId, users);
+  if (action?.type === "link") {
+    const user = users.find((entry) => entry.id === action.slackUserId);
+    if (!user) throw new Error("이 Slack 워크스페이스의 활성 사용자를 선택해 주세요.");
+    await attachSlackMember(env.DB, authorization.ownerId, connection.teamId, action.memberId, user, "admin");
+  }
+  const plan = await readSlackMemberMatches(env.DB, authorization.ownerId, connection.teamId, users);
+  const labels: Record<string, string> = { connected: "연결됨", email_missing: "OKRPTR 이메일이 없습니다.",
+    email_not_found: "같은 이메일의 Slack 계정을 찾지 못했습니다. 이메일이 다르거나 Slack 이메일이 공개되지 않았을 수 있습니다.",
+    email_ambiguous: "같은 이메일이 여러 계정에 등록돼 자동 연결을 보류했습니다.",
+    already_linked: "해당 Slack 계정이 다른 멤버에게 연결돼 있습니다.",
+    email_match_pending: "이메일이 일치하지만 아직 연결되지 않았습니다.",
+    slack_account_inactive: "연결됐던 Slack 계정이 비활성화됐거나 이 워크스페이스에서 확인되지 않습니다." };
+  return { members: plan.members.map((member) => { const match = plan.matches.find((entry) => entry.memberId === member.id)!;
+    return { memberId: member.id, displayName: member.display_name, email: member.email, reason: match.reason, message: labels[match.reason] }; }),
+    availableUsers: users.filter((user) => !plan.links.some((link) => link.team_id === connection.teamId && link.slack_user_id === user.id))
+      .map((user) => ({ id: user.id, displayName: user.profile?.display_name || user.profile?.real_name || "Slack 사용자", email: user.profile?.email || "" })) };
 }
 
 export async function createSlackMemberLinkUrl(ownerId: string, teamId: string, slackUserId: string, request: Request) {
@@ -136,16 +138,26 @@ export async function consumeSlackMemberLink(authorization: RequestAuthorization
   const profile = await slackApi<SlackApiResult & { user?: SlackUser }>(token, "users.info", { user: row.slack_user_id });
   if (!profile.user || profile.user.deleted || profile.user.is_bot) throw new Error("연결할 수 없는 Slack 사용자입니다.");
   const now = new Date().toISOString();
-  await env.DB.batch([
-    env.DB.prepare("DELETE FROM slack_member_links WHERE owner_id = ? AND (member_id = ? OR (team_id = ? AND slack_user_id = ?))")
-      .bind(authorization.ownerId, member.id, row.team_id, row.slack_user_id),
+  const linkId = crypto.randomUUID();
+  const results = await env.DB.batch([
     env.DB.prepare(`INSERT INTO slack_member_links
       (id, owner_id, member_id, team_id, slack_user_id, slack_email, slack_display_name, matched_by, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)`)
-      .bind(crypto.randomUUID(), authorization.ownerId, member.id, row.team_id, row.slack_user_id,
-        profile.user.profile?.email ?? row.slack_email ?? "", profile.user.profile?.display_name || profile.user.profile?.real_name || member.displayName, now, now),
-    env.DB.prepare("UPDATE slack_link_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL").bind(now, tokenHash),
+      SELECT ?, member.workspace_id, member.id, token.team_id, token.slack_user_id, ?, ?, 'manual', ?, ?
+      FROM slack_link_tokens token JOIN workspace_members member ON member.workspace_id = token.owner_id
+      JOIN slack_connections connection ON connection.owner_id = token.owner_id AND connection.team_id = token.team_id
+      WHERE token.token_hash = ? AND token.used_at IS NULL AND token.expires_at > ?
+        AND member.id = ? AND member.workspace_id = ? AND member.status = 'active'
+        AND NOT EXISTS (SELECT 1 FROM slack_member_links link WHERE
+          (link.owner_id = member.workspace_id AND link.member_id = member.id)
+          OR (link.team_id = token.team_id AND link.slack_user_id = token.slack_user_id))`)
+      .bind(linkId, profile.user.profile?.email ?? row.slack_email ?? "",
+        profile.user.profile?.display_name || profile.user.profile?.real_name || member.displayName,
+        now, now, tokenHash, now, member.id, authorization.ownerId),
+    env.DB.prepare(`UPDATE slack_link_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL
+      AND EXISTS (SELECT 1 FROM slack_member_links WHERE id = ? AND owner_id = ? AND member_id = ?)`)
+      .bind(now, tokenHash, linkId, authorization.ownerId, member.id),
   ]);
+  if (results[0].meta.changes !== 1) throw new Error("이미 연결된 계정이거나 만료된 링크입니다. 기존 연결은 변경하지 않았습니다.");
   await scheduleMemberReminder(authorization.ownerId, member.id, { force: true });
   return { linked: true, memberId: member.id, slackUserId: row.slack_user_id };
 }
@@ -688,77 +700,60 @@ export async function retryDailyPublication(ownerId: string, publicationId: stri
 export function dailyReminderBlocks(blockId: string) {
   return [
     { type: "context", elements: [{ type: "mrkdwn", text: "*데일리 봇*" }] },
-    { type: "section", block_id: `${blockId}:body`, text: { type: "mrkdwn", text: "*오늘의 데일리를 정리할 시간입니다.*\n할당된 Task를 고르거나, 필요한 경우 사유와 함께 오늘 데일리를 스킵할 수 있습니다." } },
-    { type: "actions", block_id: blockId, elements: [{ type: "button", action_id: "daily_open", text: { type: "plain_text", text: "데일리 작성" }, style: "primary", value: "daily" }] },
+    { type: "section", block_id: `${blockId}:body`, text: { type: "mrkdwn", text: "*오늘 할 업무를 선택해 주세요.*\n내게 배정된 Project · Task · Routine에서 오늘 진행할 것을 고르고 제출합니다." } },
+    { type: "actions", block_id: blockId, elements: [{ type: "button", action_id: "daily_open", text: { type: "plain_text", text: "내 업무 선택" }, style: "primary", value: "daily" }] },
   ];
 }
 
 export async function openDailyModal(triggerId: string, authorization: RequestAuthorization) {
   const connection = await getSlackConnection(authorization.ownerId);
   if (!connection) throw new Error("Slack 연결을 찾을 수 없습니다.");
-  const dashboard = await getDailyDashboard(authorization, todayInTimezone("Asia/Seoul"));
   const token = await slackTokenForConnection(connection);
-  const parentOptions = [
-    ...dashboard.createTargets.projects.map((project) => ({ text: { type: "plain_text", text: `Project · ${project.title}`.slice(0, 75) }, value: `project:${project.id}` })),
-    ...dashboard.createTargets.routines.map((routine) => ({ text: { type: "plain_text", text: `Routine · ${routine.title}`.slice(0, 75) }, value: `routine:${routine.id}` })),
-    ...(dashboard.createTargets.allowGeneral ? [{ text: { type: "plain_text", text: "General" }, value: "general:" }] : []),
-  ];
-  const skipOptions = [
-    { text: { type: "plain_text", text: "스킵하지 않음" }, value: "none" },
-    ...(["workload", "vacation", "personal", "other"] as DailySkipReason[]).map((reason) => ({
-      text: { type: "plain_text", text: dailySkipReasonLabel(reason) }, value: reason,
-    })),
-  ];
-  const selectedSkip = dashboard.draft.skipReason ?? "none";
-  const blocks: Record<string, unknown>[] = [
-    { type: "input", block_id: "skip_reason", optional: true, label: { type: "plain_text", text: "데일리 스킵" }, element: {
-      type: "static_select", action_id: "value", options: skipOptions,
-      initial_option: skipOptions.find((option) => option.value === selectedSkip) ?? skipOptions[0],
-    } },
-    { type: "input", block_id: "skip_note", optional: true, label: { type: "plain_text", text: "스킵 상세 사유 (기타는 필수)" }, element: {
-      type: "plain_text_input", action_id: "value", max_length: 500, initial_value: dashboard.draft.skipNote,
-      placeholder: { type: "plain_text", text: "팀에 공유할 보충 설명" },
-    } },
-    { type: "input", block_id: "daily_tasks", optional: true, label: { type: "plain_text", text: "오늘 할 Task" }, element: {
-      type: "multi_external_select", action_id: "selected_tasks", min_query_length: 0, max_selected_items: 50,
-      placeholder: { type: "plain_text", text: "할당된 Task 검색" },
-      initial_options: dashboard.candidates.tasks.filter((task) => dashboard.draft.selectedTaskIds.includes(task.id)).slice(0, 50).map(taskOption),
-    } },
-    { type: "input", block_id: "today_note", optional: true, label: { type: "plain_text", text: "오늘 메모" }, element: { type: "plain_text_input", action_id: "value", multiline: true, initial_value: dashboard.draft.todayNote } },
-    { type: "input", block_id: "blockers_note", optional: true, label: { type: "plain_text", text: "블로커" }, element: { type: "plain_text_input", action_id: "value", multiline: true, initial_value: dashboard.draft.blockersNote } },
-    { type: "input", block_id: "no_planned", optional: true, label: { type: "plain_text", text: "오늘 예정" }, element: {
-      type: "checkboxes", action_id: "value", options: [{ text: { type: "plain_text", text: "오늘 예정 없음" }, value: "yes" }],
-      initial_options: dashboard.draft.noPlannedTasks ? [{ text: { type: "plain_text", text: "오늘 예정 없음" }, value: "yes" }] : [],
-    } },
-  ];
-  if (parentOptions.length) {
-    blocks.push(
-      { type: "input", block_id: "new_task_parent", optional: true, label: { type: "plain_text", text: "새 Task 상위 항목" }, element: { type: "static_select", action_id: "value", placeholder: { type: "plain_text", text: "상위 항목 선택" }, options: parentOptions.slice(0, 100) } },
-      { type: "input", block_id: "new_task_title", optional: true, label: { type: "plain_text", text: "새 Task 만들기 (선택)" }, element: { type: "plain_text_input", action_id: "value", max_length: 240, placeholder: { type: "plain_text", text: "명시적으로 제출할 때만 생성됩니다" } } },
-    );
-  }
-  await slackApi(token, "views.open", { trigger_id: triggerId, view: {
-    type: "modal", callback_id: "daily_submit", private_metadata: JSON.stringify({ ownerId: authorization.ownerId, date: dashboard.date, requestId: crypto.randomUUID() }),
-    title: { type: "plain_text", text: "OKRPTR 데일리" }, submit: { type: "plain_text", text: "확정 및 공유" }, close: { type: "plain_text", text: "취소" }, blocks,
-  } });
+  const opened = await slackApi<SlackApiResult & { view?: { id: string; hash?: string } }>(token, "views.open", {
+    trigger_id: triggerId, view: { type: "modal", title: { type: "plain_text", text: "오늘 할 업무" },
+      close: { type: "plain_text", text: "닫기" }, blocks: [{ type: "section", text: { type: "plain_text", text: "내게 배정된 업무를 불러오고 있습니다." } }] },
+  });
+  const viewId = opened.view?.id;
+  if (!viewId) throw new Error("데일리 창을 열지 못했습니다.");
+  // A trigger expires quickly; load the private workload only after opening the modal.
+  waitUntil((async () => {
+    try {
+      const preference = await getSlackDailyPreference(authorization);
+      const dashboard = await getDailyDashboard(authorization, todayInTimezone(preference.timezone));
+      await slackApi(token, "views.update", { view_id: viewId, hash: opened.view?.hash,
+        view: dailyForm({ work: dashboard.candidates.work, memberName: dashboard.member.displayName,
+          selected: dashboard.draft.selectedWorkIds, ...dashboard.draft,
+          metadata: JSON.stringify({ ownerId: authorization.ownerId, memberId: dashboard.member.id, date: dashboard.date, requestId: crypto.randomUUID(), workVersion: 1 }) }) });
+    } catch {
+      await slackApi(token, "views.update", { view_id: viewId, view: { type: "modal",
+        title: { type: "plain_text", text: "오늘 할 업무" }, close: { type: "plain_text", text: "닫기" },
+        blocks: [{ type: "section", text: { type: "plain_text", text: "업무를 불러오지 못했습니다. 잠시 후 데일리를 다시 열어 주세요. 제출된 내용은 없습니다." } }] } }).catch(() => undefined);
+    }
+  })());
 }
 
-export async function externalTaskOptions(authorization: RequestAuthorization, query: string) {
-  const dashboard = await getDailyDashboard(authorization, todayInTimezone("Asia/Seoul"));
+export async function externalTaskOptions(authorization: RequestAuthorization, query: string, workMode = false, date?: string) {
+  const preference = await getSlackDailyPreference(authorization);
+  const day = date || todayInTimezone(preference.timezone);
   const normalized = query.trim().toLocaleLowerCase();
+  if (workMode) {
+    const member = await currentDailyMember(authorization);
+    const work = await listDailyWork(env.DB, authorization.ownerId, member.id, day);
+    return work.slice(60).filter((entry) => !normalized || `${entry.title} ${entry.parentTitle}`.toLocaleLowerCase().includes(normalized)).slice(0, 100).map(dailyWorkOption);
+  }
+  const dashboard = await getDailyDashboard(authorization, day);
   return dashboard.candidates.tasks.filter((task) => !normalized || `${task.title} ${task.parentTitle}`.toLocaleLowerCase().includes(normalized)).slice(0, 100).map(taskOption);
 }
 
 function taskOption(task: { id: string; title: string; parentTitle: string }) {
   return { text: { type: "plain_text", text: `${task.title} · ${task.parentTitle}`.slice(0, 75) }, value: task.id };
 }
-
 async function listAllSlackUsers(token: string) {
   const users: SlackUser[] = [];
   let cursor = "";
   do {
     const result = await slackApi<SlackApiResult & { members?: SlackUser[] }>(token, "users.list", { limit: 200, cursor: cursor || undefined });
-    users.push(...(result.members ?? []).filter((user) => user.id && !user.is_bot && !user.deleted && user.profile?.email));
+    users.push(...(result.members ?? []).filter((user) => user.id && user.id !== "USLACKBOT" && !user.is_bot && !user.is_app_user && !user.deleted));
     cursor = result.response_metadata?.next_cursor ?? "";
   } while (cursor);
   return users;
@@ -845,6 +840,7 @@ async function loadSubmission(id: string, ownerId: string) {
     blockersNote: String(row.blockers_note), noPlannedTasks: Boolean(row.no_planned_tasks),
     skipReason: normalizeDailySkipReason(row.skip_reason), skipNote: String(row.skip_note || ""),
     source: String(row.source), submittedAt: String(row.submitted_at),
+    work: dailyWorkSnapshots(String(row.work_snapshot_json || "[]")),
     tasks: snapshots.results.map((snapshot) => ({ id: String(snapshot.id), taskId: snapshot.task_id ? String(snapshot.task_id) : null,
       taskTitle: String(snapshot.task_title), parentKind: String(snapshot.parent_kind), parentId: snapshot.parent_id ? String(snapshot.parent_id) : null,
       parentTitle: String(snapshot.parent_title), status: String(snapshot.status), isNew: Boolean(snapshot.is_new), sortOrder: Number(snapshot.sort_order) })),
@@ -862,16 +858,17 @@ function dailyCard(submission: DailySubmissionValue) {
       { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRPTR에서 보기" }, url: appUrl }] },
     ] };
   }
-  const visible = submission.tasks.slice(0, 20);
+  const allWork = [...submission.tasks, ...(submission.work ?? []).map((work) => ({ taskTitle: work.title, parentTitle: `${work.kind === "project" ? "Project" : "Routine"} · ${work.parentTitle}`, isNew: false }))];
+  const visible = allWork.slice(0, 20);
   const taskLines = visible.length ? visible.map((task) => `${task.isNew ? "✨ " : "• "}${escapeSlack(task.taskTitle)} _(${escapeSlack(task.parentTitle)})_`).join("\n") : "• 오늘 예정 없음";
-  const overflow = submission.tasks.length > 20 ? `\n_외 ${submission.tasks.length - 20}개_` : "";
+  const overflow = allWork.length > 20 ? `\n_외 ${allWork.length - 20}개_` : "";
   const blocker = submission.blockersNote ? `\n*블로커*\n${escapeSlack(submission.blockersNote)}` : "";
   const note = submission.todayNote ? `\n*오늘 메모*\n${escapeSlack(submission.todayNote)}` : "";
   const appUrl = `${String((env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?view=scrum`;
   const text = `[데일리 봇] ${submission.memberName}님의 ${submission.date} 데일리`;
   return { text, unfurl_links: false, unfurl_media: false, blocks: [
     { type: "header", text: { type: "plain_text", text: `데일리 봇 · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
-    { type: "section", text: { type: "mrkdwn", text: `*오늘 Task*\n${taskLines}${overflow}${note}${blocker}`.slice(0, 2900) } },
+    { type: "section", text: { type: "mrkdwn", text: `*오늘 할 업무*\n${taskLines}${overflow}${note}${blocker}`.slice(0, 2900) } },
     { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRPTR에서 보기" }, url: appUrl }] },
   ] };
 }

@@ -833,7 +833,8 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(page, /내 데일리/);
   assert.match(page, /확정 및 공유/);
   assert.match(page, /작성 중인 초안은 상태만 표시/);
-  assert.match(page, /책임자이지만 미완료 Task가 없는 Project/);
+  assert.match(page, /<DailyWorkPicker/);
+  assert.doesNotMatch(page, /책임자이지만 미완료 Task가 없는 Project/);
   assert.match(page, /오늘은 데일리를 스킵합니다/);
   assert.match(page, /본업 과중/);
   assert.match(page, /확정된 스킵 사유만 공개/);

@@ -42,7 +42,7 @@ function harness(t) {
     CREATE TABLE slack_daily_channels(owner_id TEXT, channel_id TEXT);
     CREATE TABLE daily_submissions(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, scrum_date TEXT, version INTEGER, member_name TEXT, member_email TEXT,
       yesterday_note TEXT DEFAULT '', today_note TEXT DEFAULT '', blockers_note TEXT DEFAULT '', no_planned_tasks INTEGER DEFAULT 1,
-      skip_reason TEXT, skip_note TEXT DEFAULT '', source TEXT DEFAULT 'web', submitted_at TEXT);
+      skip_reason TEXT, skip_note TEXT DEFAULT '', source TEXT DEFAULT 'web', submitted_at TEXT, work_snapshot_json TEXT DEFAULT '[]');
     CREATE TABLE daily_task_snapshots(id TEXT, submission_id TEXT, sort_order INTEGER);
     CREATE TABLE slack_daily_publications(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, submission_id TEXT, scrum_date TEXT, channel_id TEXT,
       slack_message_ts TEXT, status TEXT DEFAULT 'pending', error TEXT DEFAULT '', attempts INTEGER DEFAULT 0, updated_at TEXT);`);
@@ -92,6 +92,7 @@ function harness(t) {
     "@/lib/pace-data": { getSlackConnection: async (ownerId) => db.prepare("SELECT * FROM slack_connections WHERE owner_id=?").get(ownerId) },
     "@/lib/slack-daily-status": {}, "@/lib/slack-oauth": {}, "@/lib/slack-bot-delivery": api,
     "@/lib/daily-bot": { normalizeDailySkipReason: () => null },
+    "@/lib/daily-work": { dailyWorkSnapshots: (raw) => JSON.parse(raw || "[]") }, "@/lib/slack-daily-form": {}, "@/lib/slack-member-matching": {},
   });
   t.after(() => { globalThis.fetch = originalFetch; db.close(); });
   const input = (team = "a", overrides = {}) => ({ ownerId: team, botKind: "automation", subjectId: `delivery-${team}`, eventKey: "same-event",

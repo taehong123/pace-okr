@@ -8,10 +8,11 @@ const source = await readFile(new URL("../lib/workspace-backups.ts", import.meta
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 const backups = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 const schema = JSON.parse(await readFile(new URL("../drizzle/meta/0034_snapshot.json", import.meta.url), "utf8"));
-const currentSchema = JSON.parse(await readFile(new URL("../drizzle/meta/0038_snapshot.json", import.meta.url), "utf8"));
+const currentSchema = JSON.parse(await readFile(new URL("../drizzle/meta/0039_snapshot.json", import.meta.url), "utf8"));
 const migration = await readFile(new URL("../drizzle/0036_workspace_backups.sql", import.meta.url), "utf8");
 const linksMigration = await readFile(new URL("../drizzle/0037_restore_links.sql", import.meta.url), "utf8");
 const routineMigration = await readFile(new URL("../drizzle/0042_routine_properties.sql", import.meta.url), "utf8");
+const dailyWorkMigration = await readFile(new URL("../drizzle/0045_daily_work_selection.sql", import.meta.url), "utf8");
 
 function fixture() {
   const sqlite = new DatabaseSync(":memory:");
@@ -26,6 +27,7 @@ function fixture() {
   for (const sql of migration.split("--> statement-breakpoint")) if (sql.trim()) sqlite.exec(sql);
   for (const sql of linksMigration.split("--> statement-breakpoint")) if (sql.trim()) sqlite.exec(sql);
   sqlite.exec(routineMigration);
+  sqlite.exec(dailyWorkMigration.replaceAll("--> statement-breakpoint", ""));
   const d1 = {
     prepare(sql) {
       return { sql, params: [], bind(...params) { return { ...this, params }; },
@@ -100,6 +102,19 @@ test("snapshot uses separate storage, includes complete business hierarchy, and 
   assert.equal((await backups.listWorkspaceBackups(f.ctx, "other")).backups.length, 0);
   await assert.rejects(backups.previewWorkspaceBackup(f.ctx, "other", entry.id), { code: "backup_not_found" });
   await assert.rejects(backups.createWorkspaceBackup(f.ctx, "w", "manual", "u"), { code: "rate_limited" });
+  f.sqlite.close();
+});
+
+test("backups predating personal work selection restore with empty work arrays without losing routine properties", async () => {
+  const f = fixture();
+  await backups.createWorkspaceBackup(f.ctx, "w", "daily");
+  const old = JSON.parse([...f.objects.values()][0]);
+  for (const row of old.tables.daily_scrums) delete row.work_selection_json;
+  for (const row of old.tables.daily_submissions) delete row.work_snapshot_json;
+  const validated = backups.validateSnapshot(old, "w");
+  assert.equal(validated.tables.daily_scrums[0].work_selection_json, "[]");
+  assert.equal(validated.tables.daily_submissions[0].work_snapshot_json, "[]");
+  assert.equal(validated.tables.routine_property_definitions.length, 1);
   f.sqlite.close();
 });
 

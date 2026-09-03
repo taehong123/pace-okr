@@ -93,6 +93,7 @@ function harness(t) {
     "@/lib/pace-data": { getSlackConnection: async (owner) => connectionFor("owner_id", owner), getSlackConnectionByTeam: async (team) => connectionFor("team_id", team), ensureWorkspace: async () => {} },
     "@/lib/slack-oauth": { decryptSlackSecret: async (owner) => `mock-token-${owner}`, slackScopes: [] },
     "@/lib/slack-daily-status": status,
+    "@/lib/daily-work": {}, "@/lib/slack-daily-form": {}, "@/lib/slack-member-matching": {},
   });
   const calls = [], pending = [];
   const behavior = { rejectSchedule: false, loseResponse: false, rejectCancellation: false, lockedCancellation: false, rejectTeam: "", onSchedule: null, paginate: false };
