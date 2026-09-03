@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import ts from "typescript";
+import { preferences, serverLanguage } from "./helpers/language-fixture.mjs";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 const source = await read("../lib/slack-daily.ts");
@@ -38,20 +39,24 @@ const camel = (row) => Object.fromEntries(Object.entries(row).map(([key, value])
 
 function harness(t) {
   const db = new DatabaseSync(":memory:");
-  db.exec(`CREATE TABLE workspaces(id TEXT PRIMARY KEY, scheduled_deletion_at TEXT);
+  db.exec(`CREATE TABLE workspaces(id TEXT PRIMARY KEY, scheduled_deletion_at TEXT, message_language TEXT DEFAULT 'ko');
+    CREATE TABLE users(id TEXT PRIMARY KEY, language_preference TEXT DEFAULT 'ko', resolved_language TEXT DEFAULT 'ko', language_revision INTEGER DEFAULT 0);
     CREATE TABLE slack_connections(id TEXT PRIMARY KEY, owner_id TEXT, team_id TEXT, bot_user_id TEXT, encrypted_bot_token TEXT);
-    CREATE TABLE workspace_members(id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT);
+    CREATE TABLE workspace_members(id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT, user_id TEXT);
     CREATE TABLE slack_daily_settings(owner_id TEXT PRIMARY KEY, enabled INTEGER, weekdays TEXT, reminder_time TEXT, timezone TEXT, install_status TEXT, onboarding_completed_at TEXT, last_error TEXT, updated_at TEXT, required_scopes TEXT);
     CREATE TABLE slack_daily_preferences(owner_id TEXT, member_id TEXT, enabled INTEGER, reminder_time TEXT, timezone TEXT);
     CREATE TABLE slack_member_links(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, slack_user_id TEXT, dm_channel_id TEXT, team_id TEXT);
     CREATE TABLE slack_daily_channels(id TEXT PRIMARY KEY, owner_id TEXT);
     CREATE TABLE slack_daily_reminders(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, slack_user_id TEXT, dm_channel_id TEXT, scheduled_message_id TEXT, post_at INTEGER, block_id TEXT, bot_user_id TEXT, status TEXT, last_error TEXT, created_at TEXT, updated_at TEXT, UNIQUE(owner_id,member_id));
-    INSERT INTO workspaces VALUES('workspace',NULL);
-    INSERT INTO workspace_members VALUES('member','workspace','active');
+    INSERT INTO users(id) VALUES('user');
+    INSERT INTO workspaces(id,scheduled_deletion_at) VALUES('workspace',NULL);
+    INSERT INTO workspace_members VALUES('member','workspace','active','user');
     INSERT INTO slack_connections VALUES('connection','workspace','T-team','U-bot','workspace');
     INSERT INTO slack_daily_settings VALUES('workspace',1,'[0,1,2,3,4,5,6]','09:00','Asia/Seoul','connected','2026-09-02T00:00:00Z','old error','2026-09-02T00:00:00Z','');
     INSERT INTO slack_member_links VALUES('link','workspace','member','U-member','D-member','T-team');
     INSERT INTO slack_daily_preferences VALUES('workspace','member',1,NULL,NULL);`);
+  db.exec(`ALTER TABLE slack_daily_reminders ADD message_language TEXT DEFAULT 'ko' NOT NULL;
+    ALTER TABLE slack_daily_reminders ADD message_text TEXT DEFAULT '[데일리 봇] 오늘의 데일리를 작성해 주세요.' NOT NULL;`);
   const raw = { async batch(statements) {
     db.exec("BEGIN");
     try { const results = []; for (const statement of statements) results.push(await statement.run()); db.exec("COMMIT"); return results; }
@@ -87,6 +92,7 @@ function harness(t) {
     return row ? camel(row) : null;
   };
   const api = compile(source, {
+    "./language-preferences": preferences, "./server-language": serverLanguage,
     "cloudflare:workers": { env: { DB: raw, SLACK_TOKEN_ENCRYPTION_KEY: "mock" } },
     "drizzle-orm": { eq: (key, value) => (row) => row[key] === value, and: (...conditions) => (row) => conditions.every((condition) => condition(row)) },
     "@/db": { getDb: () => orm }, "@/db/schema": schema, "@/lib/daily-bot": {},
@@ -128,9 +134,9 @@ function harness(t) {
   };
   t.after(() => { globalThis.fetch = originalFetch; db.close(); });
   const reminder = () => db.prepare("SELECT * FROM slack_daily_reminders WHERE owner_id='workspace' AND member_id='member'").get();
-  const addOther = () => db.exec(`INSERT INTO workspaces VALUES('other',NULL);
+  const addOther = () => db.exec(`INSERT INTO workspaces(id,scheduled_deletion_at) VALUES('other',NULL);
     INSERT INTO slack_connections VALUES('connection-other','other','T-other','U-other-bot','other');
-    INSERT INTO workspace_members VALUES('member-other','other','active');
+    INSERT INTO workspace_members(id,workspace_id,status) VALUES('member-other','other','active');
     INSERT INTO slack_daily_settings VALUES('other',1,'[0,1,2,3,4,5,6]','09:00','America/New_York','connected','2026-09-02T00:00:00Z','','2026-09-02T00:00:00Z','');
     INSERT INTO slack_member_links VALUES('link-other','other','member-other','U-other','D-other','T-other');
     INSERT INTO slack_daily_preferences VALUES('other','member-other',1,NULL,NULL);`);
@@ -304,7 +310,7 @@ test("a new recipient cannot bypass another recipient's failure cooldown", async
   const { api, db, calls, behavior } = harness(t);
   behavior.rejectSchedule = true;
   await api.repairSlackDailyReminders("workspace");
-  db.exec(`INSERT INTO workspace_members VALUES('new-member','workspace','active');
+  db.exec(`INSERT INTO workspace_members(id,workspace_id,status) VALUES('new-member','workspace','active');
     INSERT INTO slack_member_links VALUES('new-link','workspace','new-member','U-new','D-new','T-team')`);
   const before = calls.length;
   behavior.rejectSchedule = false;
@@ -431,6 +437,63 @@ test("verification preserves an unchanged reservation during the final minute", 
   assert.ok(!calls.some((c) => c.method === "chat.deleteScheduledMessage"));
 });
 
+test("language change cancels a confirmed old reservation before replacing it without changing its time", async (t) => {
+  const { api, db, calls, pending, reminder } = harness(t);
+  await api.scheduleMemberReminder("workspace", "member");
+  const original = { ...reminder() };
+  db.exec("UPDATE users SET language_preference='en', resolved_language='en'");
+  await api.scheduleMemberReminder("workspace", "member");
+  assert.equal(pending.length, 1);
+  assert.equal(reminder().post_at, original.post_at);
+  assert.equal(reminder().message_language, "en");
+  assert.notEqual(reminder().scheduled_message_id, original.scheduled_message_id);
+  assert.match(pending[0].text, /Daily/);
+  assert.equal(calls.filter((call) => call.method === "chat.deleteScheduledMessage").length, 1);
+});
+
+test("language change with lost response recovers stored non-Korean body exactly once", async (t) => {
+  const { api, db, behavior, pending, calls } = harness(t);
+  db.exec("UPDATE users SET language_preference='ja', resolved_language='ja'");
+  behavior.loseResponse = true;
+  await assert.rejects(api.scheduleMemberReminder("workspace", "member"), /response lost/);
+  db.exec("UPDATE users SET language_preference='es', resolved_language='es'");
+  await api.scheduleMemberReminder("workspace", "member");
+  assert.equal(pending.length, 1);
+  assert.equal(calls.filter((call) => call.method === "chat.scheduleMessage").length, 2);
+  assert.equal(calls.filter((call) => call.method === "chat.deleteScheduledMessage").length, 1);
+});
+
+test("language cancellation failure and final-minute change preserve the existing receipt", async (t) => {
+  const { api, db, behavior, pending, reminder, calls } = harness(t);
+  await api.scheduleMemberReminder("workspace", "member");
+  const original = { ...reminder() };
+  db.exec("UPDATE users SET language_preference='en', resolved_language='en'");
+  behavior.rejectCancellation = true;
+  await assert.rejects(api.scheduleMemberReminder("workspace", "member"), /ratelimited/);
+  assert.equal(reminder().scheduled_message_id, original.scheduled_message_id);
+  assert.equal(reminder().message_text, original.message_text);
+  assert.equal(pending.length, 1);
+  behavior.rejectCancellation = false;
+  db.exec("UPDATE slack_daily_reminders SET status='scheduled'");
+  t.mock.timers.enable({ apis: ["Date"], now: original.post_at * 1000 - 30_000 });
+  const count = calls.length;
+  await api.scheduleMemberReminder("workspace", "member", { verify: true });
+  assert.equal(calls.length, count);
+  assert.equal(reminder().scheduled_message_id, original.scheduled_message_id);
+});
+
+test("unknown ambiguous receipts are preserved instead of guessed during language recovery", async (t) => {
+  const { api, db, behavior, pending, calls } = harness(t);
+  behavior.loseResponse = true;
+  await assert.rejects(api.scheduleMemberReminder("workspace", "member"), /response lost/);
+  pending.push({ ...pending[0], id: "ambiguous" });
+  db.exec("UPDATE users SET language_preference='zh', resolved_language='zh'");
+  await assert.rejects(api.scheduleMemberReminder("workspace", "member"), /하나로 확인/);
+  assert.equal(pending.length, 2);
+  assert.equal(calls.filter((call) => call.method === "chat.scheduleMessage").length, 1);
+  assert.equal(calls.filter((call) => call.method === "chat.deleteScheduledMessage").length, 0);
+});
+
 test("a confirmed absent receipt allows replacement after invalid_scheduled_message_id", async (t) => {
   const { api, pending, db, behavior, reminder } = harness(t);
   await api.scheduleMemberReminder("workspace", "member");
@@ -456,7 +519,7 @@ test("bounded maintenance rotates beyond the first twenty workspaces", async (t)
   const { api, db, addOther, calls, pending } = harness(t);
   addOther();
   for (let i = 0; i < 25; i++) {
-    db.prepare("INSERT INTO workspaces VALUES(?,NULL)").run(`idle-${i}`);
+    db.prepare("INSERT INTO workspaces(id,scheduled_deletion_at) VALUES(?,NULL)").run(`idle-${i}`);
     db.prepare(`INSERT INTO slack_daily_settings(owner_id,enabled,weekdays,reminder_time,timezone,install_status,onboarding_completed_at,last_error,updated_at)
       VALUES(?,1,'[1,2,3,4,5]','09:00','Asia/Seoul','connected','configured','','2000-01-01T00:00:00Z')`).run(`idle-${i}`);
   }
@@ -468,7 +531,7 @@ test("bounded maintenance rotates beyond the first twenty workspaces", async (t)
 
 test("automatic repair stops the recipient queue when its shared time budget expires", async (t) => {
   const { api, db, calls, behavior } = harness(t);
-  db.exec(`INSERT INTO workspace_members VALUES('new-member','workspace','active');
+  db.exec(`INSERT INTO workspace_members(id,workspace_id,status) VALUES('new-member','workspace','active');
     INSERT INTO slack_member_links VALUES('new-link','workspace','new-member','U-new','D-new','T-team')`);
   const controller = new AbortController();
   const timeout = AbortSignal.timeout.bind(AbortSignal);

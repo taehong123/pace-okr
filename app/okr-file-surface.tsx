@@ -20,6 +20,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { t , apiError } from "@/lib/client-language";
 
 type ItemStatus = "backlog" | "todo" | "policy_discussion" | "in_progress" | "developing" | "development_done" | "done" | "blocked";
 type CycleStatus = "planned" | "active" | "closed";
@@ -124,10 +125,10 @@ async function fetchEditableOkrFile(workspaceId: string, cycleId: string) {
         cache: "no-store",
       });
       const data = await response.json() as { file?: OkrFile; error?: string };
-      if (!response.ok || !data.file) throw new Error(data.error ?? "OKR 파일을 불러오지 못했습니다.");
+      if (!response.ok || !data.file) throw new Error(apiError(data, "OKR 파일을 불러오지 못했습니다."));
       return data.file;
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") throw new Error("응답이 오래 걸려 불러오기를 중단했습니다. 다시 시도해 주세요.");
+      if (error instanceof DOMException && error.name === "AbortError") throw new Error(t("응답이 오래 걸려 불러오기를 중단했습니다. 다시 시도해 주세요."));
       throw error;
     } finally {
       window.clearTimeout(timeout);
@@ -185,20 +186,20 @@ function buildBootstrapOkrFile(cycle: OkrFileCycleSummary, items: OkrExecutionIt
 }
 
 const statuses: Array<{ value: ItemStatus; label: string }> = [
-  { value: "backlog", label: "백로그" },
-  { value: "todo", label: "할 일" },
-  { value: "policy_discussion", label: "정책 논의 중" },
-  { value: "in_progress", label: "진행 중" },
-  { value: "developing", label: "개발 중" },
-  { value: "development_done", label: "개발 완료" },
-  { value: "done", label: "완료" },
-  { value: "blocked", label: "막힘" },
+  { value: "backlog", get label() { return t("백로그"); } },
+  { value: "todo", get label() { return t("할 일"); } },
+  { value: "policy_discussion", get label() { return t("정책 논의 중"); } },
+  { value: "in_progress", get label() { return t("진행 중"); } },
+  { value: "developing", get label() { return t("개발 중"); } },
+  { value: "development_done", get label() { return t("개발 완료"); } },
+  { value: "done", get label() { return t("완료"); } },
+  { value: "blocked", get label() { return t("막힘"); } },
 ];
 
 const cycleStatuses: Array<{ value: CycleStatus; label: string }> = [
-  { value: "planned", label: "예정" },
-  { value: "active", label: "진행 중" },
-  { value: "closed", label: "종료" },
+  { value: "planned", get label() { return t("예정"); } },
+  { value: "active", get label() { return t("진행 중"); } },
+  { value: "closed", get label() { return t("종료"); } },
 ];
 
 export function OkrFileSurface({
@@ -336,11 +337,11 @@ export function OkrFileSurface({
   async function save() {
     if (saving) return;
     if (!draft.metadata.name.trim() || !draft.objective.title.trim()) {
-      setError("파일명과 Objective를 입력해 주세요.");
+      setError(t("파일명과 Objective를 입력해 주세요."));
       return;
     }
     if (!draft.objective.keyResults.length || draft.objective.keyResults.some((keyResult) => !keyResult.title.trim() || keyResult.initiatives.some((initiative) => !initiative.title.trim()))) {
-      setError("KR은 한 개 이상 필요하며 KR·Initiative의 빈 제목을 채워야 합니다.");
+      setError(t("KR은 한 개 이상 필요하며 KR·Initiative의 빈 제목을 채워야 합니다."));
       return;
     }
     const unresolved = impactedProjects.filter((project) => {
@@ -390,8 +391,8 @@ export function OkrFileSurface({
       });
       const data = await response.json() as { file?: OkrFile; error?: string };
       if (!response.ok || !data.file) {
-        if (response.status === 409) throw new Error("다른 사용자가 이 파일을 먼저 수정했습니다. 다시 불러온 뒤 변경해 주세요.");
-        throw new Error(data.error ?? "OKR 파일을 저장하지 못했습니다.");
+        if (response.status === 409) throw new Error(t("다른 사용자가 이 파일을 먼저 수정했습니다. 다시 불러온 뒤 변경해 주세요."));
+        throw new Error(apiError(data, "OKR 파일을 저장하지 못했습니다."));
       }
       const next = draftFromFile(data.file);
       setDraft(next);
@@ -416,76 +417,76 @@ export function OkrFileSurface({
     const data = await response.json() as { split?: boolean; cycles?: OkrFileCycleSummary[]; error?: string };
     setSaving(false);
     if (!response.ok || !data.cycles) {
-      setError(data.error ?? "OKR 파일을 분리하지 못했습니다.");
+      setError(apiError(data, "OKR 파일을 분리하지 못했습니다."));
       return;
     }
     onSplit(data.cycles);
-    onNotice("Objective별로 OKR 파일을 분리했습니다.");
+    onNotice(t("Objective별로 OKR 파일을 분리했습니다."));
   }
 
   if (editing) {
-    return <section className="okr-file-editor" aria-label="OKR 파일 전체 수정">
+    return <section className="okr-file-editor" aria-label={t("OKR 파일 전체 수정")}>
       <header className="okr-file-editor-toolbar">
-        <div><span>OKR 파일</span><h2>{creating ? "새 파일 만들기" : "파일 전체 수정"}</h2></div>
-        <div><button type="button" onClick={() => void cancelEdit()} disabled={saving}><X size={14} />취소</button><button type="button" className="primary" onClick={() => void save()} disabled={saving || !dirty && !creating}>{saving ? <LoaderCircle className="spin" size={14} /> : <Save size={14} />}{saving ? "저장 중" : "파일 저장"}</button></div>
+        <div><span>{t("OKR 파일")}</span><h2>{creating ? t("새 파일 만들기") : t("파일 전체 수정")}</h2></div>
+        <div><button type="button" onClick={() => void cancelEdit()} disabled={saving}><X size={14} />{t("취소")}</button><button type="button" className="primary" onClick={() => void save()} disabled={saving || !dirty && !creating}>{saving ? <LoaderCircle className="spin" size={14} /> : <Save size={14} />}{saving ? t("저장 중") : t("파일 저장")}</button></div>
       </header>
       <div className="okr-file-editor-body">
         <section className="okr-file-metadata-editor">
-          <label className="wide"><span>파일명</span><input value={draft.metadata.name} onChange={(event) => setDraft((current) => ({ ...current, metadata: { ...current.metadata, name: event.target.value } }))} /></label>
-          <label><span>부서</span><input value={draft.metadata.department} onChange={(event) => setDraft((current) => ({ ...current, metadata: { ...current.metadata, department: event.target.value } }))} placeholder="부서 미지정" /></label>
-          <label><span>파일 상태</span><select value={draft.metadata.status} onChange={(event) => setDraft((current) => ({ ...current, metadata: { ...current.metadata, status: event.target.value as CycleStatus } }))}>{cycleStatuses.map((status) => <option value={status.value} key={status.value}>{status.label}</option>)}</select></label>
-          <label><span>시작일</span><input type="date" value={draft.metadata.startDate} onChange={(event) => setDraft((current) => ({ ...current, metadata: { ...current.metadata, startDate: event.target.value } }))} /></label>
-          <label><span>종료일</span><input type="date" value={draft.metadata.endDate} onChange={(event) => setDraft((current) => ({ ...current, metadata: { ...current.metadata, endDate: event.target.value } }))} /></label>
+          <label className="wide"><span>{t("파일명")}</span><input value={draft.metadata.name} onChange={(event) => setDraft((current) => ({ ...current, metadata: { ...current.metadata, name: event.target.value } }))} /></label>
+          <label><span>{t("부서")}</span><input value={draft.metadata.department} onChange={(event) => setDraft((current) => ({ ...current, metadata: { ...current.metadata, department: event.target.value } }))} placeholder={t("부서 미지정")} /></label>
+          <label><span>{t("파일 상태")}</span><select value={draft.metadata.status} onChange={(event) => setDraft((current) => ({ ...current, metadata: { ...current.metadata, status: event.target.value as CycleStatus } }))}>{cycleStatuses.map((status) => <option value={status.value} key={status.value}>{status.label}</option>)}</select></label>
+          <label><span>{t("시작일")}</span><input type="date" value={draft.metadata.startDate} onChange={(event) => setDraft((current) => ({ ...current, metadata: { ...current.metadata, startDate: event.target.value } }))} /></label>
+          <label><span>{t("종료일")}</span><input type="date" value={draft.metadata.endDate} onChange={(event) => setDraft((current) => ({ ...current, metadata: { ...current.metadata, endDate: event.target.value } }))} /></label>
         </section>
         <section className="okr-file-objective-editor">
-          <header><span className="type-icon type-objective">O</span><div><small>Objective</small><textarea rows={2} value={draft.objective.title} onChange={(event) => setDraft((current) => ({ ...current, objective: { ...current.objective, title: event.target.value } }))} placeholder="이번 주기에 달성할 하나의 목표" /></div><StatusSelect value={draft.objective.status} onChange={(status) => setDraft((current) => ({ ...current, objective: { ...current.objective, status } }))} /></header>
+          <header><span className="type-icon type-objective">O</span><div><small>{t("Objective")}</small><textarea rows={2} value={draft.objective.title} onChange={(event) => setDraft((current) => ({ ...current, objective: { ...current.objective, title: event.target.value } }))} placeholder={t("이번 주기에 달성할 하나의 목표")} /></div><StatusSelect value={draft.objective.status} onChange={(status) => setDraft((current) => ({ ...current, objective: { ...current.objective, status } }))} /></header>
           <div className="okr-file-key-results">
             {draft.objective.keyResults.map((keyResult, keyResultIndex) => <section className="okr-file-key-result-editor" key={keyResult.clientId}>
               <header>
                 <span className="type-icon type-key_result">KR</span>
-                <div><small>Key Result {keyResultIndex + 1}</small><textarea rows={2} value={keyResult.title} onChange={(event) => patchKeyResult(setDraft, keyResult.clientId, { title: event.target.value })} placeholder="측정 가능한 핵심 결과" /></div>
-                <div className="okr-file-row-tools"><button type="button" disabled={keyResultIndex === 0} onClick={() => moveKeyResult(setDraft, keyResultIndex, -1)} aria-label="KR 위로 이동"><ArrowUp size={13} /></button><button type="button" disabled={keyResultIndex === draft.objective.keyResults.length - 1} onClick={() => moveKeyResult(setDraft, keyResultIndex, 1)} aria-label="KR 아래로 이동"><ArrowDown size={13} /></button><button type="button" className="danger" disabled={draft.objective.keyResults.length === 1} onClick={() => setDraft((current) => ({ ...current, objective: { ...current.objective, keyResults: current.objective.keyResults.filter((entry) => entry.clientId !== keyResult.clientId) } }))} aria-label="KR 삭제"><Trash2 size={13} /></button></div>
+                <div><small>{t("Key Result")}{keyResultIndex + 1}</small><textarea rows={2} value={keyResult.title} onChange={(event) => patchKeyResult(setDraft, keyResult.clientId, { title: event.target.value })} placeholder={t("측정 가능한 핵심 결과")} /></div>
+                <div className="okr-file-row-tools"><button type="button" disabled={keyResultIndex === 0} onClick={() => moveKeyResult(setDraft, keyResultIndex, -1)} aria-label={t("KR 위로 이동")}><ArrowUp size={13} /></button><button type="button" disabled={keyResultIndex === draft.objective.keyResults.length - 1} onClick={() => moveKeyResult(setDraft, keyResultIndex, 1)} aria-label={t("KR 아래로 이동")}><ArrowDown size={13} /></button><button type="button" className="danger" disabled={draft.objective.keyResults.length === 1} onClick={() => setDraft((current) => ({ ...current, objective: { ...current.objective, keyResults: current.objective.keyResults.filter((entry) => entry.clientId !== keyResult.clientId) } }))} aria-label={t("KR 삭제")}><Trash2 size={13} /></button></div>
               </header>
-              <div className="okr-file-kr-metrics"><StatusSelect value={keyResult.status} onChange={(status) => patchKeyResult(setDraft, keyResult.clientId, { status, ...(status === "done" || status === "development_done" ? { progress: 100 } : {}) })} /><label><span>진척도</span><input type="range" min="0" max="100" step="5" value={keyResult.progress} onChange={(event) => patchKeyResult(setDraft, keyResult.clientId, { progress: Number(event.target.value) })} /><b>{keyResult.progress}%</b></label></div>
+              <div className="okr-file-kr-metrics"><StatusSelect value={keyResult.status} onChange={(status) => patchKeyResult(setDraft, keyResult.clientId, { status, ...(status === "done" || status === "development_done" ? { progress: 100 } : {}) })} /><label><span>{t("진척도")}</span><input type="range" min="0" max="100" step="5" value={keyResult.progress} onChange={(event) => patchKeyResult(setDraft, keyResult.clientId, { progress: Number(event.target.value) })} /><b>{keyResult.progress}%</b></label></div>
               <div className="okr-file-initiatives">
                 {keyResult.initiatives.map((initiative, initiativeIndex) => <div className="okr-file-initiative-editor" key={initiative.clientId}>
                   <span className="type-icon type-initiative">I</span>
-                  <div><small>Initiative {initiativeIndex + 1}</small><textarea rows={2} value={initiative.title} onChange={(event) => patchInitiative(setDraft, initiative.clientId, { title: event.target.value })} placeholder="이 KR을 움직일 실행 방향" /></div>
-                  <select value={keyResult.clientId} onChange={(event) => moveInitiativeToKeyResult(setDraft, initiative.clientId, event.target.value)} aria-label="상위 KR 변경">{draft.objective.keyResults.map((target, index) => <option value={target.clientId} key={target.clientId}>KR {index + 1}</option>)}</select>
+                  <div><small>{t("Initiative")}{initiativeIndex + 1}</small><textarea rows={2} value={initiative.title} onChange={(event) => patchInitiative(setDraft, initiative.clientId, { title: event.target.value })} placeholder={t("이 KR을 움직일 실행 방향")} /></div>
+                  <select value={keyResult.clientId} onChange={(event) => moveInitiativeToKeyResult(setDraft, initiative.clientId, event.target.value)} aria-label={t("상위 KR 변경")}>{draft.objective.keyResults.map((target, index) => <option value={target.clientId} key={target.clientId}>KR {index + 1}</option>)}</select>
                   <StatusSelect value={initiative.status} onChange={(status) => patchInitiative(setDraft, initiative.clientId, { status })} />
-                  <div className="okr-file-row-tools"><button type="button" disabled={initiativeIndex === 0} onClick={() => moveInitiative(setDraft, keyResult.clientId, initiativeIndex, -1)} aria-label="Initiative 위로 이동"><ArrowUp size={12} /></button><button type="button" disabled={initiativeIndex === keyResult.initiatives.length - 1} onClick={() => moveInitiative(setDraft, keyResult.clientId, initiativeIndex, 1)} aria-label="Initiative 아래로 이동"><ArrowDown size={12} /></button><button type="button" className="danger" onClick={() => removeInitiative(setDraft, initiative.clientId)} aria-label="Initiative 삭제"><Trash2 size={12} /></button></div>
+                  <div className="okr-file-row-tools"><button type="button" disabled={initiativeIndex === 0} onClick={() => moveInitiative(setDraft, keyResult.clientId, initiativeIndex, -1)} aria-label={t("Initiative 위로 이동")}><ArrowUp size={12} /></button><button type="button" disabled={initiativeIndex === keyResult.initiatives.length - 1} onClick={() => moveInitiative(setDraft, keyResult.clientId, initiativeIndex, 1)} aria-label={t("Initiative 아래로 이동")}><ArrowDown size={12} /></button><button type="button" className="danger" onClick={() => removeInitiative(setDraft, initiative.clientId)} aria-label={t("Initiative 삭제")}><Trash2 size={12} /></button></div>
                 </div>)}
-                <button type="button" className="okr-file-add-row" onClick={() => addInitiative(setDraft, keyResult.clientId)}><Plus size={13} />Initiative 추가</button>
+                <button type="button" className="okr-file-add-row" onClick={() => addInitiative(setDraft, keyResult.clientId)}><Plus size={13} />{t("Initiative 추가")}</button>
               </div>
             </section>)}
-            <button type="button" className="okr-file-add-kr" onClick={() => addKeyResult(setDraft)}><Plus size={14} />Key Result 추가</button>
+            <button type="button" className="okr-file-add-kr" onClick={() => addKeyResult(setDraft)}><Plus size={14} />{t("Key Result 추가")}</button>
           </div>
         </section>
         {impactedProjects.length > 0 && <section className="okr-project-resolutions">
-          <header><AlertTriangle size={16} /><div><b>연결 Project 정리 필요</b><p>삭제되는 Initiative 아래 Project는 다른 Initiative로 이동하거나 휴지통으로 보내야 합니다.</p></div></header>
+          <header><AlertTriangle size={16} /><div><b>{t("연결 Project 정리 필요")}</b><p>{t("삭제되는 Initiative 아래 Project는 다른 Initiative로 이동하거나 휴지통으로 보내야 합니다.")}</p></div></header>
           {impactedProjects.map((project) => {
             const value = resolutions[project.id]?.action === "trash" ? "trash" : resolutions[project.id]?.targetInitiativeRef ? `move:${resolutions[project.id].targetInitiativeRef}` : "";
-            return <label key={project.id}><span><Briefcase size={13} /><b>{project.title}</b><small>하위 Task {project.taskCount}개</small></span><select value={value} onChange={(event) => {
+            return <label key={project.id}><span><Briefcase size={13} /><b>{project.title}</b><small>{t("{kind} · {count}", { kind: t("하위 Task"), count: project.taskCount })}</small></span><select value={value} onChange={(event) => {
               const next = event.target.value;
               setError("");
               setResolutions((current) => ({ ...current, [project.id]: next === "trash" ? { action: "trash" } : next.startsWith("move:") ? { action: "move", targetInitiativeRef: next.slice(5) } : { action: "move" } }));
-            }}><option value="">처리 방법 선택</option><optgroup label="다른 Initiative로 이동">{resolutionOptions.map((option) => <option value={`move:${option.ref}`} key={option.ref}>{option.label}</option>)}</optgroup>{project.canTrash && <option value="trash">Project·Task를 휴지통으로 이동</option>}</select>{!project.canTrash && <small>생성자 또는 책임자만 휴지통으로 이동할 수 있습니다.</small>}</label>;
+            }}><option value="">{t("처리 방법 선택")}</option><optgroup label={t("다른 Initiative로 이동")}>{resolutionOptions.map((option) => <option value={`move:${option.ref}`} key={option.ref}>{option.label}</option>)}</optgroup>{project.canTrash && <option value="trash">{t("Project·Task를 휴지통으로 이동")}</option>}</select>{!project.canTrash && <small>{t("생성자 또는 책임자만 휴지통으로 이동할 수 있습니다.")}</small>}</label>;
           })}
         </section>}
         {error && <p className="okr-file-editor-error" role="alert">{error}</p>}
       </div>
-      <footer className="okr-file-editor-footer"><span>{dirty ? "저장하지 않은 변경사항이 있습니다." : "변경사항 없음"}</span><div><button type="button" onClick={() => void cancelEdit()} disabled={saving}>취소</button><button type="button" className="primary" onClick={() => void save()} disabled={saving || !dirty && !creating}><Check size={14} />전체 저장</button></div></footer>
+      <footer className="okr-file-editor-footer"><span>{dirty ? t("저장하지 않은 변경사항이 있습니다.") : t("변경사항 없음")}</span><div><button type="button" onClick={() => void cancelEdit()} disabled={saving}>{t("취소")}</button><button type="button" className="primary" onClick={() => void save()} disabled={saving || !dirty && !creating}><Check size={14} />{t("전체 저장")}</button></div></footer>
     </section>;
   }
 
   if (!readFile) return null;
-  if (readFile.needsSplit) return <section className="okr-file-repair"><AlertTriangle size={22} /><div><h2>Objective별 파일 분리가 필요합니다</h2><p>이 파일에는 Objective가 {readFile.objectiveCount}개 있습니다. 데이터는 자동으로 바꾸지 않았습니다.</p></div>{!readOnly && <button onClick={() => void splitFile()} disabled={saving}>{saving ? <LoaderCircle className="spin" size={14} /> : <RotateCcw size={14} />}Objective별 파일로 분리</button>}</section>;
+  if (readFile.needsSplit) return <section className="okr-file-repair"><AlertTriangle size={22} /><div><h2>{t("Objective별 파일 분리가 필요합니다")}</h2><p>{t("이 파일에는 Objective가 {count}개 있습니다. 데이터는 자동으로 바꾸지 않았습니다.", { count: readFile.objectiveCount })}</p></div>{!readOnly && <button onClick={() => void splitFile()} disabled={saving}>{saving ? <LoaderCircle className="spin" size={14} /> : <RotateCcw size={14} />}{t("Objective별 파일로 분리")}</button>}</section>;
 
   return <article className="okr-file-read-surface">
-    <header className="okr-file-read-header"><div><small>OKR 파일 · v{readFile.cycle.version}</small><h2>{readFile.cycle.name}</h2><p>{readFile.cycle.startDate} – {readFile.cycle.endDate} · {cycleStatuses.find((status) => status.value === readFile.cycle.status)?.label} · {readFile.cycle.department || "부서 미지정"}</p></div><div>{!readOnly && <button className="primary" onClick={() => void beginEdit()} disabled={editLoading}>{editLoading ? <LoaderCircle className="spin" size={13} /> : <Pencil size={13} />}{editLoading ? "편집 준비 중" : "파일 수정"}</button>}<button onClick={onNavigateProjects}><Briefcase size={13} />Project 탭</button></div></header>
+    <header className="okr-file-read-header"><div><small>{t("OKR 파일 · v{version}", { version: readFile.cycle.version })}</small><h2>{readFile.cycle.name}</h2><p>{readFile.cycle.startDate} – {readFile.cycle.endDate} · {cycleStatuses.find((status) => status.value === readFile.cycle.status)?.label} · {readFile.cycle.department || t("부서 미지정")}</p></div><div>{!readOnly && <button className="primary" onClick={() => void beginEdit()} disabled={editLoading}>{editLoading ? <LoaderCircle className="spin" size={13} /> : <Pencil size={13} />}{editLoading ? t("편집 준비 중") : t("파일 수정")}</button>}<button onClick={onNavigateProjects}><Briefcase size={13} />{t("Project 탭")}</button></div></header>
     {error && <div className="okr-file-refresh-state error" role="status"><AlertTriangle size={12} />{error}</div>}
     {readFile.objective ? <section className="okr-file-read-tree">
-      <div className="okr-file-read-objective"><span className="type-icon type-objective">O</span><div><small>Objective</small><h3>{readFile.objective.title}</h3></div></div>
+      <div className="okr-file-read-objective"><span className="type-icon type-objective">O</span><div><small>{t("Objective")}</small><h3>{readFile.objective.title}</h3></div></div>
       {readFile.objective.keyResults.map((keyResult, keyResultIndex) => <OkrReadKeyResult
         key={keyResult.id}
         keyResult={keyResult}
@@ -497,7 +498,7 @@ export function OkrFileSurface({
         onOpenProject={onOpenProject}
         onOpenTask={onOpenTask}
       />)}
-    </section> : <div className="okr-file-empty"><Target size={22} /><div><h2>이 파일의 Objective를 작성해 주세요</h2><p>파일 수정에서 Objective와 KR을 한 번에 만들 수 있습니다.</p></div>{!readOnly && <button onClick={() => void beginEdit()}><Plus size={14} />파일 작성</button>}</div>}
+    </section> : <div className="okr-file-empty"><Target size={22} /><div><h2>{t("이 파일의 Objective를 작성해 주세요")}</h2><p>{t("파일 수정에서 Objective와 KR을 한 번에 만들 수 있습니다.")}</p></div>{!readOnly && <button onClick={() => void beginEdit()}><Plus size={14} />{t("파일 작성")}</button>}</div>}
   </article>;
 }
 
@@ -528,14 +529,14 @@ function OkrReadKeyResult({
     {hasInitiatives ? <button type="button" className="okr-tree-row okr-tree-kr-row" aria-expanded={keyResultExpanded} aria-controls={initiativesId} onClick={() => onToggle(keyResultId)}>
       <TreeChevron expanded={keyResultExpanded} />
       <span className="type-icon type-key_result">KR</span>
-      <span className="okr-tree-copy"><small>Key Result {keyResultIndex + 1}</small><strong>{keyResult.title}</strong></span>
-      <span className="okr-tree-count">Initiative {keyResult.initiatives.length}개</span>
+      <span className="okr-tree-copy"><small>{t("Key Result")}{keyResultIndex + 1}</small><strong>{keyResult.title}</strong></span>
+      <span className="okr-tree-count">{t("{kind} · {count}", { kind: t("Initiative"), count: keyResult.initiatives.length })}</span>
       <b className="okr-tree-progress">{keyResult.progress}%</b>
     </button> : <div className="okr-tree-row okr-tree-kr-row static">
       <span className="okr-tree-chevron-placeholder" />
       <span className="type-icon type-key_result">KR</span>
-      <span className="okr-tree-copy"><small>Key Result {keyResultIndex + 1}</small><strong>{keyResult.title}</strong></span>
-      <span className="okr-tree-count empty">Initiative 없음</span>
+      <span className="okr-tree-copy"><small>{t("Key Result")}{keyResultIndex + 1}</small><strong>{keyResult.title}</strong></span>
+      <span className="okr-tree-count empty">{t("Initiative 없음")}</span>
       <b className="okr-tree-progress">{keyResult.progress}%</b>
     </div>}
     {hasInitiatives && keyResultExpanded && <div className="okr-tree-initiatives" id={initiativesId} role="group" aria-label={`${keyResult.title}의 Initiative`}>
@@ -548,13 +549,13 @@ function OkrReadKeyResult({
           {projects.length ? <button type="button" className="okr-tree-row okr-tree-initiative-row" aria-expanded={initiativeExpanded} aria-controls={projectsId} onClick={() => onToggle(initiativeId)}>
             <TreeChevron expanded={initiativeExpanded} />
             <span className="type-icon type-initiative">I</span>
-            <span className="okr-tree-copy"><small>Initiative {initiativeIndex + 1}</small><strong>{initiative.title}</strong></span>
-            <span className="okr-tree-count">Project {projects.length}개</span>
+            <span className="okr-tree-copy"><small>{t("Initiative")}{initiativeIndex + 1}</small><strong>{initiative.title}</strong></span>
+            <span className="okr-tree-count">{t("{kind} · {count}", { kind: t("Project"), count: projects.length })}</span>
           </button> : <div className="okr-tree-row okr-tree-initiative-row static">
             <span className="okr-tree-chevron-placeholder" />
             <span className="type-icon type-initiative">I</span>
-            <span className="okr-tree-copy"><small>Initiative {initiativeIndex + 1}</small><strong>{initiative.title}</strong></span>
-            <span className="okr-tree-count empty">미완료 Project 없음</span>
+            <span className="okr-tree-copy"><small>{t("Initiative")}{initiativeIndex + 1}</small><strong>{initiative.title}</strong></span>
+            <span className="okr-tree-count empty">{t("미완료 Project 없음")}</span>
           </div>}
           {projects.length > 0 && initiativeExpanded && <div className="okr-tree-projects" id={projectsId} role="group" aria-label={`${initiative.title}의 미완료 Project`}>
             {projects.map((project) => {
@@ -566,15 +567,15 @@ function OkrReadKeyResult({
                   {tasks.length ? <button type="button" className="okr-tree-row okr-tree-project-main" aria-expanded={projectExpanded} aria-controls={tasksId} onClick={() => onToggle(project.id)}>
                     <TreeChevron expanded={projectExpanded} />
                     <Briefcase className="okr-tree-kind-icon" size={15} />
-                    <span className="okr-tree-copy"><small>Project</small><strong className="project-item-title">{project.title}</strong></span>
-                    <span className="okr-tree-count">Task {tasks.length}개</span>
+                    <span className="okr-tree-copy"><small>{t("Project")}</small><strong className="project-item-title">{project.title}</strong></span>
+                    <span className="okr-tree-count">{t("{kind} · {count}", { kind: t("Task"), count: tasks.length })}</span>
                   </button> : <div className="okr-tree-row okr-tree-project-main static">
                     <span className="okr-tree-chevron-placeholder" />
                     <Briefcase className="okr-tree-kind-icon" size={15} />
-                    <span className="okr-tree-copy"><small>Project</small><strong className="project-item-title">{project.title}</strong></span>
-                    <span className="okr-tree-count empty">미완료 Task 없음</span>
+                    <span className="okr-tree-copy"><small>{t("Project")}</small><strong className="project-item-title">{project.title}</strong></span>
+                    <span className="okr-tree-count empty">{t("미완료 Task 없음")}</span>
                   </div>}
-                  <button type="button" className="okr-tree-open-detail" aria-label={`${project.title} Project 상세 보기`} title="Project 상세 보기" onClick={() => onOpenProject(project.id)}><ExternalLink size={13} /></button>
+                  <button type="button" className="okr-tree-open-detail" aria-label={`${project.title} Project 상세 보기`} title={t("Project 상세 보기")} onClick={() => onOpenProject(project.id)}><ExternalLink size={13} /></button>
                 </div>
                 {tasks.length > 0 && projectExpanded && <div className="okr-tree-tasks" id={tasksId} role="group" aria-label={`${project.title}의 미완료 Task`}>
                   {tasks.map((task) => <button type="button" className="okr-tree-task" key={task.id} onClick={() => onOpenTask(task.id)}><ListChecks size={14} /><span>{task.title}</span><ChevronRight size={13} /></button>)}
@@ -593,7 +594,7 @@ function TreeChevron({ expanded }: { expanded: boolean }) {
 }
 
 function StatusSelect({ value, onChange }: { value: ItemStatus; onChange: (status: ItemStatus) => void }) {
-  return <select className={`okr-status-select status-${value}`} value={value} onChange={(event) => onChange(event.target.value as ItemStatus)} aria-label="상태">{statuses.map((status) => <option value={status.value} key={status.value}>{status.label}</option>)}</select>;
+  return <select className={`okr-status-select status-${value}`} value={value} onChange={(event) => onChange(event.target.value as ItemStatus)} aria-label={t("상태")}>{statuses.map((status) => <option value={status.value} key={status.value}>{status.label}</option>)}</select>;
 }
 
 function emptyDraft(): Draft {

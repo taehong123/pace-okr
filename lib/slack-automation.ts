@@ -49,18 +49,24 @@ export function defaultSlackAutomationTemplate(triggerType: SlackAutomationTrigg
   return "새 업무가 등록되었습니다.\n*{{title}}*\n상태: {{status}} · 우선순위: {{priority}} · {{workspace}}";
 }
 
-export function renderSlackAutomationMessage(template: string, context: SlackAutomationContext) {
+export type AutomationMessageKind = "custom" | "default" | "blocked";
+export function systemAutomationTemplate(kind: Exclude<AutomationMessageKind, "custom">, trigger: SlackAutomationTrigger, t: Translator = (key) => key) {
+  if (kind === "blocked") return t("업무가 막힘 상태로 변경되었습니다.\n*{{title}}*\n우선순위: {{priority}} · {{workspace}}");
+  return t(defaultSlackAutomationTemplate(trigger));
+}
+
+export function renderSlackAutomationMessage(template: string, context: SlackAutomationContext, t: Translator = (key) => key) {
   const variables: Record<string, string> = {
     title: context.title,
-    status: statusLabels[context.status] ?? context.status,
-    from_status: context.fromStatus ? statusLabels[context.fromStatus] ?? context.fromStatus : "-",
-    priority: priorityLabels[context.priority] ?? context.priority,
-    kind: kindLabels[context.kind] ?? context.kind,
+    status: t(statusLabels[context.status] ?? context.status),
+    from_status: context.fromStatus ? t(statusLabels[context.fromStatus] ?? context.fromStatus) : "-",
+    priority: t(priorityLabels[context.priority] ?? context.priority),
+    kind: t(kindLabels[context.kind] ?? context.kind),
     workspace: context.workspace,
   };
 
   const message = template.replace(/{{\s*(title|status|from_status|priority|kind|workspace)\s*}}/g, (_, key: string) => escapeSlackText(variables[key] ?? ""));
-  return `*업무 자동화 봇*\n${message}`;
+  return `*${t("업무 자동화 봇")}*\n${message}`;
 }
 
 export function slackAutomationMatches(input: {
@@ -126,3 +132,4 @@ function slackErrorMessage(code?: string) {
   if (code === "missing_scope") return "Slack 앱에 메시지 전송 권한이 없습니다. 앱을 다시 연결해 주세요.";
   return `Slack 전송에 실패했습니다${code ? ` (${code})` : ""}`;
 }
+import type { Translator } from "./server-language";

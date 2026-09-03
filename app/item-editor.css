@@ -1,4 +1,8 @@
 /* Shared create/edit contract. Keep fields independent of their page or drawer. */
+.language-settings-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.language-settings-controls select { flex: 1 1 12rem; min-width: 0; min-height: var(--field-height); padding: var(--space-2) var(--space-3); border: 1px solid var(--border-control); border-radius: var(--radius-control); background: var(--input-bg); color: var(--text-primary); font: inherit; }
+.language-settings-controls button { min-height: var(--control-height); }
+.language-settings-error { color: var(--red); }
 :is(.property-panel, .okr-file-editor, .routine-card, .project-property-manager, .project-template-manager) {
   --editor-inset: var(--space-6);
 }
@@ -203,6 +207,10 @@
 .project-document-template-create { gap: var(--space-2); grid-template-columns: minmax(0, 1fr) auto var(--control-height); padding: var(--space-4) var(--editor-inset); }
 .project-block-editor { padding: var(--space-4) 0 var(--space-8); }
 .project-block-editor .bn-editor { padding-inline: var(--editor-inset); font-size: var(--type-body); line-height: 1.6; }
+/* Locale changes only replace placeholder text, never editor content or history. */
+.project-block-editor .bn-container .bn-editor .bn-block-content[data-content-type="heading"]:has(.ProseMirror-trailingBreak:only-child)::after { content: var(--editor-placeholder-heading); }
+.project-block-editor .bn-container .bn-editor .bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)::after { content: var(--editor-placeholder-emptyDocument); }
+.project-block-editor .bn-container .bn-editor .bn-block-content[data-is-empty-and-focused]:has(.ProseMirror-trailingBreak:only-child)::after { content: var(--editor-placeholder-default); }
 
 .routine-card { gap: var(--space-4); padding: var(--space-4); }
 .routine-guide-grid { gap: var(--space-4); }

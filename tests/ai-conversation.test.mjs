@@ -5,6 +5,7 @@ import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import { clientLanguage } from "./helpers/client-language-fixture.mjs";
 
 const require = createRequire(import.meta.url);
 function compile(source, dependencies = {}) {
@@ -12,7 +13,7 @@ function compile(source, dependencies = {}) {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
   const loaded = { exports: {} };
-  new Function("require", "module", "exports", compiled)((name) => name in dependencies ? dependencies[name] : require(name), loaded, loaded.exports);
+  new Function("require", "module", "exports", compiled)((name) => name in dependencies ? dependencies[name] : name === "@/lib/client-language" ? clientLanguage : name === "@/lib/language-preferences" ? { readLanguagePreferences: async () => ({ language: "en", resolvedLanguage: "en", revision: 0 }) } : require(name), loaded, loaded.exports);
   return loaded.exports;
 }
 
@@ -24,6 +25,7 @@ const names = new Set(["HomeOkrChat", "countOkrDraft", "planStringFieldsWithValu
 const components = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && names.has(node.name?.text)).map((node) => node.getText(ast)).join("\n");
 const { HomeOkrChat } = compile(`
 import { useState, useMemo, useRef, useEffect } from "react";
+import { t } from "@/lib/client-language";
 import { Bot, Link2, LoaderCircle, CheckCircle2, AlertTriangle, Eye, Send } from "lucide-react";
 ${components}
 export { HomeOkrChat };
@@ -93,6 +95,9 @@ test("web reads reference context and rules for the authenticated workspace, wit
   assert.equal(body.organized.plan.tasks, "");
   assert.deepEqual(calls, [["ensure", "workspace-a"], ["rules", "workspace-a"], ["context", "workspace-a", "user-a"], ["usage", "workspace-a"]]);
   const context = JSON.parse(sent.input[1].content);
+  assert.match(sent.input[0].content, /explicit response-language request first/);
+  assert.match(sent.input[0].content, /preserve the established conversation language/);
+  assert.match(sent.input[0].content, /current language \(en\)/);
   assert.equal(context.referenceContext.workspace.id, "workspace-a");
   assert.equal(context.workspaceRules.reviewBeforeCreate, true);
   assert.equal(context.referenceContext.truncated.project, true);

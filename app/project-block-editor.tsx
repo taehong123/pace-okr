@@ -4,9 +4,27 @@ import { BlockNoteSchema, defaultBlockSpecs } from "@blocknote/core";
 import { ko } from "@blocknote/core/locales";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
-import { useCreateBlockNote } from "@blocknote/react";
-import { useEffect, useRef, useState } from "react";
+import { BlockNoteContext, useCreateBlockNote } from "@blocknote/react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { themeColorScheme } from "@/lib/themes";
+import { t, useLanguage } from "@/lib/client-language";
+import type { Language } from "@/lib/language";
+
+const editorDictionaries: Partial<Record<Language, typeof ko>> = { ko };
+const editorRequests: Partial<Record<Language, Promise<typeof ko>>> = {};
+const editorLoaders = {
+  en: () => import("@/lib/locales/editor-en"),
+  ja: () => import("@/lib/locales/editor-ja"),
+  zh: () => import("@/lib/locales/editor-zh"),
+  es: () => import("@/lib/locales/editor-es"),
+};
+function loadEditorDictionary(language: Language) {
+  if (editorDictionaries[language]) return Promise.resolve(editorDictionaries[language]!);
+  return editorRequests[language] ??= editorLoaders[language as Exclude<Language, "ko">]().then(({ default: dictionary }) => {
+    editorDictionaries[language] = dictionary;
+    return dictionary;
+  }).finally(() => { delete editorRequests[language]; });
+}
 
 const projectDocumentSchema = BlockNoteSchema.create({
   blockSpecs: {
@@ -27,19 +45,51 @@ export type ProjectBlockEditorChange = {
   plainText: string;
 };
 
-export default function ProjectBlockEditor({ initialContent, editable = true, onChange }: {
+type ProjectBlockEditorProps = {
   initialContent: string;
   editable?: boolean;
   onChange?: (change: ProjectBlockEditorChange) => void;
-}) {
+};
+
+export default function ProjectBlockEditor(props: ProjectBlockEditorProps) {
+  const { language } = useLanguage();
+  const [dictionary, setDictionary] = useState(() => editorDictionaries[language]);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let active = true;
+    void loadEditorDictionary(language).then((value) => {
+      if (active) { setDictionary(value); setFailed(false); }
+    }).catch(() => { if (active) setFailed(true); });
+    return () => { active = false; };
+  }, [language, attempt]);
+  return <>
+    {failed && <p role="alert">{t("일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.")} <button className="secondary" onClick={() => setAttempt((value) => value + 1)}>{t("재시도")}</button></p>}
+    {dictionary ? <ProjectBlockEditorBody {...props} dictionary={dictionary} /> : !failed && <p role="status">{t("불러오는 중")}</p>}
+  </>;
+}
+
+function ProjectBlockEditorBody({ initialContent, editable = true, onChange, dictionary }: ProjectBlockEditorProps & { dictionary: typeof ko }) {
   const initialBlocks = parseInitialContent(initialContent);
   const changeTimer = useRef<number | null>(null);
   const [viewTheme, setViewTheme] = useState<"light" | "dark">(() => currentEditorTheme());
   const editor = useCreateBlockNote({
     schema: projectDocumentSchema,
-    dictionary: ko,
+    // Own dictionary, never mutate the library's shared locale object.
+    dictionary: { ...dictionary },
     initialContent: initialBlocks as never,
   });
+  const [appliedDictionary, setAppliedDictionary] = useState(dictionary);
+  useLayoutEffect(() => {
+    if (appliedDictionary === dictionary) return;
+    Object.assign(editor.dictionary, dictionary);
+    // Refresh menu context before paint, without replacing the editor, selection or undo history.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAppliedDictionary(dictionary);
+  }, [editor, dictionary, appliedDictionary]);
+  const context = useMemo(() => ({ colorSchemePreference: viewTheme, languageDictionary: appliedDictionary }), [viewTheme, appliedDictionary]);
+  const placeholderStyle = Object.fromEntries(Object.entries(dictionary.placeholders).map(([key, value]) =>
+    [`--editor-placeholder-${key}`, JSON.stringify(value)])) as CSSProperties;
 
   useEffect(() => () => {
     if (changeTimer.current !== null) window.clearTimeout(changeTimer.current);
@@ -67,8 +117,10 @@ export default function ProjectBlockEditor({ initialContent, editable = true, on
   }
 
   return (
-    <div className="project-block-editor">
-      <BlockNoteView editor={editor} editable={editable} onChange={changed} theme={viewTheme} />
+    <div className="project-block-editor" style={placeholderStyle}>
+      <BlockNoteContext.Provider value={context}>
+        <BlockNoteView editor={editor} editable={editable} onChange={changed} theme={viewTheme} />
+      </BlockNoteContext.Provider>
     </div>
   );
 }

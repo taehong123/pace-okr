@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createRequire } from "node:module";
 import test from "node:test";
 import ts from "typescript";
+import { preferences } from "./helpers/language-fixture.mjs";
 
 const require = createRequire(import.meta.url);
 function compile(source, dependencies = {}) {
@@ -108,6 +109,7 @@ function fixture() {
     return core.getProjectReview(d1, identity, staged.id);
   };
   const route = (auth = identity) => compile(reviewRouteSource, { ...dependencies,
+    "@/lib/language-preferences": preferences,
     "@/lib/pace-data": { ...pace, authorizeRequest: async () => auth, ensureWorkspace: async () => {} },
     "@/lib/project-review-writer": writer,
   });

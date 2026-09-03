@@ -1,4 +1,6 @@
 import { env } from "cloudflare:workers";
+import { newAccountLanguage, readLanguagePreferences, workspaceMessageLanguage } from "./language-preferences";
+import { serverTranslator } from "./server-language";
 import { parseRoutineProperties, prepareRoutineProperties } from "./routine-properties";
 import { effectiveIntegrationProvider, type IntegrationProvider } from "@/lib/integration-providers";
 import { and, asc, desc, eq, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
@@ -58,10 +60,11 @@ import {
 } from "@/db/schema";
 import { syncDueKrDataConnectionsWithDb, syncKrDataConnectionWithDb } from "@/lib/kr-data-sync";
 import {
-  defaultSlackAutomationTemplate,
   isSlackAutomationTrigger,
   normalizeSlackChannelId,
   renderSlackAutomationMessage,
+  systemAutomationTemplate,
+  type AutomationMessageKind,
   slackAutomationMatches,
   type SlackAutomationContext,
   type SlackAutomationTrigger,
@@ -2031,6 +2034,7 @@ export type SlackAutomationInput = {
   triggerStatus?: string;
   channelId?: string;
   messageTemplate?: string;
+  messageTemplateKind?: AutomationMessageKind;
   active?: boolean;
 };
 
@@ -2059,9 +2063,12 @@ export async function createSlackAutomation(ownerId: string, userId: string, inp
   await ensureSchema();
   if (!await getSlackConnection(ownerId)) throw new Error("Slack을 먼저 연결해 주세요");
   const requestedTrigger = input.triggerType?.trim();
+  const messageTemplateKind = input.messageTemplateKind ?? (input.messageTemplate?.trim() ? "custom" : "default");
+  if (!["custom", "default", "blocked"].includes(messageTemplateKind)) throw new Error("지원하지 않는 메시지 종류입니다.");
   const values = validateSlackAutomationInput({
     ...input,
-    messageTemplate: input.messageTemplate?.trim() || (requestedTrigger && isSlackAutomationTrigger(requestedTrigger) ? defaultSlackAutomationTemplate(requestedTrigger) : undefined),
+    messageTemplate: messageTemplateKind !== "custom" && requestedTrigger && isSlackAutomationTrigger(requestedTrigger)
+      ? systemAutomationTemplate(messageTemplateKind, requestedTrigger) : input.messageTemplate,
   }, false);
   await validateSlackAutomationChannel(ownerId, values.channelId!);
   const now = new Date().toISOString();
@@ -2074,6 +2081,7 @@ export async function createSlackAutomation(ownerId: string, userId: string, inp
     triggerStatus: values.triggerStatus!,
     channelId: values.channelId!,
     messageTemplate: values.messageTemplate!,
+    messageTemplateKind,
     active: values.active ?? true,
     createdAt: now,
     updatedAt: now,
@@ -2085,12 +2093,16 @@ export async function updateSlackAutomation(ownerId: string, id: string, input: 
   await ensureSchema();
   const current = await getSlackAutomation(ownerId, id);
   if (!current) throw new Error("Slack 자동화를 찾을 수 없습니다");
+  const messageTemplateKind = input.messageTemplateKind ?? (input.messageTemplate !== undefined && input.messageTemplate !== current.messageTemplate ? "custom" : current.messageTemplateKind) as AutomationMessageKind;
+  if (!["custom", "default", "blocked"].includes(messageTemplateKind)) throw new Error("지원하지 않는 메시지 종류입니다.");
+  const trigger = input.triggerType ?? current.triggerType;
   const next = validateSlackAutomationInput({
     name: input.name ?? current.name,
     triggerType: input.triggerType ?? current.triggerType,
     triggerStatus: input.triggerStatus ?? current.triggerStatus,
     channelId: input.channelId ?? current.channelId,
-    messageTemplate: input.messageTemplate ?? current.messageTemplate,
+    messageTemplate: messageTemplateKind !== "custom" && isSlackAutomationTrigger(trigger)
+      ? systemAutomationTemplate(messageTemplateKind, trigger) : input.messageTemplate ?? current.messageTemplate,
     active: input.active ?? current.active,
   }, false);
   if (next.channelId !== current.channelId || (next.active && !current.active)) await validateSlackAutomationChannel(ownerId, next.channelId!);
@@ -2100,6 +2112,7 @@ export async function updateSlackAutomation(ownerId: string, id: string, input: 
     triggerStatus: next.triggerStatus,
     channelId: next.channelId,
     messageTemplate: next.messageTemplate,
+    messageTemplateKind,
     active: next.active,
     updatedAt: new Date().toISOString(),
   }).where(and(eq(slackAutomations.ownerId, ownerId), eq(slackAutomations.id, id))).returning();
@@ -2215,7 +2228,12 @@ async function deliverSlackAutomation(
   triggerType: string,
 ) {
   const now = new Date().toISOString();
-  const message = renderSlackAutomationMessage(automation.messageTemplate, context);
+  const t = await serverTranslator(await workspaceMessageLanguage(env.DB, automation.ownerId));
+  const systemKind = automation.messageTemplateKind === "default" || automation.messageTemplateKind === "blocked" ? automation.messageTemplateKind : null;
+  // Historical and custom templates have no reliable provenance. Never translate them.
+  const template = systemKind && isSlackAutomationTrigger(automation.triggerType)
+    ? systemAutomationTemplate(systemKind, automation.triggerType, t) : automation.messageTemplate;
+  const message = renderSlackAutomationMessage(template, context, t);
   const [created] = await getDb().insert(slackAutomationDeliveries).values({
     id: crypto.randomUUID(),
     ownerId: automation.ownerId,
@@ -2265,6 +2283,7 @@ function serializeSlackAutomation(automation: SlackAutomation) {
     triggerStatus: automation.triggerStatus,
     channelId: automation.channelId,
     messageTemplate: automation.messageTemplate,
+    messageTemplateKind: automation.messageTemplateKind,
     active: automation.active,
     lastTriggeredAt: automation.lastTriggeredAt,
     lastDeliveryStatus: automation.lastDeliveryStatus,
@@ -2443,7 +2462,7 @@ export async function authorizeRequest(
   const googleSession = await readGoogleSession(request, (env as RuntimeEnv).GOOGLE_TOKEN_ENCRYPTION_KEY);
   if (googleSession) {
     try {
-      const canonicalUserId = await canonicalUserIdForGoogle(googleSession.sub, googleSession.email, googleSession.name);
+      const canonicalUserId = await canonicalUserIdForGoogle(googleSession.sub, googleSession.email, googleSession.name, request);
       const membership = await resolveWorkspaceMembership(canonicalUserId, googleSession.email, googleSession.name, requestedWorkspaceId(request));
       if (!membership || membership.status !== "active") {
         return Response.json({ error: "This Google account is not an active workspace member." }, { status: 403 });
@@ -2468,7 +2487,7 @@ export async function authorizeRequest(
   );
 }
 
-async function canonicalUserIdForGoogle(subject: string, emailInput: string, displayNameInput: string) {
+async function canonicalUserIdForGoogle(subject: string, emailInput: string, displayNameInput: string, request: Request) {
   const email = normalizeEmail(emailInput);
   if (!email) throw new Error("A verified Google email is required");
   const now = new Date().toISOString();
@@ -2497,7 +2516,7 @@ async function canonicalUserIdForGoogle(subject: string, emailInput: string, dis
   const [emailUser] = await getDb().select().from(users).where(eq(users.emailNormalized, email)).limit(1);
   const userId = emailUser?.id ?? crypto.randomUUID();
   if (!emailUser) {
-    await getDb().insert(users).values({ id: userId, emailNormalized: email, displayName, createdAt: now, updatedAt: now }).onConflictDoNothing();
+    await getDb().insert(users).values({ id: userId, emailNormalized: email, displayName, ...newAccountLanguage(request), createdAt: now, updatedAt: now }).onConflictDoNothing();
   }
   await getDb().insert(authIdentities).values({
     id: crypto.randomUUID(),
@@ -2519,7 +2538,8 @@ async function canonicalUserIdForGoogle(subject: string, emailInput: string, dis
 async function ensureWorkspaceShell(ownerId: string, email: string | null = null, displayName = "Workspace Owner") {
   const now = new Date().toISOString();
   const workspaceName = displayName && displayName !== "Workspace Owner" ? `${displayName}의 개인 워크스페이스` : "개인 워크스페이스";
-  await getDb().insert(workspaces).values({ id: ownerId, name: workspaceName, ownerUserId: ownerId, kind: "personal", createdAt: now, updatedAt: now }).onConflictDoNothing();
+  const { resolvedLanguage } = await readLanguagePreferences(env.DB, ownerId);
+  await getDb().insert(workspaces).values({ id: ownerId, name: workspaceName, ownerUserId: ownerId, kind: "personal", messageLanguage: resolvedLanguage, createdAt: now, updatedAt: now }).onConflictDoNothing();
   await getDb().insert(workspaceMembers).values({
     id: crypto.randomUUID(),
     workspaceId: ownerId,
@@ -2626,7 +2646,8 @@ export async function createWorkspaceForUser(userId: string, email: string | nul
   if (name.length > 80) throw new Error("Workspace name must be 80 characters or fewer");
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  await getDb().insert(workspaces).values({ id, name, ownerUserId: userId, kind: "team", createdAt: now, updatedAt: now });
+  const { resolvedLanguage } = await readLanguagePreferences(env.DB, userId);
+  await getDb().insert(workspaces).values({ id, name, ownerUserId: userId, kind: "team", messageLanguage: resolvedLanguage, createdAt: now, updatedAt: now });
   await getDb().insert(workspaceMembers).values({ id: crypto.randomUUID(), workspaceId: id, userId, email, displayName, role: "owner", status: "active", createdAt: now, updatedAt: now });
   await setActiveWorkspace(userId, id);
   return {

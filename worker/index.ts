@@ -4,6 +4,7 @@ import handler from "vinext/server/app-router-entry";
 import { syncDueKrDataConnectionsWithDb } from "@/lib/kr-data-sync";
 import { runDueWorkspaceBackups } from "@/lib/workspace-backups";
 import { workspaceSubdomainRedirect } from "@/lib/workspace-address";
+import { withPublicErrorDetails } from "@/lib/api-error";
 
 interface Env {
   ASSETS: Fetcher;
@@ -95,6 +96,7 @@ const worker = {
 
     const response = await handler.fetch(request, env, ctx);
     if (cacheableRequest && response.ok) return withCacheHeaders(request, response, url.pathname);
+    if (url.pathname.startsWith("/api/") && !response.ok) return withPublicErrorDetails(response);
     return response;
   },
   scheduled(_controller: ScheduledController, _env: Env, ctx: ExecutionContext) {

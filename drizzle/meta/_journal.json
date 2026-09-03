@@ -274,6 +274,20 @@
       "when": 1788421279694,
       "tag": "0042_routine_properties",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1788430199410,
+      "tag": "0043_global_language",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1788432409910,
+      "tag": "0044_automation_message_origin",
+      "breakpoints": true
     }
   ]
 }

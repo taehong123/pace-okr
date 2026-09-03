@@ -1,4 +1,5 @@
 import { env, waitUntil } from "cloudflare:workers";
+import { languageForBootstrap } from "@/lib/language-preferences";
 import {
   authorizeRequest,
   canManageTeam,
@@ -34,11 +35,12 @@ export async function GET(request: Request) {
     const provider = hostname === "localhost" || hostname === "127.0.0.1" ? "local" : "google";
 
     const loadShell = async () => {
-      const [workspaces, rules, cycles, team] = await Promise.all([
+      const [workspaces, rules, cycles, team, preferences] = await Promise.all([
         listUserWorkspaces(authorization.userId, authorization.ownerId),
         getWorkspaceRules(authorization.ownerId),
         listOkrCycles(authorization.ownerId),
         getTeam(authorization.ownerId, authorization.userId),
+        languageForBootstrap(env.DB, authorization.userId, request),
       ]);
       return {
         user: {
@@ -46,6 +48,7 @@ export async function GET(request: Request) {
         email: authorization.email,
         displayName: authorization.displayName,
         provider,
+        preferences,
         },
         workspaces,
         rules,

@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { ArrowLeft, ArrowRight, ArrowUpRight, Languages, LoaderCircle, LogIn } from "lucide-react";
-import { LANDING_LANGUAGE_KEY, landingCopy, landingLanguages, resolveLandingLanguage, type LandingLanguage } from "@/lib/landing-copy";
+import { getLandingCopy, landingLanguages, type LandingLanguage } from "@/lib/landing-copy";
 import { DEFAULT_THEME, isThemeMode } from "@/lib/themes";
 import { AppInstallButton } from "./app-install-button";
 import "./landing.css";
+import { chooseGuestLanguage, t, useLanguage } from "@/lib/client-language";
 
 const productSizes = [
   { width: 1120, height: 264, mobileWidth: 358, mobileHeight: 361 },
@@ -13,21 +14,6 @@ const productSizes = [
   { width: 860, height: 488, mobileWidth: 362, mobileHeight: 818 },
   { width: 1120, height: 608, mobileWidth: 358, mobileHeight: 754 },
 ];
-
-function subscribeLanguage(callback: () => void) {
-  window.addEventListener("storage", callback);
-  window.addEventListener("languagechange", callback);
-  return () => {
-    window.removeEventListener("storage", callback);
-    window.removeEventListener("languagechange", callback);
-  };
-}
-
-function browserLanguage() {
-  let saved: string | null = null;
-  try { saved = localStorage.getItem(LANDING_LANGUAGE_KEY); } catch { /* Storage is optional. */ }
-  return resolveLandingLanguage(saved, navigator.languages.length ? navigator.languages : [navigator.language]);
-}
 
 function subscribeTheme(callback: () => void) {
   const observer = new MutationObserver(callback);
@@ -41,11 +27,9 @@ function browserTheme() {
 }
 
 export function LandingScreen({ reason, onSignIn }: { reason: string | null; onSignIn: () => void }) {
-  const detectedLanguage = useSyncExternalStore(subscribeLanguage, browserLanguage, () => "ko" as const);
+  const { language } = useLanguage();
   const theme = useSyncExternalStore(subscribeTheme, browserTheme, () => DEFAULT_THEME);
-  const [chosenLanguage, setChosenLanguage] = useState<LandingLanguage | null>(null);
-  const language = chosenLanguage ?? detectedLanguage;
-  const copy = landingCopy[language];
+  const copy = getLandingCopy(t);
   const [index, setIndex] = useState(0);
   const [signingIn, setSigningIn] = useState(false);
   const viewport = useRef<HTMLDivElement>(null);
@@ -111,8 +95,7 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
           <span className="sr-only">{copy.language}</span>
           <select value={language} onChange={(event) => {
             const next = event.target.value as LandingLanguage;
-            setChosenLanguage(next);
-            try { localStorage.setItem(LANDING_LANGUAGE_KEY, next); } catch { /* Keep the selection for this visit. */ }
+            void chooseGuestLanguage(next).catch(() => undefined);
           }}>
             {landingLanguages.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
           </select>

@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { ChevronDown, LoaderCircle, X } from "lucide-react";
 import { OverlayDialog } from "./overlay-dialog";
 import "./marketing-consent.css";
+import { t , apiError } from "@/lib/client-language";
 
 type Consent = {
   marketingDataConsent: boolean;
@@ -21,7 +22,7 @@ async function requestConsent<T>(init?: RequestInit): Promise<T> {
     cache: "no-store", ...init, headers: { "Content-Type": "application/json", ...init?.headers },
   });
   const data = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(data.error || "동의 설정을 저장하지 못했습니다.");
+  if (!response.ok) throw new Error(apiError(data, "동의 설정을 저장하지 못했습니다."));
   return data;
 }
 
@@ -65,10 +66,10 @@ export function MarketingConsentPrompt({ userId, onNotice }: { userId: string; o
   }
 
   if (!visible) return null;
-  return <OverlayDialog title="이메일 안내 수신 선택" onRequestClose={skip} initialFocus=".consent-prompt .icon-button">
+  return <OverlayDialog title={t("이메일 안내 수신 선택")} onRequestClose={skip} initialFocus=".consent-prompt .icon-button">
     <section className="consent-prompt">
-      <header><h2>이메일 안내 수신 선택</h2><button type="button" className="icon-button" onClick={skip} aria-label="수신 안내 닫기" title="닫기"><X size={18} /></button></header>
-      <p>선택 사항입니다. 동의하지 않아도 서비스를 이용할 수 있습니다.</p>
+      <header><h2>{t("이메일 안내 수신 선택")}</h2><button type="button" className="icon-button" onClick={skip} aria-label={t("수신 안내 닫기")} title={t("닫기")}><X size={18} /></button></header>
+      <p>{t("선택 사항입니다. 동의하지 않아도 서비스를 이용할 수 있습니다.")}</p>
       <ConsentEditor onboarding onSkip={skip} onSaved={() => { rememberDismissal(userId); setVisible(false); }} />
     </section>
   </OverlayDialog>;
@@ -79,7 +80,7 @@ export function MarketingConsentSettings() {
   const id = useId();
   return <section className="settings-section marketing-preferences">
     <button type="button" className="secondary marketing-preferences-toggle" aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen((value) => !value)}>
-      <span>이메일 수신 설정</span><ChevronDown size={16} aria-hidden="true" />
+      <span>{t("이메일 수신 설정")}</span><ChevronDown size={16} aria-hidden="true" />
     </button>
     {open && <div id={id}><ConsentEditor /></div>}
   </section>;
@@ -102,7 +103,7 @@ function ConsentEditor({ onboarding = false, onSkip, onSaved }: { onboarding?: b
     const timeout = window.setTimeout(() => controller.abort(), 15_000);
     void requestConsent<{ consent: Consent }>({ signal: controller.signal }).then((data) => {
       if (!active) return;
-      if (!data.consent) throw new Error("동의 설정을 불러오지 못했습니다.");
+      if (!data.consent) throw new Error(t("동의 설정을 불러오지 못했습니다."));
       setConsent(data.consent);
       setMarketingDataConsent(data.consent.marketingDataConsent);
       setAdvertisingEmailConsent(data.consent.advertisingEmailConsent);
@@ -126,7 +127,7 @@ function ConsentEditor({ onboarding = false, onSkip, onSaved }: { onboarding?: b
       const data = await requestConsent<{ consent: Consent }>({ method: "PATCH", signal: controller.signal, body: JSON.stringify({
         marketingDataConsent, advertisingEmailConsent, source: onboarding ? "onboarding" : "settings",
       }) });
-      if (!data.consent) throw new Error("동의 설정을 저장하지 못했습니다.");
+      if (!data.consent) throw new Error(t("동의 설정을 저장하지 못했습니다."));
       setConsent(data.consent);
       setState("saved");
       setMessage("동의 설정을 저장했습니다.");
@@ -138,24 +139,24 @@ function ConsentEditor({ onboarding = false, onSkip, onSaved }: { onboarding?: b
   }
 
   function changed() { setState("ready"); setMessage(""); }
-  if (state === "loading") return <p className="consent-state" role="status"><LoaderCircle className="spin" size={16} />불러오는 중</p>;
-  if (!consent) return <div className="consent-state"><p role="alert">{message}</p><button type="button" className="secondary" onClick={() => { setState("loading"); setAttempt((value) => value + 1); }}>다시 불러오기</button></div>;
+  if (state === "loading") return <p className="consent-state" role="status"><LoaderCircle className="spin" size={16} />{t("불러오는 중")}</p>;
+  if (!consent) return <div className="consent-state"><p role="alert">{message}</p><button type="button" className="secondary" onClick={() => { setState("loading"); setAttempt((value) => value + 1); }}>{t("다시 불러오기")}</button></div>;
 
   return <form className="consent-form" onSubmit={(event) => void save(event)} aria-busy={state === "saving"}>
-    <label className="consent-option" htmlFor={`${id}-data`} aria-label="마케팅 목적 개인정보 이용 설정">
+    <label className="consent-option" htmlFor={`${id}-data`} aria-label={t("마케팅 목적 개인정보 이용 설정")}>
       <input id={`${id}-data`} type="checkbox" checked={marketingDataConsent} disabled={state === "saving"} onChange={(event) => { setMarketingDataConsent(event.target.checked); changed(); }} />
-      <span><b>마케팅 목적 개인정보 이용 (선택)</b><small>혜택과 프로모션 안내를 위해 가입 이메일과 서비스 이용 정보를 사용합니다.</small></span>
+      <span><b>{t("마케팅 목적 개인정보 이용 (선택)")}</b><small>{t("혜택과 프로모션 안내를 위해 가입 이메일과 서비스 이용 정보를 사용합니다.")}</small></span>
     </label>
-    <label className="consent-option" htmlFor={`${id}-email`} aria-label="광고성 이메일 수신 설정">
+    <label className="consent-option" htmlFor={`${id}-email`} aria-label={t("광고성 이메일 수신 설정")}>
       <input id={`${id}-email`} type="checkbox" checked={advertisingEmailConsent} disabled={state === "saving"} onChange={(event) => { setAdvertisingEmailConsent(event.target.checked); changed(); }} />
-      <span><b>광고성 이메일 수신 (선택)</b><small>혜택과 프로모션 이메일을 받습니다. 내 설정이나 메일의 수신거부 링크에서 철회할 수 있습니다.</small></span>
+      <span><b>{t("광고성 이메일 수신 (선택)")}</b><small>{t("혜택과 프로모션 이메일을 받습니다. 내 설정이나 메일의 수신거부 링크에서 철회할 수 있습니다.")}</small></span>
     </label>
-    <p className="consent-note">두 동의가 모두 유효할 때만 광고 이메일을 보냅니다. 초대·결제·보안 안내는 별개입니다.</p>
-    {!onboarding && consent.needsReaffirmation && <p className="consent-note">기존 동의의 재확인 기간이 지났습니다. 다시 저장하기 전까지 광고 이메일을 보내지 않습니다.</p>}
+    <p className="consent-note">{t("두 동의가 모두 유효할 때만 광고 이메일을 보냅니다. 초대·결제·보안 안내는 별개입니다.")}</p>
+    {!onboarding && consent.needsReaffirmation && <p className="consent-note">{t("기존 동의의 재확인 기간이 지났습니다. 다시 저장하기 전까지 광고 이메일을 보내지 않습니다.")}</p>}
     {message && <p className="consent-message" role={state === "error" ? "alert" : "status"}>{message}</p>}
     <footer>
-      {onSkip && <button type="button" className="secondary consent-skip" onClick={onSkip}>동의 없이 계속</button>}
-      <button type="submit" className="primary-action" disabled={state === "saving"}>{state === "saving" ? <><LoaderCircle className="spin" size={16} />저장 중</> : onboarding ? "선택 저장" : "동의 설정 저장"}</button>
+      {onSkip && <button type="button" className="secondary consent-skip" onClick={onSkip}>{t("동의 없이 계속")}</button>}
+      <button type="submit" className="primary-action" disabled={state === "saving"}>{state === "saving" ? <><LoaderCircle className="spin" size={16} />{t("저장 중")}</> : onboarding ? t("선택 저장") : t("동의 설정 저장")}</button>
     </footer>
   </form>;
 }

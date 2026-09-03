@@ -203,23 +203,24 @@ async function prepareSlackChannel(ownerId: string, channelId: string): Promise<
 }
 
 async function sendReport(ownerId: string, settings: ManagementBotSettings, snapshot: Awaited<ReturnType<typeof collectWorkspaceManagementSnapshot>>, test: boolean, now = new Date()) {
+  const t = await serverTranslator(await workspaceMessageLanguage((env as RuntimeEnv).DB, ownerId));
   const workspace = await (env as RuntimeEnv).DB.prepare("SELECT name FROM workspaces WHERE id = ? LIMIT 1").bind(ownerId).first<{ name: string }>();
   const selected = snapshot.groups.filter((group) => group.count > 0);
   const body = selected.length
-    ? selected.map((group) => `*${signalLabel(group.signal)} · ${group.count}개*\n${group.items.slice(0, 5).map((item) => `• ${escapeSlack(item.title)} _(${item.kind === "project" ? "Project" : "Task"})_`).join("\n")}${group.count > 5 ? `\n_외 ${group.count - 5}개_` : ""}`).join("\n\n")
-    : "현재 선택한 관리 항목은 모두 정리되어 있습니다. ✅";
+    ? selected.map((group) => `*${t(signalLabel(group.signal))} · ${t("{count}개", { count: group.count })}*\n${group.items.slice(0, 5).map((item) => `• ${escapeSlack(item.title)} _(${t(item.kind === "project" ? "Project" : "Task")})_`).join("\n")}${group.count > 5 ? `\n_${t("외 {count}개", { count: group.count - 5 })}_` : ""}`).join("\n\n")
+    : t("현재 선택한 관리 항목은 모두 정리되어 있습니다. ✅");
   const appUrl = `${String((env as RuntimeEnv).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?settings=workspace&tab=summary`;
   return deliverSlackBotMessage((env as RuntimeEnv).DB, {
     ownerId, botKind: "management", subjectId: snapshot.date,
     eventKey: test ? `test:${crypto.randomUUID()}` : snapshot.date,
     expiresAt: new Date(zonedDayRange(snapshot.date, settings.timezone)[1]).toISOString(),
     payload: { channel: settings.channelId, test,
-    text: `[관리 봇] ${workspace?.name || "OKRPTR"} 워크스페이스 관리 리포트 · ${snapshot.date}`,
+    text: `[${t("관리 봇")}] ${t("{workspace} 워크스페이스 관리 리포트 · {date}", { workspace: workspace?.name || "OKRPTR", date: snapshot.date })}`,
     blocks: [
-      { type: "header", text: { type: "plain_text", text: `${test ? "테스트 · " : ""}관리 봇 · 워크스페이스 관리 리포트`.slice(0, 150) } },
+      { type: "header", text: { type: "plain_text", text: `${test ? `${t("테스트")} · ` : ""}${t("관리 봇")} · ${t("워크스페이스 관리 리포트")}`.slice(0, 150) } },
       { type: "context", elements: [{ type: "mrkdwn", text: `*${escapeSlack(workspace?.name || "OKRPTR").slice(0, 1800)}* · ${snapshot.date}` }] },
       { type: "section", text: { type: "mrkdwn", text: body.slice(0, 2900) } },
-      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRPTR에서 정리" }, url: appUrl }] },
+      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRPTR에서 정리") }, url: appUrl }] },
     ],
     },
   }, now);
@@ -332,3 +333,5 @@ function escapeSlack(value: string) { return value.replace(/&/g, "&amp;").replac
 function signalLabel(signal: ManagementBotSignal) {
   return { missing_due_date: "기한 없음", missing_owner: "책임자·담당자 없음", overdue: "기한 초과", completed_yesterday: "어제 완료", due_today: "오늘 마감" }[signal];
 }
+import { workspaceMessageLanguage } from "./language-preferences";
+import { serverTranslator } from "./server-language";

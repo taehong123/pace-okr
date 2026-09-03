@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import ts from "typescript";
+import { language } from "./helpers/language-fixture.mjs";
 
 const addressSource = await readFile(new URL("../lib/workspace-address.ts", import.meta.url), "utf8");
 const identitySource = await readFile(new URL("../lib/workspace-identity.ts", import.meta.url), "utf8");
@@ -20,7 +21,7 @@ function compile(source, dependencies = {}) {
   return loaded.exports;
 }
 const address = compile(addressSource);
-const identity = compile(identitySource, { "./workspace-address": address });
+const identity = compile(identitySource, { "./workspace-address": address, "./language": language });
 
 function fixture(t, migrate = true) {
   const db = new DatabaseSync(":memory:");
@@ -31,6 +32,7 @@ function fixture(t, migrate = true) {
     INSERT INTO workspaces VALUES ('a','우리 팀',NULL,'old'),('b','다른 팀',NULL,'old');
     INSERT INTO workspace_members VALUES ('a','owner','owner','active'),('a','admin','admin','active'),
       ('a','reader','viewer','active'),('a','member','member','active'),('b','other','owner','active');`);
+  db.exec("ALTER TABLE workspaces ADD message_language TEXT NOT NULL DEFAULT 'ko'");
   if (migrate) db.exec(migration);
   let beforeBatch = null, failure = null;
   const statement = (sql, args = []) => ({ sql, args,
@@ -78,6 +80,21 @@ test("old addresses still open the same workspace and can never transfer after d
   db.exec("DELETE FROM workspaces WHERE id='a'");
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM workspace_addresses").get().n, 2);
   await assert.rejects(identity.updateWorkspaceIdentity(d1, "b", "other", { address: "first-team", revision: 0 }), /사용 중/);
+});
+
+test("shared message language uses existing role and revision guards without renaming or crossing workspaces", async (t) => {
+  const { db, d1 } = fixture(t);
+  assert.equal((await identity.readWorkspaceIdentity(d1, "a", "member")).messageLanguage, "ko");
+  const saved = await identity.updateWorkspaceIdentity(d1, "a", "admin", { messageLanguage: "ja", revision: 0 });
+  assert.equal(saved.messageLanguage, "ja");
+  assert.equal(saved.name, "우리 팀");
+  assert.equal(saved.address, null);
+  assert.equal(db.prepare("SELECT message_language FROM workspaces WHERE id='b'").get().message_language, "ko");
+  await assert.rejects(identity.updateWorkspaceIdentity(d1, "a", "member", { messageLanguage: "en", revision: 1 }));
+  await assert.rejects(identity.updateWorkspaceIdentity(d1, "a", "reader", { messageLanguage: "en", revision: 1 }));
+  await assert.rejects(identity.updateWorkspaceIdentity(d1, "a", "owner", { messageLanguage: "en", revision: 0 }));
+  await assert.rejects(identity.updateWorkspaceIdentity(d1, "a", "owner", { messageLanguage: "xx", revision: 1 }));
+  assert.equal((await identity.readWorkspaceIdentity(d1, "a", "owner")).messageLanguage, "ja");
 });
 
 test("members, viewers, revoked members and cross-workspace accounts cannot rename", async (t) => {

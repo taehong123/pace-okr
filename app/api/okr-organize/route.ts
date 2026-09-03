@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { authorizeRequest, ensureWorkspace, getAiUsageSummary, getWorkspaceRules, recordAiUsageEvent } from "@/lib/pace-data";
 import { BillingLimitError, assertAiBudget } from "@/lib/billing";
 import { CONVERSATION_POLICY, readWorkContext, WORK_CLASSIFICATION } from "@/lib/work-intake";
+import { readLanguagePreferences } from "@/lib/language-preferences";
 
 type RuntimeEnv = typeof env & {
   OPENAI_API_KEY?: string;
@@ -172,7 +173,10 @@ export async function POST(request: Request) {
       return Response.json({ error: "OPENAI_API_KEY is not configured", code: "missing_openai_key" }, { status: 503 });
     }
 
-    const workspaceRules = await getWorkspaceRules(authorization.ownerId);
+    const [workspaceRules, languagePreferences] = await Promise.all([
+      getWorkspaceRules(authorization.ownerId), readLanguagePreferences(env.DB, authorization.userId),
+    ]);
+    const languageInstruction = `\nResponse language: follow any explicit response-language request first. Otherwise preserve the established conversation language, even when the account language changes. Only when no conversation language is established, use the account's current language (${languagePreferences.resolvedLanguage}). Do not translate stored user titles, descriptions, property names or custom messages unless the user explicitly asks.`;
     const workContext = await readWorkContext(env.DB, authorization.ownerId, authorization.userId, {
       kind: mode === "task" || mode === "project" || mode === "routine" ? mode : "unsure",
       limit: 12,
@@ -206,7 +210,7 @@ export async function POST(request: Request) {
         input: [
           {
             role: "system",
-            content: systemInstruction(mode),
+            content: systemInstruction(mode) + languageInstruction,
           },
           {
             role: "user",

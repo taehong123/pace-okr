@@ -3,6 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import ts from "typescript";
+import { preferences, serverLanguage } from "./helpers/language-fixture.mjs";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 function compile(source, dependencies = {}) {
@@ -58,6 +59,7 @@ function harness(t) {
     db.prepare("INSERT INTO workspace_members VALUES(?,?,'active',?)").run(`member-${team}`, team, `멤버 ${team}`);
     db.prepare("INSERT INTO slack_daily_channels VALUES(?,?)").run(team, `C-${team}`);
   }
+  db.exec("ALTER TABLE workspaces ADD message_language TEXT NOT NULL DEFAULT 'ko'");
   const raw = { prepare(sql) {
     const stmt = db.prepare(sql); let values = [];
     return { bind(...args) { values = args; return this; }, async first() { return stmt.get(...values) ?? null; },
@@ -82,12 +84,14 @@ function harness(t) {
     "@/lib/slack-automation": transport,
   });
   const management = compile(managementSource, {
+    "./language-preferences": preferences, "./server-language": serverLanguage,
     "cloudflare:workers": { env: { DB: raw } },
     "@/lib/pace-data": { getSlackConnection: async (ownerId) => db.prepare("SELECT * FROM slack_connections WHERE owner_id=?").get(ownerId) },
     "@/lib/slack-daily": { listSlackChannels: async () => [] },
     "@/lib/slack-bot-delivery": api,
   });
   const daily = compile(dailySource, {
+    "./language-preferences": preferences, "./server-language": serverLanguage,
     "cloudflare:workers": { env: { DB: raw } }, "drizzle-orm": {}, "@/db": {}, "@/db/schema": {},
     "@/lib/pace-data": { getSlackConnection: async (ownerId) => db.prepare("SELECT * FROM slack_connections WHERE owner_id=?").get(ownerId) },
     "@/lib/slack-daily-status": {}, "@/lib/slack-oauth": {}, "@/lib/slack-bot-delivery": api,

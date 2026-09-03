@@ -12,6 +12,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
+import { t } from "@/lib/client-language";
 
 export type OverlayCloseReason = "backdrop" | "escape" | "close-button" | "history";
 export type OverlayVariant = "modal" | "drawer" | "sheet";
@@ -176,8 +177,8 @@ export function OverlayDialog({
             <h2 id={`${overlayId}-discard-title`}>{discardTitle}</h2>
             <p id={`${overlayId}-discard-message`}>{discardMessage}</p>
             <footer>
-              <button ref={discardFocusRef} type="button" onClick={() => setConfirmingDiscard(false)}>계속 작성</button>
-              <button type="button" className="danger" onClick={() => finishClose("close-button")}>변경사항 버리기</button>
+              <button ref={discardFocusRef} type="button" onClick={() => setConfirmingDiscard(false)}>{t("계속 작성")}</button>
+              <button type="button" className="danger" onClick={() => finishClose("close-button")}>{t("변경사항 버리기")}</button>
             </footer>
           </section>
         </div>
@@ -210,10 +211,10 @@ export function ConfirmationProvider({ children }: { children: ReactNode }) {
           {(requestClose) => <section className="overlay-confirm app-confirm-dialog" role="document">
             <h2>{pending.title}</h2>
             <p>{pending.message}</p>
-            {pending.confirmationText && <label><span>확인 문구</span><input value={confirmationValue} onChange={(event) => setConfirmationValue(event.target.value)} placeholder={pending.confirmationText} /></label>}
+            {pending.confirmationText && <label><span>{t("확인 문구")}</span><input value={confirmationValue} onChange={(event) => setConfirmationValue(event.target.value)} placeholder={pending.confirmationText} /></label>}
             <footer>
-              <button type="button" onClick={() => requestClose("close-button")}>{pending.cancelLabel ?? "취소"}</button>
-              <button type="button" className={pending.danger ? "danger" : "primary"} disabled={Boolean(pending.confirmationText) && confirmationValue !== pending.confirmationText} onClick={() => settle(true)}>{pending.confirmLabel ?? "확인"}</button>
+              <button type="button" onClick={() => requestClose("close-button")}>{pending.cancelLabel ?? t("취소")}</button>
+              <button type="button" className={pending.danger ? "danger" : "primary"} disabled={Boolean(pending.confirmationText) && confirmationValue !== pending.confirmationText} onClick={() => settle(true)}>{pending.confirmLabel ?? t("확인")}</button>
             </footer>
           </section>}
         </OverlayDialog>

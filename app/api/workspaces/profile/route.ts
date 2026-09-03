@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
 import { authorizeRequest } from "@/lib/pace-data";
 import { readWorkspaceIdentity, updateWorkspaceIdentity, WorkspaceIdentityError } from "@/lib/workspace-identity";
 
@@ -23,7 +23,11 @@ export async function PATCH(request: Request) {
   try {
     const input = await request.json();
     if (!input || typeof input !== "object" || Array.isArray(input)) return Response.json({ error: "입력 내용을 확인해 주세요." }, { status: 400 });
-    return result(await updateWorkspaceIdentity(env.DB, auth.ownerId, auth.userId, input as Record<string, unknown>, enabled()));
+    const profile = await updateWorkspaceIdentity(env.DB, auth.ownerId, auth.userId, input as Record<string, unknown>, enabled());
+    if (Object.hasOwn(input, "messageLanguage")) waitUntil(import("@/lib/slack-daily")
+      .then(({ repairSlackDailyReminders }) => repairSlackDailyReminders(auth.ownerId))
+      .catch((error: unknown) => console.error("workspace_reminder_language_refresh_failed", error instanceof Error ? error.message : "Unknown failure")));
+    return result(profile);
   } catch (error) { return failure(error); }
 }
 

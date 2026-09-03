@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { languageForBootstrap } from "@/lib/language-preferences";
 import { z } from "zod";
 import { authorizeRequest, ensureWorkspace, validateItemPropertiesByName } from "@/lib/pace-data";
 import { writeReviewedProject } from "@/lib/project-review-writer";
@@ -29,15 +30,16 @@ export async function GET(request: Request) {
     const cycleId = url.searchParams.has("cycleId") ? url.searchParams.get("cycleId") || null : review.proposal.requestedCycleId;
     if (url.searchParams.get("mode") === "candidates") return json({ candidates: review.state === "pending"
       ? await listReviewInitiatives(env.DB, authorization.ownerId, url.searchParams.get("q") ?? "", cycleId) : { choices: [], truncated: false } });
-    const [candidates, recommendations, workspace, existing, editor, canApprove] = await Promise.all([
+    const [candidates, recommendations, workspace, existing, editor, canApprove, preferences] = await Promise.all([
       review.state === "pending" ? listReviewInitiatives(env.DB, authorization.ownerId, url.searchParams.get("q") ?? "", cycleId) : { choices: [], truncated: false },
       Promise.all(review.recommendations.map(async (entry) => ({ ...entry, initiative: await getReviewInitiative(env.DB, authorization.ownerId, entry.initiativeId) }))),
       env.DB.prepare("SELECT name FROM workspaces WHERE id = ?").bind(authorization.ownerId).first<{ name: string }>(),
       ["creating", "failed"].includes(review.state) ? env.DB.prepare("SELECT id FROM items WHERE owner_id = ? AND id = ?").bind(authorization.ownerId, review.projectId).first<{ id: string }>() : null,
       review.state === "pending" ? getProjectReviewEditor(authorization.ownerId) : null,
       memberCanWrite(authorization.ownerId, authorization.userId, authorization.role),
+      languageForBootstrap(env.DB, authorization.userId, request),
     ]);
-    return json({ review, candidates, recommendations, editor, canApprove, workspaceName: workspace?.name ?? "", existingProjectId: existing?.id ?? null });
+    return json({ review, candidates, recommendations, editor, canApprove, account: { userId: authorization.userId, preferences }, workspaceName: workspace?.name ?? "", existingProjectId: existing?.id ?? null });
   } catch (error) { return reviewError(error); }
 }
 

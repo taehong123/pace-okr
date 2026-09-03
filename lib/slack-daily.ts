@@ -1,4 +1,6 @@
 import { env } from "cloudflare:workers";
+import { memberMessageLanguage, readLanguagePreferences, workspaceMessageLanguage } from "./language-preferences";
+import { serverTranslator, type Translator } from "./server-language";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
@@ -291,6 +293,7 @@ export async function testDailyDm(ownerId: string, memberId: string) {
 }
 
 async function deliverDailyReminder(ownerId: string, memberId: string, test: boolean) {
+  const t = await serverTranslator(await memberMessageLanguage(env.DB, ownerId, memberId));
   const [connection, link, member] = await Promise.all([
     getSlackConnection(ownerId),
     getDb().select().from(slackMemberLinks).where(and(eq(slackMemberLinks.ownerId, ownerId), eq(slackMemberLinks.memberId, memberId))).limit(1).then((rows) => rows[0] ?? null),
@@ -303,14 +306,15 @@ async function deliverDailyReminder(ownerId: string, memberId: string, test: boo
   const dmChannelId = await ensureDmChannel(token, link.slackUserId, link.dmChannelId);
   await slackApi(token, "chat.postMessage", {
     channel: dmChannelId,
-    text: `[데일리 봇] ${test ? "테스트 · " : ""}오늘의 데일리를 작성해 주세요.`,
-    blocks: dailyReminderBlocks(`${DAILY_REMINDER_BLOCK_PREFIX}${test ? "test" : "manual"}:${crypto.randomUUID()}`),
+    text: `[${t("데일리 봇")}] ${test ? `${t("테스트")} · ` : ""}${t("오늘의 데일리를 작성해 주세요.")}`,
+    blocks: dailyReminderBlocks(`${DAILY_REMINDER_BLOCK_PREFIX}${test ? "test" : "manual"}:${crypto.randomUUID()}`, t),
   });
   if (dmChannelId !== link.dmChannelId) await getDb().update(slackMemberLinks).set({ dmChannelId, updatedAt: new Date().toISOString() }).where(eq(slackMemberLinks.id, link.id));
   return { sent: true, memberId, dmChannelId };
 }
 
 export async function testDailyChannel(ownerId: string, channelId: string) {
+  const t = await serverTranslator(await workspaceMessageLanguage(env.DB, ownerId));
   const [connection, channel] = await Promise.all([
     getSlackConnection(ownerId),
     getDb().select().from(slackDailyChannels).where(and(
@@ -321,7 +325,7 @@ export async function testDailyChannel(ownerId: string, channelId: string) {
   const token = await slackTokenForConnection(connection);
   await slackApi(token, "chat.postMessage", {
     channel: channelId,
-    text: "[데일리 봇] Slack 연결 테스트입니다. 데일리 공유가 이 채널에 전송됩니다.",
+    text: `[${t("데일리 봇")}] ${t("Slack 연결 테스트입니다. 데일리 공유가 이 채널에 전송됩니다.")}`,
   });
 }
 
@@ -467,6 +471,16 @@ export async function reconcileDailyReminders(ownerId: string, options: Reminder
   return { checked: links.results.length, failed: failures.length };
 }
 
+export async function refreshUserReminderLanguages(userId: string) {
+  const memberships = await env.DB.prepare(`SELECT m.workspace_id, m.id FROM workspace_members m
+    JOIN slack_daily_reminders r ON r.owner_id = m.workspace_id AND r.member_id = m.id
+    WHERE m.user_id = ? AND m.status = 'active'`).bind(userId).all<{ workspace_id: string; id: string }>();
+  for (const member of memberships.results) {
+    try { await scheduleMemberReminder(member.workspace_id, member.id, { verify: true }); }
+    catch (error) { console.error("reminder_language_reconcile_failed", error instanceof Error ? error.message : "Unknown failure"); }
+  }
+}
+
 // Repair missing/failed/overdue reservations independently of a user's settings visit.
 // Slack owns the actual delivery time; this only maintains the next reservation.
 export async function repairSlackDailyReminders(ownerId: string) {
@@ -533,14 +547,19 @@ const ACTIVE_REMINDER_SQL = `EXISTS (SELECT 1 FROM slack_daily_settings s
   JOIN workspaces w ON w.id = s.owner_id AND w.scheduled_deletion_at IS NULL
   JOIN slack_connections c ON c.owner_id = s.owner_id
   JOIN workspace_members m ON m.workspace_id = s.owner_id AND m.id = ? AND m.status = 'active'
+  LEFT JOIN users u ON u.id = m.user_id
   JOIN slack_member_links l ON l.owner_id = s.owner_id AND l.member_id = m.id
   LEFT JOIN slack_daily_preferences p ON p.owner_id = s.owner_id AND p.member_id = m.id
   WHERE s.owner_id = ? AND c.id = ? AND c.team_id = l.team_id AND l.slack_user_id = ?
     AND s.enabled = 1 AND s.install_status = 'connected' AND s.onboarding_completed_at IS NOT NULL
     AND COALESCE(p.enabled, 1) = 1 AND COALESCE(p.reminder_time, s.reminder_time) = ?
-    AND COALESCE(p.timezone, s.timezone) = ? AND s.weekdays = ?)`;
+    AND COALESCE(p.timezone, s.timezone) = ? AND s.weekdays = ?
+    AND COALESCE(CASE WHEN u.language_preference = 'auto' THEN u.resolved_language ELSE u.language_preference END, w.message_language) = ?)`;
 
 export async function scheduleMemberReminder(ownerId: string, memberId: string, options: ReminderOptions = {}) {
+  const language = await memberMessageLanguage(env.DB, ownerId, memberId);
+  const t = await serverTranslator(language);
+  const messageText = `[${t("데일리 봇")}] ${t("오늘의 데일리를 작성해 주세요.")}`;
   const connection = options.connection ?? await getSlackConnection(ownerId);
   const [settings, preference, link, existing, member] = await Promise.all([
     ensureDailySettingsRow(ownerId, connection),
@@ -563,8 +582,11 @@ export async function scheduleMemberReminder(ownerId: string, memberId: string, 
   const imminent = previousParts && `${String(previousParts.hour).padStart(2, "0")}:${String(previousParts.minute).padStart(2, "0")}` === time
     && parseWeekdays(settings.weekdays).includes(new Date(Date.UTC(previousParts.year, previousParts.month - 1, previousParts.day)).getUTCDay());
   const postAt = enabled ? imminent ? previousPostAt : nextReminderEpoch(time, timezone, parseWeekdays(settings.weekdays)) : Number(existing!.post_at);
+  const languageChanged = Boolean(existing && (String(existing.message_language ?? "ko") !== language || String(existing.message_text ?? DAILY_REMINDER_TEXT) !== messageText));
+  // Slack locks near-delivery cancellation; keep that receipt and change the next one.
+  if (enabled && languageChanged && existing?.status === "scheduled" && imminent) return "scheduled";
   if (enabled && existing?.status === "scheduled" && Number(existing.post_at) === postAt && postAt > nowSeconds + 60
-    && existing.slack_user_id === link!.slackUserId && existing.bot_user_id === connection.botUserId && !options.force && !options.verify) return "scheduled";
+    && existing.slack_user_id === link!.slackUserId && existing.bot_user_id === connection.botUserId && !languageChanged && !options.force && !options.verify) return "scheduled";
   const blockId = existing && Number(existing.post_at) === postAt && existing.slack_user_id === link?.slackUserId
     ? String(existing.block_id) : `${DAILY_REMINDER_BLOCK_PREFIX}${crypto.randomUUID()}`;
   const now = new Date().toISOString();
@@ -587,17 +609,28 @@ export async function scheduleMemberReminder(ownerId: string, memberId: string, 
       await removeClaim();
       return "canceled";
     }
-    const guardArgs = [memberId, ownerId, connection.id, link!.slackUserId, time, timezone, settings.weekdays];
+    const guardArgs = [memberId, ownerId, connection.id, link!.slackUserId, time, timezone, settings.weekdays, language];
     const dmChannelId = await ensureDmChannel(token, link!.slackUserId, link!.dmChannelId, signal);
     // Reuse Slack's receipt after a lost response; do not schedule a duplicate.
     const receipts = await reminderReceipts(token, dmChannelId, postAt, signal);
-    let scheduledId = receipts.find((entry) => entry.text === DAILY_REMINDER_TEXT)?.id;
-    if (existing && (existing.dm_channel_id !== dmChannelId || Number(existing.post_at) !== postAt
+    const priorText = String(existing?.message_text ?? DAILY_REMINDER_TEXT);
+    const knownReceipt = receipts.find((entry) => entry.id === existing?.scheduled_message_id);
+    const matchingReceipts = receipts.filter((entry) => entry.text === priorText || entry.text === messageText);
+    if (!knownReceipt && matchingReceipts.length > 1) throw new Error("Slack 예약 결과를 하나로 확인할 수 없습니다. 중복 방지를 위해 기존 예약을 보존합니다.");
+    let scheduledId: string | undefined = knownReceipt?.id ?? matchingReceipts[0]?.id;
+    let canceledPrevious = false;
+    if (languageChanged && scheduledId) {
+      await cancelScheduledReminder(token, { ...existing!, dm_channel_id: dmChannelId, post_at: postAt, scheduled_message_id: scheduledId }, signal);
+      canceledPrevious = existing?.dm_channel_id === dmChannelId && Number(existing?.post_at) === postAt
+        && (!existing?.scheduled_message_id || existing.scheduled_message_id === scheduledId);
+      scheduledId = undefined;
+    }
+    if (existing && !canceledPrevious && (existing.dm_channel_id !== dmChannelId || Number(existing.post_at) !== postAt
       || (existing.scheduled_message_id && String(existing.scheduled_message_id) !== scheduledId))) await cancelScheduledReminder(token, existing, signal);
-    const reservation = { post_at: postAt, block_id: blockId, dm_channel_id: dmChannelId, scheduled_message_id: scheduledId ?? "" };
-    const prepared = await env.DB.prepare(`UPDATE slack_daily_reminders SET post_at = ?, block_id = ?, dm_channel_id = ?, scheduled_message_id = ?
+    const reservation = { post_at: postAt, block_id: blockId, dm_channel_id: dmChannelId, scheduled_message_id: scheduledId ?? "", message_text: messageText };
+    const prepared = await env.DB.prepare(`UPDATE slack_daily_reminders SET post_at = ?, block_id = ?, dm_channel_id = ?, scheduled_message_id = ?, message_language = ?, message_text = ?
       WHERE owner_id = ? AND member_id = ? AND updated_at = ? AND ${ACTIVE_REMINDER_SQL}`)
-      .bind(postAt, blockId, dmChannelId, scheduledId ?? "", ownerId, memberId, now, ...guardArgs).run();
+      .bind(postAt, blockId, dmChannelId, scheduledId ?? "", language, messageText, ownerId, memberId, now, ...guardArgs).run();
     if (!prepared.meta.changes) {
       if (scheduledId) await cancelScheduledReminder(token, reservation, signal);
       await removeClaim();
@@ -605,7 +638,7 @@ export async function scheduleMemberReminder(ownerId: string, memberId: string, 
     }
     if (!scheduledId) {
       const result = await slackApi<SlackApiResult & { scheduled_message_id?: string }>(token, "chat.scheduleMessage", {
-        channel: dmChannelId, post_at: postAt, text: DAILY_REMINDER_TEXT, blocks: dailyReminderBlocks(blockId),
+        channel: dmChannelId, post_at: postAt, text: messageText, blocks: dailyReminderBlocks(blockId, t),
       }, signal);
       scheduledId = result.scheduled_message_id;
       if (!scheduledId) throw new Error("Slack 예약 메시지 ID를 받지 못했습니다.");
@@ -652,10 +685,11 @@ export async function publishDailySubmission(ownerId: string, submissionId: stri
   const publications = await env.DB.prepare(`SELECT * FROM slack_daily_publications
     WHERE owner_id = ? AND submission_id = ? AND status IN ('pending', 'failed') ORDER BY channel_id`)
     .bind(ownerId, submissionId).all<Record<string, string | number | null>>();
+  const t = await serverTranslator(await workspaceMessageLanguage(env.DB, ownerId));
   for (const publication of publications.results) {
     const now = new Date().toISOString();
     try {
-      const message = dailyCard(submission);
+      const message = dailyCard(submission, t);
       const receipt = await env.DB.prepare("SELECT id FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = 'daily_publication' AND event_key = ?")
         .bind(ownerId, publication.id).first();
       if (!receipt && Number(publication.attempts) > 0 && !publication.slack_message_ts) {
@@ -685,61 +719,62 @@ export async function retryDailyPublication(ownerId: string, publicationId: stri
   if (result?.status === "failed") throw new Error(result.error || "데일리 공유 결과 확인이 필요합니다.");
 }
 
-export function dailyReminderBlocks(blockId: string) {
+export function dailyReminderBlocks(blockId: string, t: Translator = (key) => key) {
   return [
-    { type: "context", elements: [{ type: "mrkdwn", text: "*데일리 봇*" }] },
-    { type: "section", block_id: `${blockId}:body`, text: { type: "mrkdwn", text: "*오늘의 데일리를 정리할 시간입니다.*\n할당된 Task를 고르거나, 필요한 경우 사유와 함께 오늘 데일리를 스킵할 수 있습니다." } },
-    { type: "actions", block_id: blockId, elements: [{ type: "button", action_id: "daily_open", text: { type: "plain_text", text: "데일리 작성" }, style: "primary", value: "daily" }] },
+    { type: "context", elements: [{ type: "mrkdwn", text: `*${t("데일리 봇")}*` }] },
+    { type: "section", block_id: `${blockId}:body`, text: { type: "mrkdwn", text: `*${t("오늘의 데일리를 정리할 시간입니다.")}*\n${t("할당된 Task를 고르거나, 필요한 경우 사유와 함께 오늘 데일리를 스킵할 수 있습니다.")}` } },
+    { type: "actions", block_id: blockId, elements: [{ type: "button", action_id: "daily_open", text: { type: "plain_text", text: t("데일리 작성") }, style: "primary", value: "daily" }] },
   ];
 }
 
 export async function openDailyModal(triggerId: string, authorization: RequestAuthorization) {
+  const t = await serverTranslator((await readLanguagePreferences(env.DB, authorization.userId)).resolvedLanguage);
   const connection = await getSlackConnection(authorization.ownerId);
   if (!connection) throw new Error("Slack 연결을 찾을 수 없습니다.");
   const dashboard = await getDailyDashboard(authorization, todayInTimezone("Asia/Seoul"));
   const token = await slackTokenForConnection(connection);
   const parentOptions = [
-    ...dashboard.createTargets.projects.map((project) => ({ text: { type: "plain_text", text: `Project · ${project.title}`.slice(0, 75) }, value: `project:${project.id}` })),
-    ...dashboard.createTargets.routines.map((routine) => ({ text: { type: "plain_text", text: `Routine · ${routine.title}`.slice(0, 75) }, value: `routine:${routine.id}` })),
-    ...(dashboard.createTargets.allowGeneral ? [{ text: { type: "plain_text", text: "General" }, value: "general:" }] : []),
+    ...dashboard.createTargets.projects.map((project) => ({ text: { type: "plain_text", text: `${t("Project")} · ${project.title}`.slice(0, 75) }, value: `project:${project.id}` })),
+    ...dashboard.createTargets.routines.map((routine) => ({ text: { type: "plain_text", text: `${t("Routine")} · ${routine.title}`.slice(0, 75) }, value: `routine:${routine.id}` })),
+    ...(dashboard.createTargets.allowGeneral ? [{ text: { type: "plain_text", text: t("General") }, value: "general:" }] : []),
   ];
   const skipOptions = [
-    { text: { type: "plain_text", text: "스킵하지 않음" }, value: "none" },
+    { text: { type: "plain_text", text: t("스킵하지 않음") }, value: "none" },
     ...(["workload", "vacation", "personal", "other"] as DailySkipReason[]).map((reason) => ({
-      text: { type: "plain_text", text: dailySkipReasonLabel(reason) }, value: reason,
+      text: { type: "plain_text", text: t(dailySkipReasonLabel(reason)) }, value: reason,
     })),
   ];
   const selectedSkip = dashboard.draft.skipReason ?? "none";
   const blocks: Record<string, unknown>[] = [
-    { type: "input", block_id: "skip_reason", optional: true, label: { type: "plain_text", text: "데일리 스킵" }, element: {
+    { type: "input", block_id: "skip_reason", optional: true, label: { type: "plain_text", text: t("데일리 스킵") }, element: {
       type: "static_select", action_id: "value", options: skipOptions,
       initial_option: skipOptions.find((option) => option.value === selectedSkip) ?? skipOptions[0],
     } },
-    { type: "input", block_id: "skip_note", optional: true, label: { type: "plain_text", text: "스킵 상세 사유 (기타는 필수)" }, element: {
+    { type: "input", block_id: "skip_note", optional: true, label: { type: "plain_text", text: t("스킵 상세 사유 (기타는 필수)") }, element: {
       type: "plain_text_input", action_id: "value", max_length: 500, initial_value: dashboard.draft.skipNote,
-      placeholder: { type: "plain_text", text: "팀에 공유할 보충 설명" },
+      placeholder: { type: "plain_text", text: t("팀에 공유할 보충 설명") },
     } },
-    { type: "input", block_id: "daily_tasks", optional: true, label: { type: "plain_text", text: "오늘 할 Task" }, element: {
+    { type: "input", block_id: "daily_tasks", optional: true, label: { type: "plain_text", text: t("오늘 할 Task") }, element: {
       type: "multi_external_select", action_id: "selected_tasks", min_query_length: 0, max_selected_items: 50,
-      placeholder: { type: "plain_text", text: "할당된 Task 검색" },
+      placeholder: { type: "plain_text", text: t("할당된 Task 검색") },
       initial_options: dashboard.candidates.tasks.filter((task) => dashboard.draft.selectedTaskIds.includes(task.id)).slice(0, 50).map(taskOption),
     } },
-    { type: "input", block_id: "today_note", optional: true, label: { type: "plain_text", text: "오늘 메모" }, element: { type: "plain_text_input", action_id: "value", multiline: true, initial_value: dashboard.draft.todayNote } },
-    { type: "input", block_id: "blockers_note", optional: true, label: { type: "plain_text", text: "블로커" }, element: { type: "plain_text_input", action_id: "value", multiline: true, initial_value: dashboard.draft.blockersNote } },
-    { type: "input", block_id: "no_planned", optional: true, label: { type: "plain_text", text: "오늘 예정" }, element: {
-      type: "checkboxes", action_id: "value", options: [{ text: { type: "plain_text", text: "오늘 예정 없음" }, value: "yes" }],
-      initial_options: dashboard.draft.noPlannedTasks ? [{ text: { type: "plain_text", text: "오늘 예정 없음" }, value: "yes" }] : [],
+    { type: "input", block_id: "today_note", optional: true, label: { type: "plain_text", text: t("오늘 메모") }, element: { type: "plain_text_input", action_id: "value", multiline: true, initial_value: dashboard.draft.todayNote } },
+    { type: "input", block_id: "blockers_note", optional: true, label: { type: "plain_text", text: t("블로커") }, element: { type: "plain_text_input", action_id: "value", multiline: true, initial_value: dashboard.draft.blockersNote } },
+    { type: "input", block_id: "no_planned", optional: true, label: { type: "plain_text", text: t("오늘 예정") }, element: {
+      type: "checkboxes", action_id: "value", options: [{ text: { type: "plain_text", text: t("오늘 예정 없음") }, value: "yes" }],
+      initial_options: dashboard.draft.noPlannedTasks ? [{ text: { type: "plain_text", text: t("오늘 예정 없음") }, value: "yes" }] : [],
     } },
   ];
   if (parentOptions.length) {
     blocks.push(
-      { type: "input", block_id: "new_task_parent", optional: true, label: { type: "plain_text", text: "새 Task 상위 항목" }, element: { type: "static_select", action_id: "value", placeholder: { type: "plain_text", text: "상위 항목 선택" }, options: parentOptions.slice(0, 100) } },
-      { type: "input", block_id: "new_task_title", optional: true, label: { type: "plain_text", text: "새 Task 만들기 (선택)" }, element: { type: "plain_text_input", action_id: "value", max_length: 240, placeholder: { type: "plain_text", text: "명시적으로 제출할 때만 생성됩니다" } } },
+      { type: "input", block_id: "new_task_parent", optional: true, label: { type: "plain_text", text: t("새 Task 상위 항목") }, element: { type: "static_select", action_id: "value", placeholder: { type: "plain_text", text: t("상위 항목 선택") }, options: parentOptions.slice(0, 100) } },
+      { type: "input", block_id: "new_task_title", optional: true, label: { type: "plain_text", text: t("새 Task 만들기 (선택)") }, element: { type: "plain_text_input", action_id: "value", max_length: 240, placeholder: { type: "plain_text", text: t("명시적으로 제출할 때만 생성됩니다") } } },
     );
   }
   await slackApi(token, "views.open", { trigger_id: triggerId, view: {
     type: "modal", callback_id: "daily_submit", private_metadata: JSON.stringify({ ownerId: authorization.ownerId, date: dashboard.date, requestId: crypto.randomUUID() }),
-    title: { type: "plain_text", text: "OKRPTR 데일리" }, submit: { type: "plain_text", text: "확정 및 공유" }, close: { type: "plain_text", text: "취소" }, blocks,
+    title: { type: "plain_text", text: t("OKRPTR 데일리") }, submit: { type: "plain_text", text: t("확정 및 공유") }, close: { type: "plain_text", text: t("취소") }, blocks,
   } });
 }
 
@@ -819,7 +854,13 @@ async function reminderReceipts(token: string, channel: string, postAt: number, 
 
 async function cancelScheduledReminder(token: string, reminder: Record<string, string | number>, signal?: AbortSignal) {
   const channel = String(reminder.dm_channel_id), postAt = Number(reminder.post_at);
-  const id = String(reminder.scheduled_message_id || "") || (await reminderReceipts(token, channel, postAt, signal)).find((entry) => entry.text === DAILY_REMINDER_TEXT)?.id;
+  const expectedText = String(reminder.message_text ?? DAILY_REMINDER_TEXT);
+  let id = String(reminder.scheduled_message_id || "");
+  if (!id) {
+    const candidates = (await reminderReceipts(token, channel, postAt, signal)).filter((entry) => entry.text === expectedText);
+    if (candidates.length > 1) throw new Error("Slack 예약 결과를 하나로 확인할 수 없습니다. 중복 방지를 위해 기존 예약을 보존합니다.");
+    id = candidates[0]?.id ?? "";
+  }
   if (!id) return;
   try {
     await slackApi(token, "chat.deleteScheduledMessage", { channel, scheduled_message_id: id }, signal);
@@ -851,28 +892,28 @@ async function loadSubmission(id: string, ownerId: string) {
   } satisfies DailySubmissionValue;
 }
 
-function dailyCard(submission: DailySubmissionValue) {
+function dailyCard(submission: DailySubmissionValue, t: Translator = (key, values) => key.replace(/\{(\w+)\}/g, (match, name: string) => values && Object.hasOwn(values, name) ? String(values[name]) : match)) {
   if (submission.skipReason) {
-    const reason = dailySkipReasonLabel(submission.skipReason);
+    const reason = t(dailySkipReasonLabel(submission.skipReason));
     const detail = submission.skipNote ? `\n${escapeSlack(submission.skipNote)}` : "";
     const appUrl = `${String((env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?view=scrum`;
-    return { text: `[데일리 봇] ${submission.memberName}님의 ${submission.date} 데일리 스킵 · ${reason}`, unfurl_links: false, unfurl_media: false, blocks: [
-      { type: "header", text: { type: "plain_text", text: `데일리 봇 · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
-      { type: "section", text: { type: "mrkdwn", text: `*⏭️ 오늘 데일리 스킵*\n*사유:* ${reason}${detail}`.slice(0, 2900) } },
-      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRPTR에서 보기" }, url: appUrl }] },
+    return { text: `[${t("데일리 봇")}] ${t("{member}님의 {date} 데일리 스킵 · {reason}", { member: submission.memberName, date: submission.date, reason })}`, unfurl_links: false, unfurl_media: false, blocks: [
+      { type: "header", text: { type: "plain_text", text: `${t("데일리 봇")} · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
+      { type: "section", text: { type: "mrkdwn", text: `*⏭️ ${t("오늘 데일리 스킵")}*\n*${t("사유")}:* ${reason}${detail}`.slice(0, 2900) } },
+      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRPTR에서 보기") }, url: appUrl }] },
     ] };
   }
   const visible = submission.tasks.slice(0, 20);
-  const taskLines = visible.length ? visible.map((task) => `${task.isNew ? "✨ " : "• "}${escapeSlack(task.taskTitle)} _(${escapeSlack(task.parentTitle)})_`).join("\n") : "• 오늘 예정 없음";
-  const overflow = submission.tasks.length > 20 ? `\n_외 ${submission.tasks.length - 20}개_` : "";
-  const blocker = submission.blockersNote ? `\n*블로커*\n${escapeSlack(submission.blockersNote)}` : "";
-  const note = submission.todayNote ? `\n*오늘 메모*\n${escapeSlack(submission.todayNote)}` : "";
+  const taskLines = visible.length ? visible.map((task) => `${task.isNew ? "✨ " : "• "}${escapeSlack(task.taskTitle)} _(${escapeSlack(task.parentTitle)})_`).join("\n") : `• ${t("오늘 예정 없음")}`;
+  const overflow = submission.tasks.length > 20 ? `\n_${t("외 {count}개", { count: submission.tasks.length - 20 })}_` : "";
+  const blocker = submission.blockersNote ? `\n*${t("블로커")}*\n${escapeSlack(submission.blockersNote)}` : "";
+  const note = submission.todayNote ? `\n*${t("오늘 메모")}*\n${escapeSlack(submission.todayNote)}` : "";
   const appUrl = `${String((env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?view=scrum`;
-  const text = `[데일리 봇] ${submission.memberName}님의 ${submission.date} 데일리`;
+  const text = `[${t("데일리 봇")}] ${t("{member}님의 {date} 데일리", { member: submission.memberName, date: submission.date })}`;
   return { text, unfurl_links: false, unfurl_media: false, blocks: [
-    { type: "header", text: { type: "plain_text", text: `데일리 봇 · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
-    { type: "section", text: { type: "mrkdwn", text: `*오늘 Task*\n${taskLines}${overflow}${note}${blocker}`.slice(0, 2900) } },
-    { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRPTR에서 보기" }, url: appUrl }] },
+    { type: "header", text: { type: "plain_text", text: `${t("데일리 봇")} · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
+    { type: "section", text: { type: "mrkdwn", text: `*${t("오늘 할 Task")}*\n${taskLines}${overflow}${note}${blocker}`.slice(0, 2900) } },
+    { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRPTR에서 보기") }, url: appUrl }] },
   ] };
 }
 
