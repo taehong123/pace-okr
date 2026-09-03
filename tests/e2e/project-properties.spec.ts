@@ -53,8 +53,12 @@ test("core Project fields retain fonts, contrast and wrapping at narrow/wide siz
     await page.goto("/?view=work");
     await page.getByRole("button", { name: "직접 추가", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "새 항목", exact: true });
-    await page.evaluate((value) => document.documentElement.setAttribute("data-theme", value), theme);
+    await page.evaluate((value) => {
+      document.documentElement.dataset.theme = value;
+      document.documentElement.style.colorScheme = value === "dark" ? "dark" : "light";
+    }, theme);
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    expect(await page.locator("html").evaluate((root) => getComputedStyle(root).colorScheme)).toBe(theme === "dark" ? "dark" : "light");
     await dialog.getByLabel("이름", { exact: true }).fill("고객 온보딩과 실제 활성화 지표를 개선하는 긴 프로젝트 제목 2026");
     for (const width of [320, 390, 768, 1440, 1920, 2560, 3840]) {
       await page.setViewportSize({ width, height: 1000 });
