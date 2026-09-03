@@ -210,7 +210,7 @@
   .property-panel :is(.settings-section h3, .settings-account-actions) { padding-inline: var(--space-4); }
   .property-panel :is(.settings-account-card, .marketing-email-summary, .theme-picker, .appearance-settings > p) { margin-inline: var(--space-4); }
   .app-shell .home-okr-chat .user-message { max-width: 100%; }
-  .app-shell .routine-card header { grid-template-columns: minmax(0, 1fr) var(--control-height) var(--control-height); }
+  .app-shell .routine-card header { grid-template-columns: var(--control-height) minmax(0, 1fr) var(--control-height); }
   .app-shell .routine-card header > svg { display: none; }
   .app-shell .routine-card footer { flex-wrap: wrap; }
   .app-shell .routine-assignee { min-width: 0; width: 100%; }
