@@ -278,15 +278,15 @@
     {
       "idx": 39,
       "version": "6",
-      "when": 1788430199410,
-      "tag": "0043_global_language",
+      "when": 1788452400000,
+      "tag": "0045_daily_work_selection",
       "breakpoints": true
     },
     {
       "idx": 40,
       "version": "6",
-      "when": 1788432409910,
-      "tag": "0044_automation_message_origin",
+      "when": 1788455068537,
+      "tag": "0046_global_language",
       "breakpoints": true
     }
   ]

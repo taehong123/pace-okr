@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e359f547-5b3c-4534-9a91-b094b5d067e3",
-  "prevId": "e118de8d-5798-452c-8d69-2e2929e9eaee",
+  "id": "1babd849-7e7e-45b9-8245-2f8ac0abae1b",
+  "prevId": "ec62482d-d74d-4677-8363-dc3e48e61f56",
   "tables": {
     "account_consent_events": {
       "name": "account_consent_events",
@@ -1453,6 +1453,14 @@
           "notNull": true,
           "autoincrement": false
         },
+        "work_selection_json": {
+          "name": "work_selection_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
         "yesterday_note": {
           "name": "yesterday_note",
           "type": "text",
@@ -1639,6 +1647,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "work_snapshot_json": {
+          "name": "work_snapshot_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
         },
         "yesterday_note": {
           "name": "yesterday_note",

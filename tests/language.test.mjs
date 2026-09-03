@@ -115,12 +115,12 @@ test("preferences API permits every member's own account but denies tokens and c
 });
 
 test("language migration is additive, LF, and preserves existing Korean defaults", async () => {
-  const sql = await readFile(new URL("../drizzle/0043_global_language.sql", import.meta.url), "utf8");
+  const sql = await readFile(new URL("../drizzle/0046_global_language.sql", import.meta.url), "utf8");
   assert.doesNotMatch(sql, /\r/);
   assert.doesNotMatch(sql, /\b(DROP|DELETE|UPDATE)\b/i);
   const db = new DatabaseSync(":memory:");
   try {
-    db.exec("CREATE TABLE users(id TEXT); CREATE TABLE workspaces(id TEXT); CREATE TABLE slack_daily_reminders(id TEXT); INSERT INTO users VALUES('existing'); INSERT INTO workspaces VALUES('existing');");
+    db.exec("CREATE TABLE users(id TEXT); CREATE TABLE workspaces(id TEXT); CREATE TABLE slack_daily_reminders(id TEXT); CREATE TABLE slack_automations(id TEXT); INSERT INTO users VALUES('existing'); INSERT INTO workspaces VALUES('existing');");
     db.exec(sql);
     assert.equal(db.prepare("SELECT language_preference FROM users").get().language_preference, "ko");
     assert.equal(db.prepare("SELECT message_language FROM workspaces").get().message_language, "ko");
@@ -161,11 +161,11 @@ test("automatic language does not follow an IP-only change during an active scre
 });
 
 test("automation migration retains existing messages as custom text", async () => {
-  const sql = await readFile(new URL("../drizzle/0044_automation_message_origin.sql", import.meta.url), "utf8");
+  const sql = await readFile(new URL("../drizzle/0046_global_language.sql", import.meta.url), "utf8");
   assert.doesNotMatch(sql, /\r|DROP|DELETE|UPDATE/i);
   const db = new DatabaseSync(":memory:");
   try {
-    db.exec("CREATE TABLE slack_automations(id TEXT, message_template TEXT); INSERT INTO slack_automations VALUES ('a','사용자가 작성한 메시지')");
+    db.exec("CREATE TABLE slack_automations(id TEXT, message_template TEXT); CREATE TABLE slack_daily_reminders(id TEXT); CREATE TABLE users(id TEXT); CREATE TABLE workspaces(id TEXT); INSERT INTO slack_automations VALUES ('a','사용자가 작성한 메시지')");
     db.exec(sql);
     assert.deepEqual({ ...db.prepare("SELECT * FROM slack_automations").get() }, { id: "a", message_template: "사용자가 작성한 메시지", message_template_kind: "custom" });
   } finally { db.close(); }

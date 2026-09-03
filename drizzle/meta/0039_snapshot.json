@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e118de8d-5798-452c-8d69-2e2929e9eaee",
+  "id": "ec62482d-d74d-4677-8363-dc3e48e61f56",
   "prevId": "3d275901-3f7e-4055-a77b-50a200ef490b",
   "tables": {
     "account_consent_events": {
@@ -1523,6 +1523,14 @@
           "notNull": true,
           "autoincrement": false,
           "default": "CURRENT_TIMESTAMP"
+        },
+        "work_selection_json": {
+          "name": "work_selection_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
         }
       },
       "indexes": {
@@ -1702,6 +1710,14 @@
           "notNull": true,
           "autoincrement": false,
           "default": "CURRENT_TIMESTAMP"
+        },
+        "work_snapshot_json": {
+          "name": "work_snapshot_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
         }
       },
       "indexes": {
@@ -5429,22 +5445,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "message_language": {
-          "name": "message_language",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'ko'"
-        },
-        "message_text": {
-          "name": "message_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[데일리 봇] 오늘의 데일리를 작성해 주세요.'"
-        },
         "post_at": {
           "name": "post_at",
           "type": "integer",
@@ -6166,30 +6166,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "language_preference": {
-          "name": "language_preference",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'ko'"
-        },
-        "resolved_language": {
-          "name": "resolved_language",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'ko'"
-        },
-        "language_revision": {
-          "name": "language_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
         },
         "display_name": {
           "name": "display_name",
@@ -7680,14 +7656,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'team'"
-        },
-        "message_language": {
-          "name": "message_language",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'ko'"
         },
         "deletion_requested_at": {
           "name": "deletion_requested_at",
