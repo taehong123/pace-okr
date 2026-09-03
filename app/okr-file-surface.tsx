@@ -469,7 +469,7 @@ export function OkrFileSurface({
               const next = event.target.value;
               setError("");
               setResolutions((current) => ({ ...current, [project.id]: next === "trash" ? { action: "trash" } : next.startsWith("move:") ? { action: "move", targetInitiativeRef: next.slice(5) } : { action: "move" } }));
-            }}><option value="">처리 방법 선택</option><optgroup label="다른 Initiative로 이동">{resolutionOptions.map((option) => <option value={`move:${option.ref}`} key={option.ref}>{option.label}</option>)}</optgroup>{project.canTrash && <option value="trash">Project·Task를 휴지통으로 이동</option>}</select>{!project.canTrash && <small>생성자 또는 주 DRI만 휴지통으로 이동할 수 있습니다.</small>}</label>;
+            }}><option value="">처리 방법 선택</option><optgroup label="다른 Initiative로 이동">{resolutionOptions.map((option) => <option value={`move:${option.ref}`} key={option.ref}>{option.label}</option>)}</optgroup>{project.canTrash && <option value="trash">Project·Task를 휴지통으로 이동</option>}</select>{!project.canTrash && <small>생성자 또는 책임자만 휴지통으로 이동할 수 있습니다.</small>}</label>;
           })}
         </section>}
         {error && <p className="okr-file-editor-error" role="alert">{error}</p>}

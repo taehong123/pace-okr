@@ -330,5 +330,5 @@ function localWeekday(value: string) {
 function pad(value: number) { return String(value).padStart(2, "0"); }
 function escapeSlack(value: string) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 function signalLabel(signal: ManagementBotSignal) {
-  return { missing_due_date: "기한 없음", missing_owner: "DRI·담당자 없음", overdue: "기한 초과", completed_yesterday: "어제 완료", due_today: "오늘 마감" }[signal];
+  return { missing_due_date: "기한 없음", missing_owner: "책임자·담당자 없음", overdue: "기한 초과", completed_yesterday: "어제 완료", due_today: "오늘 마감" }[signal];
 }

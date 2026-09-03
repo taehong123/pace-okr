@@ -153,12 +153,13 @@ test("edits all fields and seven property types before explicitly choosing anoth
   const state = await mockReview(page);
   await page.getByLabel("Project 제목 (필수)").fill("수정된 결제 Project");
   await page.getByLabel("설명 · 범위와 완료 기준").fill("수정한 완료 기준");
-  await page.getByLabel("담당 DRI", { exact: true }).selectOption("peer");
+  await page.getByLabel("책임자", { exact: true }).selectOption("peer");
   await page.getByLabel("참여자", { exact: true }).selectOption(["me"]);
-  await page.getByLabel("마감일", { exact: true }).fill("2026-10-15");
+  await page.getByLabel("기한", { exact: true }).fill("2026-10-15");
   await page.getByLabel("상태", { exact: true }).selectOption("in_progress");
   await page.getByLabel("우선순위", { exact: true }).selectOption("urgent");
-  await page.getByLabel("검토 주기", { exact: true }).selectOption("monthly");
+  await expect(page.getByLabel(/검토 주기|스프린트|예상 시간|예상 기간|^시기$/)).toHaveCount(0);
+  await expect(page.locator(".review-summary")).not.toContainText("검토 주기");
   await page.getByLabel("진행률 (%)", { exact: true }).fill("25");
   await page.getByLabel("본문 템플릿", { exact: true }).selectOption("other-template");
   await page.getByLabel("예산", { exact: true }).fill("0");
@@ -182,7 +183,7 @@ test("edits all fields and seven property types before explicitly choosing anoth
   await expect(page.getByRole("heading", { name: "확인한 내용으로 생성했습니다" })).toBeVisible();
   expect(state.posts[0]).toMatchObject({ editorRevision: editor.revision, initiativeId: "cross-file", proposal: {
     title: "수정된 결제 Project", description: "수정한 완료 기준", driMemberId: "peer", workerMemberIds: ["me"], dueDate: "2026-10-15",
-    status: "in_progress", priority: "urgent", cadence: "monthly", progress: 25, templateId: "other-template", requestedCycleId: "next",
+    status: "in_progress", priority: "urgent", cadence: "weekly", progress: 25, templateId: "other-template", requestedCycleId: "next",
     properties: { 예산: 0, 메모: "유지할 메모", 분류: "운영", 출시일: "2026-10-01", 검토됨: false, 검토자: "peer", 협업자: ["me", "peer"] },
   } });
   expect(state.posts).toHaveLength(1);
@@ -193,10 +194,10 @@ test("search does not reset the proposal, and every changed field clears consent
   await page.getByRole("radio", { name: /결제 실패 감소/ }).check();
   for (const change of [
     () => page.getByLabel("Project 제목 (필수)").fill("새 제목"),
-    () => page.getByLabel("마감일", { exact: true }).fill(""),
+    () => page.getByLabel("기한", { exact: true }).fill(""),
     () => page.getByLabel("예산", { exact: true }).fill("0"),
     () => page.getByLabel("검토됨", { exact: true }).check(),
-    () => page.getByLabel("담당 DRI", { exact: true }).selectOption(""),
+    () => page.getByLabel("책임자", { exact: true }).selectOption(""),
   ]) {
     await consent(page).check(); await change(); await expect(consent(page)).not.toBeChecked();
     await expect(createButton(page)).toBeDisabled();

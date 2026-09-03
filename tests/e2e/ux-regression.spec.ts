@@ -105,7 +105,7 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
     await expect(settingsDialog.getByRole("heading", { name: "Slack과 봇" })).toBeVisible();
     await expect(settingsDialog.getByRole("button", { name: /^관리 봇/ })).toHaveAttribute("aria-expanded", "true");
     await settingsDialog.getByText("고급 설정", { exact: true }).click();
-    for (const signal of ["기한 없음", "DRI·담당자 없음", "기한 초과", "어제 완료", "오늘 마감"]) {
+    for (const signal of ["기한 없음", "책임자·담당자 없음", "기한 초과", "어제 완료", "오늘 마감"]) {
       await expect(settingsDialog.getByText(signal, { exact: true }).first()).toBeVisible();
     }
     await settingsDialog.getByLabel("Slack 발송 채널").selectOption("C123");
@@ -159,7 +159,7 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
     const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
     await expect(settingsDialog.getByRole("heading", { name: "관리 요약" })).toBeVisible();
     await expect(settingsDialog.getByRole("heading", { name: "봇 연동" })).toHaveCount(0);
-    for (const signal of ["기한 없음", "DRI·담당자 없음", "기한 초과", "어제 완료", "오늘 마감"]) {
+    for (const signal of ["기한 없음", "책임자·담당자 없음", "기한 초과", "어제 완료", "오늘 마감"]) {
       await expect(settingsDialog.getByText(signal, { exact: true })).toBeVisible();
     }
     await expect.poll(() => summaryRequests.length).toBe(1);

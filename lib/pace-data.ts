@@ -178,13 +178,10 @@ const DEFAULT_PROJECT_EXECUTION_PROPERTIES: { name: string; type: PropertyType; 
   { name: "상위 Initiative", type: "text", systemKey: "parent_id" },
   { name: "상태", type: "select", systemKey: "status", options: [...ITEM_STATUSES.filter((status) => status !== "archived")] },
   { name: "우선순위", type: "select", systemKey: "priority", options: [...ITEM_PRIORITIES] },
-  { name: "주기", type: "select", systemKey: "cadence", options: [...ITEM_CADENCES] },
   { name: "기한", type: "date", systemKey: "due_date" },
-  { name: "DRI", type: "member", systemKey: "project_dri" },
+  { name: "책임자", type: "member", systemKey: "project_dri" },
   { name: "하위 업무자", type: "members", systemKey: "project_workers" },
-  { name: "시기", type: "select", options: ["이번 주", "이번 달", "이번 분기", "다음 분기", "미정"] },
   { name: "KR 기여 예상치", type: "number" },
-  { name: "예상 기간", type: "number" },
 ];
 
 type RuntimeEnv = typeof env & {
@@ -216,7 +213,7 @@ const parentKind: Record<ItemKind, ItemKind | null> = {
 };
 const completedStatuses = new Set<ItemStatus>(["done", "development_done"]);
 const okrKinds = new Set<ItemKind>(["objective", "key_result", "initiative"]);
-const reservedAssignmentPropertyNames = new Set(["dri", "owner", "assignee", "담당", "담당자", "worker", "workers", "하위 업무자", "업무자", "작업자", "참여자"]);
+const reservedAssignmentPropertyNames = new Set(["dri", "owner", "assignee", "담당", "담당자", "책임자", "worker", "workers", "하위 업무자", "업무자", "작업자", "참여자"]);
 
 async function ensureSchema() {
   if (!schemaReady) {
@@ -4136,7 +4133,7 @@ export type ItemAssignmentSummary = {
 
 export class ItemDeletePermissionError extends Error {
   constructor() {
-    super("Project는 생성자 또는 주 DRI만, Task는 생성자 또는 담당자만 삭제할 수 있습니다.");
+    super("Project는 생성자 또는 책임자만, Task는 생성자 또는 담당자만 삭제할 수 있습니다.");
     this.name = "ItemDeletePermissionError";
   }
 }
@@ -5977,17 +5974,25 @@ async function removeLegacySeedWorkspaceData(ownerId: string) {
 
 async function seedProjectExecutionProperties(ownerId: string) {
   let existing = await listPropertyDefinitions(ownerId);
+  // Rename only the old built-in label; keep assignments, values, visibility and custom names.
+  const oldDri = existing.find((property) => property.systemKey === "project_dri" && property.name === "DRI");
+  if (oldDri && !existing.some((property) => property.name === "책임자")) {
+    await getDb().update(propertyDefinitions).set({ name: "책임자", updatedAt: new Date().toISOString() })
+      .where(and(eq(propertyDefinitions.ownerId, ownerId), eq(propertyDefinitions.id, oldDri.id), eq(propertyDefinitions.name, "DRI")));
+  }
   for (const definition of DEFAULT_PROJECT_EXECUTION_PROPERTIES.filter((entry) => entry.systemKey)) {
     if (existing.some((property) => property.systemKey === definition.systemKey)) continue;
-    const legacy = existing.find((property) => !property.systemKey && property.name.toLocaleLowerCase() === definition.name.toLocaleLowerCase());
+    const legacy = existing.find((property) => !property.systemKey && property.name.toLocaleLowerCase() === definition.name.toLocaleLowerCase())
+      ?? (definition.systemKey === "project_dri" ? existing.find((property) => !property.systemKey && property.name.toLocaleLowerCase() === "dri") : undefined);
     if (!legacy) continue;
     await getDb().update(propertyDefinitions).set({
+      name: definition.name,
       systemKey: definition.systemKey,
       type: definition.type,
       options: JSON.stringify(normalizeOptions(definition.options ?? [])),
-      active: true,
+      active: legacy.active,
       updatedAt: new Date().toISOString(),
-    }).where(eq(propertyDefinitions.id, legacy.id));
+    }).where(and(eq(propertyDefinitions.ownerId, ownerId), eq(propertyDefinitions.id, legacy.id)));
   }
   existing = await listPropertyDefinitions(ownerId);
   const existingNames = new Set(existing.map((property) => property.name.toLocaleLowerCase()));
@@ -6034,7 +6039,7 @@ async function migrateLegacyItemAssignments(ownerId: string) {
       AND LOWER(TRIM(member.display_name)) = LOWER(TRIM(ipv.value, '"@ '))
     WHERE ipv.owner_id = ?
       AND item.kind IN ('project', 'task')
-      AND LOWER(TRIM(property.name)) IN ('dri', 'owner', 'assignee', '담당', '담당자')
+      AND LOWER(TRIM(property.name)) IN ('dri', 'owner', 'assignee', '담당', '담당자', '책임자')
       AND INSTR(TRIM(ipv.value, '"'), ',') = 0
       AND (
         SELECT COUNT(*) FROM workspace_members AS candidate

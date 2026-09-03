@@ -7,7 +7,6 @@ import { PropertyValueInput, type EditablePropertyValue } from "@/app/property-v
 
 const priorityNames = { low: "낮음", medium: "보통", high: "높음", urgent: "긴급" };
 const statusNames = { backlog: "대기", todo: "할 일", policy_discussion: "정책 논의", in_progress: "진행 중", developing: "개발 중", development_done: "개발 완료", done: "완료", blocked: "막힘" };
-const cadenceNames = { daily: "일간", weekly: "주간", monthly: "월간", quarterly: "분기" };
 const empty = (v: unknown) => v == null || v === "" || (Array.isArray(v) && !v.length);
 const memberName = (editor: ProjectReviewEditor | null, id: string) => editor?.members.find((m) => m.id === id)?.displayName ?? "사용할 수 없는 멤버";
 const label = (editor: ProjectReviewEditor | null, key: string, fallback: string) => editor?.properties.find((p) => p.systemKey === key)?.name ?? fallback;
@@ -35,7 +34,7 @@ export function ReviewFields({ review, proposal: p, editor, errors, disabled, on
   const props = (key: string) => ({ id: `review-${key}`, disabled, "aria-invalid": Boolean(errors[key]) || undefined, "aria-describedby": `review-${key}-hint` });
   const field = (key: keyof ProjectProposal, title: string, control: ReactNode) => <Field id={`review-${key}`} title={title} hint={origin(key, p[key])} error={errors[key]}>{control}</Field>;
   const selectedTemplate = editor.templates.find((t) => t.id === p.templateId);
-  function systemSelect(key: "status" | "priority" | "cadence", names: Record<string, string>) {
+  function systemSelect(key: "status" | "priority", names: Record<string, string>) {
     const definition = editor.properties.find((property) => property.systemKey === key);
     const options = definition ? definition.options.filter((value) => Object.hasOwn(names, value)) : Object.keys(names);
     return <select {...props(key)} value={p[key]} onChange={(e) => update(key, e.target.value as ProjectProposal[typeof key])}>
@@ -45,14 +44,14 @@ export function ReviewFields({ review, proposal: p, editor, errors, disabled, on
   }
   return <section aria-labelledby="review-edit-heading">
     <h2 id="review-edit-heading">Project 내용 수정</h2>
-    <p className="review-help">대화 초안·기본값·수정됨으로 구분합니다. DRI와 마감일은 미지정이어도 생성할 수 있습니다.</p>
+    <p className="review-help">대화 초안·기본값·수정됨으로 구분합니다. 책임자와 기한은 미지정이어도 생성할 수 있습니다.</p>
     <div className="review-fields">
       {field("title", "Project 제목 (필수)", <input {...props("title")} value={p.title} maxLength={500} onChange={(e) => update("title", e.target.value)} />)}
       {field("description", "설명 · 범위와 완료 기준", <textarea {...props("description")} value={p.description} maxLength={20000} rows={4} onChange={(e) => update("description", e.target.value)} />)}
-      {field("driMemberId", label(editor, "project_dri", "담당 DRI"), <PropertyValueInput id="review-driMemberId" disabled={disabled} invalid={Boolean(errors.driMemberId)} describedBy="review-driMemberId-hint" type="member" options={[]} members={editor.members} value={p.driMemberId} onChange={(v) => update("driMemberId", v as string | null)} />)}
+      {field("driMemberId", label(editor, "project_dri", "책임자"), <PropertyValueInput id="review-driMemberId" disabled={disabled} invalid={Boolean(errors.driMemberId)} describedBy="review-driMemberId-hint" type="member" options={[]} members={editor.members} value={p.driMemberId} onChange={(v) => update("driMemberId", v as string | null)} />)}
       {field("workerMemberIds", label(editor, "project_workers", "참여자"), <PropertyValueInput id="review-workerMemberIds" disabled={disabled} invalid={Boolean(errors.workerMemberIds)} describedBy="review-workerMemberIds-hint" type="members" options={[]} members={editor.members} value={p.workerMemberIds} onChange={(v) => update("workerMemberIds", v as string[])} />)}
-      {field("dueDate", label(editor, "due_date", "마감일"), <input {...props("dueDate")} type="date" value={p.dueDate ?? ""} onChange={(e) => update("dueDate", e.target.value || null)} />)}
-      {([ ["status", "상태", statusNames], ["priority", "우선순위", priorityNames], ["cadence", "검토 주기", cadenceNames] ] as const).map(([key, title, names]) => <div key={key}>{field(key, label(editor, key, title), systemSelect(key, names))}</div>)}
+      {field("dueDate", label(editor, "due_date", "기한"), <input {...props("dueDate")} type="date" value={p.dueDate ?? ""} onChange={(e) => update("dueDate", e.target.value || null)} />)}
+      {([ ["status", "상태", statusNames], ["priority", "우선순위", priorityNames] ] as const).map(([key, title, names]) => <div key={key}>{field(key, label(editor, key, title), systemSelect(key, names))}</div>)}
       {field("progress", label(editor, "progress", "진행률 (%)"), <input {...props("progress")} type="number" min={0} max={100} step="any" value={p.progress} onChange={(e) => update("progress", e.target.value === "" ? 0 : Number(e.target.value))} />)}
       {field("templateId", "본문 템플릿", <select {...props("templateId")} value={p.templateId ?? ""} onChange={(e) => update("templateId", e.target.value || null)}><option value="">미지정</option>{p.templateId && !selectedTemplate && <option value={p.templateId}>사용할 수 없는 템플릿 · 다시 선택</option>}{editor.templates.map((t) => <option value={t.id} key={t.id}>{t.name}</option>)}</select>)}
       {custom.map((property) => {
@@ -73,11 +72,11 @@ export function ReviewSummary({ review, proposal: p, editor, selection }: { revi
   const template = editor?.templates.find((t) => t.id === p.templateId);
   const preview = pending ? template?.preview : review.templatePreview;
   const rows: [string, string][] = [
-    [label(editor, "project_dri", "담당 DRI"), pending ? p.driMemberId ? memberName(editor, p.driMemberId) : "미지정" : review.fieldLabels.dri || "미지정"],
+    [label(editor, "project_dri", "책임자"), pending ? p.driMemberId ? memberName(editor, p.driMemberId) : "미지정" : review.fieldLabels.dri || "미지정"],
     [label(editor, "project_workers", "참여자"), (pending ? p.workerMemberIds.map((id) => memberName(editor, id)) : review.fieldLabels.workers).join(", ") || "미지정"],
-    [label(editor, "due_date", "마감일"), p.dueDate || "미지정"], [label(editor, "priority", "우선순위"), priorityNames[p.priority]],
+    [label(editor, "due_date", "기한"), p.dueDate || "미지정"], [label(editor, "priority", "우선순위"), priorityNames[p.priority]],
     [`${label(editor, "status", "상태")} · ${label(editor, "progress", "진행률")}`, `${statusNames[p.status]} · ${p.progress}%`],
-    [label(editor, "cadence", "검토 주기"), cadenceNames[p.cadence]], ["본문 템플릿", pending ? template?.name || "미지정" : review.fieldLabels.template || "미지정"],
+    ["본문 템플릿", pending ? template?.name || "미지정" : review.fieldLabels.template || "미지정"],
     ["연결 OKR 파일", selection ? selection.cycleName ?? "파일 없음" : "Initiative 선택 후 결정"],
     ...Object.entries(p.properties).map(([name, value]): [string, string] => [name, !pending && review.propertyLabels?.[name] ? review.propertyLabels[name] : propertyText(editor, name, value)]),
   ];

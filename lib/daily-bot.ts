@@ -464,7 +464,7 @@ async function validateCreateTarget(ownerId: string, memberId: string, kind: "pr
   if (kind === "general") {
     const [projects, routinesForMember] = await Promise.all([listDriProjectTargets(ownerId, memberId), listRoutineTargets(ownerId, memberId)]);
     if (projects.length === 0 && routinesForMember.length === 0) return { parentKind: "general" as const, parentId: null };
-    throw new Error("DRI Project 또는 담당 Routine을 선택해 주세요.");
+    throw new Error("책임 Project 또는 담당 Routine을 선택해 주세요.");
   }
   throw new Error("본인이 담당한 Project 또는 Routine만 선택할 수 있습니다.");
 }

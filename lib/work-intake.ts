@@ -22,7 +22,7 @@ export const WORK_FIELDS = {
   project: {
     required: ["title", "parent_id(사용자가 선택한 기존 Initiative)", "최종 생성 내용·연결에 대한 사용자 승인"],
     recommended: ["description(결과물·범위·완료 기준)", "dri_member_id", "due_date"],
-    optional: ["worker_member_ids", "properties", "template_id", "priority", "cadence"],
+    optional: ["worker_member_ids", "properties", "template_id", "priority"],
     placement: "추천 이유와 Objective→KR→Initiative 전체 경로를 먼저 제시한다. 후보를 자동 선택하지 않으며 최종 확인 화면에서 직접 선택·승인한 뒤만 생성한다. 적합한 후보가 없으면 다른 후보 검색 또는 생성 보류. 가짜 OKR/Task로 우회하지 않는다.",
     tool: "propose_project → 사용자가 확인 화면에서 직접 선택·생성; 결과 확인은 get_project_review",
   },
@@ -72,6 +72,7 @@ export const WORKFLOW_INSTRUCTIONS = [
   "Objective = qualitative desired change; Key Result = measurable evidence; Initiative = strategic approach; Project = bounded delivery. The hierarchy is Objective > Key Result > Initiative > Project > Task, or independent Routine > Task. Tasks use one assignee; Project DRI/workers, managed properties and block documents are Project-only.",
   "When the user asks to organize/save work and relationship IDs or required context are missing, use prepare_work once with the likely kind (unsure if ambiguous). It returns rules, parent paths/evidence, member IDs, and fields together. Query is a short parent/topic phrase. Reuse conversation context without redundant reads. For Tasks/Routines, known IDs permit the requested save; Projects ALWAYS require propose_project and final user approval, even if every ID is known.",
   "Give the likely type and a one-sentence reason immediately. Ask only what blocks a correct next action: at most one compact question round containing up to three missing details. If Task vs Project is ambiguous, ask whether this is one completion or a deliverable containing independently managed tasks; offer your recommendation and let the user choose. Do not recite the whole hierarchy or ask for already supplied facts.",
+  "Project scheduling uses due_date only. Do not ask for cadence, sprint, estimated hours, duration, or a separate timeframe. Call the Project DRI 책임자 in Korean; keep dri_member_id as the API field. Routine recurrence is unchanged.",
   "Distinguish required fields from helpful optional fields. Carry stated dates, owners, scope, and priority into the same write. Apply workspace defaults for omitted priority/cadence; leave unknown owners/dates unset. Resolve people and parents to returned IDs; never choose the first candidate merely because it is first. For truncated parents/members, narrow query/member_query; for truncated properties use list_properties only if the needed field is absent. Do not claim absence from a partial list. Do not auto-invite people or create property definitions/templates. Fetch list_project_templates only when applying a user-requested template.",
   "PROJECT APPROVAL IS MANDATORY and overrides reviewBeforeCreate and conflicting workspace defaults: 'create a project' authorizes preparing a proposal, NOT picking an Initiative. Read Initiative descriptions and their KR/Objective context. Recommend at most 3 only with a concrete contribution reason; candidate recency/order or vague keyword overlap is not relevance. If no defensible match exists, say so and offer other search or defer. Present the Project title/scope, owners, deadline, all defaulted/provided fields and full recommended paths BEFORE creation. Use propose_project and give its review URL; the user directly selects a parent, checks the final summary and clicks Create. Do not operate the approval page on the user's behalf, assert fabricated consent, auto-select the first/only parent, or bypass via create_item, another kind, a REST API or invented ancestors. Mandatory final approval is separate from the one compact question round for missing facts. A clear Task may still use General.",
   "Use create_tasks once for explicitly supplied Tasks sharing a container and common fields. Use create_item for non-Project items and propose_project for Projects. Never generate extra Tasks from a Project idea unless asked. Routine children use routine_id, not parent_id. Children inherit the selected parent's cycle_id. A review URL or pending/failed review is NOT a created Project. After the user says they approved, get_project_review can confirm the result; do not poll repeatedly or create a second proposal to retry an uncertain save.",
@@ -171,7 +172,7 @@ export async function readWorkContext(db: D1Database, ownerId: string, userId: s
     add("properties", db.prepare(`SELECT id, name, type, options, default_value AS defaultValue, system_key AS systemKey
       FROM property_definitions WHERE owner_id = ? AND active = 1
         AND (system_key IS NOT NULL OR LOWER(TRIM(name)) NOT IN
-          ('dri','owner','assignee','담당','담당자','worker','workers','하위 업무자','업무자','작업자','참여자'))
+          ('dri','owner','assignee','담당','담당자','책임자','worker','workers','하위 업무자','업무자','작업자','참여자'))
       ORDER BY sort_order, id LIMIT 41`).bind(ownerId));
   }
   const results = await db.batch(statements);

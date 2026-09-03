@@ -715,7 +715,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
     routineNote: "Routine은 Project처럼 Task를 담는 실행 컨테이너지만 OKR 계층과 독립적입니다.",
     points: [
       { title: "대화에서 바로 등록", description: "MCP를 연결하면 AI 대화와 봇에서 Task, 프로젝트, Routine을 바로 만들 수 있습니다." },
-      { title: "책임과 맥락을 선명하게", description: "Project의 DRI와 속성, Task의 담당자와 소속을 한눈에 관리합니다." },
+      { title: "책임과 맥락을 선명하게", description: "Project의 책임자와 속성, Task의 담당자와 소속을 한눈에 관리합니다." },
       { title: "매일 실행을 놓치지 않게", description: "Routine, 데일리 스크럼과 추천이 지금 집중할 일을 정리해 줍니다." },
     ],
     mcpAction: "MCP 연결 보기",
@@ -730,7 +730,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
     routineNote: "Routines are Project-like Task containers, but remain independent from the OKR hierarchy.",
     points: [
       { title: "Capture from conversation", description: "Connect MCP to create tasks, projects, and routines directly from AI chats and bots." },
-      { title: "Make ownership explicit", description: "Track Project DRIs and properties alongside each Task's assignee and work context." },
+      { title: "Make ownership explicit", description: "Track Project owners and properties alongside each Task's assignee and work context." },
       { title: "Keep daily execution visible", description: "Routines, daily scrum, and recommendations keep your next priorities clear." },
     ],
     mcpAction: "View MCP setup",
@@ -745,7 +745,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
     routineNote: "RoutineはProjectのようにTaskを持てますが、OKR階層とは独立しています。",
     points: [
       { title: "会話からすぐに登録", description: "MCPを接続すると、AIチャットやボットからタスク、プロジェクト、ルーティンを作成できます。" },
-      { title: "責任と文脈を明確に", description: "ProjectのDRIとプロパティ、Taskの担当者と所属を一目で管理できます。" },
+      { title: "責任と文脈を明確に", description: "Projectの責任者とプロパティ、Taskの担当者と所属を一目で管理できます。" },
       { title: "日々の実行を見失わない", description: "ルーティン、デイリースクラム、提案機能が次に集中することを整理します。" },
     ],
     mcpAction: "MCP接続を見る",
@@ -1568,7 +1568,7 @@ function WorkspaceApp() {
 
   async function archiveProjectItem(project: OkrptrItem) {
     if (!deletableItemIds.has(project.id)) {
-      showNotice("Project는 생성자 또는 주 DRI만 삭제할 수 있습니다.", "error");
+      showNotice("Project는 생성자 또는 책임자만 삭제할 수 있습니다.", "error");
       return;
     }
     const taskCount = activeItems.filter((item) => item.kind === "task" && item.parentId === project.id).length;
@@ -2857,7 +2857,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
               <header><b>필터</b>{activeFilterCount > 0 && <button onClick={resetFilters}>전체 해제</button>}</header>
               <label><span>상태</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ItemStatus | "all")}><option value="all">전체</option>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
               <label><span>우선순위</span><select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value as Priority | "all")}><option value="all">전체</option>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-              <label><span>DRI</span><select value={driFilter} onChange={(event) => setDriFilter(event.target.value)}><option value="all">전체</option>{driOptions.map((assignment) => <option value={assignment.memberId} key={assignment.memberId}>{assignment.displayName}</option>)}</select></label>
+              <label><span>책임자</span><select value={driFilter} onChange={(event) => setDriFilter(event.target.value)}><option value="all">전체</option>{driOptions.map((assignment) => <option value={assignment.memberId} key={assignment.memberId}>{assignment.displayName}</option>)}</select></label>
               <label><span>마감</span><select value={dueFilter} onChange={(event) => setDueFilter(event.target.value as "all" | "overdue" | "week" | "none")}><option value="all">전체</option><option value="overdue">기한 초과</option><option value="week">7일 이내</option><option value="none">기한 없음</option></select></label>
               <footer><button onClick={() => setFilterOpen(false)}>적용</button></footer>
             </section>}
@@ -2889,7 +2889,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
         <div className="database-scroll">
           <div className="task-table" role="table" aria-label="Project 표" style={{ "--custom-columns": customProperties.length, "--custom-column-tracks": customProperties.length ? `repeat(${customProperties.length}, var(--custom-column-width))` : " " } as CSSProperties}>
             <div className="task-table-row task-table-head" role="row">
-              <span role="columnheader"><ListChecks size={12} />이름</span><span role="columnheader"><Activity size={12} />상태</span><span role="columnheader"><Zap size={12} />우선순위</span><span role="columnheader"><CalendarDays size={12} />기한</span><span role="columnheader"><Link2 size={12} />상위 Initiative</span><span role="columnheader"><Users size={12} />DRI</span>
+              <span role="columnheader"><ListChecks size={12} />이름</span><span role="columnheader"><Activity size={12} />상태</span><span role="columnheader"><Zap size={12} />우선순위</span><span role="columnheader"><CalendarDays size={12} />기한</span><span role="columnheader"><Link2 size={12} />상위 Initiative</span><span role="columnheader"><Users size={12} />책임자</span>
               {customProperties.map((property) => <span role="columnheader" key={property.id}>{property.type === "number" ? <Hash size={12} /> : <TextCursorInput size={12} />}{property.name}</span>)}
               <button aria-label="속성 추가" title="속성 추가" onClick={onOpenProperties}><Plus size={13} /></button>
             </div>
@@ -3034,10 +3034,9 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
           <div className="project-field-grid">
             {systemPropertyVisible("priority") && <ProjectSystemPropertySlot property={systemProperty("priority")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemProperty("priority")?.name ?? "우선순위"}</span><select disabled={readOnly} className={`priority-${project.priority}`} value={project.priority} onChange={(event) => void onPatch(project.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></ProjectSystemPropertySlot>}
             {systemPropertyVisible("status") && <ProjectSystemPropertySlot property={systemProperty("status")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemProperty("status")?.name ?? "상태"}</span><select disabled={readOnly} value={project.status} onChange={(event) => void onPatch(project.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></ProjectSystemPropertySlot>}
-            {systemPropertyVisible("cadence") && <ProjectSystemPropertySlot property={systemProperty("cadence")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemProperty("cadence")?.name ?? "주기"}</span><select disabled={readOnly} value={project.cadence} onChange={(event) => void onPatch(project.id, { cadence: event.target.value as Cadence })}>{Object.entries(cadenceLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></ProjectSystemPropertySlot>}
             {systemPropertyVisible("due_date") && <ProjectSystemPropertySlot property={systemProperty("due_date")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemProperty("due_date")?.name ?? "기한"}</span><input disabled={readOnly} type="date" value={project.dueDate ?? ""} onChange={(event) => void onPatch(project.id, { dueDate: event.target.value || null })} /></label></ProjectSystemPropertySlot>}
           </div>
-          {teamMembers.length > 0 && systemPropertyVisible("project_dri") && <ProjectSystemPropertySlot property={systemProperty("project_dri")} readOnly={readOnly} onHide={onPropertyVisibility}><MemberMentionPicker label={systemProperty("project_dri")?.name ?? "DRI"} members={teamMembers} selectedIds={driIds} onChange={(ids) => !readOnly && void saveAssignments("project_dri", ids)} placeholder="@실명으로 찾기" maxSelected={1} /></ProjectSystemPropertySlot>}
+          {teamMembers.length > 0 && systemPropertyVisible("project_dri") && <ProjectSystemPropertySlot property={systemProperty("project_dri")} readOnly={readOnly} onHide={onPropertyVisibility}><MemberMentionPicker label={systemProperty("project_dri")?.name ?? "책임자"} members={teamMembers} selectedIds={driIds} onChange={(ids) => !readOnly && void saveAssignments("project_dri", ids)} placeholder="@실명으로 찾기" maxSelected={1} /></ProjectSystemPropertySlot>}
           {teamMembers.length > 0 && systemPropertyVisible("project_workers") && <ProjectSystemPropertySlot property={systemProperty("project_workers")} readOnly={readOnly} onHide={onPropertyVisibility}><MemberMentionPicker label={systemProperty("project_workers")?.name ?? "하위 업무자"} members={teamMembers} selectedIds={workerIds} onChange={(ids) => !readOnly && void saveAssignments("project_worker", ids)} placeholder="@실명으로 여러 명 태그" /></ProjectSystemPropertySlot>}
         </form>
         <section className="project-custom-properties">
@@ -3425,7 +3424,7 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
               <LineageRow label="Key Result" value={keyResult?.title ?? "미연결"} />
               <LineageRow label="Initiative" value={initiative?.title ?? "미연결"} />
               <LineageRow label="Project" value={project?.title ?? "미연결"} />
-              {project && <div className="lineage-project-meta"><span>우선순위 <b>{priorityLabels[project.priority]}</b></span><span>DRI <b>{projectDri}</b></span><span>상태 <b>{statusLabel(project.status)}</b></span><span>기한 <b>{dueLabel(project.dueDate)}</b></span></div>}
+              {project && <div className="lineage-project-meta"><span>우선순위 <b>{priorityLabels[project.priority]}</b></span><span>책임자 <b>{projectDri}</b></span><span>상태 <b>{statusLabel(project.status)}</b></span><span>기한 <b>{dueLabel(project.dueDate)}</b></span></div>}
             </>
           )}
         </section>
@@ -3612,7 +3611,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
   const [taskContainer, setTaskContainer] = useState("");
   const [status, setStatus] = useState<ItemStatus>(() => propertySystemDefault(properties, "status", "todo") as ItemStatus);
   const [priority, setPriority] = useState<Priority>(() => propertySystemDefault(properties, "priority", "medium") as Priority);
-  const [cadence, setCadence] = useState<Cadence>(() => propertySystemDefault(properties, "cadence", "weekly") as Cadence);
+  const [cadence] = useState<Cadence>(() => propertySystemDefault(properties, "cadence", "weekly") as Cadence);
   const [dueDate, setDueDate] = useState(() => propertySystemDefault(properties, "due_date", ""));
   const [customValues, setCustomValues] = useState<Record<string, PropertyValue>>({});
   const [availableTemplates, setAvailableTemplates] = useState<ProjectTemplate[]>([]);
@@ -3670,7 +3669,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
           routineId,
           status,
           priority,
-          cadence,
+          cadence: kind === "project" ? undefined : cadence,
           dueDate: dueDate || null,
           driMemberId: kind === "project" ? projectDriIds[0] ?? "" : undefined,
           workerMemberIds: kind === "project" ? projectWorkerIds : undefined,
@@ -3717,11 +3716,10 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
               <div className="project-field-grid">
                 <label><span>우선순위</span><select className={`priority-${priority}`} value={priority} onChange={(event) => setPriority(event.target.value as Priority)}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
                 <label><span>상태</span><select value={status} onChange={(event) => setStatus(event.target.value as ItemStatus)}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-                <label><span>주기</span><select value={cadence} onChange={(event) => setCadence(event.target.value as Cadence)}>{Object.entries(cadenceLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
                 <label><span>기한</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
               </div>
               {teamMembers.length > 0 && (
-                <MemberMentionPicker label="DRI" members={teamMembers} selectedIds={projectDriIds} onChange={setProjectDriIds} placeholder="@실명으로 찾기" maxSelected={1} />
+                <MemberMentionPicker label="책임자" members={teamMembers} selectedIds={projectDriIds} onChange={setProjectDriIds} placeholder="@실명으로 찾기" maxSelected={1} />
               )}
               {teamMembers.length > 0 && (
                 <MemberMentionPicker label="하위 업무자" members={teamMembers} selectedIds={projectWorkerIds} onChange={setProjectWorkerIds} placeholder="@실명으로 여러 명 태그" />
@@ -4184,7 +4182,7 @@ function DailyScrumView({ workspaceId, onOpenTask, onNotice }: { workspaceId: st
       <section className={`daily-task-picker ${isSkipped ? "daily-work-disabled" : ""}`}><header><div><b>오늘 할 Task</b><span>{isSkipped ? "스킵을 해제하면 Task를 선택할 수 있습니다." : "본인에게 할당된 미완료 Task만 표시합니다."}</span></div><strong>{currentScrum.draft.selectedTaskIds.length}/50</strong></header><label className="daily-none"><input type="checkbox" disabled={isSkipped} checked={currentScrum.draft.noPlannedTasks} onChange={(event) => updateDraft({ noPlannedTasks: event.target.checked, selectedTaskIds: event.target.checked ? [] : currentScrum.draft.selectedTaskIds })} />오늘 예정 없음</label>
         {currentScrum.candidates.groups.length ? <div className="daily-task-groups">{currentScrum.candidates.groups.map((group) => <section key={group.key}><h3>{group.kind === "project" ? "Project" : group.kind === "routine" ? "Routine" : "General"} · {group.title}</h3>{group.tasks.map((task) => <div className="daily-task-option" key={task.id}><label aria-label={`${task.title} 선택`}><input type="checkbox" aria-label={`${task.title} 선택`} checked={currentScrum.draft.selectedTaskIds.includes(task.id)} disabled={isSkipped || currentScrum.draft.noPlannedTasks || (!currentScrum.draft.selectedTaskIds.includes(task.id) && currentScrum.draft.selectedTaskIds.length >= 50)} onChange={() => toggleTask(task.id)} /><span><b>{task.title}</b><small>{statusLabel(task.status)} · {dueLabel(task.dueDate)}</small></span></label><button onClick={() => onOpenTask(task.id)} aria-label={`${task.title} 열기`}><ChevronRight size={15} /></button></div>)}</section>)}</div> : <p className="daily-empty">할당된 미완료 Task가 없습니다.</p>}
       </section>
-      {!isSkipped && noTaskProjects.length > 0 && <div className="daily-dri-alert"><Target size={18} /><div><b>DRI이지만 미완료 Task가 없는 Project</b><p>실행 항목을 바로 추가할 수 있습니다.</p><div>{noTaskProjects.map((project) => <button key={project.id} onClick={() => setNewTaskParent(`project:${project.id}`)}>{project.title}<Plus size={13} /></button>)}</div></div></div>}
+      {!isSkipped && noTaskProjects.length > 0 && <div className="daily-dri-alert"><Target size={18} /><div><b>책임자이지만 미완료 Task가 없는 Project</b><p>실행 항목을 바로 추가할 수 있습니다.</p><div>{noTaskProjects.map((project) => <button key={project.id} onClick={() => setNewTaskParent(`project:${project.id}`)}>{project.title}<Plus size={13} /></button>)}</div></div></div>}
       <form className={`daily-new-task ${isSkipped ? "daily-work-disabled" : ""}`} onSubmit={(event) => void createDailyTask(event)}><header><b>새 Task 만들기</b><span>{isSkipped ? "스킵을 해제하면 Task를 만들 수 있습니다." : "이 양식을 제출할 때만 실제 Task가 생성됩니다."}</span></header><div><select aria-label="새 Task 상위 항목" disabled={isSkipped} value={newTaskParent} onChange={(event) => setNewTaskParent(event.target.value)}>{currentScrum.createTargets.projects.map((project) => <option key={project.id} value={`project:${project.id}`}>Project · {project.title}</option>)}{currentScrum.createTargets.routines.map((routine) => <option key={routine.id} value={`routine:${routine.id}`}>Routine · {routine.title}</option>)}{currentScrum.createTargets.allowGeneral && <option value="general:">General</option>}</select><input aria-label="새 Task 제목" disabled={isSkipped} value={newTaskTitle} onChange={(event) => setNewTaskTitle(event.target.value)} maxLength={240} placeholder="오늘 할 Task 제목" /><button disabled={isSkipped || !newTaskTitle.trim() || !newTaskParent || Boolean(saving)}>{saving === "task" ? "생성 중" : "Task 생성"}</button></div></form>
     </section><section className="daily-rollup" aria-labelledby="daily-rollup-heading"><header><h2 id="daily-rollup-heading">팀 데일리</h2><p>작성 중인 초안은 상태만 표시하고, 확정된 스킵 사유만 공개합니다.</p></header><div>{currentScrum.team.map((member) => <article key={member.memberId} className={`daily-member-card ${member.status}`}><header><div><b>{member.displayName}</b><small>{member.slackConnected ? "Slack 연결" : "Slack 미연결"}</small></div><span>{member.status === "skipped" ? "스킵" : member.status === "submitted" ? "제출 완료" : member.status === "writing" ? "작성 중" : "미제출"}</span></header>{member.submission ? member.submission.skipReason ? <div className="daily-skip-summary"><b>오늘 데일리 스킵</b><span>사유 · {dailySkipLabel(member.submission.skipReason)}</span>{member.submission.skipNote && <p>{member.submission.skipNote}</p>}</div> : <div><ul>{member.submission.tasks.map((task) => <li key={task.id}>{task.isNew && <em>신규</em>}<button disabled={!task.taskId} onClick={() => task.taskId && onOpenTask(task.taskId)}>{task.taskTitle}</button><small>{task.parentTitle}</small></li>)}{member.submission.noPlannedTasks && !member.submission.tasks.length && <li>오늘 예정 없음</li>}</ul>{member.submission.todayNote && <p><b>오늘</b>{member.submission.todayNote}</p>}{member.submission.blockersNote && <p className="blocker"><b>블로커</b>{member.submission.blockersNote}</p>}</div> : <p className="daily-private-draft">{member.status === "writing" ? "초안을 작성 중입니다. 내용은 제출 후 공개됩니다." : "아직 제출된 데일리가 없습니다."}</p>}</article>)}</div>{currentScrum.legacyWorkspaceNote && <details className="daily-legacy"><summary>기존 워크스페이스 메모</summary><p>{currentScrum.legacyWorkspaceNote.todayNote || currentScrum.legacyWorkspaceNote.yesterdayNote || currentScrum.legacyWorkspaceNote.blockersNote}</p></details>}</section></div>
   </section>;
@@ -4756,7 +4754,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
         {visibleFields.size > 0 && <div className="okr-setup-fields home-draft-fields">
           {mode === "project" && visibleFields.has("project") && <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="결과와 범위가 분명한 첫 Project" /></label>}
           {mode === "project" && visibleFields.has("project") && <label><span>상위 Initiative</span><select value={projectTarget?.initiativeId ?? ""} onChange={(event) => setProjectTarget(projectTargets.find((entry) => entry.initiativeId === event.target.value) ?? null)}><option value="">저장 전에 선택</option>{projectTargets.map((entry) => <option value={entry.initiativeId} key={entry.initiativeId}>{entry.cycleName} · {entry.initiativeTitle}</option>)}</select></label>}
-          {mode === "project" && visibleFields.has("project") && members.length > 0 && <label><span>Project DRI</span><select value={projectDriMemberId} onChange={(event) => setProjectDriMemberId(event.target.value)}>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
+          {mode === "project" && visibleFields.has("project") && members.length > 0 && <label><span>Project 책임자</span><select value={projectDriMemberId} onChange={(event) => setProjectDriMemberId(event.target.value)}>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
           {(mode === "task" || mode === "project" || mode === "routine") && visibleFields.has("tasks") && <label className="wide"><span>{mode === "task" ? "Task 초안" : plan.taskParent === "routine" || !plan.project.trim() && plan.routineTitle.trim() ? "첫 Task · Routine 아래" : plan.project.trim() ? "첫 Task · Project 아래" : "첫 Task"}</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder="한 줄에 하나씩 입력" /></label>}
           {mode === "task" && visibleFields.has("tasks") && taskContainers.length > 0 && <label><span>연결 대상 · 선택 사항</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">선택 안 함 — General에 저장</option>{taskContainers.some((entry) => entry.kind === "project") && <optgroup label="Project">{taskContainers.filter((entry) => entry.kind === "project").map((entry) => <option key={entry.id} value={`project:${entry.id}`}>{entry.title}</option>)}</optgroup>}{taskContainers.some((entry) => entry.kind === "routine") && <optgroup label="Routine">{taskContainers.filter((entry) => entry.kind === "routine").map((entry) => <option key={entry.id} value={`routine:${entry.id}`}>{entry.title}</option>)}</optgroup>}</select></label>}
           {mode === "task" && visibleFields.has("tasks") && members.length > 0 && <label><span>담당자</span><select value={taskAssigneeMemberId} onChange={(event) => setTaskAssigneeMemberId(event.target.value)}><option value="">미지정</option>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
@@ -6147,7 +6145,7 @@ function AppIntegrationsView({ google, slack, loading, loadError, onGoogleChange
 
 const managementBotSignalMeta: Record<ManagementBotSignal, { label: string; detail: string; tone: "quality" | "urgent" | "done" }> = {
   missing_due_date: { label: "기한 없음", detail: "활성 Project·Task 중 마감일이 비어 있는 항목", tone: "quality" },
-  missing_owner: { label: "DRI·담당자 없음", detail: "Project DRI 또는 Task 담당자가 없는 항목", tone: "quality" },
+  missing_owner: { label: "책임자·담당자 없음", detail: "Project 책임자 또는 Task 담당자가 없는 항목", tone: "quality" },
   overdue: { label: "기한 초과", detail: "마감일이 지났지만 아직 완료되지 않은 항목", tone: "urgent" },
   completed_yesterday: { label: "어제 완료", detail: "어제 완료 상태로 변경된 Project·Task", tone: "done" },
   due_today: { label: "오늘 마감", detail: "오늘까지 완료해야 하는 활성 Project·Task", tone: "urgent" },

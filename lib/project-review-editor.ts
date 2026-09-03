@@ -72,7 +72,7 @@ export async function prepareEditedProjectReview(ownerId: string, review: Projec
   if (proposal.templateId && !editor.templates.some((t) => t.id === proposal.templateId)) fields.templateId = "현재 템플릿을 선택하거나 미지정으로 변경해 주세요.";
   if (proposal.requestedCycleId !== parent.cycleId) fields.initiativeId = "선택한 Initiative와 OKR 파일이 다릅니다. 연결을 다시 선택해 주세요.";
   const custom = editor.properties.filter((p) => !p.systemKey);
-  for (const key of ["status", "priority", "cadence"] as const) {
+  for (const key of ["status", "priority"] as const) {
     const definition = editor.properties.find((p) => p.systemKey === key);
     if (definition && !definition.options.includes(proposal[key])) fields[key] = "워크스페이스에서 사용하는 현재 선택지를 골라 주세요.";
   }
