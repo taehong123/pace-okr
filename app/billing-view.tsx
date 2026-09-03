@@ -3,7 +3,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { AlertTriangle, CreditCard, LoaderCircle, LockKeyhole } from "lucide-react";
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useAppConfirm } from "./overlay-dialog";
 import { AiUsageMeter } from "./ai-usage-meter";
@@ -197,23 +196,6 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
 
     <section className="billing-history"><header><div><span>5 YEAR RECORD</span><h3>결제 기록</h3></div><p>계약·결제·해지 기록은 관련 법령에 따라 5년간 보관합니다.</p></header>{billing.transactions.length ? <div>{billing.transactions.map((transaction) => <article key={transaction.id}><div><b>{plans.find((plan) => plan.id === transaction.plan)?.label || transaction.plan} · {transactionLabel(transaction.kind)}</b><small>{formatDateTime(transaction.createdAt)}</small></div><strong>{transaction.priceWon.toLocaleString("ko-KR")}원</strong><span>{transaction.status}</span>{transaction.receiptUrl ? <a href={transaction.receiptUrl} target="_blank" rel="noreferrer">영수증</a> : <em>영수증 없음</em>}</article>)}</div> : <p className="billing-empty-history">아직 결제 기록이 없습니다.</p>}</section>
   </section>;
-}
-
-export function ProjectQuotaBadge() {
-  const [quota, setQuota] = useState<{ used: number; limit: number | null; remaining: number | null; enforcementEnabled: boolean } | null>(null);
-  useEffect(() => {
-    const controller = new AbortController();
-    void fetch("/api/billing/status", { cache: "no-store", signal: controller.signal })
-      .then(async (response) => response.ok ? response.json() as Promise<BillingStatusData> : Promise.reject())
-      .then((data) => setQuota({ ...data.usage.projects, enforcementEnabled: data.enforcementEnabled }))
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, []);
-  if (!quota || quota.limit === null) return null;
-  const percentage = quota.limit ? Math.round((quota.used / quota.limit) * 100) : 0;
-  return <Link className={`project-quota-badge ${percentage >= 100 ? "limit" : percentage >= 80 ? "warning" : ""}`} href="/?view=billing">
-    <span>이번 달 Project</span><b>{quota.remaining}개 남음</b>{!quota.enforcementEnabled && <small>현재 미적용</small>}
-  </Link>;
 }
 
 function Usage({ label, used, limit, suffix }: { label: string; used: number; limit: number | null; suffix: string }) {

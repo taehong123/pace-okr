@@ -4,6 +4,16 @@ import test from "node:test";
 
 const projectRoot = new URL("../", import.meta.url);
 
+test("project quota stays in billing without badges on work and creation surfaces", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const billing = await readFile(new URL("../app/billing-view.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.doesNotMatch(page, /ProjectQuotaBadge/);
+  assert.doesNotMatch(billing, /ProjectQuotaBadge|이번 달 Project|현재 미적용/);
+  assert.doesNotMatch(styles, /project-quota-badge/);
+  assert.match(billing, /<Usage label="Project 생성" used=\{billing\.usage\.projects\.used\}/);
+});
+
 test("brands connection completion as OKRPTR while preserving workspace names", async () => {
   const [promptRoute, slackStatus, page] = await Promise.all([
     readFile(new URL("../app/api/integration-tokens/route.ts", import.meta.url), "utf8"),

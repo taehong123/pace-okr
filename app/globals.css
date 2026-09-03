@@ -3018,15 +3018,6 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
 .billing-loading, .billing-load-error { min-height: 220px; display: grid; place-content: center; justify-items: center; gap: 9px; color: var(--muted); font-size: var(--type-meta); text-align: center; }
 .billing-load-error p { margin: 0; }
 .billing-load-error button { min-width: 110px; padding: 0 12px; }
-.project-quota-badge { min-height: 34px; display: inline-grid; grid-template-columns: auto auto; align-content: center; gap: 1px 7px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); text-decoration: none; }
-.project-quota-badge span { color: var(--muted); font-size: var(--type-meta); }
-.project-quota-badge small { color: var(--muted); font-size: var(--type-meta); }
-.project-quota-badge b { font-size: var(--type-meta); }
-.project-quota-badge small { grid-column: 1 / -1; }
-.project-quota-badge.warning { border-color: var(--border-default); background: var(--bg-surface); }
-.project-quota-badge.limit { border-color: var(--border-default); background: var(--bg-raised); color: var(--red); }
-.create-item-form > .project-quota-badge { justify-self: stretch; grid-template-columns: minmax(0, 1fr) auto; min-height: 42px; }
-.home-okr-chat > .home-chat-surface .project-quota-badge { width: fit-content; }
 
 @media (max-width: 700px) {
   .registration-shell { place-items: start center; padding: 0; }
@@ -3078,7 +3069,6 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
   .billing-history > div { overflow: hidden; }
   .billing-history article { min-width: 0; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 12px; }
   .billing-history article strong, .billing-history article a { text-align: right; }
-  .page-create-actions > .project-quota-badge { grid-column: 1 / -1; min-height: 44px; }
 }
 
 /* Wide screens use the same density as desktop; only available space grows. */

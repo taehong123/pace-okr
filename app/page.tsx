@@ -69,7 +69,7 @@ import AIConnectionsDialog from "./ai-connections";
 import WorkspaceBackups from "./workspace-backups";
 import { MarketingConsentPrompt, MarketingConsentSettings } from "./marketing-consent";
 import { OkrFileSurface, type OkrFileCycleSummary } from "./okr-file-surface";
-import BillingView, { ProjectQuotaBadge } from "./billing-view";
+import BillingView from "./billing-view";
 import { ChatAiUsage } from "./ai-usage-meter";
 import { aiUsageLimitMessage } from "@/lib/ai-usage";
 import { invalidateAiUsage, type AiUsageScope } from "@/lib/ai-usage-client";
@@ -2183,7 +2183,7 @@ function WorkspaceApp() {
             ) : activeView === "inbox" ? (
               <div className="page-create-actions"><button onClick={() => openTaskCreationChat()}><Bot size={14} />AI 대화로 추가</button><button className="primary-action" onClick={() => openCreateItem("task", null)}><Plus size={14} />직접 추가</button></div>
             ) : activeView === "work" ? (
-              <div className="page-create-actions"><ProjectQuotaBadge /><button onClick={() => openProjectCreationChat()}><Bot size={14} />AI 대화로 추가</button><button className="primary-action" onClick={() => openCreateItem("project")}><Plus size={14} />직접 추가</button></div>
+              <div className="page-create-actions"><button onClick={() => openProjectCreationChat()}><Bot size={14} />AI 대화로 추가</button><button className="primary-action" onClick={() => openCreateItem("project")}><Plus size={14} />직접 추가</button></div>
             ) : activeView === "routines" ? (
               <div className="page-create-actions"><button onClick={() => openRoutineCreationChat()}><Bot size={14} />AI 대화로 추가</button><button className="primary-action" onClick={() => setRoutineCreateOpen(true)}><Plus size={14} />직접 추가</button></div>
             ) : activeView === "reviews" ? (
@@ -3699,7 +3699,6 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
       {(requestClose) => <aside className="property-panel">
         <header><div><h2>새 항목</h2><p>{kind === "project" ? "Project 속성을 지정해서 추가" : "OKR 실행 구조에 추가"}</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="새 항목 닫기" title="새 항목 닫기"><X size={17} /></button></header>
         <form className="property-form create-item-form" onSubmit={submit}>
-          {kind === "project" && <ProjectQuotaBadge />}
           <label><span>유형</span><select value={kind} disabled><option value={initialKind}>{kindLabel(initialKind)}</option></select></label>
           <label><span>이름</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
           {onCreateWithChat && <div className="create-chat-nudge"><div><Bot size={15} /><span><b>대화로 정리할까요?</b><small>{kind === "task" ? "할 일을 다듬고, 연결 대상을 고르지 않으면 General에 저장합니다." : kind === "project" ? "결과와 범위를 말하면 Project 초안을 정리합니다." : "말로 설명하면 OKR 초안을 함께 정리해드려요."}</small></span></div><button type="button" onClick={() => onCreateWithChat({ kind, title })}>AI 대화로 추가<ChevronRight size={13} /></button></div>}
@@ -4755,7 +4754,6 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
           onMoveInitiative={moveInitiative}
         />}
         {visibleFields.size > 0 && <div className="okr-setup-fields home-draft-fields">
-          {mode === "project" && visibleFields.has("project") && <ProjectQuotaBadge />}
           {mode === "project" && visibleFields.has("project") && <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="결과와 범위가 분명한 첫 Project" /></label>}
           {mode === "project" && visibleFields.has("project") && <label><span>상위 Initiative</span><select value={projectTarget?.initiativeId ?? ""} onChange={(event) => setProjectTarget(projectTargets.find((entry) => entry.initiativeId === event.target.value) ?? null)}><option value="">저장 전에 선택</option>{projectTargets.map((entry) => <option value={entry.initiativeId} key={entry.initiativeId}>{entry.cycleName} · {entry.initiativeTitle}</option>)}</select></label>}
           {mode === "project" && visibleFields.has("project") && members.length > 0 && <label><span>Project DRI</span><select value={projectDriMemberId} onChange={(event) => setProjectDriMemberId(event.target.value)}>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
