@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { parseRoutineProperties, prepareRoutineProperties } from "./routine-properties";
 import { effectiveIntegrationProvider, type IntegrationProvider } from "@/lib/integration-providers";
 import { and, asc, desc, eq, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -2519,10 +2520,6 @@ async function ensureWorkspaceShell(ownerId: string, email: string | null = null
   const now = new Date().toISOString();
   const workspaceName = displayName && displayName !== "Workspace Owner" ? `${displayName}의 개인 워크스페이스` : "개인 워크스페이스";
   await getDb().insert(workspaces).values({ id: ownerId, name: workspaceName, ownerUserId: ownerId, kind: "personal", createdAt: now, updatedAt: now }).onConflictDoNothing();
-  const [personalWorkspace] = await getDb().select().from(workspaces).where(and(eq(workspaces.id, ownerId), eq(workspaces.ownerUserId, ownerId))).limit(1);
-  if (personalWorkspace && (personalWorkspace.name === "OKRPTR Workspace" || personalWorkspace.name.endsWith(" Workspace"))) {
-    await getDb().update(workspaces).set({ name: workspaceName, updatedAt: now }).where(eq(workspaces.id, ownerId));
-  }
   await getDb().insert(workspaceMembers).values({
     id: crypto.randomUUID(),
     workspaceId: ownerId,
@@ -2801,6 +2798,7 @@ async function permanentlyDeleteWorkspace(id: string) {
   await getDb().delete(activityLog).where(eq(activityLog.ownerId, id));
   await getDb().delete(routineCompletions).where(eq(routineCompletions.ownerId, id));
   await getDb().delete(routines).where(eq(routines.ownerId, id));
+  await (env as RuntimeEnv).DB.prepare("DELETE FROM routine_property_definitions WHERE owner_id = ?").bind(id).run();
   await getDb().delete(checklistItems).where(eq(checklistItems.ownerId, id));
   await getDb().delete(itemPropertyValues).where(eq(itemPropertyValues.ownerId, id));
   await getDb().delete(itemAssignments).where(eq(itemAssignments.ownerId, id));
@@ -5303,6 +5301,7 @@ export async function createRoutine(
     cadence?: RoutineCadence;
     active?: boolean;
     assigneeMemberId?: string | null;
+    properties?: unknown;
   },
 ) {
   const title = input.title.trim();
@@ -5310,6 +5309,7 @@ export async function createRoutine(
   const cadence = input.cadence ?? "daily";
   if (!ROUTINE_CADENCES.includes(cadence)) throw new Error("Unsupported routine cadence");
   await validateRoutineAssignee(ownerId, input.assigneeMemberId ?? null);
+  const properties = await prepareRoutineProperties((env as RuntimeEnv).DB, ownerId, input.properties, true);
   const [last] = await getDb()
     .select({ sortOrder: routines.sortOrder })
     .from(routines)
@@ -5328,6 +5328,7 @@ export async function createRoutine(
       triggerPoint: input.triggerPoint?.trim() ?? "",
       actionPlace: input.actionPlace?.trim() ?? "",
       actionSteps: input.actionSteps?.trim() ?? "",
+      propertiesJson: JSON.stringify(properties),
       cadence,
       active: input.active ?? true,
       sortOrder: (last?.sortOrder ?? 0) + 10,
@@ -5348,6 +5349,7 @@ export async function updateRoutine(
     cadence: RoutineCadence;
     active: boolean;
     assigneeMemberId: string | null;
+    properties: unknown;
   }>,
 ) {
   const current = await getRoutine(ownerId, id);
@@ -5358,6 +5360,7 @@ export async function updateRoutine(
     throw new Error("Unsupported routine cadence");
   }
   if (patch.assigneeMemberId !== undefined) await validateRoutineAssignee(ownerId, patch.assigneeMemberId);
+  const propertyPatch = patch.properties === undefined ? undefined : await prepareRoutineProperties((env as RuntimeEnv).DB, ownerId, patch.properties);
   const [updated] = await getDb()
     .update(routines)
     .set({
@@ -5366,6 +5369,7 @@ export async function updateRoutine(
       triggerPoint: patch.triggerPoint?.trim(),
       actionPlace: patch.actionPlace?.trim(),
       actionSteps: patch.actionSteps?.trim(),
+      propertiesJson: propertyPatch === undefined ? undefined : sql`json_patch(${routines.propertiesJson}, ${JSON.stringify(propertyPatch)})`,
       cadence: patch.cadence,
       active: patch.active,
       assigneeMemberId: patch.assigneeMemberId,
@@ -5461,6 +5465,7 @@ export function serializeRoutine(
     triggerPoint: routine.triggerPoint,
     actionPlace: routine.actionPlace,
     actionSteps: routine.actionSteps,
+    properties: parseRoutineProperties(routine.propertiesJson),
     cadence: routine.cadence,
     active: routine.active,
     sortOrder: routine.sortOrder,

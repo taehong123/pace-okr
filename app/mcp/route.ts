@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import { env } from "cloudflare:workers";
+import { listRoutineProperties } from "@/lib/routine-properties";
 import { isReadOnlyMcpRequest, readWorkContext, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
 import { getProjectReview, projectReviewSummary } from "@/lib/project-review";
 import { stageProjectReview } from "@/lib/project-review-service";
@@ -173,6 +174,7 @@ const routineOutput = z.object({
   triggerPoint: z.string(),
   actionPlace: z.string(),
   actionSteps: z.string(),
+  properties: z.record(z.string(), propertyValueSchema),
   cadence: z.string(),
   active: z.boolean(),
   sortOrder: z.number(),
@@ -1139,6 +1141,17 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
     },
   );
 
+  server.registerTool("list_routine_properties", {
+    title: "List routine properties",
+    description: "Read the independent Routine property catalog before setting routine values. Never use Project property IDs for routines.",
+    inputSchema: { include_inactive: z.boolean().optional() },
+    outputSchema: { properties: z.array(propertyDefinitionOutput), count: z.number() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  }, async ({ include_inactive }) => {
+    const properties = await listRoutineProperties(env.DB, ownerId, include_inactive ?? false);
+    return { structuredContent: { properties, count: properties.length }, content: [{ type: "text", text: `Found ${properties.length} Routine properties.` }] };
+  });
+
   server.registerTool(
     "create_routine",
     {
@@ -1152,14 +1165,16 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
         actionSteps: z.string().optional().describe("Concrete steps for how to perform the routine."),
         cadence: z.enum(ROUTINE_CADENCES).optional(),
         active: z.boolean().optional(),
+        properties: z.record(z.string(), propertyValueSchema).optional().describe("Routine custom values keyed by IDs from list_routine_properties, not Project properties."),
         date: z.string().optional().describe("Date used for the returned completion state"),
       },
       outputSchema: { routine: routineOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ title, description, triggerPoint, actionPlace, actionSteps, cadence, active, date }) => {
+    async ({ title, description, triggerPoint, actionPlace, actionSteps, cadence, active, date, properties }) => {
       const selectedDate = date ?? new Date().toISOString().slice(0, 10);
       const created = await createRoutine(ownerId, {
+        properties,
         title,
         description,
         triggerPoint,
@@ -1190,14 +1205,16 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
         actionSteps: z.string().optional(),
         cadence: z.enum(ROUTINE_CADENCES).optional(),
         active: z.boolean().optional(),
+        properties: z.record(z.string(), propertyValueSchema).optional().describe("Only changed Routine values keyed by IDs from list_routine_properties; null clears a value."),
         date: z.string().optional(),
       },
       outputSchema: { routine: routineOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ id, title, description, triggerPoint, actionPlace, actionSteps, cadence, active, date }) => {
+    async ({ id, title, description, triggerPoint, actionPlace, actionSteps, cadence, active, date, properties }) => {
       const selectedDate = date ?? new Date().toISOString().slice(0, 10);
       const updated = await updateRoutine(ownerId, id, {
+        properties,
         title,
         description,
         triggerPoint,

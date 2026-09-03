@@ -16,9 +16,9 @@ const localBindingConfig = {
   compatibility_flags: ["nodejs_compat"],
   triggers: { crons: ["*/15 * * * *"] },
   assets: {
-    // Keep the prerendered shell and static assets on Cloudflare's asset path so
-    // an idle Worker does not add a cold start before the first paint.
-    run_worker_first: ["/_vinext/image"],
+    // Resolve workspace entry hosts before serving the shared prerendered shell.
+    // Other static assets retain Cloudflare's direct asset path.
+    run_worker_first: ["/", "/_vinext/image"],
   },
   d1_databases: d1
     ? [

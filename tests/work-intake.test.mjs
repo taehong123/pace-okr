@@ -15,6 +15,7 @@ function compile(source, dependencies = {}) {
 const intake = compile(await readFile(new URL("../lib/work-intake.ts", import.meta.url), "utf8"));
 const mcpSource = await readFile(new URL("../app/mcp/route.ts", import.meta.url), "utf8");
 const reviewCore = compile(await readFile(new URL("../lib/project-review.ts", import.meta.url), "utf8"));
+const routineProperties = compile(await readFile(new URL("../lib/routine-properties.ts", import.meta.url), "utf8"));
 
 function fixture() {
   const db = new DatabaseSync(":memory:");
@@ -170,6 +171,7 @@ function mcpFixture() {
   const serverModule = compile(`${mcpSource}\nexport { createOkrptrServer };`, {
     "cloudflare:workers": { env: { DB: fixtureData.d1 } },
     "@/lib/pace-data": data,
+    "@/lib/routine-properties": routineProperties,
     "@/lib/work-intake": intake,
     "@/lib/project-review": { ...reviewCore, getProjectReview: async () => reviewReceipt },
     "@/lib/project-review-service": { stageProjectReview: async (_auth, input, recommendations) => {

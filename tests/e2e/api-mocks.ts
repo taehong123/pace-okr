@@ -131,6 +131,10 @@ export async function installApiMocks(page: Page, options: { withRoutine?: boole
     const request = route.request();
     const url = new URL(request.url());
     if (url.pathname === "/api/bootstrap") return json(route, bootstrapResponse);
+    if (url.pathname === "/api/workspaces/profile") return json(route, { profile: {
+      id: bootstrapResponse.workspaces[0].id, name: bootstrapResponse.workspaces[0].name,
+      address: null, revision: 0, canManage: workspaceRole === "owner" || workspaceRole === "admin", subdomainsEnabled: false, url: null,
+    } });
     if (url.pathname === "/api/account/marketing-consent") return json(route, { consent: {
       marketingDataConsent: true, advertisingEmailConsent: true,
       marketingEligible: true, needsReaffirmation: false, reaffirmAfter: null,
@@ -316,6 +320,7 @@ export async function installApiMocks(page: Page, options: { withRoutine?: boole
     }
     if (url.pathname === "/api/project-templates") return json(route, { templates: [] });
     if (url.pathname === "/api/properties") return json(route, { properties: bootstrapResponse.properties });
+    if (url.pathname === "/api/routine-properties") return json(route, { properties: [] });
     if (url.pathname === "/api/checklists") return json(route, { items: [] });
     if (url.pathname === "/api/recommendations") return json(route, { recommendations: [] });
     if (url.pathname === "/api/daily-scrum" && request.method() === "GET") return json(route, {

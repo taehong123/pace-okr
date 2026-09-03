@@ -436,9 +436,9 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   assert.match(layout, /__OKRPTR_BOOTSTRAP_REQUEST__/);
   assert.match(layout, /serviceWorker\.register\("\/sw\.js"/);
   assert.match(viteConfig, /prerender:\s*\{\s*routes:\s*"\*"\s*\}/);
-  assert.match(viteConfig, /idle Worker does not add a cold start before the first paint/);
-  assert.match(viteConfig, /run_worker_first:\s*\["\/_vinext\/image"\]/);
-  assert.doesNotMatch(viteConfig, /run_worker_first:\s*\["\/"/);
+  assert.match(viteConfig, /Resolve workspace entry hosts before serving the shared prerendered shell/);
+  assert.match(viteConfig, /run_worker_first:\s*\["\/",\s*"\/_vinext\/image"\]/);
+  assert.ok(worker.indexOf("workspaceSubdomainRedirect(request") < worker.indexOf("env.ASSETS.fetch(request)"));
   assert.match(assetHeaders, /max-age=31536000, immutable/);
   assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: public, max-age=31536000, immutable/);
   assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: no-cache, must-revalidate/);

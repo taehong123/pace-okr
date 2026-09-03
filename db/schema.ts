@@ -25,6 +25,28 @@ export const workspaces = sqliteTable(
   ],
 );
 
+export const workspaceIdentitySettings = sqliteTable("workspace_identity_settings", {
+  workspaceId: text("workspace_id").primaryKey().references(() => workspaces.id, { onDelete: "cascade" }),
+  address: text("address"),
+  revision: integer("revision").notNull().default(0),
+  updatedAt: text("updated_at").notNull(),
+});
+
+// Old addresses remain reserved after deletion, so shared links cannot change owners.
+export const workspaceAddresses = sqliteTable("workspace_addresses", {
+  address: text("address").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  index("idx_workspace_addresses_workspace").on(table.workspaceId),
+  check("workspace_addresses_lowercase", sql`${table.address} = lower(${table.address})`),
+]);
+
+export const workspaceIdentityGuards = sqliteTable("workspace_identity_guards", {
+  id: text("id").primaryKey(),
+  valid: integer("valid").notNull(),
+}, (table) => [check("workspace_identity_guard_valid", sql`${table.valid} = 1`)]);
+
 export const appMigrations = sqliteTable(
   "app_migrations",
   {
@@ -687,6 +709,19 @@ export const dailyTaskSnapshots = sqliteTable(
   ],
 );
 
+export const routinePropertyDefinitions = sqliteTable("routine_property_definitions", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  name: text("name").notNull(),
+  type: text("type").notNull(),
+  options: text("options").notNull().default("[]"),
+  defaultValue: text("default_value").notNull().default("null"),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [uniqueIndex("idx_routine_properties_owner_name").on(table.ownerId, sql`lower(${table.name})`)]);
+
 export const routines = sqliteTable(
   "routines",
   {
@@ -699,6 +734,7 @@ export const routines = sqliteTable(
     triggerPoint: text("trigger_point").notNull().default(""),
     actionPlace: text("action_place").notNull().default(""),
     actionSteps: text("action_steps").notNull().default(""),
+    propertiesJson: text("properties_json").notNull().default("{}"),
     cadence: text("cadence").notNull().default("daily"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     sortOrder: integer("sort_order").notNull().default(0),

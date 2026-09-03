@@ -9,6 +9,19 @@ const projectProperties = [
   { id: "contribution", name: "KR 기여 예상치", type: "number", systemKey: null, active: true, options: [], defaultValue: null, sortOrder: 20 },
 ];
 
+test("removed project properties are absent from default settings, with a separate recovery view", async ({ page }) => {
+  await installApiMocks(page, { projectProperties, teamWorkspace: true });
+  await page.goto("/?settings=workspace&tab=projects");
+  const manager = page.locator(".project-property-manager");
+  for (const name of retired) await expect(manager.locator(".project-property-select").filter({ hasText: name })).toHaveCount(0);
+  await expect(manager.locator(".project-property-select").filter({ hasText: "책임자" })).toBeVisible();
+  await manager.getByRole("button", { name: "제거한 속성 (5)", exact: true }).click();
+  for (const name of retired) await expect(manager.locator(".project-property-select").filter({ hasText: name })).toBeVisible();
+  await manager.getByRole("button", { name: "사용 중인 속성 보기", exact: true }).click();
+  for (const name of retired) await expect(manager.locator(".project-property-select").filter({ hasText: name })).toHaveCount(0);
+  await expect(manager.getByRole("button", { name: "복원", exact: true })).toHaveCount(0);
+});
+
 test("Project create and detail show deadline/owner, never retired fields, and preserve values", async ({ page }) => {
   await installApiMocks(page, { projectProperties, withRoutine: true });
   const writes: Record<string, unknown>[] = [];

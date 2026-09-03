@@ -1,0 +1,19 @@
+.workspace-identity { display: grid; gap: var(--space-6); padding: var(--space-6); border-top: 1px solid var(--border-default); }
+.workspace-identity form { display: grid; gap: var(--space-2); min-width: 0; }
+.workspace-identity label { color: var(--text-primary); font-size: var(--type-label); font-weight: 600; }
+.workspace-identity-edit { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.workspace-identity input { flex: 1 1 12rem; width: 100%; min-width: 0; min-height: var(--field-height); padding: var(--space-2) var(--space-3); border: 1px solid var(--border-control); border-radius: var(--radius-control); background: var(--bg-surface); color: var(--text-primary); font: inherit; font-size: var(--type-body); }
+.workspace-identity button { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); min-height: var(--control-height); }
+.workspace-address-input { display: flex; align-items: center; gap: var(--space-2); flex: 1 1 16rem; min-width: 0; }
+.workspace-address-input input { flex-basis: 6rem; }
+.workspace-address-input > span { color: var(--text-secondary); font-size: var(--type-label); white-space: nowrap; }
+.workspace-identity small, .workspace-identity p { margin: 0; color: var(--text-secondary); font-size: var(--type-label); overflow-wrap: anywhere; }
+.workspace-identity > p { display: flex; align-items: center; gap: var(--space-2); }
+.workspace-identity-link { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.workspace-identity-link a { overflow-wrap: anywhere; color: var(--text-link); font-size: var(--type-label); }
+.workspace-identity-error { display: grid; gap: var(--space-2); justify-items: start; }
+.workspace-identity-error p { color: var(--red); }
+@media (max-width: 700px) {
+  .workspace-identity { padding: var(--space-4); }
+  .workspace-identity-edit > input, .workspace-address-input { flex-basis: 100%; }
+}

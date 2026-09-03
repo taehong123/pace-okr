@@ -1,7 +1,8 @@
 // Explicit columns keep credentials and future, unrelated tables out of snapshots.
 export const BACKUP_COLUMNS: Record<string, string[]> = Object.fromEntries(Object.entries({
   okr_cycles: "id,owner_id,name,department,version,start_date,end_date,status,created_at,updated_at",
-  routines: "id,owner_id,system_key,assignee_member_id,title,description,trigger_point,action_place,action_steps,cadence,active,sort_order,created_at,updated_at",
+  routine_property_definitions: "id,owner_id,name,type,options,default_value,active,sort_order,created_at,updated_at",
+  routines: "id,owner_id,system_key,assignee_member_id,title,description,trigger_point,action_place,action_steps,properties_json,cadence,active,sort_order,created_at,updated_at",
   items: "id,owner_id,cycle_id,parent_id,routine_id,kind,title,description,status,priority,cadence,progress,due_date,source,source_ref,created_by_user_id,sort_order,archived_at,archived_from_status,archive_root_id,created_at,updated_at",
   property_definitions: "id,owner_id,name,type,options,default_value,system_key,active,sort_order,created_at,updated_at",
   project_templates: "id,owner_id,name,description,content,plain_text,created_by_user_id,created_at,updated_at",
@@ -137,6 +138,11 @@ export async function createWorkspaceBackup(ctx: Context, ownerId: string, reaso
 export function validateSnapshot(value: unknown, ownerId: string): Snapshot {
   const data = value as Snapshot;
   if (!data || data.version !== 1 || data.workspaceId !== ownerId || !data.tables || !Number.isSafeInteger(data.revision)) throw new BackupError("invalid_backup", "현재 워크스페이스에서 복원할 수 없는 백업입니다.");
+  // Older signed snapshots predate routine custom fields. Preserve restore compatibility.
+  if (!("routine_property_definitions" in data.tables)) {
+    data.tables.routine_property_definitions = [];
+    if (Array.isArray(data.tables.routines)) data.tables.routines = data.tables.routines.map((row) => ({ properties_json: "{}", ...row }));
+  }
   for (const table of BACKUP_TABLES) {
     const rows = data.tables[table];
     if (!Array.isArray(rows) || rows.length > MAX_ROWS) throw new BackupError("invalid_backup", "백업 데이터가 완전하지 않습니다.");

@@ -8,8 +8,10 @@ const source = await readFile(new URL("../lib/workspace-backups.ts", import.meta
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 const backups = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 const schema = JSON.parse(await readFile(new URL("../drizzle/meta/0034_snapshot.json", import.meta.url), "utf8"));
+const currentSchema = JSON.parse(await readFile(new URL("../drizzle/meta/0038_snapshot.json", import.meta.url), "utf8"));
 const migration = await readFile(new URL("../drizzle/0036_workspace_backups.sql", import.meta.url), "utf8");
 const linksMigration = await readFile(new URL("../drizzle/0037_restore_links.sql", import.meta.url), "utf8");
+const routineMigration = await readFile(new URL("../drizzle/0042_routine_properties.sql", import.meta.url), "utf8");
 
 function fixture() {
   const sqlite = new DatabaseSync(":memory:");
@@ -23,6 +25,7 @@ function fixture() {
   }
   for (const sql of migration.split("--> statement-breakpoint")) if (sql.trim()) sqlite.exec(sql);
   for (const sql of linksMigration.split("--> statement-breakpoint")) if (sql.trim()) sqlite.exec(sql);
+  sqlite.exec(routineMigration);
   const d1 = {
     prepare(sql) {
       return { sql, params: [], bind(...params) { return { ...this, params }; },
@@ -51,6 +54,8 @@ function fixture() {
     INSERT INTO workspace_members (id,workspace_id,user_id,display_name,role,status) VALUES ('member','w','u','Owner','owner','active'), ('former','w','old-user','Former','member','active');
     INSERT INTO okr_cycles (id,owner_id,name,start_date,end_date) VALUES ('cycle','w','Quarter','2026-07-01','2026-09-30');
     INSERT INTO routines (id,owner_id,title,assignee_member_id) VALUES ('routine','w','Daily','member');
+    INSERT INTO routine_property_definitions (id,owner_id,name,type,created_at,updated_at) VALUES ('routine-property','w','점검 수','number','now','now');
+    UPDATE routines SET properties_json='{"routine-property":3}' WHERE id='routine';
     INSERT INTO items (id,owner_id,kind,title,cycle_id,parent_id,routine_id) VALUES
       ('objective','w','objective','Objective','cycle',NULL,NULL), ('kr','w','key_result','KR','cycle','objective',NULL),
       ('initiative','w','initiative','Initiative','cycle','kr',NULL), ('project','w','project','Project','cycle','initiative',NULL),
@@ -241,7 +246,7 @@ test("revision triggers cover all restored tables and business changes do not al
   const f = fixture();
   for (const name of backups.BACKUP_TABLES) {
     assert.equal(f.sqlite.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND tbl_name=?").get(name).n, 3, name);
-    assert.deepEqual(backups.BACKUP_COLUMNS[name], Object.keys(schema.tables[name].columns));
+    assert.deepEqual(backups.BACKUP_COLUMNS[name], Object.keys(currentSchema.tables[name].columns));
   }
   const before = f.sqlite.prepare("SELECT revision FROM workspace_backup_state WHERE owner_id='other'").get().revision;
   f.sqlite.exec("UPDATE items SET title='Changed' WHERE id='task'");
