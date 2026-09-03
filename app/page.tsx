@@ -3749,6 +3749,7 @@ function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRo
   const [propertyAttempt, setPropertyAttempt] = useState(0);
   const [propertiesReady, setPropertiesReady] = useState(false);
   const activeProperties = propertyDefinitions.filter((property) => property.active);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -3968,25 +3969,27 @@ function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRo
       <div className="routine-cards">
         {loadError && rows === null ? <AsyncState icon={AlertTriangle} title="Routine을 불러오지 못했습니다" detail="잠시 후 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => { setRows(null); setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} /> : rows === null ? <AsyncState icon={LoaderCircle} title="Routine을 불러오는 중입니다" loading /> : rows.length ? rows.map((routine) => {
           const draft = routineDraft(routine);
+          const expanded = expandedIds.has(routine.id);
+          const detailsId = `routine-details-${routine.id}`;
           return (
             <article className={`routine-card ${routine.active ? "" : "inactive"} ${routine.systemKey === "general" ? "general-routine" : ""}`} key={routine.id}>
               <header>
                 {routine.systemKey === "general" ? <span className="general-routine-icon"><Inbox size={13} /></span> : <button className={`task-check ${routine.completed ? "checked" : ""}`} disabled={!routine.active} onClick={() => void toggleCompletion(routine)} aria-label={routine.completed ? "완료 취소" : "완료 처리"}><Check size={12} /></button>}
-                <div><b>{routine.title}{routine.systemKey === "general" && <em className="system-badge">기본</em>}</b><small>{routine.systemKey === "general" ? "Project·Routine에 연결하지 않은 Task가 모이는 기본 목록" : `${routineCadenceLabel(routine.cadence)} · ${routine.completed ? "오늘 완료" : "오늘 미완료"}`}</small></div>
+                {routine.systemKey === "general" ? <div><b>{routine.title}<em className="system-badge">기본</em></b><small>Project·Routine에 연결하지 않은 Task가 모이는 기본 목록</small></div> : <button type="button" className="routine-expand" aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpandedIds((current) => { const next = new Set(current); if (next.has(routine.id)) next.delete(routine.id); else next.add(routine.id); return next; })}><span><b>{routine.title}</b><small>{routineCadenceLabel(routine.cadence)} · {routine.completed ? "오늘 완료" : "오늘 미완료"} · {teamMembers.find((member) => member.id === routine.assigneeMemberId)?.displayName ?? "담당자 없음"}{hasDraftChange(routine) ? " · 저장하지 않은 변경" : ""}</small></span><ChevronDown size={16} /></button>}
                 {routine.systemKey !== "general" && <label className="routine-switch"><input type="checkbox" checked={routine.active} onChange={() => void toggleActive(routine)} /><span /><em className="sr-only">Routine 활성 상태</em></label>}
                 {routine.systemKey !== "general" && <button className="icon-button" onClick={() => void remove(routine.id)} aria-label="Routine 삭제" title="Routine 삭제"><Trash2 size={13} /></button>}
               </header>
-              {routine.systemKey !== "general" && <div className="routine-guide-grid">
+              {routine.systemKey !== "general" && <div className="routine-details" id={detailsId} hidden={!expanded}><div className="routine-guide-grid">
                 <label><span>트리거 포인트</span><input value={draft.triggerPoint} onChange={(event) => updateDraft(routine, "triggerPoint", event.target.value)} placeholder="예: 오전 9시, Slack 알림 확인 후" /></label>
                 <label><span>어디서</span><input value={draft.actionPlace} onChange={(event) => updateDraft(routine, "actionPlace", event.target.value)} placeholder="예: OKRPTR 작업 탭, 캘린더, 책상" /></label>
                 <label><span>목적/메모</span><input value={draft.description} onChange={(event) => updateDraft(routine, "description", event.target.value)} placeholder="왜 반복하는지" /></label>
                 <label className="routine-steps"><span>무엇을 어떻게</span><textarea value={draft.actionSteps} onChange={(event) => updateDraft(routine, "actionSteps", event.target.value)} placeholder="1. 확인할 것&#10;2. 실행할 것&#10;3. 끝났다고 판단하는 기준" rows={3} /></label>
-              </div>}
-              {routine.systemKey !== "general" && <section className="routine-property-values" aria-label={`${routine.title} 속성 값`}><h3>속성 값</h3>{activeProperties.length ? propertyInputs({ ...routine.properties, ...propertyDrafts[routine.id] }, (id, value) => setPropertyDrafts((current) => ({ ...current, [routine.id]: { ...current[routine.id], [id]: value } }))) : <p>{propertiesReady ? "아직 루틴 속성이 없습니다. 루틴 속성 관리에서 추가할 수 있습니다." : "루틴 속성을 불러오는 중입니다."}</p>}</section>}
-              {routine.systemKey !== "general" && <footer>
+              </div>
+              <section className="routine-property-values" aria-label={`${routine.title} 속성 값`}><h3>속성 값</h3>{activeProperties.length ? propertyInputs({ ...routine.properties, ...propertyDrafts[routine.id] }, (id, value) => setPropertyDrafts((current) => ({ ...current, [routine.id]: { ...current[routine.id], [id]: value } }))) : <p>{propertiesReady ? "아직 루틴 속성이 없습니다. 루틴 속성 관리에서 추가할 수 있습니다." : "루틴 속성을 불러오는 중입니다."}</p>}</section>
+              <footer>
                 <label className="routine-assignee"><span>담당자</span><select value={routine.assigneeMemberId ?? ""} onChange={(event) => void updateAssignee(routine, event.target.value)}><option value="">담당자 없음</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>
                 <button className="primary-action" disabled={readOnly || !hasDraftChange(routine) || saving} aria-busy={saving} onClick={() => void saveRoutineGuide(routine)}><Check size={14} />저장</button>
-              </footer>}
+              </footer></div>}
             </article>
           );
         }) : <EmptyState icon={Repeat2} title="등록된 Routine이 없습니다" />}
