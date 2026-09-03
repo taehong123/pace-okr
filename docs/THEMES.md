@@ -74,6 +74,16 @@ the first body paint. The client and BlockNote consume the same registry.
 
 ## Component rules
 
+`app/workspace-design.css`, imported after the base stylesheet, aligns signed-in
+surfaces with the landing's document layout. It does not own theme values or
+application behavior. Page content is capped at 75rem, with the existing 32/16px
+insets and 24px top / 16px heading spacing. Body descriptions use the body role;
+regularly scanned secondary values use the label role rather than metadata.
+Project tabs use an underline, while the workspace, conversation and settings
+sections remain unframed. Repeated items and actual dialogs retain their frames.
+Mobile navigation grows with its labels, and content retains bottom clearance.
+Do not apply desktop sidebar padding or navigation margins to the mobile bar.
+
 - Surface text uses `text-primary`, `text-secondary` or `text-tertiary` on the
   corresponding `bg-*` surface. Links and icons have their own tokens.
 - Actions use **paired** `button-{role}-bg` and `button-{role}-fg` tokens, never
@@ -104,6 +114,11 @@ the first body paint. The client and BlockNote consume the same registry.
   Add roles to the registry and contrast tests instead of theme-specific patches.
 
 ## Regression checks
+
+- `tests/e2e/workspace-design.spec.ts`: ten working views across seven widths,
+  actual Korean/Latin/numeral fonts, long titles, 200% user text, unclipped mobile
+  navigation, settings header separation and keyboard close, and six-theme
+  conversation contrast. All application requests use fictional fixtures.
 
 - `tests/e2e/design-balance.spec.ts`: desktop density stays stable through 4K;
   editable values and mobile touch targets retain their size, search/date values

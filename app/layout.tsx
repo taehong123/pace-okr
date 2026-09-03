@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./fonts.css";
 import "./globals.css";
+import "./workspace-design.css";
 import { themeBootstrapScript, themeCss } from "@/lib/themes";
 
 const bootstrapScript = themeBootstrapScript + `(() => {

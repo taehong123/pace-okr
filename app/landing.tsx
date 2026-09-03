@@ -8,9 +8,9 @@ import "./landing.css";
 
 const productSizes = [
   { width: 1120, height: 264, mobileWidth: 358, mobileHeight: 361 },
-  { width: 1120, height: 521, mobileWidth: 358, mobileHeight: 696 },
-  { width: 860, height: 482, mobileWidth: 362, mobileHeight: 806 },
-  { width: 1120, height: 475, mobileWidth: 358, mobileHeight: 633 },
+  { width: 1120, height: 521, mobileWidth: 358, mobileHeight: 697 },
+  { width: 860, height: 488, mobileWidth: 362, mobileHeight: 818 },
+  { width: 1120, height: 608, mobileWidth: 358, mobileHeight: 754 },
 ];
 
 function subscribeLanguage(callback: () => void) {

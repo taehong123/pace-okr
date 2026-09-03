@@ -51,7 +51,7 @@ for (const theme of THEMES) {
     page.on("pageerror", (error) => errors.push(error.message));
     await installApiMocks(page, { teamWorkspace: true, slackState: "connected" });
     await page.addInitScript(({ key, mode }) => localStorage.setItem(key, mode), { key: THEME_STORAGE_KEY, mode: theme.mode });
-    for (const view of ["okr", "work", "inbox", "routines", "my_work", "scrum", "integrations", "billing"]) {
+    for (const view of ["okr", "work", "inbox", "routines", "my_work", "scrum", "integrations", "billing", "data", "recommendations"]) {
       await page.goto(`/?view=${view}`);
       await expect(page.locator(".workspace")).toBeVisible();
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme.mode);
