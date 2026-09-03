@@ -2,7 +2,8 @@ import { expect, test } from "@playwright/test";
 import { installApiMocks } from "./api-mocks";
 import AxeBuilder from "@axe-core/playwright";
 
-test("failed reservation is visible and repair preserves settings without an immediate message", async ({ page }) => {
+for (const repairFails of [false, true]) {
+test(`failed reservation remains visible until repair succeeds (${repairFails ? "failure" : "success"})`, async ({ page }) => {
   await installApiMocks(page, { slackState: "connected", teamWorkspace: true });
   const writes: unknown[] = [];
   let repaired = false;
@@ -10,6 +11,7 @@ test("failed reservation is visible and repair preserves settings without an imm
   await page.route("**/api/slack/daily/settings", async (route) => {
     if (route.request().method() === "PATCH") {
       writes.push(route.request().postDataJSON());
+      if (repairFails) return route.fulfill({ status: 500, json: { error: "예약 재확인 실패" } });
       repaired = true;
     }
     return route.fulfill({ json: {
@@ -30,9 +32,35 @@ test("failed reservation is visible and repair preserves settings without an imm
   expect(layout.font).toMatch(/Pretendard/);
   await page.getByRole("button", { name: "예약 복구", exact: true }).focus();
   await page.keyboard.press("Enter");
+  if (repairFails) {
+    await expect(page.getByText("예약 재확인 실패", { exact: true })).toBeVisible();
+    await expect(page.locator(".slack-connected-title")).toContainText("예약 실패");
+    await expect(page.getByRole("button", { name: "예약 복구", exact: true })).toBeEnabled();
+    expect(writes).toEqual([{ action: "repair" }]);
+    return;
+  }
   await expect(page.locator(".slack-connected-title")).toContainText("사용 중");
   await expect(page.getByText("데일리 발송 예약에 문제가 있습니다")).toHaveCount(0);
   expect(writes).toEqual([{ action: "repair" }]);
+});
+}
+
+test("failed disconnect keeps the installation visible and allows retry", async ({ page }) => {
+  await installApiMocks(page, { slackState: "connected", teamWorkspace: true });
+  let calls = 0;
+  await page.route("**/api/slack/disconnect", async (route) => {
+    calls += 1;
+    expect(route.request().method()).toBe("POST");
+    return route.fulfill({ status: 409, json: { error: "reservation cancellation pending" } });
+  });
+  await page.goto("/?view=work&settings=workspace&tab=integrations&bot=daily");
+  await page.getByText("Slack 연결 관리", { exact: true }).click();
+  const button = page.getByRole("button", { name: "Slack 연결 해제", exact: true });
+  await button.click();
+  await expect(page.getByText("Slack 연결을 해제하지 못했습니다.", { exact: true })).toBeVisible();
+  await expect(button).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Slack 연결", exact: true })).toHaveCount(0);
+  expect(calls).toBe(1);
 });
 
 test("viewer cannot invoke reservation repair", async ({ page }) => {

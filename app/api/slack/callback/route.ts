@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { authorizeRequest, canManageTeam, consumeSlackOAuthState, hasWorkspaceAdminAccess, saveSlackConnection, SlackWorkspaceConnectionError } from "@/lib/pace-data";
+import { authorizeRequest, canManageTeam, consumeSlackOAuthState, getSlackConnection, getSlackConnectionByTeam, hasWorkspaceAdminAccess, saveSlackConnection, SlackWorkspaceConnectionError } from "@/lib/pace-data";
 import { classifySlackOAuthError, decryptSlackSecret, encryptSlackSecret, exchangeSlackCode, redirectWithSlackStatus, revokeSlackToken, SlackOAuthExchangeError, slackConfigured, slackScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { disconnectSlackDaily, syncSlackDailyInstallation } from "@/lib/slack-daily";
 
@@ -49,6 +49,10 @@ async function handleSlackCallback(request: Request) {
     const botToken = install.access_token ?? "";
     const teamId = install.team?.id ?? "";
     if (!botToken || !teamId) return redirectWithSlackStatus(request, returnTo, "oauth_exchange_failed");
+    const targetConnection = await getSlackConnectionByTeam(teamId);
+    if (targetConnection && targetConnection.ownerId !== state.ownerId) return redirectWithSlackStatus(request, returnTo, "workspace_already_connected");
+    const currentConnection = await getSlackConnection(state.ownerId);
+    if (currentConnection && currentConnection.teamId !== teamId) await disconnectSlackDaily(state.ownerId, currentConnection);
     const { previousConnection } = await saveSlackConnection({
       ownerId: state.ownerId,
       userId: state.userId,
@@ -72,7 +76,6 @@ async function handleSlackCallback(request: Request) {
 
 async function finalizeSlackInstallation(ownerId: string, teamId: string, previousConnection: Awaited<ReturnType<typeof saveSlackConnection>>["previousConnection"], runtime: SlackRuntimeEnv) {
   if (previousConnection && previousConnection.teamId !== teamId) {
-    try { await disconnectSlackDaily(ownerId, previousConnection); } catch { /* The new connection remains valid even if old schedules cannot be cancelled. */ }
     try {
       const previousToken = await decryptSlackSecret(previousConnection.encryptedBotToken, runtime.SLACK_TOKEN_ENCRYPTION_KEY!);
       await revokeSlackToken(previousToken);

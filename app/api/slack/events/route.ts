@@ -1,6 +1,6 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { getSlackConnectionByTeam } from "@/lib/pace-data";
-import { handleDeliveredDailyReminder, reconcileDailyReminders } from "@/lib/slack-daily";
+import { handleDeliveredDailyReminder, repairSlackDailyReminders } from "@/lib/slack-daily";
 import { slackConfigured, verifySlackRequest, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 
 type SlackEventEnvelope = {
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     const blockIds = (event.blocks ?? []).flatMap((block) => block.block_id ? [block.block_id] : []);
     waitUntil(handleDeliveredDailyReminder({ teamId, channelId: event.channel, botId: event.user, blockIds }).then(() => undefined));
   } else {
-    waitUntil(reconcileDailyReminders(connection.ownerId));
+    waitUntil(repairSlackDailyReminders(connection.ownerId));
   }
   return new Response(null, { status: 200 });
 }

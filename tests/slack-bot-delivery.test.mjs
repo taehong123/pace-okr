@@ -17,6 +17,7 @@ function compile(source, dependencies = {}) {
 const transport = compile(await read("../lib/slack-automation.ts"));
 const source = await read("../lib/slack-bot-delivery.ts");
 const managementSource = await read("../lib/workspace-management-bot.ts");
+const dailySource = await read("../lib/slack-daily.ts");
 const files = await readdir(new URL("../drizzle/", import.meta.url));
 const migrationName = files.find((name) => name.endsWith("_slack_bot_deliveries.sql"));
 assert.ok(migrationName, "generated delivery migration must exist");
@@ -36,7 +37,15 @@ function harness(t) {
     CREATE TABLE activity_log(owner_id TEXT, item_id TEXT, action TEXT, payload TEXT, created_at TEXT);
     CREATE TABLE slack_automations(id TEXT PRIMARY KEY, owner_id TEXT, active INTEGER, channel_id TEXT, trigger_type TEXT, trigger_status TEXT,
       message_template TEXT, last_triggered_at TEXT, last_delivery_status TEXT, last_error TEXT);
-    CREATE TABLE slack_automation_deliveries(id TEXT PRIMARY KEY, owner_id TEXT, automation_id TEXT, item_id TEXT, status TEXT, error TEXT, sent_at TEXT);`);
+    CREATE TABLE slack_automation_deliveries(id TEXT PRIMARY KEY, owner_id TEXT, automation_id TEXT, item_id TEXT, status TEXT, error TEXT, sent_at TEXT);
+    CREATE TABLE workspace_members(id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT, display_name TEXT);
+    CREATE TABLE slack_daily_channels(owner_id TEXT, channel_id TEXT);
+    CREATE TABLE daily_submissions(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, scrum_date TEXT, version INTEGER, member_name TEXT, member_email TEXT,
+      yesterday_note TEXT DEFAULT '', today_note TEXT DEFAULT '', blockers_note TEXT DEFAULT '', no_planned_tasks INTEGER DEFAULT 1,
+      skip_reason TEXT, skip_note TEXT DEFAULT '', source TEXT DEFAULT 'web', submitted_at TEXT);
+    CREATE TABLE daily_task_snapshots(id TEXT, submission_id TEXT, sort_order INTEGER);
+    CREATE TABLE slack_daily_publications(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, submission_id TEXT, scrum_date TEXT, channel_id TEXT,
+      slack_message_ts TEXT, status TEXT DEFAULT 'pending', error TEXT DEFAULT '', attempts INTEGER DEFAULT 0, updated_at TEXT);`);
   db.exec(migration.replaceAll("--> statement-breakpoint", ""));
   for (const team of ["a", "b"]) {
     db.prepare("INSERT INTO workspaces VALUES(?,?,NULL)").run(team, `팀 ${team}`);
@@ -46,6 +55,8 @@ function harness(t) {
     db.prepare("INSERT INTO items VALUES(?,?,'task',?,'blocked',NULL,NULL)").run(`item-${team}`, team, `업무 ${team}`);
     db.prepare("INSERT INTO slack_automations VALUES(?,?,1,?,'task_status_changed','blocked','template',NULL,'never','')").run(`rule-${team}`, team, `C-${team}`);
     db.prepare("INSERT INTO slack_automation_deliveries VALUES(?,?,?,?,'pending','',NULL)").run(`delivery-${team}`, team, `rule-${team}`, `item-${team}`);
+    db.prepare("INSERT INTO workspace_members VALUES(?,?,'active',?)").run(`member-${team}`, team, `멤버 ${team}`);
+    db.prepare("INSERT INTO slack_daily_channels VALUES(?,?)").run(team, `C-${team}`);
   }
   const raw = { prepare(sql) {
     const stmt = db.prepare(sql); let values = [];
@@ -55,15 +66,15 @@ function harness(t) {
   const calls = [], behavior = { code: {}, loseResponse: false, beforeDecrypt: null };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, request) => {
-    assert.equal(url, "https://slack.com/api/chat.postMessage");
+    assert.ok(["https://slack.com/api/chat.postMessage", "https://slack.com/api/chat.update"].includes(url));
     assert.ok(request.signal, "network calls must have a timeout");
     const payload = JSON.parse(request.body), token = request.headers.Authorization;
-    calls.push({ payload, token });
+    calls.push({ payload, token, method: url.split("/").at(-1) });
     if (behavior.loseResponse) throw new Error("lost response after send");
     const code = behavior.code[token];
     if (code === "ratelimited") return new Response("rate limited", { status: 429, headers: { "Retry-After": "180" } });
     if (code) return Response.json({ ok: false, error: code });
-    return Response.json({ ok: true, ts: `${calls.length}.000001` });
+    return Response.json({ ok: true, ts: payload.ts || `${calls.length}.000001` });
   };
   const api = compile(source, {
     "cloudflare:workers": { env: { DB: raw, SLACK_TOKEN_ENCRYPTION_KEY: "mock" } },
@@ -76,11 +87,25 @@ function harness(t) {
     "@/lib/slack-daily": { listSlackChannels: async () => [] },
     "@/lib/slack-bot-delivery": api,
   });
+  const daily = compile(dailySource, {
+    "cloudflare:workers": { env: { DB: raw } }, "drizzle-orm": {}, "@/db": {}, "@/db/schema": {},
+    "@/lib/pace-data": { getSlackConnection: async (ownerId) => db.prepare("SELECT * FROM slack_connections WHERE owner_id=?").get(ownerId) },
+    "@/lib/slack-daily-status": {}, "@/lib/slack-oauth": {}, "@/lib/slack-bot-delivery": api,
+    "@/lib/daily-bot": { normalizeDailySkipReason: () => null },
+  });
   t.after(() => { globalThis.fetch = originalFetch; db.close(); });
   const input = (team = "a", overrides = {}) => ({ ownerId: team, botKind: "automation", subjectId: `delivery-${team}`, eventKey: "same-event",
     payload: { channel: `C-${team}`, text: `알림 ${team}` }, expiresAt: "2026-09-04T00:00:00.000Z", ...overrides });
   const receipt = (team = "a") => db.prepare("SELECT * FROM slack_bot_deliveries WHERE owner_id=? ORDER BY created_at DESC LIMIT 1").get(team);
-  return { db, raw, calls, behavior, api, management, input, receipt };
+  function publication(team, version = 1) {
+    const submissionId = `submission-${team}-${version}`, id = `publication-${team}-${version}`;
+    db.prepare(`INSERT INTO daily_submissions(id,owner_id,member_id,scrum_date,version,member_name,member_email,submitted_at)
+      VALUES(?,?,?,'2026-09-03',?,?,?,?)`).run(submissionId, team, `member-${team}`, version, `멤버 ${team}`, `${team}@example.com`, NOW.toISOString());
+    db.prepare(`INSERT INTO slack_daily_publications(id,owner_id,member_id,submission_id,scrum_date,channel_id,updated_at)
+      VALUES(?,?,?,?,'2026-09-03',?,?)`).run(id, team, `member-${team}`, submissionId, `C-${team}`, NOW.toISOString());
+    return { submissionId, id };
+  }
+  return { db, raw, calls, behavior, api, management, daily, publication, input, receipt };
 }
 
 test("delivery migration is additive LF and enforces tenant/event uniqueness and workspace cleanup", async (t) => {
@@ -118,6 +143,32 @@ test("rate limits retain pending receipts, respect retry-after and isolate the o
   assert.equal(receipt().status, "sent");
   assert.equal(calls.length, 3);
   assert.equal(calls[0].payload.client_msg_id, calls[2].payload.client_msg_id);
+});
+
+test("background retries leave queued receipts intact when the request budget is exhausted", async (t) => {
+  const { api, raw, input, behavior, calls, receipt } = harness(t);
+  behavior.code["Bearer token-a"] = "ratelimited";
+  behavior.code["Bearer token-b"] = "ratelimited";
+  await api.deliverSlackBotMessage(raw, input());
+  await api.deliverSlackBotMessage(raw, input("b"));
+  behavior.code = {};
+  behavior.beforeDecrypt = () => t.mock.timers.tick(11_000);
+  const result = await api.runDueSlackBotDeliveries(raw, new Date(NOW.getTime() + 181_000));
+  assert.equal(result.checked, 1);
+  assert.equal(calls.length, 3);
+  assert.equal(receipt().status, "sent");
+  assert.equal(receipt("b").status, "retry");
+});
+
+test("management stops after a slow request and a later pass completes remaining reports", async (t) => {
+  const { management, raw, calls, behavior, db } = harness(t);
+  behavior.beforeDecrypt = () => t.mock.timers.tick(11_000);
+  await management.runDueWorkspaceManagementBots(raw);
+  assert.equal(calls.length, 1);
+  assert.equal(db.prepare("SELECT count(*) n FROM workspace_management_bot_settings WHERE last_sent_date IS NULL").get().n, 1);
+  behavior.beforeDecrypt = null;
+  await management.runDueWorkspaceManagementBots(raw);
+  assert.equal(calls.length, 2);
 });
 
 test("lost response is uncertain, never called successful and never blindly replayed", async (t) => {
@@ -223,6 +274,44 @@ test("management can recover a rejected report after reconnection but never rese
   const count = calls.length;
   await management.runDueWorkspaceManagementBots(raw, NOW, "b");
   assert.equal(calls.length, count);
+});
+
+test("daily sharing claims concurrent submissions once and edits the existing message for a new version", async (t) => {
+  const { daily, publication, calls, db } = harness(t);
+  const first = publication("a");
+  await Promise.all([daily.publishDailySubmission("a", first.submissionId), daily.publishDailySubmission("a", first.submissionId)]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "chat.postMessage");
+  const second = publication("a", 2);
+  await daily.publishDailySubmission("a", second.submissionId);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].method, "chat.update");
+  assert.equal(calls[1].payload.ts, "1.000001");
+  assert.equal(db.prepare("SELECT status FROM slack_daily_publications WHERE id=?").get(second.id).status, "sent");
+});
+
+test("uncertain daily sharing cannot be retried or create a second message through a newer submission", async (t) => {
+  const { daily, publication, calls, behavior, db } = harness(t);
+  const first = publication("a");
+  behavior.loseResponse = true;
+  await daily.publishDailySubmission("a", first.submissionId);
+  behavior.loseResponse = false;
+  await assert.rejects(daily.retryDailyPublication("a", first.id), /중복 방지/);
+  const second = publication("a", 2);
+  await daily.publishDailySubmission("a", second.submissionId);
+  assert.equal(calls.length, 1);
+  assert.equal(db.prepare("SELECT status FROM slack_daily_publications WHERE id=?").get(second.id).status, "failed");
+});
+
+test("daily sharing ignores stale versions and foreign-tenant IDs, and honours channel removal", async (t) => {
+  const { daily, publication, calls, db } = harness(t);
+  const first = publication("a"), second = publication("a", 2);
+  await daily.publishDailySubmission("b", second.submissionId);
+  await daily.publishDailySubmission("a", first.submissionId);
+  assert.equal(calls.length, 0);
+  db.exec("DELETE FROM slack_daily_channels WHERE owner_id='a'");
+  await daily.publishDailySubmission("a", second.submissionId);
+  assert.equal(calls.length, 0);
 });
 
 test("bot writes require Owner/Admin and authenticated tenant scope before execution", async () => {

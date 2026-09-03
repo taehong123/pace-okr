@@ -1996,10 +1996,18 @@ export async function saveSlackConnection(input: {
   return { connection, previousConnection };
 }
 
-export async function deleteSlackConnection(ownerId: string) {
+export async function deleteSlackConnection(ownerId: string, expectedConnectionId?: string) {
   await ensureSchema();
   const current = await getSlackConnection(ownerId);
-  await getDb().delete(slackConnections).where(eq(slackConnections.ownerId, ownerId));
+  if (!current) return null;
+  if (expectedConnectionId && current.id !== expectedConnectionId) throw new Error("Slack 연결이 변경되었습니다. 현재 연결을 확인해 주세요.");
+  const result = expectedConnectionId
+    ? await env.DB.prepare(`DELETE FROM slack_connections WHERE owner_id = ? AND id = ?
+        AND NOT EXISTS (SELECT 1 FROM slack_daily_reminders WHERE owner_id = ?)
+        AND NOT EXISTS (SELECT 1 FROM slack_daily_settings WHERE owner_id = ? AND enabled = 1)`)
+        .bind(ownerId, current.id, ownerId, ownerId).run()
+    : await env.DB.prepare("DELETE FROM slack_connections WHERE owner_id = ? AND id = ?").bind(ownerId, current.id).run();
+  if (!result.meta.changes) throw new Error("Slack 연결이 변경되었습니다. 현재 연결을 확인해 주세요.");
   return current;
 }
 

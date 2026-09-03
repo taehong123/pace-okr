@@ -15,7 +15,7 @@ export async function PATCH(request: Request) {
   try {
     const payload = await request.json() as Record<string, unknown>;
     if (payload.action === "repair") {
-      await reconcileDailyReminders(authorization.ownerId);
+      await reconcileDailyReminders(authorization.ownerId, { verify: true });
       return Response.json(await getSlackDailySettings(authorization));
     }
     if (payload.action === "resync") {

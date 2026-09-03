@@ -140,13 +140,17 @@ export async function collectWorkspaceManagementSnapshot(ownerId: string, reques
 }
 
 export async function runDueWorkspaceManagementBots(db: D1Database, now = new Date(), ownerId?: string) {
+  const startedAt = Date.now();
   const settingsRows = await db.prepare(`SELECT s.* FROM workspace_management_bot_settings s
     JOIN workspaces w ON w.id = s.owner_id AND w.scheduled_deletion_at IS NULL
-    WHERE s.enabled = 1 AND s.channel_id <> '' ${ownerId ? "AND s.owner_id = ?" : ""}`)
+    WHERE s.enabled = 1 AND s.channel_id <> '' ${ownerId ? "AND s.owner_id = ?" : ""} ORDER BY s.owner_id`)
     .bind(...(ownerId ? [ownerId] : [])).all<Record<string, string | number | null>>();
   let sent = 0;
   let failed = 0;
-  for (const row of settingsRows.results) {
+  const rows = settingsRows.results;
+  const offset = ownerId || !rows.length ? 0 : Math.floor(now.getTime() / (15 * 60_000)) % rows.length;
+  for (const row of [...rows.slice(offset), ...rows.slice(0, offset)].slice(0, 20)) {
+    if (Date.now() - startedAt >= 10_000) break;
     try {
       const settings = serializeSettings(row);
       const parts = zonedParts(now, settings.timezone);

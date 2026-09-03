@@ -28,6 +28,8 @@ export type SlackDailyChannel = { id: string; name: string; isPrivate: boolean; 
 export const DAILY_REMINDER_BLOCK_PREFIX = "okrptr_daily_reminder:";
 const DAILY_REMINDER_TEXT = "[데일리 봇] 오늘의 데일리를 작성해 주세요.";
 const REMINDER_LEASE_MS = 120_000;
+const REMINDER_RETRY_MS = 5 * 60_000;
+const REMINDER_VERIFY_MS = 6 * 60 * 60_000;
 
 class SlackRequestError extends Error {
   constructor(public code: string | undefined, method: string, details: string[] = []) {
@@ -39,12 +41,12 @@ export async function slackTokenForConnection(connection: SlackConnection) {
   return decryptSlackSecret(connection.encryptedBotToken, (env as SlackRuntimeEnv).SLACK_TOKEN_ENCRYPTION_KEY!);
 }
 
-export async function slackApi<T extends SlackApiResult>(token: string, method: string, body: Record<string, unknown> = {}) {
+export async function slackApi<T extends SlackApiResult>(token: string, method: string, body: Record<string, unknown> = {}, signal?: AbortSignal) {
   const response = await fetch(`https://slack.com/api/${method}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15_000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
   });
   const result = await response.json() as T;
   if (!response.ok || !result.ok) throw new SlackRequestError(result.error, method, result.response_metadata?.messages);
@@ -426,82 +428,145 @@ export async function configureSlackDailyOnboarding(authorization: RequestAuthor
 }
 
 export async function disconnectSlackDaily(ownerId: string, connection: SlackConnection) {
-  const token = await slackTokenForConnection(connection);
-  const reminders = await env.DB.prepare("SELECT * FROM slack_daily_reminders WHERE owner_id = ? AND status = 'scheduled'")
+  // Pause first. An in-flight reservation rechecks this state and cancels itself.
+  await ensureDailySettingsRow(ownerId, connection);
+  const paused = await env.DB.prepare(`UPDATE slack_daily_settings SET enabled = 0, updated_at = ? WHERE owner_id = ?
+    AND EXISTS (SELECT 1 FROM slack_connections WHERE owner_id = ? AND id = ?)`)
+    .bind(new Date().toISOString(), ownerId, ownerId, connection.id).run();
+  if (!paused.meta.changes) throw new Error("Slack 연결이 변경되었습니다. 현재 연결을 확인해 주세요.");
+  const reminders = await env.DB.prepare("SELECT * FROM slack_daily_reminders WHERE owner_id = ?")
     .bind(ownerId).all<Record<string, string | number>>();
-  for (const reminder of reminders.results) await cancelScheduledReminder(token, reminder);
-  await env.DB.batch([
-    env.DB.prepare("DELETE FROM slack_daily_reminders WHERE owner_id = ?").bind(ownerId),
-    env.DB.prepare("DELETE FROM slack_member_links WHERE owner_id = ?").bind(ownerId),
-    env.DB.prepare("DELETE FROM slack_daily_channels WHERE owner_id = ?").bind(ownerId),
-    env.DB.prepare(`INSERT INTO slack_daily_settings (owner_id, enabled, install_status, required_scopes, onboarding_completed_at, last_error, updated_at)
-      VALUES (?, 0, 'not_connected', '', NULL, '', ?)
-      ON CONFLICT(owner_id) DO UPDATE SET enabled = 0, install_status = 'not_connected', required_scopes = '', onboarding_completed_at = NULL, last_error = '', updated_at = excluded.updated_at`)
-      .bind(ownerId, new Date().toISOString()),
+  for (const reminder of reminders.results) {
+    const result = await scheduleMemberReminder(ownerId, String(reminder.member_id), { force: true, connection });
+    if (result === "busy") throw new Error("진행 중인 Slack 예약을 정리하고 있습니다. 잠시 후 연결 해제를 다시 시도해 주세요.");
+  }
+  const cleanupGuard = `EXISTS (SELECT 1 FROM slack_daily_settings s JOIN slack_connections c ON c.owner_id = s.owner_id
+      WHERE s.owner_id = ? AND s.enabled = 0 AND c.id = ?)
+    AND NOT EXISTS (SELECT 1 FROM slack_daily_reminders WHERE owner_id = ?)`;
+  // The batch must not erase a newly enabled setup or an unobserved in-flight receipt.
+  const finalized = await env.DB.batch([
+    env.DB.prepare(`UPDATE slack_daily_settings SET install_status = 'not_connected', required_scopes = '',
+      onboarding_completed_at = NULL, last_error = '', updated_at = ? WHERE owner_id = ? AND ${cleanupGuard}`)
+      .bind(new Date().toISOString(), ownerId, ownerId, connection.id, ownerId),
+    env.DB.prepare(`DELETE FROM slack_member_links WHERE owner_id = ? AND ${cleanupGuard}`).bind(ownerId, ownerId, connection.id, ownerId),
+    env.DB.prepare(`DELETE FROM slack_daily_channels WHERE owner_id = ? AND ${cleanupGuard}`).bind(ownerId, ownerId, connection.id, ownerId),
   ]);
+  if (!finalized[0].meta.changes) throw new Error("Slack 설정이나 예약이 변경되었습니다. 현재 상태를 확인한 뒤 연결 해제를 다시 시도해 주세요.");
 }
 
-export async function reconcileDailyReminders(ownerId: string, options: { force?: boolean } = {}) {
-  const links = await getDb().select({ memberId: slackMemberLinks.memberId }).from(slackMemberLinks).where(eq(slackMemberLinks.ownerId, ownerId));
+export async function reconcileDailyReminders(ownerId: string, options: ReminderOptions = {}) {
+  const links = await env.DB.prepare(`SELECT member_id AS memberId FROM slack_member_links WHERE owner_id = ?
+    UNION SELECT member_id AS memberId FROM slack_daily_reminders WHERE owner_id = ?`).bind(ownerId, ownerId).all<{ memberId: string }>();
   const failures: string[] = [];
-  for (const link of links) {
+  for (const link of links.results) {
     try { await scheduleMemberReminder(ownerId, link.memberId, options); } catch (error) {
       failures.push(error instanceof Error ? error.message : "Slack 알림 예약 실패");
     }
   }
   await upsertSlackDailySettings(ownerId, { lastError: [...new Set(failures)].join(" · ") });
-  return { checked: links.length, failed: failures.length };
+  return { checked: links.results.length, failed: failures.length };
 }
 
 // Repair missing/failed/overdue reservations independently of a user's settings visit.
 // Slack owns the actual delivery time; this only maintains the next reservation.
 export async function repairSlackDailyReminders(ownerId: string) {
-  const due = await env.DB.prepare(`SELECT 1 FROM slack_daily_settings s
-    JOIN slack_member_links l ON l.owner_id = s.owner_id
-    JOIN workspace_members m ON m.workspace_id = l.owner_id AND m.id = l.member_id AND m.status = 'active'
-    LEFT JOIN slack_daily_preferences p ON p.owner_id = l.owner_id AND p.member_id = l.member_id
-    LEFT JOIN slack_daily_reminders r ON r.owner_id = l.owner_id AND r.member_id = l.member_id
-    WHERE s.owner_id = ? AND s.enabled = 1 AND s.install_status = 'connected' AND s.onboarding_completed_at IS NOT NULL
-      AND COALESCE(p.enabled, 1) = 1
-      AND (r.id IS NULL OR ((r.status != 'scheduled' OR r.post_at < ?) AND r.updated_at < ?)) LIMIT 1`)
-    .bind(ownerId, Math.floor(Date.now() / 1000) - 60, new Date(Date.now() - 5 * 60_000).toISOString()).first();
-  if (due) return reconcileDailyReminders(ownerId);
-  return { checked: 0, failed: 0 };
+  const now = Date.now();
+  const due = await env.DB.prepare(`WITH targets AS (
+      SELECT owner_id, member_id FROM slack_member_links WHERE owner_id = ?
+      UNION SELECT owner_id, member_id FROM slack_daily_reminders WHERE owner_id = ?
+    ) SELECT t.member_id FROM targets t
+    JOIN slack_daily_settings s ON s.owner_id = t.owner_id
+    LEFT JOIN slack_member_links l ON l.owner_id = t.owner_id AND l.member_id = t.member_id
+    LEFT JOIN workspace_members m ON m.workspace_id = t.owner_id AND m.id = t.member_id AND m.status = 'active'
+    LEFT JOIN slack_daily_preferences p ON p.owner_id = t.owner_id AND p.member_id = t.member_id
+    LEFT JOIN slack_daily_reminders r ON r.owner_id = t.owner_id AND r.member_id = t.member_id
+    WHERE (r.id IS NULL AND s.enabled = 1 AND s.install_status = 'connected' AND s.onboarding_completed_at IS NOT NULL
+        AND COALESCE(p.enabled, 1) = 1 AND m.id IS NOT NULL AND l.id IS NOT NULL)
+      OR (r.id IS NOT NULL AND r.updated_at < ? AND (
+        r.status != 'scheduled' OR r.post_at < ? OR r.updated_at < ? OR s.enabled = 0
+        OR COALESCE(p.enabled, 1) = 0 OR m.id IS NULL OR l.id IS NULL OR s.install_status != 'connected'
+        OR l.slack_user_id != r.slack_user_id))
+    ORDER BY COALESCE(r.updated_at, ''), t.member_id LIMIT 20`)
+    .bind(ownerId, ownerId, new Date(now - REMINDER_RETRY_MS).toISOString(), Math.floor(now / 1000) - 60,
+      new Date(now - REMINDER_VERIFY_MS).toISOString()).all<{ member_id: string }>();
+  const signal = AbortSignal.timeout(20_000);
+  let checked = 0, failed = 0;
+  const failures: string[] = [];
+  for (const row of due.results) {
+    if (signal.aborted) break;
+    try { await scheduleMemberReminder(ownerId, row.member_id, { verify: true, signal }); }
+    catch (error) {
+      failed += 1;
+      failures.push(error instanceof Error ? error.message : "Slack 알림 예약 실패");
+    }
+    checked += 1;
+  }
+  if (checked) {
+    const errors = await env.DB.prepare("SELECT DISTINCT last_error FROM slack_daily_reminders WHERE owner_id = ? AND status = 'failed' AND last_error != '' LIMIT 10")
+      .bind(ownerId).all<{ last_error: string }>();
+    await upsertSlackDailySettings(ownerId, { lastError: [...new Set([...failures, ...errors.results.map((row) => row.last_error)])].join(" · ") });
+  }
+  return { checked, failed };
 }
 
 export async function runDueSlackDailyReminders() {
   const rows = await env.DB.prepare(`SELECT s.owner_id FROM slack_daily_settings s
     JOIN workspaces w ON w.id = s.owner_id AND w.scheduled_deletion_at IS NULL
-    WHERE s.enabled = 1 AND s.install_status = 'connected' AND s.onboarding_completed_at IS NOT NULL`).all<{ owner_id: string }>();
+    WHERE (s.enabled = 1 AND s.install_status = 'connected' AND s.onboarding_completed_at IS NOT NULL)
+      OR EXISTS (SELECT 1 FROM slack_daily_reminders r WHERE r.owner_id = s.owner_id)
+    ORDER BY s.updated_at, s.owner_id LIMIT 20`).all<{ owner_id: string }>();
   for (const row of rows.results) {
     try { await repairSlackDailyReminders(row.owner_id); }
     catch (error) { console.error("slack_daily_repair_failed", row.owner_id, error instanceof Error ? error.message : "Unknown failure"); }
+    // Rotate bounded maintenance fairly, even when this workspace needs no repair.
+    try {
+      await env.DB.prepare("UPDATE slack_daily_settings SET updated_at = ? WHERE owner_id = ?")
+        .bind(new Date().toISOString(), row.owner_id).run();
+    } catch (error) { console.error("slack_daily_rotation_failed", row.owner_id, error instanceof Error ? error.message : "Unknown failure"); }
   }
 }
 
-export async function scheduleMemberReminder(ownerId: string, memberId: string, options: { force?: boolean } = {}) {
-  const [connection, settings, preference, link, existing, member] = await Promise.all([
-    getSlackConnection(ownerId),
-    ensureDailySettingsRow(ownerId, await getSlackConnection(ownerId)),
+type ReminderOptions = { force?: boolean; verify?: boolean; signal?: AbortSignal; connection?: SlackConnection };
+
+// This predicate fences the external write against current tenant, recipient and settings state.
+const ACTIVE_REMINDER_SQL = `EXISTS (SELECT 1 FROM slack_daily_settings s
+  JOIN workspaces w ON w.id = s.owner_id AND w.scheduled_deletion_at IS NULL
+  JOIN slack_connections c ON c.owner_id = s.owner_id
+  JOIN workspace_members m ON m.workspace_id = s.owner_id AND m.id = ? AND m.status = 'active'
+  JOIN slack_member_links l ON l.owner_id = s.owner_id AND l.member_id = m.id
+  LEFT JOIN slack_daily_preferences p ON p.owner_id = s.owner_id AND p.member_id = m.id
+  WHERE s.owner_id = ? AND c.id = ? AND c.team_id = l.team_id AND l.slack_user_id = ?
+    AND s.enabled = 1 AND s.install_status = 'connected' AND s.onboarding_completed_at IS NOT NULL
+    AND COALESCE(p.enabled, 1) = 1 AND COALESCE(p.reminder_time, s.reminder_time) = ?
+    AND COALESCE(p.timezone, s.timezone) = ? AND s.weekdays = ?)`;
+
+export async function scheduleMemberReminder(ownerId: string, memberId: string, options: ReminderOptions = {}) {
+  const connection = options.connection ?? await getSlackConnection(ownerId);
+  const [settings, preference, link, existing, member] = await Promise.all([
+    ensureDailySettingsRow(ownerId, connection),
     getDb().select().from(slackDailyPreferences).where(and(eq(slackDailyPreferences.ownerId, ownerId), eq(slackDailyPreferences.memberId, memberId))).limit(1).then((rows) => rows[0] ?? null),
     getDb().select().from(slackMemberLinks).where(and(eq(slackMemberLinks.ownerId, ownerId), eq(slackMemberLinks.memberId, memberId))).limit(1).then((rows) => rows[0] ?? null),
     env.DB.prepare("SELECT * FROM slack_daily_reminders WHERE owner_id = ? AND member_id = ? LIMIT 1").bind(ownerId, memberId).first<Record<string, string | number>>(),
     env.DB.prepare("SELECT id FROM workspace_members WHERE workspace_id = ? AND id = ? AND status = 'active'").bind(ownerId, memberId).first(),
   ]);
-  if (!connection || !link) return;
-  const enabled = member && settings.enabled && (preference?.enabled ?? true) && settings.installStatus === "connected";
-  const token = await slackTokenForConnection(connection);
-  if (!enabled) {
-    if (existing) await cancelScheduledReminder(token, existing);
-    await env.DB.prepare("DELETE FROM slack_daily_reminders WHERE owner_id = ? AND member_id = ?").bind(ownerId, memberId).run();
-    return;
-  }
+  if (!connection) return "unavailable";
+  const enabled = Boolean(member && link && link.teamId === connection.teamId && settings.enabled
+    && settings.onboardingCompletedAt && (preference?.enabled ?? true) && settings.installStatus === "connected");
+  if (!enabled && !existing) return "canceled";
   const nowSeconds = Math.floor(Date.now() / 1000);
   const leaseCutoff = new Date(Date.now() - REMINDER_LEASE_MS).toISOString();
-  if (existing?.status === "scheduling" && String(existing.updated_at) > leaseCutoff) return;
-  if (existing && existing.status === "scheduled" && Number(existing.post_at) > nowSeconds + 60 && !options.force) return;
-  const postAt = nextReminderEpoch(preference?.reminderTime ?? settings.reminderTime, preference?.timezone ?? settings.timezone, parseWeekdays(settings.weekdays));
-  const blockId = existing && Number(existing.post_at) === postAt ? String(existing.block_id) : `${DAILY_REMINDER_BLOCK_PREFIX}${crypto.randomUUID()}`;
+  if (existing?.status === "scheduling" && String(existing.updated_at) >= leaseCutoff) return "busy";
+  const time = preference?.reminderTime ?? settings.reminderTime;
+  const timezone = preference?.timezone ?? settings.timezone;
+  const previousPostAt = Number(existing?.post_at || 0);
+  const previousParts = enabled && previousPostAt > nowSeconds && previousPostAt <= nowSeconds + 60 ? zonedParts(new Date(previousPostAt * 1000), timezone) : null;
+  const imminent = previousParts && `${String(previousParts.hour).padStart(2, "0")}:${String(previousParts.minute).padStart(2, "0")}` === time
+    && parseWeekdays(settings.weekdays).includes(new Date(Date.UTC(previousParts.year, previousParts.month - 1, previousParts.day)).getUTCDay());
+  const postAt = enabled ? imminent ? previousPostAt : nextReminderEpoch(time, timezone, parseWeekdays(settings.weekdays)) : Number(existing!.post_at);
+  if (enabled && existing?.status === "scheduled" && Number(existing.post_at) === postAt && postAt > nowSeconds + 60
+    && existing.slack_user_id === link!.slackUserId && existing.bot_user_id === connection.botUserId && !options.force && !options.verify) return "scheduled";
+  const blockId = existing && Number(existing.post_at) === postAt && existing.slack_user_id === link?.slackUserId
+    ? String(existing.block_id) : `${DAILY_REMINDER_BLOCK_PREFIX}${crypto.randomUUID()}`;
   const now = new Date().toISOString();
   const claim = await env.DB.prepare(`INSERT INTO slack_daily_reminders
     (id, owner_id, member_id, slack_user_id, dm_channel_id, scheduled_message_id, post_at, block_id, bot_user_id, status, last_error, created_at, updated_at)
@@ -509,27 +574,56 @@ export async function scheduleMemberReminder(ownerId: string, memberId: string, 
     ON CONFLICT(owner_id, member_id) DO UPDATE SET status = 'scheduling', updated_at = excluded.updated_at
     WHERE slack_daily_reminders.updated_at = ?
       AND (slack_daily_reminders.status != 'scheduling' OR slack_daily_reminders.updated_at < ?)`)
-    .bind(existing?.id ?? crypto.randomUUID(), ownerId, memberId, link.slackUserId, link.dmChannelId || "", postAt, blockId, connection.botUserId, now, now, existing?.updated_at ?? "", leaseCutoff).run();
-  if (!claim.meta.changes) return;
+    .bind(existing?.id ?? crypto.randomUUID(), ownerId, memberId, link?.slackUserId ?? existing!.slack_user_id,
+      link?.dmChannelId || existing?.dm_channel_id || "", postAt, blockId, connection.botUserId, now, now, existing?.updated_at ?? "", leaseCutoff).run();
+  if (!claim.meta.changes) return "busy";
+  const signal = options.signal ?? AbortSignal.timeout(20_000);
+  const removeClaim = () => env.DB.prepare("DELETE FROM slack_daily_reminders WHERE owner_id = ? AND member_id = ? AND updated_at = ?")
+    .bind(ownerId, memberId, now).run();
   try {
-    const dmChannelId = await ensureDmChannel(token, link.slackUserId, link.dmChannelId);
+    const token = await slackTokenForConnection(connection);
+    if (!enabled) {
+      await cancelScheduledReminder(token, existing!, signal);
+      await removeClaim();
+      return "canceled";
+    }
+    const guardArgs = [memberId, ownerId, connection.id, link!.slackUserId, time, timezone, settings.weekdays];
+    const dmChannelId = await ensureDmChannel(token, link!.slackUserId, link!.dmChannelId, signal);
     // Reuse Slack's receipt after a lost response; do not schedule a duplicate.
-    const scheduled = await slackApi<SlackApiResult & { scheduled_messages?: Array<{ id: string; channel_id: string; post_at: number; text: string }> }>(token, "chat.scheduledMessages.list", { channel: dmChannelId, oldest: String(postAt - 1), latest: String(postAt + 1), limit: 100 });
-    let scheduledId = scheduled.scheduled_messages?.find((entry) => entry.channel_id === dmChannelId && entry.post_at === postAt && entry.text === DAILY_REMINDER_TEXT)?.id;
-    if (existing?.scheduled_message_id && String(existing.scheduled_message_id) !== scheduledId) await cancelScheduledReminder(token, existing);
-    await env.DB.prepare("UPDATE slack_daily_reminders SET post_at = ?, block_id = ?, dm_channel_id = ?, scheduled_message_id = ? WHERE owner_id = ? AND member_id = ? AND updated_at = ?")
-      .bind(postAt, blockId, dmChannelId, scheduledId ?? "", ownerId, memberId, now).run();
+    const receipts = await reminderReceipts(token, dmChannelId, postAt, signal);
+    let scheduledId = receipts.find((entry) => entry.text === DAILY_REMINDER_TEXT)?.id;
+    if (existing && (existing.dm_channel_id !== dmChannelId || Number(existing.post_at) !== postAt
+      || (existing.scheduled_message_id && String(existing.scheduled_message_id) !== scheduledId))) await cancelScheduledReminder(token, existing, signal);
+    const reservation = { post_at: postAt, block_id: blockId, dm_channel_id: dmChannelId, scheduled_message_id: scheduledId ?? "" };
+    const prepared = await env.DB.prepare(`UPDATE slack_daily_reminders SET post_at = ?, block_id = ?, dm_channel_id = ?, scheduled_message_id = ?
+      WHERE owner_id = ? AND member_id = ? AND updated_at = ? AND ${ACTIVE_REMINDER_SQL}`)
+      .bind(postAt, blockId, dmChannelId, scheduledId ?? "", ownerId, memberId, now, ...guardArgs).run();
+    if (!prepared.meta.changes) {
+      if (scheduledId) await cancelScheduledReminder(token, reservation, signal);
+      await removeClaim();
+      return "changed";
+    }
     if (!scheduledId) {
       const result = await slackApi<SlackApiResult & { scheduled_message_id?: string }>(token, "chat.scheduleMessage", {
         channel: dmChannelId, post_at: postAt, text: DAILY_REMINDER_TEXT, blocks: dailyReminderBlocks(blockId),
-      });
+      }, signal);
       scheduledId = result.scheduled_message_id;
       if (!scheduledId) throw new Error("Slack 예약 메시지 ID를 받지 못했습니다.");
     }
-    await env.DB.prepare(`UPDATE slack_daily_reminders SET scheduled_message_id = ?, slack_user_id = ?, bot_user_id = ?,
-      status = 'scheduled', last_error = '', updated_at = ? WHERE owner_id = ? AND member_id = ? AND updated_at = ?`)
-      .bind(scheduledId, link.slackUserId, connection.botUserId, new Date().toISOString(), ownerId, memberId, now).run();
-    if (dmChannelId !== link.dmChannelId) await getDb().update(slackMemberLinks).set({ dmChannelId, updatedAt: now }).where(eq(slackMemberLinks.id, link.id));
+    reservation.scheduled_message_id = scheduledId;
+    // Keep the receipt durable even when the user changed settings while Slack replied.
+    await env.DB.prepare("UPDATE slack_daily_reminders SET scheduled_message_id = ? WHERE owner_id = ? AND member_id = ? AND updated_at = ?")
+      .bind(scheduledId, ownerId, memberId, now).run();
+    const completed = await env.DB.prepare(`UPDATE slack_daily_reminders SET slack_user_id = ?, bot_user_id = ?,
+      status = 'scheduled', last_error = '', updated_at = ? WHERE owner_id = ? AND member_id = ? AND updated_at = ? AND ${ACTIVE_REMINDER_SQL}`)
+      .bind(link!.slackUserId, connection.botUserId, new Date().toISOString(), ownerId, memberId, now, ...guardArgs).run();
+    if (!completed.meta.changes) {
+      await cancelScheduledReminder(token, reservation, signal);
+      await removeClaim();
+      return "changed";
+    }
+    if (dmChannelId !== link!.dmChannelId) await getDb().update(slackMemberLinks).set({ dmChannelId, updatedAt: now }).where(eq(slackMemberLinks.id, link!.id));
+    return "scheduled";
   } catch (error) {
     await env.DB.prepare("UPDATE slack_daily_reminders SET status = 'failed', last_error = ?, updated_at = ? WHERE owner_id = ? AND member_id = ? AND updated_at = ?")
       .bind(error instanceof Error ? error.message : "Slack 알림 예약 실패", new Date().toISOString(), ownerId, memberId, now).run();
@@ -553,8 +647,7 @@ export async function handleDeliveredDailyReminder(input: { teamId: string; chan
 export async function publishDailySubmission(ownerId: string, submissionId: string) {
   const connection = await getSlackConnection(ownerId);
   if (!connection) return;
-  const token = await slackTokenForConnection(connection);
-  const submission = await loadSubmission(submissionId);
+  const submission = await loadSubmission(submissionId, ownerId);
   if (!submission) return;
   const publications = await env.DB.prepare(`SELECT * FROM slack_daily_publications
     WHERE owner_id = ? AND submission_id = ? AND status IN ('pending', 'failed') ORDER BY channel_id`)
@@ -562,26 +655,22 @@ export async function publishDailySubmission(ownerId: string, submissionId: stri
   for (const publication of publications.results) {
     const now = new Date().toISOString();
     try {
-      const previous = await env.DB.prepare(`SELECT publication.slack_message_ts FROM slack_daily_publications AS publication
-        INNER JOIN daily_submissions AS submission ON submission.id = publication.submission_id
-        WHERE publication.owner_id = ? AND publication.member_id = ? AND publication.scrum_date = ?
-          AND publication.channel_id = ? AND publication.slack_message_ts IS NOT NULL
-        ORDER BY submission.version DESC LIMIT 1`)
-        .bind(ownerId, submission.memberId, submission.date, publication.channel_id).first<{ slack_message_ts: string }>();
       const message = dailyCard(submission);
-      let timestamp = previous?.slack_message_ts ?? (publication.slack_message_ts ? String(publication.slack_message_ts) : null);
-      if (timestamp) {
-        await slackApi(token, "chat.update", { channel: publication.channel_id, ts: timestamp, ...message });
-      } else {
-        const result = await slackApi<SlackApiResult & { ts?: string }>(token, "chat.postMessage", { channel: publication.channel_id, ...message });
-        timestamp = result.ts ?? null;
+      const receipt = await env.DB.prepare("SELECT id FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = 'daily_publication' AND event_key = ?")
+        .bind(ownerId, publication.id).first();
+      if (!receipt && Number(publication.attempts) > 0 && !publication.slack_message_ts) {
+        throw new Error("이전 데일리 공유 결과를 확인할 수 없습니다. 중복 방지를 위해 자동 재게시하지 않습니다.");
       }
-      await env.DB.prepare(`UPDATE slack_daily_publications SET status = 'sent', error = '', slack_message_ts = ?,
-        attempts = attempts + 1, updated_at = ? WHERE id = ?`)
-        .bind(timestamp, now, publication.id).run();
+      const { deliverSlackBotMessage } = await import("@/lib/slack-bot-delivery");
+      await deliverSlackBotMessage(env.DB, {
+        ownerId, botKind: "daily_publication", subjectId: String(publication.id), eventKey: String(publication.id),
+        payload: { channel: String(publication.channel_id), ...message,
+          streamKey: JSON.stringify([submission.memberId, submission.date, publication.channel_id]) },
+        expiresAt: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+      });
     } catch (error) {
-      await env.DB.prepare(`UPDATE slack_daily_publications SET status = 'failed', error = ?, attempts = attempts + 1, updated_at = ? WHERE id = ?`)
-        .bind(error instanceof Error ? error.message : "Slack 채널 전송 실패", now, publication.id).run();
+      await env.DB.prepare(`UPDATE slack_daily_publications SET status = 'failed', error = ?, updated_at = ? WHERE owner_id = ? AND id = ?`)
+        .bind(error instanceof Error ? error.message : "Slack 채널 전송 실패", now, ownerId, publication.id).run();
     }
   }
 }
@@ -590,9 +679,10 @@ export async function retryDailyPublication(ownerId: string, publicationId: stri
   const row = await env.DB.prepare("SELECT submission_id FROM slack_daily_publications WHERE id = ? AND owner_id = ? LIMIT 1")
     .bind(publicationId, ownerId).first<{ submission_id: string }>();
   if (!row) throw new Error("게시 기록을 찾을 수 없습니다.");
-  await env.DB.prepare("UPDATE slack_daily_publications SET status = 'pending', error = '', updated_at = ? WHERE id = ?")
-    .bind(new Date().toISOString(), publicationId).run();
   await publishDailySubmission(ownerId, row.submission_id);
+  const result = await env.DB.prepare("SELECT status, error FROM slack_daily_publications WHERE owner_id = ? AND id = ?")
+    .bind(ownerId, publicationId).first<{ status: string; error: string }>();
+  if (result?.status === "failed") throw new Error(result.error || "데일리 공유 결과 확인이 필요합니다.");
 }
 
 export function dailyReminderBlocks(blockId: string) {
@@ -703,28 +793,50 @@ async function currentMemberForSlackPreference(authorization: RequestAuthorizati
   return member;
 }
 
-async function ensureDmChannel(token: string, slackUserId: string, existing: string) {
+async function ensureDmChannel(token: string, slackUserId: string, existing: string, signal?: AbortSignal) {
   if (existing) return existing;
-  const result = await slackApi<SlackApiResult & { channel?: { id?: string } }>(token, "conversations.open", { users: slackUserId, return_im: true });
+  const result = await slackApi<SlackApiResult & { channel?: { id?: string } }>(token, "conversations.open", { users: slackUserId, return_im: true }, signal);
   if (!result.channel?.id) throw new Error("Slack DM 채널을 열지 못했습니다.");
   return result.channel.id;
 }
 
-async function cancelScheduledReminder(token: string, reminder: Record<string, string | number>) {
-  if (!reminder.scheduled_message_id) return;
+type ReminderReceipt = { id: string; channel_id: string; post_at: number; text: string };
+
+async function reminderReceipts(token: string, channel: string, postAt: number, signal?: AbortSignal) {
+  if (!channel || !postAt) return [];
+  const receipts: ReminderReceipt[] = [];
+  let cursor = "";
+  for (let page = 0; page < 5; page += 1) {
+    const result = await slackApi<SlackApiResult & { scheduled_messages?: ReminderReceipt[] }>(token, "chat.scheduledMessages.list", {
+      channel, oldest: String(postAt - 1), latest: String(postAt + 1), limit: 100, ...(cursor ? { cursor } : {}),
+    }, signal);
+    receipts.push(...(result.scheduled_messages ?? []).filter((entry) => entry.channel_id === channel && Number(entry.post_at) === postAt));
+    cursor = result.response_metadata?.next_cursor ?? "";
+    if (!cursor) return receipts;
+  }
+  throw new Error("Slack 예약 목록을 모두 확인하지 못했습니다. 중복 방지를 위해 재예약을 보류했습니다.");
+}
+
+async function cancelScheduledReminder(token: string, reminder: Record<string, string | number>, signal?: AbortSignal) {
+  const channel = String(reminder.dm_channel_id), postAt = Number(reminder.post_at);
+  const id = String(reminder.scheduled_message_id || "") || (await reminderReceipts(token, channel, postAt, signal)).find((entry) => entry.text === DAILY_REMINDER_TEXT)?.id;
+  if (!id) return;
   try {
-    await slackApi(token, "chat.deleteScheduledMessage", { channel: reminder.dm_channel_id, scheduled_message_id: reminder.scheduled_message_id });
+    await slackApi(token, "chat.deleteScheduledMessage", { channel, scheduled_message_id: id }, signal);
   } catch (error) {
-    // Only a confirmed absent/delivered reservation is safe to replace.
     if (!(error instanceof SlackRequestError) || !["invalid_scheduled_message_id", "message_not_found"].includes(error.code ?? "")) throw error;
+    // Slack also returns this error during its final 60-second cancellation lock.
+    if ((await reminderReceipts(token, channel, postAt, signal)).some((entry) => entry.id === id)) {
+      throw new Error("Slack 발송 직전 예약은 취소할 수 없습니다. 기존 예약을 보존하고 재예약을 보류했습니다.");
+    }
   }
 }
 
-async function loadSubmission(id: string) {
+async function loadSubmission(id: string, ownerId: string) {
   const row = await env.DB.prepare(`SELECT submission.*, member.display_name AS current_member_name
     FROM daily_submissions AS submission
     LEFT JOIN workspace_members AS member ON member.workspace_id = submission.owner_id AND member.id = submission.member_id
-    WHERE submission.id = ? LIMIT 1`).bind(id).first<Record<string, string | number | null>>();
+    WHERE submission.id = ? AND submission.owner_id = ? LIMIT 1`).bind(id, ownerId).first<Record<string, string | number | null>>();
   if (!row) return null;
   const snapshots = await env.DB.prepare("SELECT * FROM daily_task_snapshots WHERE submission_id = ? ORDER BY sort_order").bind(id).all<Record<string, string | number | null>>();
   return {

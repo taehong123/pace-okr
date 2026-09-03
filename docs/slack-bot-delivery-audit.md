@@ -1,7 +1,7 @@
 # Shared Slack bot delivery safeguards
 
-Daily DMs use Slack's scheduled-message receipts; management and automation
-channel messages use `slack_bot_deliveries`. No existing recipients, rules or
+Daily DMs use Slack's scheduled-message receipts; management, automation and
+daily-publication channel messages use `slack_bot_deliveries`. No existing recipients, rules or
 message history are migrated or replayed. Migration 0040 is an additive receipt
 table with a workspace FK and tenant/kind/event uniqueness.
 
@@ -29,9 +29,16 @@ table with a workspace FK and tenant/kind/event uniqueness.
   not backfilled, because their actual Slack outcome is unknown.
 - Management errors are visible outside advanced settings. Accordion labels
   distinguish transmission problems and pending delivery from enabled settings.
+- Daily publications serialize each member/date/channel stream. New versions
+  update its confirmed message, not create another. Unknown previous posts block
+  fresh posts; old submission versions, removed members/channels and foreign
+  workspace IDs cannot publish. Historic failures without receipts stay explicit.
 - Automated retries and due management reports run independently from other
   maintenance jobs and also on authenticated workspace bootstrap, off its response
   critical path. No new notification destinations or permissions were added.
+- Each background pass stops starting work after ten seconds, leaving room for
+  its last bounded 15-second request. Management rotates up to twenty workspaces
+  per invocation so a malformed or slow first workspace cannot monopolize it.
 
 ## Operational limits that must stay explicit
 

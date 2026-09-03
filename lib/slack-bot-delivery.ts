@@ -2,8 +2,8 @@ import { env } from "cloudflare:workers";
 import { decryptSlackSecret, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { postSlackMessage, SlackMessageError } from "@/lib/slack-automation";
 
-type BotKind = "management" | "automation";
-type Payload = { channel: string; text: string; blocks?: unknown[]; test?: boolean };
+type BotKind = "management" | "automation" | "daily_publication";
+type Payload = { channel: string; text: string; blocks?: unknown[]; test?: boolean; streamKey?: string };
 type Row = {
   id: string; owner_id: string; bot_kind: BotKind; subject_id: string; event_key: string;
   connection_key: string; policy: string; payload: string; status: string; attempts: number;
@@ -50,15 +50,20 @@ export async function deliverSlackBotMessage(db: D1Database, input: {
 }
 
 export async function runDueSlackBotDeliveries(db: D1Database, now = new Date(), ownerId?: string) {
+  const startedAt = Date.now();
   const rows = await db.prepare(`SELECT id FROM slack_bot_deliveries
     WHERE status IN ('pending', 'retry', 'preparing', 'sending') AND retry_at <= ?
       ${ownerId ? "AND owner_id = ?" : ""} ORDER BY retry_at LIMIT 50`)
     .bind(now.toISOString(), ...(ownerId ? [ownerId] : [])).all<{ id: string }>();
+  let checked = 0;
   for (const row of rows.results) {
+    // Leave room for one bounded 15-second request inside waitUntil's lifetime.
+    if (Date.now() - startedAt >= 10_000) break;
+    checked += 1;
     try { await processDelivery(db, row.id, now); }
     catch (error) { console.error("slack_bot_delivery_repair_failed", row.id, error instanceof Error ? error.message : "Unknown failure"); }
   }
-  return { checked: rows.results.length };
+  return { checked };
 }
 
 async function processDelivery(db: D1Database, id: string, now: Date): Promise<Row> {
@@ -75,8 +80,12 @@ async function processDelivery(db: D1Database, id: string, now: Date): Promise<R
     return row;
   }
   const claim = await db.prepare(`UPDATE slack_bot_deliveries SET status = 'preparing', attempts = attempts + 1, retry_at = ?, updated_at = ?
-    WHERE id = ? AND status IN ('pending', 'retry', 'preparing') AND retry_at <= ? AND updated_at = ?`)
-    .bind(new Date(now.getTime() + LEASE_MS).toISOString(), stamp, id, stamp, row.updated_at).run();
+    WHERE id = ? AND status IN ('pending', 'retry', 'preparing') AND retry_at <= ? AND updated_at = ?
+      AND NOT EXISTS (SELECT 1 FROM slack_bot_deliveries other WHERE other.owner_id = slack_bot_deliveries.owner_id
+        AND other.bot_kind = 'daily_publication' AND other.id != slack_bot_deliveries.id
+        AND json_extract(other.payload, '$.streamKey') = json_extract(slack_bot_deliveries.payload, '$.streamKey')
+        AND other.status IN ('preparing', 'sending') AND other.retry_at > ?)`)
+    .bind(new Date(now.getTime() + LEASE_MS).toISOString(), stamp, id, stamp, row.updated_at, stamp).run();
   if (!claim.meta.changes) return (await db.prepare("SELECT * FROM slack_bot_deliveries WHERE id = ?").bind(id).first<Row>())!;
   let status = "failed", error = "", messageTs: string | null = null, retryAt = stamp;
   let requestStarted = false;
@@ -87,13 +96,31 @@ async function processDelivery(db: D1Database, id: string, now: Date): Promise<R
     const key = (env as SlackRuntimeEnv).SLACK_TOKEN_ENCRYPTION_KEY;
     if (!key) throw new Error("Slack 암호화 설정이 없습니다.");
     const token = await decryptSlackSecret(connection.encrypted_bot_token, key);
-    // Decryption and other async work must not use a stale connection or a stopped rule.
+    let previousTimestamp: string | undefined;
+    if (row.bot_kind === "daily_publication") {
+      const previous = await db.prepare(`SELECT old.slack_message_ts FROM slack_daily_publications old
+        JOIN slack_daily_publications current ON current.owner_id = old.owner_id AND current.member_id = old.member_id
+          AND current.scrum_date = old.scrum_date AND current.channel_id = old.channel_id
+        WHERE current.owner_id = ? AND current.id = ? AND old.slack_message_ts IS NOT NULL ORDER BY old.updated_at DESC LIMIT 1`)
+        .bind(row.owner_id, row.subject_id).first<{ slack_message_ts: string }>();
+      const receipt = await db.prepare(`SELECT message_ts FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = 'daily_publication'
+        AND json_extract(payload, '$.streamKey') = ? AND message_ts IS NOT NULL ORDER BY updated_at DESC LIMIT 1`)
+        .bind(row.owner_id, payload.streamKey).first<{ message_ts: string }>();
+      previousTimestamp = receipt?.message_ts || previous?.slack_message_ts;
+      if (!previousTimestamp) {
+        const uncertain = await db.prepare(`SELECT id FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = 'daily_publication'
+          AND id != ? AND json_extract(payload, '$.streamKey') = ? AND status IN ('sending', 'uncertain') LIMIT 1`)
+          .bind(row.owner_id, id, payload.streamKey).first();
+        if (uncertain) throw new SlackMessageError("이전 데일리 공유의 전송 결과 확인이 필요합니다. 중복 게시를 막기 위해 새 게시를 보류합니다.", "uncertain");
+      }
+    }
+    // Decryption/receipt lookup must not use a stale connection or a stopped rule.
     await validatePolicy(db, row, payload);
     const marked = await db.prepare("UPDATE slack_bot_deliveries SET status = 'sending' WHERE id = ? AND status = 'preparing' AND updated_at = ?")
       .bind(id, stamp).run();
     if (!marked.meta.changes) throw new CancelledDelivery("다른 작업에서 발송 상태를 변경했습니다.");
     requestStarted = true;
-    const receipt = await postSlackMessage(token, payload.channel, payload.text, { blocks: payload.blocks, clientMsgId: id });
+    const receipt = await postSlackMessage(token, payload.channel, payload.text, { blocks: payload.blocks, clientMsgId: id, messageTs: previousTimestamp });
     status = "sent"; messageTs = receipt.timestamp;
   } catch (failure) {
     error = (failure instanceof Error ? failure.message : "Slack 전송 실패").slice(0, 500);
@@ -129,6 +156,16 @@ async function readConnection(db: D1Database, ownerId: string) {
 }
 
 async function readPolicy(db: D1Database, ownerId: string, kind: BotKind, subjectId: string, test: boolean) {
+  if (kind === "daily_publication") {
+    const publication = await db.prepare(`SELECT p.channel_id, s.id, s.version, s.member_id FROM slack_daily_publications p
+      JOIN daily_submissions s ON s.id = p.submission_id AND s.owner_id = p.owner_id
+      JOIN slack_daily_channels c ON c.owner_id = p.owner_id AND c.channel_id = p.channel_id
+      JOIN workspace_members m ON m.workspace_id = p.owner_id AND m.id = s.member_id AND m.status = 'active'
+      WHERE p.owner_id = ? AND p.id = ? AND NOT EXISTS (SELECT 1 FROM daily_submissions newer
+        WHERE newer.owner_id = s.owner_id AND newer.member_id = s.member_id AND newer.scrum_date = s.scrum_date AND newer.version > s.version)`)
+      .bind(ownerId, subjectId).first<Record<string, string | number>>();
+    return publication ? { channel: String(publication.channel_id), settings: publication } : null;
+  }
   if (kind === "management") {
     const settings = await db.prepare("SELECT enabled, channel_id, weekdays, report_time, timezone, signals FROM workspace_management_bot_settings WHERE owner_id = ?")
       .bind(ownerId).first<Record<string, string | number>>();
@@ -154,7 +191,11 @@ async function validatePolicy(db: D1Database, row: Row, payload: Payload) {
 async function mirrorDelivery(db: D1Database, row: Row) {
   const payload = JSON.parse(row.payload) as Payload;
   const pending = ["pending", "preparing", "sending", "retry"].includes(row.status);
-  if (row.bot_kind === "automation") {
+  if (row.bot_kind === "daily_publication") {
+    await db.prepare(`UPDATE slack_daily_publications SET status = ?, error = ?, slack_message_ts = COALESCE(?, slack_message_ts),
+      attempts = ?, updated_at = ? WHERE owner_id = ? AND id = ?`)
+      .bind(row.status === "sent" ? "sent" : pending ? "pending" : "failed", row.last_error, row.message_ts, row.attempts, row.updated_at, row.owner_id, row.subject_id).run();
+  } else if (row.bot_kind === "automation") {
     const status = row.status === "sent" ? "sent" : pending ? "pending" : "failed";
     await db.prepare("UPDATE slack_automation_deliveries SET status = ?, error = ?, sent_at = ? WHERE owner_id = ? AND id = ?")
       .bind(status, row.last_error, row.message_ts ? row.updated_at : null, row.owner_id, row.subject_id).run();

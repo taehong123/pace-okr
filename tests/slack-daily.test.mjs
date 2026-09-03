@@ -16,23 +16,32 @@ function compile(source, dependencies = {}) {
   return loaded.exports;
 }
 const status = compile(await read("../lib/slack-daily-status.ts"));
+const dataSource = ts.createSourceFile("pace-data.ts", await read("../lib/pace-data.ts"), ts.ScriptTarget.Latest, true);
+const deleteConnectionSource = dataSource.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "deleteSlackConnection").getFullText(dataSource);
 const snake = (key) => key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 const camel = (row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key.replace(/_([a-z])/g, (_, c) => c.toUpperCase()), value]));
 
 function harness(t) {
   const db = new DatabaseSync(":memory:");
   db.exec(`CREATE TABLE workspaces(id TEXT PRIMARY KEY, scheduled_deletion_at TEXT);
+    CREATE TABLE slack_connections(id TEXT PRIMARY KEY, owner_id TEXT, team_id TEXT, bot_user_id TEXT, encrypted_bot_token TEXT);
     CREATE TABLE workspace_members(id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT);
-    CREATE TABLE slack_daily_settings(owner_id TEXT PRIMARY KEY, enabled INTEGER, weekdays TEXT, reminder_time TEXT, timezone TEXT, install_status TEXT, onboarding_completed_at TEXT, last_error TEXT, updated_at TEXT);
+    CREATE TABLE slack_daily_settings(owner_id TEXT PRIMARY KEY, enabled INTEGER, weekdays TEXT, reminder_time TEXT, timezone TEXT, install_status TEXT, onboarding_completed_at TEXT, last_error TEXT, updated_at TEXT, required_scopes TEXT);
     CREATE TABLE slack_daily_preferences(owner_id TEXT, member_id TEXT, enabled INTEGER, reminder_time TEXT, timezone TEXT);
-    CREATE TABLE slack_member_links(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, slack_user_id TEXT, dm_channel_id TEXT);
+    CREATE TABLE slack_member_links(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, slack_user_id TEXT, dm_channel_id TEXT, team_id TEXT);
+    CREATE TABLE slack_daily_channels(id TEXT PRIMARY KEY, owner_id TEXT);
     CREATE TABLE slack_daily_reminders(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, slack_user_id TEXT, dm_channel_id TEXT, scheduled_message_id TEXT, post_at INTEGER, block_id TEXT, bot_user_id TEXT, status TEXT, last_error TEXT, created_at TEXT, updated_at TEXT, UNIQUE(owner_id,member_id));
     INSERT INTO workspaces VALUES('workspace',NULL);
     INSERT INTO workspace_members VALUES('member','workspace','active');
-    INSERT INTO slack_daily_settings VALUES('workspace',1,'[0,1,2,3,4,5,6]','09:00','Asia/Seoul','connected','2026-09-02T00:00:00Z','old error','2026-09-02T00:00:00Z');
-    INSERT INTO slack_member_links VALUES('link','workspace','member','U-member','D-member');
+    INSERT INTO slack_connections VALUES('connection','workspace','T-team','U-bot','workspace');
+    INSERT INTO slack_daily_settings VALUES('workspace',1,'[0,1,2,3,4,5,6]','09:00','Asia/Seoul','connected','2026-09-02T00:00:00Z','old error','2026-09-02T00:00:00Z','');
+    INSERT INTO slack_member_links VALUES('link','workspace','member','U-member','D-member','T-team');
     INSERT INTO slack_daily_preferences VALUES('workspace','member',1,NULL,NULL);`);
-  const raw = { prepare(sql) {
+  const raw = { async batch(statements) {
+    db.exec("BEGIN");
+    try { const results = []; for (const statement of statements) results.push(await statement.run()); db.exec("COMMIT"); return results; }
+    catch (error) { db.exec("ROLLBACK"); throw error; }
+  }, prepare(sql) {
     let args = [];
     const prepared = db.prepare(sql);
     return { bind(...values) { args = values; return this; },
@@ -58,35 +67,45 @@ function harness(t) {
       }
     } }; } }; },
   };
-  const connection = { ownerId: "workspace", botUserId: "U-bot", encryptedBotToken: "mock", teamId: "T-team" };
+  const connectionFor = (column, value) => {
+    const row = db.prepare(`SELECT c.* FROM slack_connections c JOIN workspaces w ON w.id=c.owner_id AND w.scheduled_deletion_at IS NULL WHERE c.${column}=?`).get(value);
+    return row ? camel(row) : null;
+  };
   const api = compile(source, {
     "cloudflare:workers": { env: { DB: raw, SLACK_TOKEN_ENCRYPTION_KEY: "mock" } },
     "drizzle-orm": { eq: (key, value) => (row) => row[key] === value, and: (...conditions) => (row) => conditions.every((condition) => condition(row)) },
     "@/db": { getDb: () => orm }, "@/db/schema": schema, "@/lib/daily-bot": {},
-    "@/lib/pace-data": { getSlackConnection: async () => connection, getSlackConnectionByTeam: async () => connection, ensureWorkspace: async () => {} },
-    "@/lib/slack-oauth": { decryptSlackSecret: async () => "mock-token", slackScopes: [] },
+    "@/lib/pace-data": { getSlackConnection: async (owner) => connectionFor("owner_id", owner), getSlackConnectionByTeam: async (team) => connectionFor("team_id", team), ensureWorkspace: async () => {} },
+    "@/lib/slack-oauth": { decryptSlackSecret: async (owner) => `mock-token-${owner}`, slackScopes: [] },
     "@/lib/slack-daily-status": status,
   });
   const calls = [], pending = [];
-  const behavior = { rejectSchedule: false, loseResponse: false, rejectCancellation: false };
+  const behavior = { rejectSchedule: false, loseResponse: false, rejectCancellation: false, lockedCancellation: false, rejectTeam: "", onSchedule: null, paginate: false };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, options) => {
     assert.ok(url.startsWith("https://slack.com/api/"), "only mocked Slack requests are allowed");
     const method = url.split("/").at(-1), body = JSON.parse(options.body);
-    calls.push({ method, body });
-    if (method === "chat.scheduledMessages.list") return Response.json({ ok: true, scheduled_messages: pending.filter((entry) => entry.channel_id === body.channel && entry.post_at > Number(body.oldest) && entry.post_at < Number(body.latest)) });
+    const owner = options.headers.Authorization.replace("Bearer mock-token-", "");
+    assert.ok(["workspace", "other"].includes(owner), "each Slack call uses its own workspace token");
+    calls.push({ method, body, owner });
+    if (method === "chat.scheduledMessages.list") {
+      if (behavior.paginate && !body.cursor) return Response.json({ ok: true, scheduled_messages: [], response_metadata: { next_cursor: "next" } });
+      return Response.json({ ok: true, scheduled_messages: pending.filter((entry) => entry.owner === owner && entry.channel_id === body.channel && entry.post_at > Number(body.oldest) && entry.post_at < Number(body.latest)) });
+    }
     if (method === "chat.scheduleMessage") {
       const ids = body.blocks.flatMap((block) => block.block_id ? [block.block_id] : []);
       assert.equal(new Set(ids).size, ids.length, "Slack block IDs must be unique");
-      if (behavior.rejectSchedule) return Response.json({ ok: false, error: "invalid_blocks", response_metadata: { messages: ["duplicate block_id"] } });
+      if (behavior.rejectSchedule || behavior.rejectTeam === owner) return Response.json({ ok: false, error: "invalid_blocks", response_metadata: { messages: ["duplicate block_id"] } });
+      if (behavior.onSchedule) await behavior.onSchedule({ owner, body });
       const id = `Q-${calls.length}`;
-      pending.push({ id, channel_id: body.channel, post_at: body.post_at, text: body.text });
+      pending.push({ id, channel_id: body.channel, post_at: body.post_at, text: body.text, owner });
       if (behavior.loseResponse) { behavior.loseResponse = false; throw new Error("response lost"); }
       return Response.json({ ok: true, scheduled_message_id: id });
     }
     if (method === "chat.deleteScheduledMessage") {
       if (behavior.rejectCancellation) return Response.json({ ok: false, error: "ratelimited" });
-      const index = pending.findIndex((entry) => entry.id === body.scheduled_message_id);
+      if (behavior.lockedCancellation) return Response.json({ ok: false, error: "invalid_scheduled_message_id" });
+      const index = pending.findIndex((entry) => entry.owner === owner && entry.id === body.scheduled_message_id && entry.channel_id === body.channel);
       if (index >= 0) pending.splice(index, 1);
       return Response.json({ ok: true });
     }
@@ -94,7 +113,13 @@ function harness(t) {
   };
   t.after(() => { globalThis.fetch = originalFetch; db.close(); });
   const reminder = () => db.prepare("SELECT * FROM slack_daily_reminders WHERE owner_id='workspace' AND member_id='member'").get();
-  return { api, db, calls, pending, behavior, reminder };
+  const addOther = () => db.exec(`INSERT INTO workspaces VALUES('other',NULL);
+    INSERT INTO slack_connections VALUES('connection-other','other','T-other','U-other-bot','other');
+    INSERT INTO workspace_members VALUES('member-other','other','active');
+    INSERT INTO slack_daily_settings VALUES('other',1,'[0,1,2,3,4,5,6]','09:00','America/New_York','connected','2026-09-02T00:00:00Z','','2026-09-02T00:00:00Z','');
+    INSERT INTO slack_member_links VALUES('link-other','other','member-other','U-other','D-other','T-other');
+    INSERT INTO slack_daily_preferences VALUES('other','member-other',1,NULL,NULL);`);
+  return { api, db, calls, pending, behavior, reminder, addOther, connectionFor, raw };
 }
 
 test("scheduled, manual and test reminders have unique block IDs and keep the delivery marker", (t) => {
@@ -148,6 +173,7 @@ test("a lost Slack response recovers its existing receipt without duplicate deli
   await assert.rejects(api.scheduleMemberReminder("workspace", "member"), /response lost/);
   assert.equal(reminder().status, "failed");
   await api.scheduleMemberReminder("workspace", "member");
+  assert.equal(pending.length, 1, "recovery must not cancel the receipt it just adopted");
   assert.equal(reminder().scheduled_message_id, pending[0].id);
   assert.equal(calls.filter((call) => call.method === "chat.scheduleMessage").length, 1);
 });
@@ -204,3 +230,254 @@ test("recovery is off the bootstrap critical path and independently registered i
   assert.ok(route.indexOf("if (!canManageTeam(authorization))") < route.indexOf('payload.action === "repair"'));
   assert.match(source, /setupComplete: scheduleResults.length === memberIds.length/);
 });
+
+test("two real workspace fixtures retain separate tokens, recipients, timezones and failure recovery", async (t) => {
+  const { api, db, calls, behavior, pending, addOther } = harness(t);
+  addOther();
+  behavior.rejectTeam = "workspace";
+  await api.runDueSlackDailyReminders();
+  const rows = db.prepare("SELECT * FROM slack_daily_reminders ORDER BY owner_id").all();
+  assert.equal(rows.length, 2);
+  assert.equal(rows.find((r) => r.owner_id === "workspace").status, "failed");
+  assert.equal(rows.find((r) => r.owner_id === "other").status, "scheduled");
+  assert.equal(pending.length, 1);
+  for (const call of calls) assert.equal(call.body.channel, call.owner === "workspace" ? "D-member" : "D-other");
+  const otherReceipt = { ...pending[0] };
+  behavior.rejectTeam = "";
+  db.exec("UPDATE slack_daily_reminders SET updated_at='2026-01-01T00:00:00Z' WHERE owner_id='workspace'");
+  await api.repairSlackDailyReminders("workspace");
+  assert.deepEqual(pending.find((r) => r.owner === "other"), otherReceipt);
+  assert.equal(pending.length, 2);
+  assert.notEqual(pending[0].post_at, pending[1].post_at);
+});
+
+test("a new recipient cannot bypass another recipient's failure cooldown", async (t) => {
+  const { api, db, calls, behavior } = harness(t);
+  behavior.rejectSchedule = true;
+  await api.repairSlackDailyReminders("workspace");
+  db.exec(`INSERT INTO workspace_members VALUES('new-member','workspace','active');
+    INSERT INTO slack_member_links VALUES('new-link','workspace','new-member','U-new','D-new','T-team')`);
+  const before = calls.length;
+  behavior.rejectSchedule = false;
+  await api.repairSlackDailyReminders("workspace");
+  assert.ok(calls.slice(before).every((call) => call.body.channel === "D-new"));
+  assert.equal(db.prepare("SELECT status FROM slack_daily_reminders WHERE member_id='member'").get().status, "failed");
+});
+
+for (const change of ["pause", "opt-out", "removed-member", "unlinked", "remapped", "reinstalled", "time-change"]) {
+  test(`in-flight schedule is fenced and canceled after ${change}`, async (t) => {
+    const { api, db, behavior, pending, reminder } = harness(t);
+    behavior.onSchedule = async () => {
+      const sql = {
+        pause: "UPDATE slack_daily_settings SET enabled=0",
+        "opt-out": "UPDATE slack_daily_preferences SET enabled=0",
+        "removed-member": "UPDATE workspace_members SET status='removed'",
+        unlinked: "DELETE FROM slack_member_links",
+        remapped: "UPDATE slack_member_links SET slack_user_id='U-replaced'",
+        reinstalled: "UPDATE slack_connections SET id='new-connection'",
+        "time-change": "UPDATE slack_daily_settings SET reminder_time='12:34'",
+      }[change];
+      db.exec(sql);
+      assert.equal(await api.scheduleMemberReminder("workspace", "member", { force: true }), "busy");
+    };
+    assert.equal(await api.scheduleMemberReminder("workspace", "member"), "changed");
+    assert.equal(pending.length, 0);
+    assert.equal(reminder(), undefined);
+  });
+}
+
+test("missing links and disabled members cancel known or response-lost receipts rather than abandon them", async (t) => {
+  const { api, db, pending, reminder, behavior } = harness(t);
+  behavior.loseResponse = true;
+  await assert.rejects(api.scheduleMemberReminder("workspace", "member"), /response lost/);
+  db.exec("DELETE FROM slack_member_links");
+  await api.reconcileDailyReminders("workspace");
+  assert.equal(pending.length, 0);
+  assert.equal(reminder(), undefined);
+});
+
+test("disconnect retains failed receipts on cancellation failure and cleans all states on retry", async (t) => {
+  const { api, db, pending, reminder, behavior, connectionFor } = harness(t);
+  await api.scheduleMemberReminder("workspace", "member");
+  const receipt = reminder().scheduled_message_id;
+  db.exec("UPDATE slack_daily_reminders SET status='failed'");
+  behavior.rejectCancellation = true;
+  await assert.rejects(api.disconnectSlackDaily("workspace", connectionFor("owner_id", "workspace")), /ratelimited/);
+  assert.equal(reminder().scheduled_message_id, receipt);
+  assert.equal(db.prepare("SELECT enabled FROM slack_daily_settings").get().enabled, 0);
+  behavior.rejectCancellation = false;
+  await api.disconnectSlackDaily("workspace", connectionFor("owner_id", "workspace"));
+  assert.equal(pending.length, 0);
+  assert.equal(reminder(), undefined);
+  assert.equal(db.prepare("SELECT install_status FROM slack_daily_settings").get().install_status, "not_connected");
+});
+
+test("disconnect refuses to discard a reservation while its request is in flight", async (t) => {
+  const { api, behavior, pending, connectionFor } = harness(t);
+  behavior.onSchedule = () => assert.rejects(api.disconnectSlackDaily("workspace", connectionFor("owner_id", "workspace")), /진행 중/);
+  await api.scheduleMemberReminder("workspace", "member");
+  assert.equal(pending.length, 0);
+});
+
+test("Slack's final-minute cancellation lock is not mistaken for an absent reservation", async (t) => {
+  const { api, db, pending, reminder, behavior, calls } = harness(t);
+  await api.scheduleMemberReminder("workspace", "member");
+  const receipt = reminder().scheduled_message_id;
+  behavior.lockedCancellation = true;
+  db.exec("UPDATE slack_daily_settings SET reminder_time='11:15'");
+  await assert.rejects(api.scheduleMemberReminder("workspace", "member", { force: true }), /발송 직전/);
+  assert.equal(pending[0].id, receipt);
+  assert.equal(reminder().scheduled_message_id, receipt);
+  assert.equal(calls.filter((c) => c.method === "chat.scheduleMessage").length, 1);
+});
+
+test("verification detects a deleted remote reservation and paginated receipt recovery never duplicates", async (t) => {
+  const { api, db, pending, calls, behavior, reminder } = harness(t);
+  await api.scheduleMemberReminder("workspace", "member");
+  pending.splice(0);
+  db.exec("UPDATE slack_daily_reminders SET updated_at='2026-01-01T00:00:00Z'");
+  await api.repairSlackDailyReminders("workspace");
+  assert.equal(pending.length, 1);
+  assert.equal(calls.filter((c) => c.method === "chat.scheduleMessage").length, 2);
+  behavior.paginate = true;
+  await api.scheduleMemberReminder("workspace", "member", { verify: true });
+  assert.equal(reminder().scheduled_message_id, pending[0].id);
+  assert.equal(calls.filter((c) => c.method === "chat.scheduleMessage").length, 2);
+});
+
+test("signed delivery events cannot advance a different workspace or recipient", async (t) => {
+  const { api, db, pending, addOther, calls } = harness(t);
+  addOther();
+  await api.runDueSlackDailyReminders();
+  const other = db.prepare("SELECT * FROM slack_daily_reminders WHERE owner_id='other'").get();
+  const before = calls.length;
+  assert.equal(await api.handleDeliveredDailyReminder({ teamId: "T-team", channelId: "D-other", botId: "U-other-bot", blockIds: [other.block_id] }), false);
+  assert.equal(calls.length, before);
+  t.mock.timers.enable({ apis: ["Date"], now: other.post_at * 1000 + 1000 });
+  pending.splice(pending.findIndex((p) => p.owner === "other"), 1);
+  assert.equal(await api.handleDeliveredDailyReminder({ teamId: "T-other", channelId: "D-other", botId: "U-other-bot", blockIds: [other.block_id] }), true);
+  assert.ok(calls.slice(before).every((call) => call.owner === "other"));
+});
+
+test("weekday and timezone scheduling crosses midnight, weekends and daylight-saving changes", (t) => {
+  const { api } = harness(t);
+  const cases = [
+    ["Asia/Seoul", "2026-09-04T01:00:00Z", "2026-09-07T00:00:00Z"],
+    ["America/New_York", "2026-03-06T15:00:00Z", "2026-03-09T13:00:00Z"],
+    ["America/New_York", "2026-10-30T14:00:00Z", "2026-11-02T14:00:00Z"],
+  ];
+  for (const [timezone, now, expected] of cases) assert.equal(api.nextReminderEpoch("09:00", timezone, [1,2,3,4,5], new Date(now)), Date.parse(expected) / 1000);
+});
+
+test("verification preserves an unchanged reservation during the final minute", async (t) => {
+  const { api, pending, reminder, calls, behavior } = harness(t);
+  await api.scheduleMemberReminder("workspace", "member");
+  const original = { ...reminder() };
+  t.mock.timers.enable({ apis: ["Date"], now: original.post_at * 1000 - 30_000 });
+  behavior.lockedCancellation = true;
+  await api.scheduleMemberReminder("workspace", "member", { verify: true });
+  assert.equal(reminder().post_at, original.post_at);
+  assert.equal(reminder().scheduled_message_id, original.scheduled_message_id);
+  assert.equal(pending.length, 1);
+  assert.ok(!calls.some((c) => c.method === "chat.deleteScheduledMessage"));
+});
+
+test("a confirmed absent receipt allows replacement after invalid_scheduled_message_id", async (t) => {
+  const { api, pending, db, behavior, reminder } = harness(t);
+  await api.scheduleMemberReminder("workspace", "member");
+  pending.splice(0);
+  behavior.lockedCancellation = true;
+  db.exec("UPDATE slack_daily_settings SET reminder_time='11:15'");
+  await api.scheduleMemberReminder("workspace", "member", { force: true });
+  assert.equal(pending.length, 1);
+  assert.equal(reminder().scheduled_message_id, pending[0].id);
+});
+
+test("invalid legacy timezone stays visible without blocking another workspace", async (t) => {
+  const { api, db, addOther, pending } = harness(t);
+  addOther();
+  db.exec("UPDATE slack_daily_settings SET timezone='invalid/timezone' WHERE owner_id='workspace'");
+  await api.runDueSlackDailyReminders();
+  assert.match(db.prepare("SELECT last_error FROM slack_daily_settings WHERE owner_id='workspace'").get().last_error, /time zone/i);
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].owner, "other");
+});
+
+test("bounded maintenance rotates beyond the first twenty workspaces", async (t) => {
+  const { api, db, addOther, calls, pending } = harness(t);
+  addOther();
+  for (let i = 0; i < 25; i++) {
+    db.prepare("INSERT INTO workspaces VALUES(?,NULL)").run(`idle-${i}`);
+    db.prepare(`INSERT INTO slack_daily_settings(owner_id,enabled,weekdays,reminder_time,timezone,install_status,onboarding_completed_at,last_error,updated_at)
+      VALUES(?,1,'[1,2,3,4,5]','09:00','Asia/Seoul','connected','configured','','2000-01-01T00:00:00Z')`).run(`idle-${i}`);
+  }
+  await api.runDueSlackDailyReminders();
+  assert.equal(calls.length, 0);
+  await api.runDueSlackDailyReminders();
+  assert.equal(pending.length, 2);
+});
+
+test("automatic repair stops the recipient queue when its shared time budget expires", async (t) => {
+  const { api, db, calls, behavior } = harness(t);
+  db.exec(`INSERT INTO workspace_members VALUES('new-member','workspace','active');
+    INSERT INTO slack_member_links VALUES('new-link','workspace','new-member','U-new','D-new','T-team')`);
+  const controller = new AbortController();
+  const timeout = AbortSignal.timeout.bind(AbortSignal);
+  t.mock.method(AbortSignal, "timeout", (ms) => ms === 20_000 ? controller.signal : timeout(ms));
+  behavior.onSchedule = () => controller.abort();
+  assert.equal((await api.repairSlackDailyReminders("workspace")).checked, 1);
+  assert.ok(calls.every((c) => c.body.channel === "D-member"));
+});
+
+for (const scenario of ["reenabled", "replaced", "new-claim"]) {
+  test(`disconnect finalization preserves concurrent ${scenario} state`, async (t) => {
+    const { api, db, connectionFor, raw } = harness(t);
+    const connection = connectionFor("owner_id", "workspace");
+    const batch = raw.batch;
+    raw.batch = async (statements) => {
+      if (scenario === "reenabled") db.exec("UPDATE slack_daily_settings SET enabled=1");
+      if (scenario === "replaced") db.exec("UPDATE slack_connections SET id='replacement'");
+      if (scenario === "new-claim") db.exec(`INSERT INTO slack_daily_reminders(id,owner_id,member_id,status,updated_at)
+        VALUES('new','workspace','member','scheduling','2026-09-03T00:00:00Z')`);
+      return batch(statements);
+    };
+    await assert.rejects(api.disconnectSlackDaily("workspace", connection), /설정이나 예약이 변경/);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM slack_member_links").get().n, 1);
+    assert.equal(db.prepare("SELECT install_status FROM slack_daily_settings").get().install_status, "connected");
+    if (scenario === "new-claim") assert.equal(db.prepare("SELECT id FROM slack_daily_reminders").get().id, "new");
+  });
+}
+
+test("a stale disconnect cannot pause a replacement installation", async (t) => {
+  const { api, db, connectionFor } = harness(t);
+  const previous = connectionFor("owner_id", "workspace");
+  db.exec("UPDATE slack_connections SET id='replacement'");
+  await assert.rejects(api.disconnectSlackDaily("workspace", previous), /연결이 변경/);
+  assert.equal(db.prepare("SELECT enabled FROM slack_daily_settings").get().enabled, 1);
+});
+
+for (const scenario of ["enabled", "pending", "replacement", "clear", "legacy"]) {
+  test(`credential deletion checks actual SQLite state (${scenario})`, async (t) => {
+    const { db, raw, connectionFor, addOther } = harness(t);
+    addOther();
+    if (scenario !== "enabled") db.exec("UPDATE slack_daily_settings SET enabled=0 WHERE owner_id='workspace'");
+    if (scenario === "pending") db.exec(`INSERT INTO slack_daily_reminders(id,owner_id,member_id,status) VALUES('pending','workspace','member','scheduling')`);
+    const data = compile(`import { env } from 'cloudflare:workers'; import { ensureSchema, getSlackConnection } from 'fixture'; ${deleteConnectionSource}`, {
+      "cloudflare:workers": { env: { DB: raw } },
+      fixture: { ensureSchema: async () => {}, getSlackConnection: async (owner) => {
+        const connection = connectionFor("owner_id", owner);
+        if (scenario === "replacement") db.exec("UPDATE slack_connections SET id='replacement' WHERE owner_id='workspace'");
+        return connection;
+      } },
+    });
+    const action = data.deleteSlackConnection("workspace", scenario === "legacy" ? undefined : "connection");
+    if (["clear", "legacy"].includes(scenario)) {
+      await action;
+      assert.equal(connectionFor("owner_id", "workspace"), null);
+    } else {
+      await assert.rejects(action, /연결이 변경/);
+      assert.ok(connectionFor("owner_id", "workspace"));
+    }
+    assert.equal(connectionFor("owner_id", "other").id, "connection-other");
+  });
+}
