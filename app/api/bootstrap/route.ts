@@ -1,3 +1,4 @@
+import { waitUntil } from "cloudflare:workers";
 import {
   authorizeRequest,
   canManageTeam,
@@ -86,6 +87,9 @@ export async function GET(request: Request) {
 
     const payload = Object.assign({}, ...await Promise.all([loadShell(), loadData()]));
     const payloadReadyAt = Date.now();
+    // Recovery stays off the critical loading path and never sends an immediate DM.
+    waitUntil(import("@/lib/slack-daily").then(({ repairSlackDailyReminders }) => repairSlackDailyReminders(authorization.ownerId))
+      .catch((error) => console.error("slack_daily_repair_failed", error instanceof Error ? error.message : "Unknown failure")));
 
     const headers = new Headers({ "Cache-Control": "no-store" });
     headers.set("Server-Timing", [

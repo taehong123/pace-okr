@@ -102,6 +102,7 @@ const worker = {
     ]));
     // Keep backups alive even if an unrelated integration job rejects.
     ctx.waitUntil(runDueWorkspaceBackups(_env));
+    ctx.waitUntil(import("@/lib/slack-daily").then(({ runDueSlackDailyReminders }) => runDueSlackDailyReminders()));
   },
 };
 
