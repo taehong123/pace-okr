@@ -183,7 +183,7 @@ export async function cancelProjectReview(db: D1Database, identity: ReviewIdenti
   return cancelled;
 }
 
-/** The caller must have verified a same-origin, non-token browser session before invoking this. */
+/** The caller verifies browser CSRF or authenticated MCP write access and explicit user confirmation. */
 export async function approveProjectReview(db: D1Database, identity: ReviewIdentity,
   input: { id: string; version: string; initiativeId: string; initiativeFingerprint: string },
   create: (review: ProjectReview, parent: InitiativeChoice, completed: ProjectReview) => Promise<void>,
@@ -215,7 +215,7 @@ export async function approveProjectReview(db: D1Database, identity: ReviewIdent
 }
 
 export function assertProjectReviewBrowserRequest(request: Request, authorization: { apiToken: boolean }) {
-  if (authorization.apiToken || request.headers.has("authorization")) fail("browser_confirmation_required", "AI 연결 토큰으로 최종 승인을 대신할 수 없습니다. OKRPTR에서 직접 확인해 주세요.", 403);
+  if (authorization.apiToken || request.headers.has("authorization")) fail("browser_confirmation_required", "이 경로는 웹 확인 화면 전용입니다. MCP에서는 대화에서 확인한 뒤 confirm_project를 사용해 주세요.", 403);
   if (request.method !== "GET" && request.headers.get("origin") !== new URL(request.url).origin) {
     fail("invalid_origin", "OKRPTR 확인 화면에서 다시 시도해 주세요.", 403);
   }

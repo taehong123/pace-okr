@@ -15,6 +15,7 @@ function compile(source, dependencies = {}) {
 const core = compile(await readFile(new URL("../lib/project-review.ts", import.meta.url), "utf8"));
 const writerSource = await readFile(new URL("../lib/project-review-writer.ts", import.meta.url), "utf8");
 const serviceSource = await readFile(new URL("../lib/project-review-service.ts", import.meta.url), "utf8");
+const mcpReviewSource = await readFile(new URL("../lib/project-review-mcp.ts", import.meta.url), "utf8");
 const editorSource = await readFile(new URL("../lib/project-review-editor.ts", import.meta.url), "utf8");
 const reviewRouteSource = await readFile(new URL("../app/api/project-reviews/route.ts", import.meta.url), "utf8");
 const billingSource = await readFile(new URL("../lib/billing.ts", import.meta.url), "utf8");
@@ -94,6 +95,7 @@ function fixture() {
   const editor = compile(editorSource, dependencies);
   dependencies["@/lib/project-review-editor"] = editor;
   const service = compile(serviceSource, dependencies);
+  const mcp = compile(mcpReviewSource, { ...dependencies, "@/lib/project-review-service": service, "@/lib/project-review-writer": writer });
   const approve = async (review, parentId = "i2") => {
     const parent = await core.getReviewInitiative(d1, "a", parentId);
     try {
@@ -109,8 +111,109 @@ function fixture() {
     "@/lib/pace-data": { ...pace, authorizeRequest: async () => auth, ensureWorkspace: async () => {} },
     "@/lib/project-review-writer": writer,
   });
-  return { db, d1, stats, writer, service, propose, approve, route, quota, runtime, editor };
+  return { db, d1, stats, writer, service, propose, approve, route, quota, runtime, editor, mcp };
 }
+
+const mcpIdentity = { ...identity, apiToken: true, oauthScopes: "okrptr:read okrptr:write" };
+async function mcpConfirmation(f, review, parentId = "i2", changes = {}) {
+  const context = await f.mcp.readMcpProjectReview(mcpIdentity, review.id, { includeContext: true, cycleId: null });
+  const parent = context.candidates.choices.find((entry) => entry.id === parentId);
+  return { review_id: context.id, version: context.version, confirmed: true, initiative_id: parent.id,
+    initiative_fingerprint: parent.fingerprint, editor_revision: context.editor.revision,
+    proposal: { ...context.proposal, requestedCycleId: parent.cycleId, ...changes } };
+}
+
+test("personal MCP proposes, edits, chooses another file and completes without a browser URL", async () => {
+  const f = fixture();
+  try {
+    seedEditableFields(f);
+    const staged = await f.mcp.stageMcpProjectReview(mcpIdentity, { title: "결제 개편" }, [{ initiativeId: "i", reason: "가입 이탈 개선" }], "https://okrptr.com");
+    assert.equal(staged.state, "awaiting_user_confirmation"); assert.equal(staged.projectId, null);
+    assert.equal(staged.url, undefined); assert.match(staged.nextStep, /confirm_project/);
+    assert.equal(staged.recommendations[0].initiative.id, "i");
+    const input = await mcpConfirmation(f, staged, "in", { title: "확정된 재방문 개선", driMemberId: "peer", workerMemberIds: ["me"], dueDate: "2026-09-25",
+      properties: { 예산: 0, 메모: "대화에서 수정", 분류: "운영", 출시일: "2026-09-25", 검토됨: false, 검토자: "peer", 협업자: ["me"] } });
+    const result = await f.mcp.confirmMcpProjectReview(mcpIdentity, input);
+    assert.equal(result.state, "created"); assert.ok(result.projectId);
+    assert.equal(result.summary.dri, "민지"); assert.equal(result.summary.cycleId, "next");
+    assert.deepEqual(result.initiativePath, ["확장", "유지율", "재방문 개선"]);
+    assert.deepEqual(result.summary.properties, input.proposal.properties);
+    assert.equal(f.db.prepare("SELECT title FROM items WHERE id = ?").get(result.projectId).title, input.proposal.title);
+    const retry = await f.mcp.confirmMcpProjectReview(mcpIdentity, input);
+    assert.deepEqual(retry, result); assert.equal(f.stats.batches, 1);
+  } finally { f.db.close(); }
+});
+
+test("MCP cannot create without explicit confirmation or omit reviewed fields", async () => {
+  const f = fixture();
+  try {
+    const review = await f.propose(); const input = await mcpConfirmation(f, review);
+    for (const confirmed of [false, undefined]) await assert.rejects(() => f.mcp.confirmMcpProjectReview(mcpIdentity, { ...input, confirmed }));
+    const partial = { ...input.proposal }; delete partial.dueDate;
+    await assert.rejects(() => f.mcp.confirmMcpProjectReview(mcpIdentity, { ...input, proposal: partial }), (error) => error.code === "invalid_proposal");
+    assert.equal((await f.mcp.readMcpProjectReview(mcpIdentity, review.id)).state, "pending");
+    assert.equal(f.stats.batches, 0);
+  } finally { f.db.close(); }
+});
+
+test("MCP confirmation enforces personal identity, write scopes, role and review ownership", async () => {
+  const f = fixture();
+  try {
+    const review = await f.propose(); const input = await mcpConfirmation(f, review);
+    for (const auth of [{ ...mcpIdentity, oauthScopes: "okrptr:read" }, { ...mcpIdentity, oauthScopes: undefined },
+      { ...mcpIdentity, role: "viewer" }, { ...mcpIdentity, userId: "api-token" },
+      { ...mcpIdentity, userId: "peer" }, { ...mcpIdentity, ownerId: "b" }]) {
+      await assert.rejects(() => f.mcp.confirmMcpProjectReview(auth, input));
+      await assert.rejects(() => f.mcp.cancelMcpProjectReview(auth, review.id, review.version));
+    }
+    assert.equal(f.stats.batches, 0);
+  } finally { f.db.close(); }
+});
+
+test("MCP stale catalogs and lineage retain the draft, while cancellation and expiry cannot create", async () => {
+  const f = fixture();
+  try {
+    const review = await f.propose(); const input = await mcpConfirmation(f, review);
+    f.db.exec("UPDATE property_definitions SET updated_at = 'changed' WHERE id = 'budget'");
+    await assert.rejects(() => f.mcp.confirmMcpProjectReview(mcpIdentity, input), (error) => error.code === "editor_changed");
+    const refreshed = await mcpConfirmation(f, review);
+    f.db.exec("UPDATE items SET updated_at = 'changed' WHERE id = 'kr'");
+    await assert.rejects(() => f.mcp.confirmMcpProjectReview(mcpIdentity, refreshed), (error) => error.code === "initiative_changed");
+    const cancelled = await f.mcp.cancelMcpProjectReview(mcpIdentity, review.id, review.version);
+    assert.equal(cancelled.state, "cancelled"); assert.equal(cancelled.projectId, null);
+    await assert.rejects(() => f.mcp.confirmMcpProjectReview(mcpIdentity, input));
+    const next = await f.propose({ title: "만료 테스트" }); const nextInput = await mcpConfirmation(f, next);
+    f.db.prepare("UPDATE assistant_drafts SET payload_json = json_set(payload_json, '$.expiresAt', '2000-01-01') WHERE id = ?").run(next.id);
+    await assert.rejects(() => f.mcp.confirmMcpProjectReview(mcpIdentity, nextInput), (error) => error.code === "review_expired");
+    assert.equal(f.stats.batches, 0);
+  } finally { f.db.close(); }
+});
+
+test("MCP concurrent confirmations and lost responses save only once", async () => {
+  const f = fixture();
+  try {
+    const input = await mcpConfirmation(f, await f.propose());
+    f.stats.loseResponse = true;
+    const results = await Promise.allSettled([f.mcp.confirmMcpProjectReview(mcpIdentity, input), f.mcp.confirmMcpProjectReview(mcpIdentity, input)]);
+    assert.ok(results.some((entry) => entry.status === "fulfilled" && entry.value.state === "created"));
+    const receipt = await f.mcp.readMcpProjectReview(mcpIdentity, input.review_id);
+    assert.equal(receipt.state, "created"); assert.equal(f.stats.batches, 1);
+    assert.equal(f.db.prepare("SELECT count(*) AS n FROM items WHERE kind = 'project'").get().n, 1);
+    assert.equal((await f.mcp.confirmMcpProjectReview(mcpIdentity, input)).projectId, receipt.projectId);
+  } finally { f.db.close(); }
+});
+
+test("MCP rechecks write permission during the atomic save and rolls everything back", async () => {
+  const f = fixture();
+  try {
+    const input = await mcpConfirmation(f, await f.propose());
+    f.stats.beforeBatch = () => f.db.exec("UPDATE workspace_members SET status = 'inactive' WHERE id = 'me'");
+    await assert.rejects(() => f.mcp.confirmMcpProjectReview(mcpIdentity, input));
+    assert.equal(f.db.prepare("SELECT count(*) AS n FROM items WHERE kind = 'project'").get().n, 0);
+    assert.equal(f.db.prepare("SELECT count(*) AS n FROM project_monthly_usage").get().n, 0);
+    assert.equal((await f.mcp.readMcpProjectReview(mcpIdentity, input.review_id)).state, "failed");
+  } finally { f.db.close(); }
+});
 
 test("Proposal is not creation; defaults are visible and same-request retries reuse the pending review", async () => {
   const f = fixture();

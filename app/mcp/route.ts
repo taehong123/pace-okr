@@ -4,8 +4,9 @@ import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { listRoutineProperties } from "@/lib/routine-properties";
 import { isReadOnlyMcpRequest, readWorkContext, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
-import { getProjectReview, projectReviewSummary } from "@/lib/project-review";
-import { stageProjectReview } from "@/lib/project-review-service";
+import { ProjectReviewError } from "@/lib/project-review";
+import { cancelMcpProjectReview, confirmMcpProjectReview, mcpProjectConfirmationSchema,
+  readMcpProjectReview, stageMcpProjectReview } from "@/lib/project-review-mcp";
 import {
   ITEM_CADENCES,
   ITEM_KINDS,
@@ -407,7 +408,7 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
     "create_item",
     {
       title: "Create a structured OKR item",
-      description: "Save a correctly classified Task or OKR item. Project creation is NOT direct: use propose_project to recommend connections and obtain the user's final approval. Legacy Project calls only stage an unsaved review and return its confirmation link. A parent ID or a generic 'create a project' request is not approval of an AI-chosen Initiative. Never bypass Project review using another kind/tool/API.",
+      description: "Save a correctly classified Task or OKR item. For Projects use propose_project, confirm the final contents and Initiative with the user in this conversation, then call confirm_project. Legacy Project calls only stage an unsaved review. No browser visit is required. A parent ID or generic creation request does not approve an AI-chosen connection. Never bypass confirmation using another kind/tool/API.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS),
         title: z.string().trim().min(1).max(500),
@@ -433,7 +434,7 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
       if (input.kind === "project") {
         assertMcpAssignmentFields(input);
         if (input.routine_id) throw new Error("Projects cannot belong to a Routine");
-        const review = await stageProjectReview(authorization, {
+        const review = await stageMcpProjectReview(authorization, {
           title: input.title, description: input.description, status: input.status, priority: input.priority,
           cadence: input.cadence, progress: input.progress, dueDate: input.due_date,
           driMemberId: input.dri_member_id, workerMemberIds: input.worker_member_ids,
@@ -481,26 +482,26 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
     "propose_project",
     {
       title: "Recommend and review a Project before the user approves creation",
-      description: "Required for EVERY new Project, even when a parent ID is known. Stage only a draft; show the complete Project summary, up to 3 evidence-based Initiative recommendations and their Objective/KR paths. Explain why each advances the requested outcome; do not recommend merely because a candidate is recent or shares a vague keyword. If no suitable match exists, use no recommendations and offer search or defer. Give the user the review URL to choose an Initiative and explicitly create; NEVER operate that approval UI on the user's behalf. No Project is created by this tool.",
+      description: "Stage a Project draft for confirmation in this conversation, without opening a browser. Show the complete summary and up to 3 evidence-based Initiative recommendations with Objective/KR paths; recency or vague keywords are not evidence. Accept edits and the user's choice here, then call confirm_project only after explicit approval of the final proposal and connection. Use get_project_review with include_context=true to search other candidates or refresh editable options. No Project is created by this tool.",
       inputSchema: {
         title: z.string().trim().min(1).max(500), description: z.string().max(20000).optional(),
         recommended_initiatives: z.array(z.object({ initiative_id: memberIdInput, reason: z.string().trim().min(1).max(1000) })).max(3).default([]),
         due_date: dueDateInput.optional(), dri_member_id: memberIdInput.optional(), worker_member_ids: z.array(memberIdInput).max(100).optional(),
-        cycle_id: memberIdInput.optional().describe("Only if the user specified an OKR file; initial candidate filter, which the user can change in the review page"),
+        cycle_id: memberIdInput.optional().describe("Only if the user specified an OKR file; the conversation can choose another file using get_project_review"),
         properties: z.record(z.string(), propertyValueSchema).optional(), template_id: memberIdInput.optional(),
         status: z.enum(ITEM_STATUSES).optional(), priority: z.enum(ITEM_PRIORITIES).optional(), cadence: z.enum(ITEM_CADENCES).optional(), progress: z.number().min(0).max(100).optional(),
       },
-      outputSchema: { review: z.object({ id: z.string(), state: z.literal("awaiting_user_confirmation"), url: z.string(), expiresAt: z.string(), summary: z.record(z.string(), z.unknown()), selectedInitiative: z.null(), recommendations: z.array(z.unknown()), nextStep: z.string() }) },
+      outputSchema: { review: z.record(z.string(), z.unknown()) },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     async (input) => {
-      const review = await stageProjectReview(authorization, {
+      const review = await stageMcpProjectReview(authorization, {
         title: input.title, description: input.description, status: input.status, priority: input.priority,
         cadence: input.cadence, progress: input.progress, dueDate: input.due_date,
         driMemberId: input.dri_member_id, workerMemberIds: input.worker_member_ids,
         properties: input.properties, templateId: input.template_id, requestedCycleId: input.cycle_id,
       }, input.recommended_initiatives.map((entry) => ({ initiativeId: entry.initiative_id, reason: entry.reason })), origin);
-      return { structuredContent: { review }, content: [{ type: "text", text: `Project는 아직 생성되지 않았습니다. 미지정 속성도 포함해 아래 내용을 요약하세요.\n${JSON.stringify(review.summary)}\n추천 연결: ${JSON.stringify(review.recommendations)}\n[내용 확인·수정 후 생성](${review.url})\n사용자가 연결·속성을 직접 수정하고 최종 확인합니다. 대신 승인하거나 다른 도구로 생성하지 마세요.` }] };
+      return { structuredContent: { review }, content: [{ type: "text", text: `${review.nextStep}\n${JSON.stringify(review)}` }] };
     },
   );
 
@@ -508,16 +509,54 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
     "get_project_review",
     {
       title: "Check the outcome of a user's Project review",
-      description: "Read a staged Project review after the user says they approved/cancelled, or to check an uncertain save. Pending means NOT created. Do not repeatedly poll or resubmit a failed/processing review as a new Project.",
-      inputSchema: { review_id: z.string().uuid() },
-      outputSchema: { review: z.object({ id: z.string(), state: z.string(), title: z.string(), projectId: z.string().nullable(), initiativePath: z.array(z.string()), summary: z.record(z.string(), z.unknown()) }) },
+      description: "Read a Project proposal or saved receipt in this conversation. Set include_context=true to get the complete editable proposal, catalog revision and candidate fingerprints. query narrows Initiative evidence; cycle_id changes the file filter, null searches all files. Searches do not discard draft edits. Pending means NOT created; use confirm_project after explicit conversational approval. Do not repeatedly poll or create a second proposal after an uncertain save.",
+      inputSchema: { review_id: z.string().uuid(), include_context: z.boolean().default(false), query: z.string().max(120).optional(), cycle_id: memberIdInput.nullable().optional() },
+      outputSchema: { review: z.record(z.string(), z.unknown()) },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ review_id }) => {
-      const result = await getProjectReview(env.DB, authorization, review_id);
-      const review = { id: result.id, state: result.state, title: result.proposal.title,
-        projectId: result.state === "created" ? result.projectId : null, initiativePath: result.selectedParent?.path ?? [], summary: projectReviewSummary(result) };
-      return { structuredContent: { review }, content: [{ type: "text", text: result.state === "created" ? "The user approved and the Project was created." : `Project review is ${result.state}; do not claim successful creation or retry a new Project.` }] };
+    async ({ review_id, include_context, query, cycle_id }) => {
+      const review = await readMcpProjectReview(authorization, review_id, { includeContext: include_context || query !== undefined || cycle_id !== undefined, query, cycleId: cycle_id });
+      const message = review.state === "created" ? "Project가 생성됐습니다."
+        : review.state === "pending" ? "아직 생성되지 않은 요청입니다. 대화에서 확인 후 confirm_project를 사용하세요."
+          : review.state === "creating" ? "저장 결과를 아직 확정할 수 없습니다. 새 초안을 만들지 말고 이 요청의 결과를 확인하세요."
+            : "이 요청은 종료됐으며 Project가 생성되지 않았습니다.";
+      return { structuredContent: { review }, content: [{ type: "text", text: `${message}\n${JSON.stringify(review)}` }] };
+    },
+  );
+
+  server.registerTool(
+    "confirm_project",
+    {
+      title: "Create the Project approved in this conversation",
+      description: "Finish Project creation inside MCP, with no browser redirect. Call only after the user explicitly approves the final summary and selected Initiative in this conversation. Pass the complete reviewed proposal, original review version, current editor revision and the selected candidate fingerprint. Never fabricate approval or add unseen values. Returns the saved Project receipt; repeat the same request after a lost response, never create a new proposal. On validation/conflict errors keep edits, refresh get_project_review(include_context=true), and ask the user to confirm changed details again.",
+      inputSchema: mcpProjectConfirmationSchema.shape,
+      outputSchema: { review: z.record(z.string(), z.unknown()) },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async (input) => {
+      try {
+        const review = await confirmMcpProjectReview(authorization, input);
+        return { structuredContent: { review }, content: [{ type: "text", text: `Project 생성 완료. 별도 화면 확인은 필요하지 않습니다.\n${JSON.stringify(review)}` }] };
+      } catch (error) {
+        if (!(error instanceof ProjectReviewError)) throw error;
+        return { isError: true, content: [{ type: "text", text: JSON.stringify({ error: error.message, code: error.code,
+          fieldErrors: error.fieldErrors, nextStep: "입력값을 유지하고 get_project_review(include_context=true)로 현재 상태를 확인하세요. 생성 완료라고 안내하거나 새 요청으로 중복 생성하지 마세요." }) }] };
+      }
+    },
+  );
+
+  server.registerTool(
+    "cancel_project_review",
+    {
+      title: "Cancel a pending Project proposal in this conversation",
+      description: "Cancel the user's pending Project proposal without opening a browser. This does not delete an existing Project or create any work.",
+      inputSchema: { review_id: z.string().uuid(), version: z.string().uuid() },
+      outputSchema: { review: z.record(z.string(), z.unknown()) },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ review_id, version }) => {
+      const review = await cancelMcpProjectReview(authorization, review_id, version);
+      return { structuredContent: { review }, content: [{ type: "text", text: "생성 요청을 취소했습니다. Project는 생성되지 않았습니다." }] };
     },
   );
 

@@ -4,9 +4,11 @@
 
 AI recommendations are not permission to attach a Project. All new Projects
 from MCP (including cached legacy `create_item` calls) or integration-token
-`POST /api/items` requests first create an unsaved review. A browser session for
-the same user and workspace must choose a current Initiative, check the final
-summary and click Create. No candidate is preselected, even if only one exists.
+`POST /api/items` requests first create an unsaved review. The same user and
+workspace must choose a current Initiative and approve the final summary.
+MCP completes this in the conversation with `confirm_project`; a web visit is
+not required. The existing browser confirmation page remains an optional path.
+No candidate is preselected, even if only one exists.
 Integration-token bulk OKR plans containing a Project are rejected before any
 ancestors are created; that endpoint cannot bypass the review flow.
 
@@ -17,6 +19,25 @@ must explain contribution, not assert a match from vague keywords. The review
 shows hierarchy/evidence, allows another search, and supports defer/cancel.
 Semantic recommendation quality still requires evaluation with real prompts;
 server validation proves lineage/permissions, not business relevance.
+
+## MCP conversation completion
+
+`propose_project` returns the frozen proposal, review version, editor catalog and
+revision, and candidate/recommendation fingerprints without a mandatory web URL.
+The assistant presents human-readable fields and lineage, accepts changes and
+waits for explicit approval. `get_project_review(include_context=true, query,
+cycle_id)` refreshes choices; null cycle searches all files. It does not reset
+edits held in the conversation. `confirm_project` takes the complete final
+proposal, version, chosen Initiative/fingerprint, editor revision and
+`confirmed: true`, then uses the same validated atomic writer as the web page.
+It returns the saved receipt, not another approval link. A lost response can be
+resolved by reading the receipt or repeating the identical confirmation.
+`cancel_project_review` cancels a pending proposal in MCP.
+
+Explicit confirmation is a client assertion made only after the user's actual
+approval; the server cannot independently prove what a third-party chat displayed.
+The server still checks the authenticated identity, scopes, current membership,
+complete typed proposal, catalog/lineage versions, quotas and atomic claim.
 
 ## Editable review (September 2026)
 
@@ -54,8 +75,9 @@ is intentional on this standalone review page to preserve before-unload warnings
   through generic draft APIs. No new migration or configuration is required.
 - Reviews are owner/user scoped, expire after 30 minutes, and freeze the title,
   description, fields, assignments, custom properties and workspace defaults.
-- Tokens cannot approve; browser mutations require a same-origin request.
-  Existing session membership/editor authorization remains in force.
+- Personal MCP connections with write scope can approve through `confirm_project`.
+  Read-only, viewer and legacy shared server keys cannot. Browser mutations still
+  require a same-origin non-token session. Existing membership/editor checks remain.
 - Approval compares version and the selected Initiative/ancestor fingerprint,
   revalidates active members, property definitions and the template, and claims
   the review with an atomic compare-and-swap.

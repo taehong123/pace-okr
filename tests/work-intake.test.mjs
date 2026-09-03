@@ -15,6 +15,7 @@ function compile(source, dependencies = {}) {
 const intake = compile(await readFile(new URL("../lib/work-intake.ts", import.meta.url), "utf8"));
 const mcpSource = await readFile(new URL("../app/mcp/route.ts", import.meta.url), "utf8");
 const reviewCore = compile(await readFile(new URL("../lib/project-review.ts", import.meta.url), "utf8"));
+const reviewMcpSource = await readFile(new URL("../lib/project-review-mcp.ts", import.meta.url), "utf8");
 const routineProperties = compile(await readFile(new URL("../lib/routine-properties.ts", import.meta.url), "utf8"));
 
 function fixture() {
@@ -142,6 +143,7 @@ function mcpFixture() {
   const fixtureData = fixture();
   const calls = [];
   const reviewReceipt = { id: "10000000-0000-4000-8000-000000000001", state: "pending", projectId: "approved-project",
+    version: "10000000-0000-4000-8000-000000000002", recommendations: [], expiresAt: "2099-01-01T00:00:00.000Z",
     proposal: { title: "처음 초안", properties: { 예산: null }, requestedCycleId: null }, fieldLabels: { dri: null, workers: [], template: null, cycle: null }, propertyLabels: { 예산: "미지정" }, selectedParent: null };
   const rules = { workspaceId: "a", captureInstruction: "Capture", structureInstruction: "Structure", routineInstruction: "Repeat", defaultPriority: "medium", defaultCadence: "weekly", reviewBeforeCreate: true, configured: true, createdAt: "", updatedAt: "" };
   const fullItem = (input) => ({
@@ -173,12 +175,19 @@ function mcpFixture() {
     "@/lib/pace-data": data,
     "@/lib/routine-properties": routineProperties,
     "@/lib/work-intake": intake,
-    "@/lib/project-review": { ...reviewCore, getProjectReview: async () => reviewReceipt },
-    "@/lib/project-review-service": { stageProjectReview: async (_auth, input, recommendations) => {
+    "@/lib/project-review": reviewCore,
+    "@/lib/project-review-mcp": compile(reviewMcpSource, {
+      "cloudflare:workers": { env: { DB: fixtureData.d1 } },
+      "@/lib/project-review": { ...reviewCore, getProjectReview: async () => reviewReceipt,
+        listReviewInitiatives: async () => ({ choices: [], truncated: false }), getReviewInitiative: async () => null },
+      "@/lib/project-review-editor": { getProjectReviewEditor: async () => ({ revision: "test-catalog", properties: [], members: [], templates: [], cycles: [] }) },
+      "@/lib/project-review-writer": {},
+      "@/lib/project-review-service": { stageProjectReview: async (_auth, input, recommendations) => {
       if (input.properties?.invalid) throw new Error("Property not found");
       calls.push({ method: "review", input, recommendations });
       return { id: "review", state: "awaiting_user_confirmation", url: "https://okrptr.com/project-review?id=review", expiresAt: "", summary: {}, selectedInitiative: null, recommendations, nextStep: "User must select and approve" };
-    } },
+      } },
+    }),
     "@modelcontextprotocol/sdk/server/mcp.js": { McpServer: FakeServer },
   });
   async function call(name, args) {
@@ -210,6 +219,49 @@ test("MCP review outcome contains the final edited connection and property summa
     assert.equal(final.review.summary.cycleId, "next"); assert.equal(final.review.summary.dri, "민지");
     assert.deepEqual(final.review.summary.properties, { 예산: 0, 검토됨: false });
     assert.equal(f.calls.length, 0);
+  } finally { f.db.close(); }
+});
+
+test("MCP approval requires an explicit confirmation snapshot and never redirects to the browser", async () => {
+  const f = mcpFixture();
+  try {
+    await f.init();
+    const { z } = require("zod");
+    const confirmation = f.tools.get("confirm_project").definition;
+    const schema = z.object(confirmation.inputSchema);
+    const input = { review_id: f.reviewReceipt.id, version: f.reviewReceipt.version, confirmed: true,
+      initiative_id: "ini", initiative_fingerprint: "a".repeat(64), editor_revision: "b".repeat(64), proposal: {} };
+    assert.equal(schema.safeParse(input).success, true);
+    for (const key of Object.keys(input)) {
+      const incomplete = { ...input };
+      delete incomplete[key];
+      assert.equal(schema.safeParse(incomplete).success, false, key);
+    }
+    assert.equal(schema.safeParse({ ...input, confirmed: false }).success, false);
+    assert.equal(confirmation.annotations.readOnlyHint, false);
+    assert.equal(f.tools.get("cancel_project_review").definition.annotations.readOnlyHint, false);
+    const staged = await f.call("propose_project", { title: "Conversational approval" });
+    assert.equal("url" in staged.review, false);
+    assert.equal(staged.review.projectId, null);
+    assert.ok(staged.review.proposal);
+    assert.ok(staged.review.editor);
+    assert.match(staged.review.nextStep, /confirm_project/);
+    assert.equal(f.calls.filter((call) => call.method === "create").length, 0);
+  } finally { f.db.close(); }
+});
+
+test("MCP does not tell users to approve closed or uncertain reviews", async () => {
+  const f = mcpFixture();
+  try {
+    await f.init();
+    const { callback } = f.tools.get("get_project_review");
+    for (const state of ["cancelled", "failed", "expired", "creating"]) {
+      f.reviewReceipt.state = state;
+      const result = await callback({ review_id: f.reviewReceipt.id, include_context: true });
+      assert.equal(result.structuredContent.review.projectId, null);
+      assert.equal("editor" in result.structuredContent.review, false);
+      assert.doesNotMatch(result.content[0].text, /confirm_project/);
+    }
   } finally { f.db.close(); }
 });
 
@@ -296,7 +348,7 @@ test("Relinking preserves status and batch creation carries shared fields in one
 test("MCP read-only dispatch fails closed for writes, unknown tools and mixed batches", () => {
   assert.equal(intake.isReadOnlyMcpRequest({ method: "tools/call", params: { name: "prepare_work" } }), true);
   assert.equal(intake.isReadOnlyMcpRequest({ method: "initialize" }), true);
-  for (const name of ["create_item", "create_tasks", "update_workspace_rules", "delete_routine", "future_tool"]) {
+  for (const name of ["create_item", "create_tasks", "confirm_project", "cancel_project_review", "update_workspace_rules", "delete_routine", "future_tool"]) {
     assert.equal(intake.isReadOnlyMcpRequest({ method: "tools/call", params: { name } }), false);
   }
   assert.equal(intake.isReadOnlyMcpRequest([{ method: "tools/call", params: { name: "prepare_work" } }]), false);
