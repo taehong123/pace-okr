@@ -7,7 +7,8 @@ navigation, invitation handling, registration, OAuth callbacks and API routes
 remain unchanged. Optional bootstrap-cache cleanup tolerates unavailable storage.
 
 The four slides cover OKR adoption, connected work, reviewing an AI-prepared
-Project, and daily work with independent Routines. There is no autoplay or wrap.
+Project, and visibility into recorded work without collecting separate daily
+reports, alongside independent Routines. There is no autoplay or wrap.
 Native scroll snapping supports touch; arrows, dots and keyboard controls support
 manual navigation. The login footer is independent of the reading area.
 
@@ -29,6 +30,12 @@ database capability was added.
 These support OKR adoption, not customer endorsements of OKRPTR. Work progress
 and Key Result values are displayed independently, without automatic attribution.
 The undeployed Slack summon bot is not advertised.
+
+The fourth slide describes starting Slack OAuth from the connection button,
+not completing consent and bot setup in one click. Work visibility refers to
+records in OKRPTR; it does not claim automatic discovery or external syncing.
+Notion integration is not implemented and is not advertised. These boundaries
+apply to all five languages.
 
 ## Product captures
 

@@ -49,6 +49,18 @@ test("server rendering exposes the first story and an independent immediate Goog
   assert.doesNotMatch(html, /!프로젝트생성|!테스크생성|AllVibe/);
 });
 
+test("the fourth story offers Slack connection and visibility into recorded work, not unsupported integrations", () => {
+  for (const { id } of landingLanguages) {
+    const story = landingCopy[id].slides[3];
+    assert.match(story.description, /Slack/);
+    assert.match(story.description, /OKRPTR/);
+    assert.doesNotMatch(`${story.title} ${story.description}`, /Notion|노션|!테스크생성|!프로젝트생성/i);
+  }
+  assert.match(landingCopy.ko.slides[3].title, /데일리를 따로 모으지 않아도/);
+  assert.match(landingCopy.ko.slides[3].description, /버튼 하나로 시작/);
+  assert.match(landingCopy.ko.slides[3].description, /등록된 업무/);
+});
+
 test("authentication failures and unavailable configuration stay visible by the login control", () => {
   const failure = renderToStaticMarkup(React.createElement(LandingScreen, { reason: "failed", onSignIn() {} }));
   assert.match(failure, /role="alert"/);

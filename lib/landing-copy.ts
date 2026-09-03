@@ -36,7 +36,7 @@ export const landingCopy: Record<LandingLanguage, LandingCopy> = {
       { title: "세계적인 기업들이 선택한 목표 관리 방식, OKR.", description: "구글과 인텔이 활용해 온 OKR. 이제 우리 팀의 일하는 방식으로 만드세요.", alt: "고객 경험 개선 목표와 측정 가능한 핵심결과를 함께 보여주는 OKR 화면" },
       { title: "모든 일이 연결되고, 성과로 이어지는 과정이 보입니다.", description: "목표부터 프로젝트, 개별 할 일까지 하나로. 지금 내가 하는 일이 팀의 어떤 성과에 기여하는지 한눈에 확인하세요.", alt: "할 일에서 프로젝트, Initiative, 핵심결과와 목표까지 이어지는 업무 관계와 진행 상태" },
       { title: "기록은 간편하게, 실행에 더 집중하세요.", description: "AI와 대화하며 업무를 정리하고, 내용을 확인한 뒤 등록하세요.", alt: "대화로 정리한 프로젝트 제안의 내용을 생성 전에 확인하는 화면" },
-      { title: "세운 목표를, 매일의 실행으로.", description: "오늘의 할 일과 반복 업무를 함께 보고, 진행 상황을 꾸준히 확인하세요.", alt: "담당 업무의 기한과 진행 상태, 독립적인 Routine을 함께 확인하는 내 업무 화면" },
+      { title: "데일리를 따로 모으지 않아도, 팀의 일이 한눈에.", description: "Slack 연결은 버튼 하나로 시작하세요. OKRPTR에 등록된 업무의 담당자·기한·진행 상황을 함께 보고, 반복 업무까지 놓치지 마세요.", alt: "담당 업무의 기한과 진행 상태, 독립적인 Routine을 함께 확인하는 내 업무 화면" },
     ],
   },
   en: {
@@ -49,7 +49,7 @@ export const landingCopy: Record<LandingLanguage, LandingCopy> = {
       { title: "OKRs. A goal-setting framework chosen by global companies.", description: "Bring the approach used by Google and Intel into the way your team works.", alt: "An OKR screen showing a customer experience objective and measurable key results" },
       { title: "Every task connected. The path to results made visible.", description: "Connect objectives, projects, and individual tasks. See how the work you do supports your team's results.", alt: "Connected tasks, projects, initiatives, key results, and objectives with their progress" },
       { title: "Less time recording. More time doing.", description: "Organize work in an AI conversation, review the details, then create it.", alt: "A project proposal prepared in conversation and reviewed before creation" },
-      { title: "Turn your goals into everyday progress.", description: "Keep today's tasks and recurring routines together, and check progress consistently.", alt: "My Work showing assigned tasks, due dates, statuses, and independent routines" },
+      { title: "See the team's work without chasing daily updates.", description: "Start connecting Slack with one button. See owners, due dates, and progress for work recorded in OKRPTR, and keep recurring routines in view.", alt: "My Work showing assigned tasks, due dates, statuses, and independent routines" },
     ],
   },
   ja: {
@@ -62,7 +62,7 @@ export const landingCopy: Record<LandingLanguage, LandingCopy> = {
       { title: "世界の企業が選んだ目標管理の方法、OKR。", description: "GoogleやIntelが活用してきたOKRを、あなたのチームの働き方に。", alt: "顧客体験の改善目標と測定可能な主要な成果を示すOKR画面" },
       { title: "すべての仕事がつながり、成果への道筋が見える。", description: "目標からプロジェクト、一つひとつのタスクまで。今の仕事がチームのどの成果につながるのか、一目で確認できます。", alt: "タスク、プロジェクト、施策、主要な成果、目標のつながりと進捗" },
       { title: "記録は手軽に。実行にもっと集中。", description: "AIとの会話で仕事を整理し、内容を確認してから登録できます。", alt: "会話からまとめたプロジェクト案を作成前に確認する画面" },
-      { title: "立てた目標を、毎日の実行へ。", description: "今日のタスクと繰り返す仕事をまとめて見て、進捗を継続的に確認できます。", alt: "担当タスク、期限、進捗、独立したRoutineを確認する画面" },
+      { title: "日報を集めなくても、チームの仕事がひと目で。", description: "Slackとの接続はボタンから。OKRPTRに登録した仕事の担当者・期限・進捗をまとめて確認し、繰り返す仕事も忘れずに。", alt: "担当タスク、期限、進捗、独立したRoutineを確認する画面" },
     ],
   },
   zh: {
@@ -75,7 +75,7 @@ export const landingCopy: Record<LandingLanguage, LandingCopy> = {
       { title: "全球企业选择的目标管理方法：OKR。", description: "将Google和Intel实践过的OKR，融入团队的日常工作。", alt: "展示客户体验目标和可衡量关键结果的OKR界面" },
       { title: "让每项工作相互连接，让成果路径清晰可见。", description: "从目标、项目到每项任务，串联起来。一眼看清手头的工作如何支持团队成果。", alt: "任务、项目、举措、关键结果和目标之间的关联及进度" },
       { title: "轻松记录，更专注于执行。", description: "通过AI对话整理工作，确认内容后再创建。", alt: "通过对话整理项目提案并在创建前确认内容的界面" },
-      { title: "让制定的目标，成为每天的行动。", description: "一起查看今日任务与周期性工作，持续跟进进展。", alt: "查看负责的任务、截止日期、状态和独立Routine的界面" },
+      { title: "不用逐个收集日报，也能看清团队在做什么。", description: "点击按钮即可开始连接Slack。在OKRPTR中集中查看已登记工作的负责人、截止日期和进度，也不错过周期性任务。", alt: "查看负责的任务、截止日期、状态和独立Routine的界面" },
     ],
   },
   es: {
@@ -88,7 +88,7 @@ export const landingCopy: Record<LandingLanguage, LandingCopy> = {
       { title: "OKR: un método elegido por empresas de todo el mundo.", description: "Incorpora a tu equipo el enfoque que han utilizado Google e Intel.", alt: "Una pantalla de OKR con un objetivo de experiencia del cliente y resultados clave medibles" },
       { title: "Todo el trabajo conectado. El camino a los resultados, visible.", description: "Conecta objetivos, proyectos y tareas. Comprueba cómo tu trabajo contribuye a los resultados del equipo.", alt: "Tareas, proyectos, iniciativas, resultados clave y objetivos conectados con su progreso" },
       { title: "Menos tiempo registrando. Más tiempo haciendo.", description: "Organiza el trabajo conversando con la IA, revisa los detalles y después créalo.", alt: "Una propuesta de proyecto preparada en una conversación y revisada antes de crearla" },
-      { title: "Convierte tus objetivos en avances diarios.", description: "Reúne las tareas de hoy y las rutinas recurrentes, y revisa el progreso de forma constante.", alt: "Mis tareas con responsables, fechas, estados y rutinas independientes" },
+      { title: "El trabajo del equipo a la vista, sin recopilar informes diarios.", description: "Inicia la conexión con Slack con un botón. Consulta responsables, fechas y avances del trabajo registrado en OKRPTR, sin perder de vista las rutinas.", alt: "Mis tareas con responsables, fechas, estados y rutinas independientes" },
     ],
   },
 };
