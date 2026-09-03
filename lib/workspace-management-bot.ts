@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { getSlackConnection } from "@/lib/pace-data";
 import { listSlackChannels, slackApi, slackTokenForConnection, type SlackDailyChannel } from "@/lib/slack-daily";
+import { deliverSlackBotMessage } from "@/lib/slack-bot-delivery";
 
 export const managementBotSignalIds = [
   "missing_due_date",
@@ -94,7 +95,8 @@ export async function testWorkspaceManagementBot(ownerId: string) {
   if (!settings.channelId) throw new Error("테스트 리포트를 받을 Slack 채널을 선택해 주세요.");
   await prepareSlackChannel(ownerId, settings.channelId);
   const snapshot = await collectWorkspaceManagementSnapshot(ownerId, undefined, settings.timezone, settings.signals);
-  await sendReport(ownerId, settings, snapshot, true);
+  const delivery = await sendReport(ownerId, settings, snapshot, true);
+  if (delivery.status !== "sent") throw new Error(delivery.last_error || "테스트 리포트 전송 결과를 확인하지 못했습니다.");
   return { sent: true, snapshot };
 }
 
@@ -137,23 +139,24 @@ export async function collectWorkspaceManagementSnapshot(ownerId: string, reques
   };
 }
 
-export async function runDueWorkspaceManagementBots(db: D1Database, now = new Date()) {
-  const settingsRows = await db.prepare("SELECT * FROM workspace_management_bot_settings WHERE enabled = 1 AND channel_id <> ''").all<Record<string, string | number | null>>();
+export async function runDueWorkspaceManagementBots(db: D1Database, now = new Date(), ownerId?: string) {
+  const settingsRows = await db.prepare(`SELECT s.* FROM workspace_management_bot_settings s
+    JOIN workspaces w ON w.id = s.owner_id AND w.scheduled_deletion_at IS NULL
+    WHERE s.enabled = 1 AND s.channel_id <> '' ${ownerId ? "AND s.owner_id = ?" : ""}`)
+    .bind(...(ownerId ? [ownerId] : [])).all<Record<string, string | number | null>>();
   let sent = 0;
   let failed = 0;
   for (const row of settingsRows.results) {
-    const settings = serializeSettings(row);
-    const parts = zonedParts(now, settings.timezone);
-    const date = `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
-    const currentTime = `${pad(parts.hour)}:${pad(parts.minute)}`;
-    if (!settings.weekdays.includes(localWeekday(date)) || currentTime < settings.reportTime || settings.lastSentDate === date) continue;
     try {
+      const settings = serializeSettings(row);
+      const parts = zonedParts(now, settings.timezone);
+      const date = `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
+      const currentTime = `${pad(parts.hour)}:${pad(parts.minute)}`;
+      if (!settings.weekdays.includes(localWeekday(date)) || currentTime < settings.reportTime || settings.lastSentDate === date) continue;
       const snapshot = await collectWorkspaceManagementSnapshot(String(row.owner_id), date, settings.timezone, settings.signals);
-      await sendReport(String(row.owner_id), settings, snapshot, false);
-      const sentAt = now.toISOString();
-      await db.prepare("UPDATE workspace_management_bot_settings SET last_sent_date = ?, last_sent_at = ?, last_error = '', updated_at = ? WHERE owner_id = ?")
-        .bind(date, sentAt, sentAt, row.owner_id).run();
-      sent += 1;
+      const delivery = await sendReport(String(row.owner_id), settings, snapshot, false, now);
+      if (delivery.status === "sent") sent += 1;
+      else if (!["pending", "preparing", "sending", "retry"].includes(delivery.status)) failed += 1;
     } catch (error) {
       const message = error instanceof Error ? error.message : "관리 리포트 전송 실패";
       await db.prepare("UPDATE workspace_management_bot_settings SET last_error = ?, updated_at = ? WHERE owner_id = ?")
@@ -195,27 +198,27 @@ async function prepareSlackChannel(ownerId: string, channelId: string): Promise<
   return { ...channel, isMember: true };
 }
 
-async function sendReport(ownerId: string, settings: ManagementBotSettings, snapshot: Awaited<ReturnType<typeof collectWorkspaceManagementSnapshot>>, test: boolean) {
-  const connection = await getSlackConnection(ownerId);
-  if (!connection) throw new Error("워크스페이스 Slack 연결이 필요합니다.");
-  const token = await slackTokenForConnection(connection);
+async function sendReport(ownerId: string, settings: ManagementBotSettings, snapshot: Awaited<ReturnType<typeof collectWorkspaceManagementSnapshot>>, test: boolean, now = new Date()) {
   const workspace = await (env as RuntimeEnv).DB.prepare("SELECT name FROM workspaces WHERE id = ? LIMIT 1").bind(ownerId).first<{ name: string }>();
   const selected = snapshot.groups.filter((group) => group.count > 0);
   const body = selected.length
     ? selected.map((group) => `*${signalLabel(group.signal)} · ${group.count}개*\n${group.items.slice(0, 5).map((item) => `• ${escapeSlack(item.title)} _(${item.kind === "project" ? "Project" : "Task"})_`).join("\n")}${group.count > 5 ? `\n_외 ${group.count - 5}개_` : ""}`).join("\n\n")
     : "현재 선택한 관리 항목은 모두 정리되어 있습니다. ✅";
   const appUrl = `${String((env as RuntimeEnv).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?settings=workspace&tab=summary`;
-  await slackApi(token, "chat.postMessage", {
-    channel: settings.channelId,
+  return deliverSlackBotMessage((env as RuntimeEnv).DB, {
+    ownerId, botKind: "management", subjectId: snapshot.date,
+    eventKey: test ? `test:${crypto.randomUUID()}` : snapshot.date,
+    expiresAt: new Date(zonedDayRange(snapshot.date, settings.timezone)[1]).toISOString(),
+    payload: { channel: settings.channelId, test,
     text: `[관리 봇] ${workspace?.name || "OKRPTR"} 워크스페이스 관리 리포트 · ${snapshot.date}`,
-    unfurl_links: false,
     blocks: [
       { type: "header", text: { type: "plain_text", text: `${test ? "테스트 · " : ""}관리 봇 · 워크스페이스 관리 리포트`.slice(0, 150) } },
-      { type: "context", elements: [{ type: "mrkdwn", text: `*${escapeSlack(workspace?.name || "OKRPTR")}* · ${snapshot.date}` }] },
+      { type: "context", elements: [{ type: "mrkdwn", text: `*${escapeSlack(workspace?.name || "OKRPTR").slice(0, 1800)}* · ${snapshot.date}` }] },
       { type: "section", text: { type: "mrkdwn", text: body.slice(0, 2900) } },
       { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRPTR에서 정리" }, url: appUrl }] },
     ],
-  });
+    },
+  }, now);
 }
 
 function serializeSettings(row: Record<string, string | number | null>): ManagementBotSettings {
@@ -277,7 +280,8 @@ function normalizeTimezone(value: string) {
 }
 
 function normalizeDate(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) throw new Error("올바른 날짜가 필요합니다.");
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) throw new Error("올바른 날짜가 필요합니다.");
   return value;
 }
 

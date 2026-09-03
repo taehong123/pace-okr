@@ -872,6 +872,34 @@ export const slackAutomationDeliveries = sqliteTable(
   ],
 );
 
+// Durable claims for channel bots. Scheduled daily DMs retain their own receipts.
+export const slackBotDeliveries = sqliteTable(
+  "slack_bot_deliveries",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    botKind: text("bot_kind").notNull(),
+    subjectId: text("subject_id").notNull(),
+    eventKey: text("event_key").notNull(),
+    connectionKey: text("connection_key").notNull(),
+    policy: text("policy").notNull(),
+    payload: text("payload").notNull(),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    retryAt: text("retry_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    messageTs: text("message_ts"),
+    lastError: text("last_error").notNull().default(""),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_slack_bot_deliveries_event").on(table.ownerId, table.botKind, table.eventKey),
+    index("idx_slack_bot_deliveries_due").on(table.status, table.retryAt),
+    index("idx_slack_bot_deliveries_owner").on(table.ownerId, table.createdAt),
+  ],
+);
+
 export const slackOAuthStates = sqliteTable(
   "slack_oauth_states",
   {

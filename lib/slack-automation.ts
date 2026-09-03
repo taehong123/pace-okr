@@ -82,18 +82,37 @@ export function normalizeSlackChannelId(value: string) {
   return channelId;
 }
 
-export async function postSlackMessage(token: string, channel: string, text: string) {
-  const response = await fetch("https://slack.com/api/chat.postMessage", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json; charset=utf-8",
-    },
-    body: JSON.stringify({ channel, text, unfurl_links: false, unfurl_media: false }),
-  });
-  const result = await response.json() as { ok?: boolean; error?: string; ts?: string };
-  if (!response.ok || !result.ok) throw new Error(slackErrorMessage(result.error));
-  return { timestamp: result.ts ?? null };
+export class SlackMessageError extends Error {
+  constructor(message: string, public outcome: "rejected" | "uncertain", public retryAfterSeconds = 0) {
+    super(message);
+  }
+}
+
+export async function postSlackMessage(token: string, channel: string, text: string, options: { blocks?: unknown[]; clientMsgId?: string } = {}) {
+  let response: Response;
+  try {
+    response = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ channel, text: text.slice(0, 3900), blocks: options.blocks, client_msg_id: options.clientMsgId, unfurl_links: false, unfurl_media: false }),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw new SlackMessageError("Slack 전송 결과를 확인하지 못했습니다. 중복 방지를 위해 자동 재발송하지 않습니다.", "uncertain");
+  }
+  if (response.status === 429) {
+    const delay = Number(response.headers.get("Retry-After"));
+    throw new SlackMessageError("Slack 요청 한도에 도달했습니다. 잠시 후 자동 재시도합니다.", "rejected", Number.isFinite(delay) && delay > 0 ? delay : 60);
+  }
+  let result: { ok?: boolean; error?: string; ts?: string };
+  try { result = await response.json() as typeof result; }
+  catch { throw new SlackMessageError("Slack 응답을 확인하지 못했습니다. 중복 방지를 위해 자동 재발송하지 않습니다.", "uncertain"); }
+  if (response.status >= 500 || ["internal_error", "fatal_error", "request_timeout"].includes(result.error ?? "")) {
+    throw new SlackMessageError(`${slackErrorMessage(result.error)} · 처리 결과 확인 필요`, "uncertain");
+  }
+  if (!response.ok || !result.ok) throw new SlackMessageError(slackErrorMessage(result.error), "rejected", result.error === "ratelimited" ? 60 : 0);
+  if (!result.ts) throw new SlackMessageError("Slack 전송 영수증이 없습니다. 처리 결과 확인이 필요합니다.", "uncertain");
+  return { timestamp: result.ts };
 }
 
 function escapeSlackText(value: string) {

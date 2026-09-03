@@ -1,0 +1,244 @@
+import assert from "node:assert/strict";
+import { readFile, readdir } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
+import test from "node:test";
+import ts from "typescript";
+
+const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
+function compile(source, dependencies = {}) {
+  const loaded = { exports: {} };
+  const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+  new Function("require", "module", "exports", code)((name) => {
+    if (!(name in dependencies)) throw new Error(`Unmocked dependency ${name}`);
+    return dependencies[name];
+  }, loaded, loaded.exports);
+  return loaded.exports;
+}
+const transport = compile(await read("../lib/slack-automation.ts"));
+const source = await read("../lib/slack-bot-delivery.ts");
+const managementSource = await read("../lib/workspace-management-bot.ts");
+const files = await readdir(new URL("../drizzle/", import.meta.url));
+const migrationName = files.find((name) => name.endsWith("_slack_bot_deliveries.sql"));
+assert.ok(migrationName, "generated delivery migration must exist");
+const migration = await read(`../drizzle/${migrationName}`);
+const NOW = new Date("2026-09-03T01:00:00.000Z");
+
+function harness(t) {
+  t.mock.timers.enable({ apis: ["Date"], now: NOW.getTime() });
+  const db = new DatabaseSync(":memory:");
+  db.exec(`PRAGMA foreign_keys=ON;
+    CREATE TABLE workspaces(id TEXT PRIMARY KEY, name TEXT, scheduled_deletion_at TEXT);
+    CREATE TABLE slack_connections(id TEXT PRIMARY KEY, owner_id TEXT, team_id TEXT, connected_at TEXT, encrypted_bot_token TEXT);
+    CREATE TABLE workspace_management_bot_settings(owner_id TEXT PRIMARY KEY, enabled INTEGER, weekdays TEXT, report_time TEXT, timezone TEXT,
+      channel_id TEXT, channel_name TEXT, signals TEXT, last_sent_date TEXT, last_sent_at TEXT, last_error TEXT DEFAULT '', updated_at TEXT);
+    CREATE TABLE items(id TEXT PRIMARY KEY, owner_id TEXT, kind TEXT, title TEXT, status TEXT, due_date TEXT, archived_at TEXT);
+    CREATE TABLE item_assignments(owner_id TEXT, item_id TEXT, role TEXT);
+    CREATE TABLE activity_log(owner_id TEXT, item_id TEXT, action TEXT, payload TEXT, created_at TEXT);
+    CREATE TABLE slack_automations(id TEXT PRIMARY KEY, owner_id TEXT, active INTEGER, channel_id TEXT, trigger_type TEXT, trigger_status TEXT,
+      message_template TEXT, last_triggered_at TEXT, last_delivery_status TEXT, last_error TEXT);
+    CREATE TABLE slack_automation_deliveries(id TEXT PRIMARY KEY, owner_id TEXT, automation_id TEXT, item_id TEXT, status TEXT, error TEXT, sent_at TEXT);`);
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  for (const team of ["a", "b"]) {
+    db.prepare("INSERT INTO workspaces VALUES(?,?,NULL)").run(team, `팀 ${team}`);
+    db.prepare("INSERT INTO slack_connections VALUES(?,?,?,?,?)").run(`con-${team}`, team, `T-${team}`, "2026-09-02T00:00:00Z", `token-${team}`);
+    db.prepare(`INSERT INTO workspace_management_bot_settings VALUES(?,1,'[1,2,3,4,5]','09:00','Asia/Seoul',?,?,'["missing_owner"]',NULL,NULL,'',?)`)
+      .run(team, `C-${team}`, `channel-${team}`, NOW.toISOString());
+    db.prepare("INSERT INTO items VALUES(?,?,'task',?,'blocked',NULL,NULL)").run(`item-${team}`, team, `업무 ${team}`);
+    db.prepare("INSERT INTO slack_automations VALUES(?,?,1,?,'task_status_changed','blocked','template',NULL,'never','')").run(`rule-${team}`, team, `C-${team}`);
+    db.prepare("INSERT INTO slack_automation_deliveries VALUES(?,?,?,?,'pending','',NULL)").run(`delivery-${team}`, team, `rule-${team}`, `item-${team}`);
+  }
+  const raw = { prepare(sql) {
+    const stmt = db.prepare(sql); let values = [];
+    return { bind(...args) { values = args; return this; }, async first() { return stmt.get(...values) ?? null; },
+      async all() { return { results: stmt.all(...values) }; }, async run() { return { meta: { changes: Number(stmt.run(...values).changes) } }; } };
+  } };
+  const calls = [], behavior = { code: {}, loseResponse: false, beforeDecrypt: null };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, request) => {
+    assert.equal(url, "https://slack.com/api/chat.postMessage");
+    assert.ok(request.signal, "network calls must have a timeout");
+    const payload = JSON.parse(request.body), token = request.headers.Authorization;
+    calls.push({ payload, token });
+    if (behavior.loseResponse) throw new Error("lost response after send");
+    const code = behavior.code[token];
+    if (code === "ratelimited") return new Response("rate limited", { status: 429, headers: { "Retry-After": "180" } });
+    if (code) return Response.json({ ok: false, error: code });
+    return Response.json({ ok: true, ts: `${calls.length}.000001` });
+  };
+  const api = compile(source, {
+    "cloudflare:workers": { env: { DB: raw, SLACK_TOKEN_ENCRYPTION_KEY: "mock" } },
+    "@/lib/slack-oauth": { decryptSlackSecret: async (token) => { await behavior.beforeDecrypt?.(); return token; } },
+    "@/lib/slack-automation": transport,
+  });
+  const management = compile(managementSource, {
+    "cloudflare:workers": { env: { DB: raw } },
+    "@/lib/pace-data": { getSlackConnection: async (ownerId) => db.prepare("SELECT * FROM slack_connections WHERE owner_id=?").get(ownerId) },
+    "@/lib/slack-daily": { listSlackChannels: async () => [] },
+    "@/lib/slack-bot-delivery": api,
+  });
+  t.after(() => { globalThis.fetch = originalFetch; db.close(); });
+  const input = (team = "a", overrides = {}) => ({ ownerId: team, botKind: "automation", subjectId: `delivery-${team}`, eventKey: "same-event",
+    payload: { channel: `C-${team}`, text: `알림 ${team}` }, expiresAt: "2026-09-04T00:00:00.000Z", ...overrides });
+  const receipt = (team = "a") => db.prepare("SELECT * FROM slack_bot_deliveries WHERE owner_id=? ORDER BY created_at DESC LIMIT 1").get(team);
+  return { db, raw, calls, behavior, api, management, input, receipt };
+}
+
+test("delivery migration is additive LF and enforces tenant/event uniqueness and workspace cleanup", async (t) => {
+  const { db, api, raw, input } = harness(t);
+  assert.ok(!migration.includes("\r"));
+  assert.doesNotMatch(migration, /^(DROP|ALTER|DELETE FROM|UPDATE )/im);
+  assert.equal(db.prepare("PRAGMA foreign_key_check").all().length, 0);
+  await api.deliverSlackBotMessage(raw, input());
+  await api.deliverSlackBotMessage(raw, input("b"));
+  const row = db.prepare("SELECT * FROM slack_bot_deliveries WHERE owner_id='b'").get();
+  row.id = "duplicate";
+  assert.throws(() => db.prepare(`INSERT INTO slack_bot_deliveries (${Object.keys(row).join(",")}) VALUES (${Object.keys(row).map(() => "?").join(",")})`).run(...Object.values(row)), /UNIQUE/);
+  db.exec("DELETE FROM workspaces WHERE id='a'");
+  assert.equal(db.prepare("SELECT count(*) n FROM slack_bot_deliveries WHERE owner_id='a'").get().n, 0);
+  assert.equal(db.prepare("SELECT count(*) n FROM slack_bot_deliveries WHERE owner_id='b'").get().n, 1);
+});
+
+test("overlapping requests send once and identical events in two teams use separate credentials", async (t) => {
+  const { api, raw, input, calls, db } = harness(t);
+  await Promise.all([api.deliverSlackBotMessage(raw, input()), api.deliverSlackBotMessage(raw, input()), api.deliverSlackBotMessage(raw, input("b"))]);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.map((call) => [call.token, call.payload.channel]).sort(), [["Bearer token-a", "C-a"], ["Bearer token-b", "C-b"]]);
+  assert.equal(db.prepare("SELECT count(*) n FROM slack_bot_deliveries WHERE status='sent'").get().n, 2);
+});
+
+test("rate limits retain pending receipts, respect retry-after and isolate the other team", async (t) => {
+  const { api, raw, input, calls, behavior, receipt } = harness(t);
+  behavior.code["Bearer token-a"] = "ratelimited";
+  assert.equal((await api.deliverSlackBotMessage(raw, input())).status, "retry");
+  assert.equal((await api.deliverSlackBotMessage(raw, input("b"))).status, "sent");
+  await api.runDueSlackBotDeliveries(raw, new Date(NOW.getTime() + 120_000));
+  assert.equal(calls.length, 2);
+  delete behavior.code["Bearer token-a"];
+  await api.runDueSlackBotDeliveries(raw, new Date(NOW.getTime() + 181_000));
+  assert.equal(receipt().status, "sent");
+  assert.equal(calls.length, 3);
+  assert.equal(calls[0].payload.client_msg_id, calls[2].payload.client_msg_id);
+});
+
+test("lost response is uncertain, never called successful and never blindly replayed", async (t) => {
+  const { api, raw, input, calls, behavior, db, receipt } = harness(t);
+  behavior.loseResponse = true;
+  assert.equal((await api.deliverSlackBotMessage(raw, input())).status, "uncertain");
+  behavior.loseResponse = false;
+  await api.deliverSlackBotMessage(raw, input());
+  await api.runDueSlackBotDeliveries(raw, new Date(NOW.getTime() + 600_000));
+  assert.equal(calls.length, 1);
+  assert.equal(receipt().message_ts, null);
+  assert.match(db.prepare("SELECT error FROM slack_automation_deliveries WHERE id='delivery-a'").get().error, /중복 방지/);
+});
+
+test("permanent Slack rejection is visible and retry attempts are bounded", async (t) => {
+  const { api, raw, input, behavior, calls, receipt } = harness(t);
+  behavior.code["Bearer token-a"] = "missing_scope";
+  assert.equal((await api.deliverSlackBotMessage(raw, input())).status, "failed");
+  behavior.code["Bearer token-b"] = "ratelimited";
+  await api.deliverSlackBotMessage(raw, input("b"));
+  for (let n = 1; n <= 8; n++) await api.runDueSlackBotDeliveries(raw, new Date(NOW.getTime() + n * 181_000));
+  assert.equal(receipt("b").attempts, 5);
+  assert.equal(receipt("b").status, "failed");
+  assert.equal(calls.filter((call) => call.token === "Bearer token-a").length, 1);
+});
+
+for (const [label, mutation] of [
+  ["stop rule", "UPDATE slack_automations SET active=0 WHERE owner_id='a'"],
+  ["change channel", "UPDATE slack_automations SET channel_id='C-changed' WHERE owner_id='a'"],
+  ["archive task", "UPDATE items SET archived_at='now' WHERE owner_id='a'"],
+  ["disconnect", "DELETE FROM slack_connections WHERE owner_id='a'"],
+  ["reinstall on another Slack team", "UPDATE slack_connections SET team_id='T-new', connected_at='new' WHERE owner_id='a'"],
+  ["delete workspace", "UPDATE workspaces SET scheduled_deletion_at='tomorrow' WHERE id='a'"],
+]) test(`${label} during preparation cancels old send without affecting another team`, async (t) => {
+  const { api, raw, input, behavior, calls, db } = harness(t);
+  behavior.beforeDecrypt = () => { db.exec(mutation); behavior.beforeDecrypt = null; };
+  assert.equal((await api.deliverSlackBotMessage(raw, input())).status, "cancelled");
+  assert.equal(calls.length, 0);
+  assert.equal((await api.deliverSlackBotMessage(raw, input("b"))).status, "sent");
+});
+
+test("a stale in-flight request is not retried, but pre-send crash can safely resume", async (t) => {
+  const { api, raw, input, db, calls, receipt, behavior } = harness(t);
+  behavior.code["Bearer token-a"] = "ratelimited";
+  await api.deliverSlackBotMessage(raw, input());
+  db.prepare("UPDATE slack_bot_deliveries SET status='sending', retry_at=? WHERE owner_id='a'").run(NOW.toISOString());
+  await api.runDueSlackBotDeliveries(raw);
+  assert.equal(receipt().status, "uncertain");
+  assert.equal(calls.length, 1);
+  behavior.code["Bearer token-b"] = "ratelimited";
+  await api.deliverSlackBotMessage(raw, input("b"));
+  delete behavior.code["Bearer token-b"];
+  db.prepare("UPDATE slack_bot_deliveries SET status='preparing', retry_at=? WHERE owner_id='b'").run(NOW.toISOString());
+  await api.runDueSlackBotDeliveries(raw);
+  assert.equal(receipt("b").status, "sent");
+});
+
+test("management cron is single-send per team/date and isolates malformed team configuration", async (t) => {
+  const { management, raw, db, calls } = harness(t);
+  db.exec("UPDATE workspace_management_bot_settings SET timezone='not/a/zone' WHERE owner_id='a'");
+  await Promise.all([management.runDueWorkspaceManagementBots(raw), management.runDueWorkspaceManagementBots(raw)]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].payload.channel, "C-b");
+  assert.equal(db.prepare("SELECT last_sent_date FROM workspace_management_bot_settings WHERE owner_id='b'").get().last_sent_date, "2026-09-03");
+  assert.match(db.prepare("SELECT last_error FROM workspace_management_bot_settings WHERE owner_id='a'").get().last_error, /시간대/);
+});
+
+test("management obeys local weekday/time, stopped bots, deletion and current workspace scope", async (t) => {
+  const { management, raw, db, calls } = harness(t);
+  db.exec("UPDATE workspace_management_bot_settings SET timezone='America/Los_Angeles', report_time='20:00' WHERE owner_id='a'");
+  await management.runDueWorkspaceManagementBots(raw, NOW, "a");
+  assert.equal(calls.length, 0); // Los Angeles is still Wednesday 18:00.
+  db.exec("UPDATE workspace_management_bot_settings SET enabled=0 WHERE owner_id='a'; UPDATE workspaces SET scheduled_deletion_at='tomorrow' WHERE id='b'");
+  await management.runDueWorkspaceManagementBots(raw);
+  assert.equal(calls.length, 0);
+});
+
+test("management rejects invalid dates and report blocks remain within Slack limits", async (t) => {
+  const { management, raw, db, calls } = harness(t);
+  await assert.rejects(management.collectWorkspaceManagementSnapshot("a", "2026-02-31"), /날짜/);
+  db.prepare("UPDATE items SET title=? WHERE owner_id='a'").run("긴제목<&>".repeat(2000));
+  db.prepare("UPDATE workspaces SET name=? WHERE id='a'").run("긴팀명".repeat(2000));
+  await management.runDueWorkspaceManagementBots(raw, NOW, "a");
+  const blocks = calls[0].payload.blocks;
+  assert.ok(blocks.find((block) => block.type === "section").text.text.length <= 3000);
+  assert.ok(blocks.find((block) => block.type === "context").elements[0].text.length <= 2000);
+  assert.ok(calls[0].payload.text.length <= 4000);
+});
+
+test("management can recover a rejected report after reconnection but never resends an uncertain report", async (t) => {
+  const { management, raw, db, behavior, calls } = harness(t);
+  behavior.code["Bearer token-a"] = "missing_scope";
+  await management.runDueWorkspaceManagementBots(raw, NOW, "a");
+  assert.equal(db.prepare("SELECT status FROM slack_bot_deliveries WHERE owner_id='a'").get().status, "failed");
+  delete behavior.code["Bearer token-a"];
+  db.exec("UPDATE slack_connections SET connected_at='reconnected' WHERE owner_id='a'");
+  await management.runDueWorkspaceManagementBots(raw, NOW, "a");
+  assert.equal(db.prepare("SELECT status FROM slack_bot_deliveries WHERE owner_id='a'").get().status, "sent");
+  behavior.loseResponse = true;
+  await management.runDueWorkspaceManagementBots(raw, NOW, "b");
+  behavior.loseResponse = false;
+  db.exec("UPDATE slack_connections SET connected_at='reconnected' WHERE owner_id='b'");
+  const count = calls.length;
+  await management.runDueWorkspaceManagementBots(raw, NOW, "b");
+  assert.equal(calls.length, count);
+});
+
+test("bot writes require Owner/Admin and authenticated tenant scope before execution", async () => {
+  for (const path of ["../app/api/workspace-management-bot/route.ts", "../app/api/slack/automations/route.ts", "../app/api/slack/automations/test/route.ts"]) {
+    const code = await read(path);
+    for (const role of ["member", "viewer"]) {
+      let writes = 0;
+      const api = compile(code, {
+        "@/lib/pace-data": { authorizeRequest: async () => ({ ownerId: "b", role }), canManageTeam: (auth) => ["owner", "admin"].includes(auth.role), ensureWorkspace: async () => { writes++; } },
+        "@/lib/workspace-management-bot": {},
+      });
+      for (const method of ["POST", "PATCH", "DELETE"]) if (api[method]) {
+        const response = await api[method](new Request("https://example.com/api/bot", { method, body: JSON.stringify({ ownerId: "a", action: "test" }) }));
+        assert.equal(response.status, 403);
+      }
+      assert.equal(writes, 0);
+    }
+  }
+});

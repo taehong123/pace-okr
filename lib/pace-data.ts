@@ -55,13 +55,11 @@ import {
   type SlackAutomationDelivery,
   type TrashRecord,
 } from "@/db/schema";
-import { decryptSlackSecret } from "@/lib/slack-oauth";
 import { syncDueKrDataConnectionsWithDb, syncKrDataConnectionWithDb } from "@/lib/kr-data-sync";
 import {
   defaultSlackAutomationTemplate,
   isSlackAutomationTrigger,
   normalizeSlackChannelId,
-  postSlackMessage,
   renderSlackAutomationMessage,
   slackAutomationMatches,
   type SlackAutomationContext,
@@ -2059,6 +2057,7 @@ export async function createSlackAutomation(ownerId: string, userId: string, inp
     ...input,
     messageTemplate: input.messageTemplate?.trim() || (requestedTrigger && isSlackAutomationTrigger(requestedTrigger) ? defaultSlackAutomationTemplate(requestedTrigger) : undefined),
   }, false);
+  await validateSlackAutomationChannel(ownerId, values.channelId!);
   const now = new Date().toISOString();
   const [created] = await getDb().insert(slackAutomations).values({
     id: crypto.randomUUID(),
@@ -2088,6 +2087,7 @@ export async function updateSlackAutomation(ownerId: string, id: string, input: 
     messageTemplate: input.messageTemplate ?? current.messageTemplate,
     active: input.active ?? current.active,
   }, false);
+  if (next.channelId !== current.channelId || (next.active && !current.active)) await validateSlackAutomationChannel(ownerId, next.channelId!);
   const [updated] = await getDb().update(slackAutomations).set({
     name: next.name,
     triggerType: next.triggerType,
@@ -2124,7 +2124,7 @@ export async function testSlackAutomation(ownerId: string, id: string) {
   };
   const delivery = await deliverSlackAutomation(automation, context, null, `test:${ownerId}:${automation.id}:${crypto.randomUUID()}`, "test");
   if (!delivery) throw new Error("테스트 전송을 시작하지 못했습니다");
-  if (delivery.status === "failed") throw new Error(delivery.error);
+  if (delivery.status !== "sent") throw new Error(delivery.error || "테스트 발송 결과를 확인하지 못했습니다.");
   return serializeSlackAutomationDelivery(delivery);
 }
 
@@ -2133,7 +2133,7 @@ export async function dispatchSlackAutomationEvent(ownerId: string, event: {
   item: PaceItem;
   fromStatus?: string | null;
 }) {
-  if (event.item.kind !== "task") return;
+  if (event.item.kind !== "task" || event.item.ownerId !== ownerId) return;
   try {
     await ensureSchema();
     const automations = await getDb().select().from(slackAutomations).where(and(
@@ -2154,7 +2154,8 @@ export async function dispatchSlackAutomationEvent(ownerId: string, event: {
     for (const automation of automations) {
       if (!slackAutomationMatches(automation, { triggerType: event.triggerType, status: event.item.status })) continue;
       const eventKey = `${ownerId}:${event.triggerType}:${automation.id}:${event.item.id}:${event.fromStatus ?? ""}:${event.item.status}:${event.item.updatedAt}`;
-      await deliverSlackAutomation(automation, context, event.item.id, eventKey, event.triggerType);
+      try { await deliverSlackAutomation(automation, context, event.item.id, eventKey, event.triggerType); }
+      catch (error) { console.error("Slack automation delivery failed", automation.id, error instanceof Error ? error.message : "Unknown failure"); }
     }
   } catch (error) {
     console.error("Slack automation dispatch failed", error);
@@ -2183,6 +2184,18 @@ async function getSlackAutomation(ownerId: string, id: string) {
   return automation ?? null;
 }
 
+async function validateSlackAutomationChannel(ownerId: string, channelId: string) {
+  const { listSlackChannels, slackApi, slackTokenForConnection } = await import("@/lib/slack-daily");
+  const channels = await listSlackChannels(ownerId, { includeJoinablePublic: true });
+  const channel = channels.find((value) => value.id === channelId);
+  if (!channel) throw new Error("현재 워크스페이스의 공개 채널 또는 봇이 참여한 비공개 채널을 선택해 주세요.");
+  if (!channel.isPrivate && !channel.isMember) {
+    const connection = await getSlackConnection(ownerId);
+    if (!connection) throw new Error("Slack을 먼저 연결해 주세요.");
+    await slackApi(await slackTokenForConnection(connection), "conversations.join", { channel: channelId });
+  }
+}
+
 async function getWorkspaceName(ownerId: string) {
   const [workspace] = await getDb().select({ name: workspaces.name }).from(workspaces).where(eq(workspaces.id, ownerId)).limit(1);
   return workspace?.name ?? "OKRPTR";
@@ -2197,7 +2210,7 @@ async function deliverSlackAutomation(
 ) {
   const now = new Date().toISOString();
   const message = renderSlackAutomationMessage(automation.messageTemplate, context);
-  const [delivery] = await getDb().insert(slackAutomationDeliveries).values({
+  const [created] = await getDb().insert(slackAutomationDeliveries).values({
     id: crypto.randomUUID(),
     ownerId: automation.ownerId,
     automationId: automation.id,
@@ -2209,28 +2222,31 @@ async function deliverSlackAutomation(
     status: "pending",
     createdAt: now,
   }).onConflictDoNothing({ target: slackAutomationDeliveries.eventKey }).returning();
+  const delivery = created ?? (await getDb().select().from(slackAutomationDeliveries).where(and(eq(slackAutomationDeliveries.ownerId, automation.ownerId), eq(slackAutomationDeliveries.eventKey, eventKey))).limit(1))[0];
   if (!delivery) return null;
+  // Historical attempts have no receipt and must not be replayed blindly.
+  if (!created) {
+    if (delivery.status !== "pending") return delivery;
+    const receipt = await env.DB.prepare("SELECT id FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = 'automation' AND event_key = ?")
+      .bind(automation.ownerId, eventKey).first();
+    if (!receipt) return delivery;
+  }
 
   try {
-    const runtime = env as RuntimeEnv;
-    const connection = await getSlackConnection(automation.ownerId);
-    if (!connection) throw new Error("Slack 연결이 끊어졌습니다. 다시 연결해 주세요.");
-    if (!runtime.SLACK_TOKEN_ENCRYPTION_KEY) throw new Error("Slack 암호화 설정이 없습니다");
-    const token = await decryptSlackSecret(connection.encryptedBotToken, runtime.SLACK_TOKEN_ENCRYPTION_KEY);
-    await postSlackMessage(token, automation.channelId, message);
-    const sentAt = new Date().toISOString();
-    const [sent] = await getDb().update(slackAutomationDeliveries).set({ status: "sent", sentAt, error: "" })
-      .where(eq(slackAutomationDeliveries.id, delivery.id)).returning();
-    await getDb().update(slackAutomations).set({ lastTriggeredAt: sentAt, lastDeliveryStatus: "sent", lastError: "", updatedAt: sentAt })
-      .where(eq(slackAutomations.id, automation.id));
-    return sent;
+    const { deliverSlackBotMessage } = await import("@/lib/slack-bot-delivery");
+    await deliverSlackBotMessage(env.DB, {
+      ownerId: automation.ownerId, botKind: "automation", subjectId: delivery.id, eventKey,
+      payload: { channel: delivery.channelId, text: delivery.message, test: triggerType === "test" },
+      expiresAt: new Date(new Date(delivery.createdAt).getTime() + 24 * 60 * 60_000).toISOString(),
+    });
+    return (await getDb().select().from(slackAutomationDeliveries).where(and(eq(slackAutomationDeliveries.ownerId, automation.ownerId), eq(slackAutomationDeliveries.id, delivery.id))).limit(1))[0];
   } catch (error) {
     const message = (error instanceof Error ? error.message : String(error)).slice(0, 500);
     const failedAt = new Date().toISOString();
     const [failed] = await getDb().update(slackAutomationDeliveries).set({ status: "failed", error: message })
-      .where(eq(slackAutomationDeliveries.id, delivery.id)).returning();
+      .where(and(eq(slackAutomationDeliveries.ownerId, automation.ownerId), eq(slackAutomationDeliveries.id, delivery.id))).returning();
     await getDb().update(slackAutomations).set({ lastTriggeredAt: failedAt, lastDeliveryStatus: "failed", lastError: message, updatedAt: failedAt })
-      .where(eq(slackAutomations.id, automation.id));
+      .where(and(eq(slackAutomations.ownerId, automation.ownerId), eq(slackAutomations.id, automation.id)));
     return failed;
   }
 }

@@ -93,6 +93,6 @@ function forbidden() {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
-  const status = /required|입력|지원하지|찾을 수|먼저 연결|이하여야/i.test(message) ? 400 : 500;
+  const status = /required|입력|지원하지|찾을 수|먼저 연결|이하여야|선택|채널/i.test(message) ? 400 : 500;
   return Response.json({ error: message }, { status });
 }

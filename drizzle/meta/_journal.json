@@ -253,6 +253,13 @@
       "when": 1788355294873,
       "tag": "0039_marketing_prompt_state",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1788402347415,
+      "tag": "0040_slack_bot_deliveries",
+      "breakpoints": true
     }
   ]
 }

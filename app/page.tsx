@@ -629,7 +629,7 @@ type SlackAutomation = {
   messageTemplate: string;
   active: boolean;
   lastTriggeredAt: string | null;
-  lastDeliveryStatus: "never" | "sent" | "failed";
+  lastDeliveryStatus: "never" | "pending" | "sent" | "failed";
   lastError: string;
   createdAt: string;
   updatedAt: string;
@@ -6222,10 +6222,11 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
         if (!response.ok || !payload.settings) throw new Error(payload.error || "관리 봇 정보를 불러오지 못했습니다.");
         setData(payload);
         setDraft(payload.settings);
-        onSummary(payload.settings.enabled ? "사용 중" : "중지", managementScheduleSummary(payload.settings));
+        onSummary(!payload.slackConnected ? "연결 필요" : payload.settings.enabled ? payload.settings.lastError ? "전송 확인 필요" : "사용 중" : "중지", managementScheduleSummary(payload.settings));
         setError("");
       })
       .catch((loadError: unknown) => {
+        loadedRef.current = false;
         if (loadError instanceof DOMException && loadError.name === "AbortError") return;
         setError(loadError instanceof Error ? loadError.message : "관리 봇 정보를 불러오지 못했습니다.");
       })
@@ -6247,7 +6248,7 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
       if (!response.ok || !next.settings) throw new Error(next.error || "관리 봇 설정을 저장하지 못했습니다.");
       setData(next);
       setDraft(next.settings);
-      onSummary(next.settings.enabled ? "사용 중" : "중지", managementScheduleSummary(next.settings));
+      onSummary(!next.slackConnected ? "연결 필요" : next.settings.enabled ? next.settings.lastError ? "전송 확인 필요" : "사용 중" : "중지", managementScheduleSummary(next.settings));
       if (sendTest) {
         const testResponse = await fetch("/api/workspace-management-bot", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "test" }) });
         const testData = await testResponse.json() as { sent?: boolean; snapshot?: ManagementBotSnapshot; error?: string };
@@ -6279,6 +6280,7 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
   const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 
   return <section className="workspace-management-pane embedded">
+    {data.settings.lastError && <div className="workspace-management-error" role="alert"><AlertTriangle size={17} /><div><b>관리 봇 전송 확인이 필요합니다</b><p>{data.settings.lastError}</p></div></div>}
     {!data.slackConnected && <div className="workspace-settings-note management-slack-note"><Hash size={16} /><div><b>Slack 연결 후 관리 봇을 설정할 수 있습니다</b><p>관리 봇은 워크스페이스 공용 채널로 리포트를 보냅니다. 위의 Slack 연결을 먼저 완료해 주세요.</p></div></div>}
     {!canManage && <div className="workspace-settings-note"><Eye size={16} /><p>관리 봇 설정은 읽기 전용입니다. Owner 또는 Admin이 발송 항목과 시간을 변경할 수 있습니다.</p></div>}
 
@@ -6732,6 +6734,13 @@ const slackAutomationRecommendations = [
   { id: "created", name: "새 Task 알림", description: "새 Task가 만들어지면 담당 채널에 알립니다.", triggerType: "task_created" as const, triggerStatus: "", messageTemplate: slackAutomationDefaults.task_created },
 ] as const;
 
+function slackAutomationHealthLabel(automations: SlackAutomation[]) {
+  const active = automations.filter((entry) => entry.active);
+  if (active.some((entry) => entry.lastDeliveryStatus === "failed")) return "전송 확인 필요";
+  if (active.some((entry) => entry.lastDeliveryStatus === "pending")) return "발송 처리 중";
+  return active.length ? "사용 중" : automations.length ? "중지" : "설정 필요";
+}
+
 function SlackAutomationManager({ active, connected, canManage, workspaceName, onSummary, onNotice }: { active: boolean; connected: boolean; canManage: boolean; workspaceName: string; onSummary: (status: string, summary: string) => void; onNotice: (message: string) => void }) {
   const confirmAction = useAppConfirm();
   const [automations, setAutomations] = useState<SlackAutomation[]>([]);
@@ -6768,7 +6777,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
         setDeliveries(data.deliveries);
         setChannels(nextChannels);
         const activeCount = data.automations.filter((entry) => entry.active).length;
-        onSummary(activeCount ? "사용 중" : data.automations.length ? "중지" : "설정 필요", `활성 규칙 ${activeCount}개 · 전체 ${data.automations.length}개`);
+        onSummary(slackAutomationHealthLabel(data.automations), `활성 규칙 ${activeCount}개 · 전체 ${data.automations.length}개`);
       })
       .catch((error: unknown) => {
         completed = true;
@@ -6793,7 +6802,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       setAutomations(data.automations);
       setDeliveries(data.deliveries);
       const activeCount = data.automations.filter((entry) => entry.active).length;
-      onSummary(activeCount ? "사용 중" : data.automations.length ? "중지" : "설정 필요", `활성 규칙 ${activeCount}개 · 전체 ${data.automations.length}개`);
+      onSummary(slackAutomationHealthLabel(data.automations), `활성 규칙 ${activeCount}개 · 전체 ${data.automations.length}개`);
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "자동화를 불러오지 못했습니다.");
     } finally {
@@ -6825,7 +6834,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       if (!response.ok || !data.automation) throw new Error(data.error || "추천 자동화를 만들지 못했습니다.");
       const next = [data.automation, ...automations];
       setAutomations(next);
-      onSummary("사용 중", `활성 규칙 ${next.filter((entry) => entry.active).length}개 · 전체 ${next.length}개`);
+      onSummary(slackAutomationHealthLabel(next), `활성 규칙 ${next.filter((entry) => entry.active).length}개 · 전체 ${next.length}개`);
       onNotice(`'${recommendation.name}' 추천 자동화를 만들었습니다.`);
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "추천 자동화를 만들지 못했습니다.");
@@ -6849,7 +6858,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       setAutomations((current) => {
         const next = editingId ? current.map((entry) => entry.id === editingId ? data.automation! : entry) : [data.automation!, ...current];
         const activeCount = next.filter((entry) => entry.active).length;
-        onSummary(activeCount ? "사용 중" : next.length ? "중지" : "설정 필요", `활성 규칙 ${activeCount}개 · 전체 ${next.length}개`);
+        onSummary(slackAutomationHealthLabel(next), `활성 규칙 ${activeCount}개 · 전체 ${next.length}개`);
         return next;
       });
       setFormOpen(false);
@@ -6871,7 +6880,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       setAutomations((current) => {
         const next = current.map((entry) => entry.id === automation.id ? data.automation! : entry);
         const activeCount = next.filter((entry) => entry.active).length;
-        onSummary(activeCount ? "사용 중" : next.length ? "중지" : "설정 필요", `활성 규칙 ${activeCount}개 · 전체 ${next.length}개`);
+        onSummary(slackAutomationHealthLabel(next), `활성 규칙 ${activeCount}개 · 전체 ${next.length}개`);
         return next;
       });
     } catch (error) {
@@ -6906,7 +6915,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       setAutomations((current) => {
         const next = current.filter((entry) => entry.id !== automation.id);
         const activeCount = next.filter((entry) => entry.active).length;
-        onSummary(activeCount ? "사용 중" : next.length ? "중지" : "설정 필요", `활성 규칙 ${activeCount}개 · 전체 ${next.length}개`);
+        onSummary(slackAutomationHealthLabel(next), `활성 규칙 ${activeCount}개 · 전체 ${next.length}개`);
         return next;
       });
       setDeliveries((current) => current.filter((entry) => entry.automationId !== automation.id));
@@ -6940,7 +6949,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
     </form>}
     {loading ? <div className="slack-automation-loading"><LoaderCircle className="spin" size={16} />자동화를 불러오는 중</div> : automations.length === 0 ? <div className="slack-automation-empty"><Zap size={18} /><b>아직 자동화가 없습니다.</b><p>{canManage ? "새 자동화를 만들어 첫 Slack 알림을 보내보세요." : "워크스페이스 관리자가 자동화를 만들 수 있습니다."}</p></div> : <div className="slack-automation-list">{automations.map((automation) => <article key={automation.id} className={automation.active ? "" : "inactive"}>
       <div className="slack-automation-main"><span className={`slack-delivery-dot ${automation.lastDeliveryStatus}`} /><div><b>{automation.name}</b><p>{slackTriggerLabel(automation)} · #{automation.channelId}</p></div><span className={`slack-automation-state ${automation.active ? "active" : ""}`}>{automation.active ? "활성" : "중지"}</span></div>
-      <div className="slack-automation-meta">{automation.lastDeliveryStatus === "never" ? "아직 전송 이력 없음" : automation.lastDeliveryStatus === "sent" ? `${formatSlackAutomationTime(automation.lastTriggeredAt)} 전송 성공` : automation.lastError || "최근 전송 실패"}</div>
+      <div className="slack-automation-meta">{automation.lastDeliveryStatus === "never" ? "아직 전송 이력 없음" : automation.lastDeliveryStatus === "sent" ? `${formatSlackAutomationTime(automation.lastTriggeredAt)} 전송 성공` : automation.lastError || (automation.lastDeliveryStatus === "pending" ? "발송 처리 중" : "최근 전송 실패")}</div>
       {canManage && <div className="slack-automation-actions"><button type="button" onClick={() => void testSend(automation)} disabled={busyId === automation.id}>{busyId === automation.id ? <LoaderCircle className="spin" size={12} /> : <Send size={12} />}테스트</button><button type="button" onClick={() => void toggleAutomation(automation)} disabled={busyId === automation.id}>{automation.active ? "중지" : "활성화"}</button><button type="button" onClick={() => startEdit(automation)}><Pencil size={12} />수정</button><button type="button" className="danger" onClick={() => void removeAutomation(automation)} disabled={busyId === automation.id} aria-label={`${automation.name} 삭제`}><Trash2 size={12} /></button></div>}
     </article>)}</div>}
     {deliveries.length > 0 && <details className="slack-delivery-history"><summary>최근 전송 기록 <span>{deliveries.length}</span><ChevronDown size={13} /></summary><div>{deliveries.slice(0, 8).map((delivery) => <div key={delivery.id}><span className={`slack-delivery-dot ${delivery.status}`} /><p><b>{delivery.status === "sent" ? "전송 성공" : delivery.status === "failed" ? "전송 실패" : "전송 중"}</b><small>#{delivery.channelId} · {formatSlackAutomationTime(delivery.sentAt || delivery.createdAt)}</small>{delivery.error && <em>{delivery.error}</em>}</p></div>)}</div></details>}

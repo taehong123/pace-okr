@@ -1,4 +1,4 @@
-import { waitUntil } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
 import {
   authorizeRequest,
   canManageTeam,
@@ -90,6 +90,10 @@ export async function GET(request: Request) {
     // Recovery stays off the critical loading path and never sends an immediate DM.
     waitUntil(import("@/lib/slack-daily").then(({ repairSlackDailyReminders }) => repairSlackDailyReminders(authorization.ownerId))
       .catch((error) => console.error("slack_daily_repair_failed", error instanceof Error ? error.message : "Unknown failure")));
+    waitUntil(import("@/lib/slack-bot-delivery").then(({ runDueSlackBotDeliveries }) => runDueSlackBotDeliveries(env.DB, new Date(), authorization.ownerId))
+      .catch((error) => console.error("slack_bot_repair_failed", error instanceof Error ? error.message : "Unknown failure")));
+    waitUntil(import("@/lib/workspace-management-bot").then(({ runDueWorkspaceManagementBots }) => runDueWorkspaceManagementBots(env.DB, new Date(), authorization.ownerId))
+      .catch((error) => console.error("management_bot_repair_failed", error instanceof Error ? error.message : "Unknown failure")));
 
     const headers = new Headers({ "Cache-Control": "no-store" });
     headers.set("Server-Timing", [
