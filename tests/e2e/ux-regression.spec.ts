@@ -317,7 +317,7 @@ test.describe("개인 앱 연동과 워크스페이스 봇 연동", () => {
     await expect(page.getByText("1명", { exact: true })).toBeVisible();
     await expect(page.locator(".slack-connected-summary dd", { hasText: "#daily" })).toBeVisible();
     await expect(page.locator(".slack-connected-title").getByRole("button", { name: "설정", exact: true })).toBeVisible();
-    await expect(page.getByText("멤버 연결·실패 기록")).toBeVisible();
+    await expect(page.getByText("멤버 연결·발송 관리")).toBeVisible();
     await expect(page.getByRole("heading", { name: "팀 공유 채널" })).toHaveCount(0);
   });
 

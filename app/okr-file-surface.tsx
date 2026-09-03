@@ -566,12 +566,12 @@ function OkrReadKeyResult({
                   {tasks.length ? <button type="button" className="okr-tree-row okr-tree-project-main" aria-expanded={projectExpanded} aria-controls={tasksId} onClick={() => onToggle(project.id)}>
                     <TreeChevron expanded={projectExpanded} />
                     <Briefcase className="okr-tree-kind-icon" size={15} />
-                    <span className="okr-tree-copy"><small>Project</small><strong>{project.title}</strong></span>
+                    <span className="okr-tree-copy"><small>Project</small><strong className="project-item-title">{project.title}</strong></span>
                     <span className="okr-tree-count">Task {tasks.length}개</span>
                   </button> : <div className="okr-tree-row okr-tree-project-main static">
                     <span className="okr-tree-chevron-placeholder" />
                     <Briefcase className="okr-tree-kind-icon" size={15} />
-                    <span className="okr-tree-copy"><small>Project</small><strong>{project.title}</strong></span>
+                    <span className="okr-tree-copy"><small>Project</small><strong className="project-item-title">{project.title}</strong></span>
                     <span className="okr-tree-count empty">미완료 Task 없음</span>
                   </div>}
                   <button type="button" className="okr-tree-open-detail" aria-label={`${project.title} Project 상세 보기`} title="Project 상세 보기" onClick={() => onOpenProject(project.id)}><ExternalLink size={13} /></button>

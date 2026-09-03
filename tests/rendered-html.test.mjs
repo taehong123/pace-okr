@@ -841,7 +841,7 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(page, /데일리 설정/);
   assert.match(page, /공유 안 함/);
   assert.match(page, /설정 완료/);
-  assert.match(page, /멤버 연결·실패 기록/);
+  assert.match(page, /멤버 연결·발송 관리/);
   assert.match(page, /즉시 발송/);
   assert.match(page, /지금 보내기/);
   assert.match(styles, /\.daily-layout/);

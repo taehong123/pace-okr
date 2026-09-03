@@ -11,7 +11,7 @@ test(`failed reservation remains visible until repair succeeds (${repairFails ? 
   await page.route("**/api/slack/daily/settings", async (route) => {
     if (route.request().method() === "PATCH") {
       writes.push(route.request().postDataJSON());
-      if (repairFails) return route.fulfill({ status: 500, json: { error: "예약 재확인 실패" } });
+      if (repairFails) return route.fulfill({ status: 500, json: { error: "D1_ERROR: reservation lookup failed at worker.js:100" } });
       repaired = true;
     }
     return route.fulfill({ json: {
@@ -24,6 +24,9 @@ test(`failed reservation remains visible until repair succeeds (${repairFails ? 
   });
   await page.goto("/?view=work&settings=workspace&tab=integrations&bot=daily");
   await expect(page.getByRole("alert").filter({ hasText: "데일리 발송 예약에 문제가 있습니다" })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("다음 발송 예약을 확인하지 못했습니다.");
+  await expect(page.locator("body")).not.toContainText("invalid_blocks");
+  await expect(page.locator("body")).not.toContainText("chat.scheduleMessage");
   await expect(page.locator(".slack-connected-title")).toContainText("예약 실패");
   await expect(page.locator(".slack-connected-title")).not.toContainText("사용 중");
   await expect(page.getByRole("button", { name: "예약 복구", exact: true })).toBeEnabled();
@@ -33,7 +36,8 @@ test(`failed reservation remains visible until repair succeeds (${repairFails ? 
   await page.getByRole("button", { name: "예약 복구", exact: true }).focus();
   await page.keyboard.press("Enter");
   if (repairFails) {
-    await expect(page.getByText("예약 재확인 실패", { exact: true })).toBeVisible();
+    await expect(page.getByText("예약을 복구하지 못했습니다.", { exact: true })).toBeVisible();
+    await expect(page.locator("body")).not.toContainText("D1_ERROR");
     await expect(page.locator(".slack-connected-title")).toContainText("예약 실패");
     await expect(page.getByRole("button", { name: "예약 복구", exact: true })).toBeEnabled();
     expect(writes).toEqual([{ action: "repair" }]);

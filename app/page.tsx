@@ -2,6 +2,7 @@
 /* eslint-disable @next/next/no-img-element */
 import { PropertyValueInput } from "@/app/property-value-input";
 import { dailyDeliveryHealth, dailyDeliveryLabel } from "@/lib/slack-daily-status";
+import { slackErrorMessage, slackReminderLabel } from "@/lib/slack-display";
 
 import {
   Activity,
@@ -2866,7 +2867,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
         return <article className={`project-card ${selectionMode ? "selection-mode" : ""}`} role="listitem" key={entry.id}>
           {selectionMode && canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}
           <button className="project-card-open" onClick={() => onOpenProject(entry.id)}>
-            <header><b>{entry.title}</b><ChevronRight size={15} /></header>
+            <header><b className="project-item-title">{entry.title}</b><ChevronRight size={15} /></header>
             <div className="project-card-meta"><span className={`status-tag status-${entry.status}`}>{statusLabel(entry.status)}</span><span className={`priority-${entry.priority}`}>{priorityLabels[entry.priority]}</span><span><CalendarDays size={12} />{dueLabel(entry.dueDate)}</span><span><Users size={12} />{assignmentLabel(entry, "project_dri")}</span></div>
             <div className="project-card-relation"><Link2 size={12} /><span>{entry.parentId ? byId.get(entry.parentId)?.title ?? "연결 없음" : "연결 없음"}</span></div>
             {previews.length > 0 && <div className="project-card-properties">{previews.map(({ property, value }) => <span key={property.id}><small>{property.name}</small><b>{Array.isArray(value) ? `${value.length}명` : typeof value === "boolean" ? value ? "예" : "아니오" : String(value)}</b></span>)}</div>}
@@ -2884,7 +2885,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
             </div>
             {visible.map((entry) => (
               <div className="task-table-row" role="row" key={entry.id}>
-                <div className="name-cell">{selectionMode && canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<button className={`task-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} aria-label={`${entry.title} ${isCompletedStatus(entry.status) ? "완료 취소" : "완료 처리"}`} aria-pressed={isCompletedStatus(entry.status)} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })}><Check size={12} /></button>{entry.kind === "project" ? <button className="name-open-button" onClick={() => onOpenProject(entry.id)}>{entry.title}</button> : <input defaultValue={entry.title} onBlur={(event) => event.target.value.trim() !== entry.title && void onPatch(entry.id, { title: event.target.value })} />}</div>
+                <div className="name-cell">{selectionMode && canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<button className={`task-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} aria-label={`${entry.title} ${isCompletedStatus(entry.status) ? "완료 취소" : "완료 처리"}`} aria-pressed={isCompletedStatus(entry.status)} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })}><Check size={12} /></button>{entry.kind === "project" ? <button className="name-open-button project-item-title" onClick={() => onOpenProject(entry.id)}>{entry.title}</button> : <input defaultValue={entry.title} onBlur={(event) => event.target.value.trim() !== entry.title && void onPatch(entry.id, { title: event.target.value })} />}</div>
                 <select aria-label={`${entry.title} 상태`} className={`status-select status-${entry.status}`} value={entry.status} onChange={(event) => void onPatch(entry.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <select aria-label={`${entry.title} 우선순위`} className={`priority-${entry.priority}`} value={entry.priority} onChange={(event) => void onPatch(entry.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
                 <input aria-label={`${entry.title} 기한`} className="date-cell" type="date" value={entry.dueDate ?? ""} onChange={(event) => void onPatch(entry.id, { dueDate: event.target.value || null })} />
@@ -4072,7 +4073,7 @@ function MyWorkView({ workspaceId, items, routines, currentMember, onOpenProject
       <MyWorkSection title="Project" count={projects.length}>
         {projects.map((project) => {
           const roles = project.assignments.filter((assignment) => assignment.memberId === currentMember.id).map((assignment) => assignment.role === "project_dri" ? "주 담당" : "보조 담당");
-          return <button className="my-work-item" key={project.id} onClick={() => onOpenProject(project.id)}><span className="type-icon type-project">P</span><span><b>{project.title}</b><span className="my-work-item-meta"><small>{roles.join(" · ")} · {statusLabel(project.status)}</small><span className={`my-work-priority priority-${project.priority}`}>{priorityLabels[project.priority]}</span><span className="my-work-due">{dueLabel(project.dueDate)}</span></span></span><ChevronRight size={15} /></button>;
+          return <button className="my-work-item" key={project.id} onClick={() => onOpenProject(project.id)}><span className="type-icon type-project">P</span><span><b className="project-item-title">{project.title}</b><span className="my-work-item-meta"><small>{roles.join(" · ")} · {statusLabel(project.status)}</small><span className={`my-work-priority priority-${project.priority}`}>{priorityLabels[project.priority]}</span><span className="my-work-due">{dueLabel(project.dueDate)}</span></span></span><ChevronRight size={15} /></button>;
         })}
       </MyWorkSection>
       <MyWorkSection title="Routine" count={assignedRoutines.length}>
@@ -5051,7 +5052,7 @@ function BoardView({ items, onOpenItem, canDeleteItem, selectedItemIds, onToggle
     { status: "development_done", label: "개발 완료" },
     { status: "blocked", label: "막힘" },
   ];
-  return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <article className={`board-selectable-item ${selectionMode ? "selection-mode" : ""}`} key={entry.id}>{selectionMode && canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<button className="board-item" onClick={() => onOpenItem(entry)}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button></article>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
+  return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <article className={`board-selectable-item ${selectionMode ? "selection-mode" : ""}`} key={entry.id}>{selectionMode && canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<button className="board-item" onClick={() => onOpenItem(entry)}><b className={entry.kind === "project" ? "project-item-title" : undefined}>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button></article>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
 }
 
 function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDeleteItem, selectedItemIds, onToggleSelect, onSelectItems, onClearItems, onTrashSelected, trashing }: { items: OkrptrItem[]; allItems: OkrptrItem[]; routines: Routine[]; onOpenTask: (id: string) => void; onPatch: (id: string, patch: Partial<OkrptrItem>) => Promise<unknown>; canDeleteItem: (item: OkrptrItem) => boolean; selectedItemIds: Set<string>; onToggleSelect: (id: string) => void; onSelectItems: (ids: string[]) => void; onClearItems: (ids: string[]) => void; onTrashSelected: () => void; trashing: boolean }) {
@@ -6247,7 +6248,7 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
       .catch((loadError: unknown) => {
         loadedRef.current = false;
         if (loadError instanceof DOMException && loadError.name === "AbortError") return;
-        setError(loadError instanceof Error ? loadError.message : "관리 봇 정보를 불러오지 못했습니다.");
+        setError(slackErrorMessage(loadError, "관리 봇 정보를 불러오지 못했습니다."));
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
@@ -6277,7 +6278,7 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
         onNotice(next.settings.enabled ? "워크스페이스 관리 봇을 저장했습니다." : "워크스페이스 관리 봇을 껐습니다.");
       }
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "관리 봇 설정을 처리하지 못했습니다.");
+      setError(slackErrorMessage(saveError, "관리 봇 설정을 처리하지 못했습니다."));
     } finally {
       setSaving(false);
     }
@@ -6299,7 +6300,7 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
   const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 
   return <section className="workspace-management-pane embedded">
-    {data.settings.lastError && <div className="workspace-management-error" role="alert"><AlertTriangle size={17} /><div><b>관리 봇 전송 확인이 필요합니다</b><p>{data.settings.lastError}</p></div></div>}
+    {data.settings.lastError && <div className="workspace-management-error" role="alert"><AlertTriangle size={17} /><div><b>관리 봇 전송 확인이 필요합니다</b><p>{slackErrorMessage(data.settings.lastError)}</p></div></div>}
     {!data.slackConnected && <div className="workspace-settings-note management-slack-note"><Hash size={16} /><div><b>Slack 연결 후 관리 봇을 설정할 수 있습니다</b><p>관리 봇은 워크스페이스 공용 채널로 리포트를 보냅니다. 위의 Slack 연결을 먼저 완료해 주세요.</p></div></div>}
     {!canManage && <div className="workspace-settings-note"><Eye size={16} /><p>관리 봇 설정은 읽기 전용입니다. Owner 또는 Admin이 발송 항목과 시간을 변경할 수 있습니다.</p></div>}
 
@@ -6307,7 +6308,7 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
         <div className="management-bot-toggle"><div><b>매일 워크스페이스 관리 리포트</b><p>선택한 요일과 시간에 최신 데이터를 다시 계산합니다.</p></div><label><input type="checkbox" aria-label="워크스페이스 관리 봇 사용" checked={draft.enabled} disabled={!canManage || !data.slackConnected} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} /><span aria-hidden="true" /><span className="sr-only">워크스페이스 관리 봇 사용</span></label></div>
         <div className="management-schedule-grid core"><label><span>발송 시간</span><input type="time" step="900" value={draft.reportTime} disabled={!canManage} onChange={(event) => setDraft({ ...draft, reportTime: event.target.value })} /></label><label className="management-channel-field"><span>Slack 발송 대상</span><select aria-label="Slack 발송 채널" value={draft.channelId} disabled={!canManage || !data.slackConnected} onChange={(event) => setDraft({ ...draft, channelId: event.target.value })}><option value="">채널 선택</option>{draft.channelId && !data.channels.some((channel) => channel.id === draft.channelId) && <option value={draft.channelId}>#{draft.channelName || draft.channelId}</option>}{data.channels.map((channel) => <option value={channel.id} key={channel.id}>#{channel.name}{channel.isPrivate ? " · 비공개" : ""}</option>)}</select></label></div>
         <div className="management-weekdays" aria-label="관리 리포트 발송 요일">{weekdayLabels.map((label, day) => <button type="button" className={draft.weekdays.includes(day) ? "active" : ""} aria-pressed={draft.weekdays.includes(day)} disabled={!canManage} onClick={() => toggleDay(day)} key={label}>{label}</button>)}</div>
-        <details className="bot-advanced-settings"><summary>고급 설정 <ChevronDown size={14} /></summary><div><label className="management-timezone-field"><span>시간대</span><select value={draft.timezone} disabled={!canManage} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label><fieldset className="management-signal-picker"><legend>정리할 정보와 Urgency</legend>{(Object.keys(managementBotSignalMeta) as ManagementBotSignal[]).map((signal) => { const meta = managementBotSignalMeta[signal]; return <label key={signal} className={meta.tone}><input type="checkbox" checked={draft.signals.includes(signal)} disabled={!canManage} onChange={() => toggleSignal(signal)} /><span><b>{meta.label}</b><small>{meta.detail}</small></span><span className="sr-only">관리 리포트 정리 항목 선택</span></label>; })}</fieldset>{(draft.lastSentAt || draft.lastError) && <p className={`management-bot-last ${draft.lastError ? "error" : ""}`}>{draft.lastError ? `최근 전송 실패 · ${draft.lastError}` : `최근 전송 · ${formatDateTime(draft.lastSentAt!)}`}</p>}</div></details>
+        <details className="bot-advanced-settings"><summary>고급 설정 <ChevronDown size={14} /></summary><div><label className="management-timezone-field"><span>시간대</span><select value={draft.timezone} disabled={!canManage} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label><fieldset className="management-signal-picker"><legend>정리할 정보와 Urgency</legend>{(Object.keys(managementBotSignalMeta) as ManagementBotSignal[]).map((signal) => { const meta = managementBotSignalMeta[signal]; return <label key={signal} className={meta.tone}><input type="checkbox" checked={draft.signals.includes(signal)} disabled={!canManage} onChange={() => toggleSignal(signal)} /><span><b>{meta.label}</b><small>{meta.detail}</small></span><span className="sr-only">관리 리포트 정리 항목 선택</span></label>; })}</fieldset>{(draft.lastSentAt || draft.lastError) && <p className={`management-bot-last ${draft.lastError ? "error" : ""}`}>{draft.lastError ? `최근 전송 실패 · ${slackErrorMessage(draft.lastError)}` : `최근 전송 · ${formatDateTime(draft.lastSentAt!)}`}</p>}</div></details>
         {error && <p className="management-bot-error" role="alert">{error}</p>}
         {canManage && <div className="management-bot-actions"><button onClick={() => void save(false)} disabled={saving || draft.signals.length === 0 || draft.weekdays.length === 0}>{saving ? "저장 중" : "설정 저장"}</button><button onClick={() => void save(true)} disabled={saving || !draft.channelId || draft.signals.length === 0}>테스트 보내기</button></div>}
     </div>
@@ -6546,7 +6547,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
       const failed = data.schedules.some((entry) => entry.status === "failed") || data.tests.dm.status === "failed" || data.tests.channels.some((entry) => entry.status === "failed");
       onNotice(failed ? "설정은 저장했지만 예약 또는 테스트가 실패했습니다. 아래 실패 상태를 확인해 주세요." : "Slack 연결과 데일리 테스트를 완료했습니다.");
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "데일리 설정을 저장하지 못했습니다.");
+      onNotice(slackErrorMessage(error, "데일리 설정을 저장하지 못했습니다."));
     } finally {
       setBusy(false);
     }
@@ -6573,7 +6574,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
       }
       onNotice("실패한 Slack 항목을 다시 확인했습니다.");
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "Slack 테스트를 다시 실행하지 못했습니다.");
+      onNotice(slackErrorMessage(error, "Slack 테스트를 다시 실행하지 못했습니다."));
     } finally {
       setBusy(false);
     }
@@ -6591,7 +6592,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
       if (!response.ok || !data.sent) throw new Error(data.error || "데일리 봇 DM을 보내지 못했습니다.");
       onNotice(`${member.displayName}님에게 데일리 봇 DM을 보냈습니다.`);
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "데일리 봇 DM을 보내지 못했습니다.");
+      onNotice(slackErrorMessage(error, "데일리 봇 DM을 보내지 못했습니다."));
     } finally {
       setSendingMemberId(null);
     }
@@ -6606,8 +6607,8 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
       setAdmin(data);
       loadedRef.current = false;
       setLoadAttempt((attempt) => attempt + 1);
-      onNotice(data.delivery?.status === "ready" ? "설정된 시간의 발송 예약을 복구했습니다." : "예약 상태를 확인했습니다. 남은 오류는 아래에 표시됩니다.");
-    } catch (error) { onNotice(error instanceof Error ? error.message : "예약을 복구하지 못했습니다."); }
+      onNotice(data.delivery?.status === "ready" ? "설정된 시간의 발송 예약을 복구했습니다." : "예약 상태를 확인했습니다. 아직 예약되지 않은 멤버가 있습니다.");
+    } catch (error) { onNotice(slackErrorMessage(error, "예약을 복구하지 못했습니다.")); }
     finally { setBusy(false); }
   }
 
@@ -6625,7 +6626,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
   const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 
   return <div className="slack-one-button-flow">
-    {delivery.status === "failed" && <section className="integration-state-message error" role="alert"><AlertTriangle size={17} /><div><b>데일리 발송 예약에 문제가 있습니다</b><p>{delivery.targetCount}명 중 {delivery.scheduledCount}명 예약됨 · {delivery.failedCount}명 예약 확인 필요</p><p>{admin.settings.lastError || "유효한 다음 발송 예약이 없습니다."}</p></div><button type="button" disabled={busy} onClick={() => void repairReservations()}>예약 복구</button></section>}
+    {delivery.status === "failed" && <section className="integration-state-message error" role="alert"><AlertTriangle size={17} /><div><b>데일리 발송 예약에 문제가 있습니다</b><p>{delivery.targetCount}명 중 {delivery.scheduledCount}명 예약됨 · {delivery.failedCount}명 예약 확인 필요</p><p>{slackErrorMessage(admin.settings.lastError, "다음 발송 예약을 확인하지 못했습니다. 예약 복구를 눌러 다시 확인해 주세요.")}</p></div><button type="button" disabled={busy} onClick={() => void repairReservations()}>예약 복구</button></section>}
     {showSetup ? <section className="slack-onboarding-card" aria-labelledby="slack-onboarding-title">
       <header><div><h4 id="slack-onboarding-title">데일리 설정</h4><p>발송 시간, 멤버와 공유 채널을 정합니다.</p></div>{admin.setupComplete && <button type="button" onClick={() => setEditing(false)}>취소</button>}</header>
       <div className="slack-onboarding-grid single">
@@ -6639,9 +6640,9 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
       <div className="slack-connected-title">{delivery.status === "ready" ? <CheckCircle2 size={19} /> : <span><AlertTriangle size={19} /></span>}<p><b>데일리 봇 {dailyDeliveryLabel(delivery.status)}</b><span>{teamName}</span></p><button type="button" onClick={() => setEditing(true)}>설정</button></div>
       <dl><div><dt>대상</dt><dd>{targetMembers.length}명</dd></div><div><dt>다음 발송</dt><dd>{nextReminder ? new Date(nextReminder * 1000).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "예약 확인 필요"}</dd></div><div><dt>공유 채널</dt><dd>{admin.channels.length ? admin.channels.map((channel) => `#${channel.name}`).join(", ") : "공유 안 함"}</dd></div></dl>
       <section className="slack-manual-send" aria-labelledby="slack-manual-send-title"><header><b id="slack-manual-send-title">즉시 발송</b><small>멤버에게 데일리 DM을 바로 보냅니다.</small></header>{linkedMembers.length ? <div className="slack-member-links">{linkedMembers.map((member) => <div key={member.memberId}><span className="linked" /><p><b>{member.displayName}</b><small>{member.preference.enabled ? "예약 대상" : "수동 발송만"}</small></p><button type="button" disabled={busy || sendingMemberId !== null} onClick={() => void sendDailyNow(member)}>{sendingMemberId === member.memberId ? <><LoaderCircle className="spin" size={13} />발송 중</> : "지금 보내기"}</button></div>)}</div> : <p className="slack-manual-send-empty">Slack에 연결된 멤버가 없습니다.</p>}</section>
-      {result && <div className="slack-test-results" role="status"><p className={result.tests.dm.status}><span>{result.tests.dm.status === "sent" ? "설치자 테스트 DM 성공" : result.tests.dm.status === "skipped" ? "설치자 DM 테스트 생략" : `테스트 DM 실패 · ${result.tests.dm.error || "다시 시도 필요"}`}</span>{result.tests.dm.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("dm", result.tests.dm.memberId)}>재시도</button>}</p>{result.tests.channels.map((channel) => <p key={channel.channelId} className={channel.status}><span>{channel.status === "sent" ? `#${channel.channelName} 테스트 성공` : `#${channel.channelName} 실패 · ${channel.error || "다시 시도 필요"}`}</span>{channel.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("channel", channel.channelId)}>재시도</button>}</p>)}{result.schedules.filter((entry) => entry.status === "failed").map((entry) => <p key={entry.memberId} className="failed"><span>예약 실패 · {admin.members.find((member) => member.memberId === entry.memberId)?.displayName || entry.memberId}</span><button disabled={busy} onClick={() => void retrySetupResult("schedule", null)}>재시도</button></p>)}</div>}
+      {result && <div className="slack-test-results" role="status"><p className={result.tests.dm.status}><span>{result.tests.dm.status === "sent" ? "설치자 테스트 DM 성공" : result.tests.dm.status === "skipped" ? "설치자 DM 테스트 생략" : `테스트 DM 실패 · ${slackErrorMessage(result.tests.dm.error)}`}</span>{result.tests.dm.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("dm", result.tests.dm.memberId)}>재시도</button>}</p>{result.tests.channels.map((channel) => <p key={channel.channelId} className={channel.status}><span>{channel.status === "sent" ? `#${channel.channelName} 테스트 성공` : `#${channel.channelName} 실패 · ${slackErrorMessage(channel.error)}`}</span>{channel.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("channel", channel.channelId)}>재시도</button>}</p>)}{result.schedules.filter((entry) => entry.status === "failed").map((entry) => <p key={entry.memberId} className="failed"><span>예약 실패 · {admin.members.find((member) => member.memberId === entry.memberId)?.displayName || entry.memberId}</span><button disabled={busy} onClick={() => void retrySetupResult("schedule", null)}>재시도</button></p>)}</div>}
     </section>}
-    {admin.setupComplete && <details className="slack-advanced-settings" onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}><summary>멤버 연결·실패 기록 <ChevronDown size={14} /></summary>{advancedOpen && <SlackDailyAdvancedSettings connected canManage mode="workspace" onNotice={onNotice} />}</details>}
+    {admin.setupComplete && <details className="slack-advanced-settings" onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}><summary>멤버 연결·발송 관리 <ChevronDown size={14} /></summary>{advancedOpen && <SlackDailyAdvancedSettings connected canManage mode="workspace" onNotice={onNotice} />}</details>}
   </div>;
 }
 
@@ -6678,7 +6679,7 @@ function SlackDailyAdvancedSettings({ connected, canManage, mode = "workspace", 
       const response = await fetch("/api/slack/daily/preferences", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
       const data = await response.json() as SlackDailyPreferenceData & { error?: string }; if (!response.ok) throw new Error(data.error || "개인 알림을 저장하지 못했습니다.");
       setPreference(data); onNotice("개인 Slack 데일리 알림을 저장했습니다.");
-    } catch (error) { onNotice(error instanceof Error ? error.message : "개인 알림을 저장하지 못했습니다."); } finally { setBusy(false); }
+    } catch (error) { onNotice(slackErrorMessage(error, "개인 알림을 저장하지 못했습니다.")); } finally { setBusy(false); }
   }
   async function patchAdmin(payload: Record<string, unknown>, notice: string) {
     setBusy(true);
@@ -6686,7 +6687,7 @@ function SlackDailyAdvancedSettings({ connected, canManage, mode = "workspace", 
       const response = await fetch("/api/slack/daily/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await response.json() as SlackDailyAdminData & { error?: string }; if (!response.ok) throw new Error(data.error || "Slack 데일리 설정을 저장하지 못했습니다.");
       if (data.settings) setAdmin(data); onNotice(notice);
-    } catch (error) { onNotice(error instanceof Error ? error.message : "Slack 데일리 설정을 저장하지 못했습니다."); } finally { setBusy(false); }
+    } catch (error) { onNotice(slackErrorMessage(error, "Slack 데일리 설정을 저장하지 못했습니다.")); } finally { setBusy(false); }
   }
   if (!connected) return null;
   if (loadError) return <section className="integration-state-message error"><AlertTriangle size={17} /><div><b>Slack 데일리 설정을 불러오지 못했습니다</b><p>연결은 유지됩니다. 잠시 후 다시 불러와 주세요.</p></div><button onClick={() => { setLoadError(false); setPreference(null); setAdmin(null); setLoadAttempt((attempt) => attempt + 1); }}>다시 불러오기</button></section>;
@@ -6694,7 +6695,7 @@ function SlackDailyAdvancedSettings({ connected, canManage, mode = "workspace", 
     {mode === "workspace" && <section className="integration-step" aria-labelledby="slack-step-members">
       <span className="integration-step-number">2</span><div className="integration-step-copy"><h4 id="slack-step-members">사용자 이메일 연결 상태</h4><p>OKRPTR와 Slack 이메일이 같으면 자동으로 연결됩니다.</p></div>
       <div className="integration-step-body">
-        {canManage && !admin ? <div className="slack-daily-loading"><LoaderCircle className="spin" size={14} />사용자 연결 상태 확인 중</div> : canManage && admin ? <><div className="integration-step-summary"><b>{admin.members.filter((member) => member.linked).length}/{admin.members.length}명 연결</b><span>미연결 사용자는 Slack의 `/okrptr daily`에서 일회용 연결 링크를 받을 수 있습니다.</span></div><div className="slack-member-links">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? "Slack 연결됨" : "Slack 미연결"}{member.reminder ? ` · 알림 ${member.reminder.status}` : ""}</small></p></div>)}</div></> : <div className="integration-connected-note"><CheckCircle2 size={15} />사용자별 Slack 연결 상태는 Owner 또는 Admin이 확인합니다.</div>}
+        {canManage && !admin ? <div className="slack-daily-loading"><LoaderCircle className="spin" size={14} />사용자 연결 상태 확인 중</div> : canManage && admin ? <><div className="integration-step-summary"><b>{admin.members.filter((member) => member.linked).length}/{admin.members.length}명 연결</b><span>미연결 사용자는 Slack의 `/okrptr daily`에서 일회용 연결 링크를 받을 수 있습니다.</span></div><div className="slack-member-links">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? "Slack 연결됨" : "Slack 미연결"}{member.reminder ? ` · ${slackReminderLabel(member.reminder.status)}` : ""}</small></p></div>)}</div></> : <div className="integration-connected-note"><CheckCircle2 size={15} />사용자별 Slack 연결 상태는 Owner 또는 Admin이 확인합니다.</div>}
       </div>
     </section>}
 
@@ -6718,7 +6719,7 @@ function SlackDailyAdvancedSettings({ connected, canManage, mode = "workspace", 
 
     <section className="integration-step" aria-labelledby="slack-step-test">
       <span className="integration-step-number">5</span><div className="integration-step-copy"><h4 id="slack-step-test">테스트 DM과 작동 확인</h4><p>사용자 연결과 다음 알림 예약을 확인하고 실제 테스트 DM을 보냅니다.</p></div>
-      <div className="integration-step-body">{canManage && admin ? <><div className="slack-admin-actions"><button disabled={busy} onClick={() => void patchAdmin({ action: "resync" }, "Slack 사용자와 예약을 재동기화했습니다.")}><RefreshCw size={13} />사용자·예약 재동기화</button></div><div className="slack-member-links slack-test-list">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? member.reminder ? `다음 알림 · ${member.reminder.status}` : "알림 예약 확인 필요" : "Slack 미연결"}</small></p>{member.linked && <button disabled={busy} onClick={() => void patchAdmin({ action: "test_dm", memberId: member.memberId }, `${member.displayName}님에게 테스트 DM을 보냈습니다.`)}>테스트 DM</button>}</div>)}</div>{admin.failedPublications.length > 0 && <div className="slack-publication-failures"><b>채널 전송 실패</b>{admin.failedPublications.map((failure) => <div key={failure.id}><p>{failure.memberName} · {failure.date} · {failure.channelId}<small>{failure.error}</small></p><button disabled={busy} onClick={() => void patchAdmin({ action: "retry_publication", publicationId: failure.id }, "채널 전송을 다시 시도했습니다.")}>재시도</button></div>)}</div>}</> : <div className="integration-connected-note"><CheckCircle2 size={15} />연결된 사용자는 Slack에서 `/okrptr daily`로 언제든 데일리를 열 수 있습니다.</div>}</div>
+      <div className="integration-step-body">{canManage && admin ? <><div className="slack-admin-actions"><button disabled={busy} onClick={() => void patchAdmin({ action: "resync" }, "Slack 사용자와 예약을 재동기화했습니다.")}><RefreshCw size={13} />사용자·예약 재동기화</button></div><div className="slack-member-links slack-test-list">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? member.reminder ? `다음 알림 · ${slackReminderLabel(member.reminder.status)}` : "알림 예약 확인 필요" : "Slack 미연결"}</small></p>{member.linked && <button disabled={busy} onClick={() => void patchAdmin({ action: "test_dm", memberId: member.memberId }, `${member.displayName}님에게 테스트 DM을 보냈습니다.`)}>테스트 DM</button>}</div>)}</div>{admin.failedPublications.length > 0 && <div className="slack-publication-failures"><b>채널 전송 실패</b>{admin.failedPublications.map((failure) => <div key={failure.id}><p>{failure.memberName} · {failure.date} · {admin.channels.find((channel) => channel.id === failure.channelId)?.name ?? "공유 채널"}<small>{slackErrorMessage(failure.error)}</small></p><button disabled={busy} onClick={() => void patchAdmin({ action: "retry_publication", publicationId: failure.id }, "채널 전송을 다시 시도했습니다.")}>재시도</button></div>)}</div>}</> : <div className="integration-connected-note"><CheckCircle2 size={15} />연결된 사용자는 Slack에서 `/okrptr daily`로 언제든 데일리를 열 수 있습니다.</div>}</div>
     </section></>}
   </div>;
 }
@@ -6800,7 +6801,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       })
       .catch((error: unknown) => {
         completed = true;
-        if (mounted) { onSummary("불러오기 실패", "설정을 다시 확인해 주세요"); onNotice(error instanceof Error ? error.message : "자동화를 불러오지 못했습니다."); }
+        if (mounted) { onSummary("불러오기 실패", "설정을 다시 확인해 주세요"); onNotice(slackErrorMessage(error, "자동화를 불러오지 못했습니다.")); }
       })
       .finally(() => { if (mounted) { setLoading(false); setLoaded(true); } });
     return () => {
@@ -6823,7 +6824,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       const activeCount = data.automations.filter((entry) => entry.active).length;
       onSummary(slackAutomationHealthLabel(data.automations), `활성 규칙 ${activeCount}개 · 전체 ${data.automations.length}개`);
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "자동화를 불러오지 못했습니다.");
+      onNotice(slackErrorMessage(error, "자동화를 불러오지 못했습니다."));
     } finally {
       if (showLoading) setLoading(false);
     }
@@ -6856,7 +6857,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       onSummary(slackAutomationHealthLabel(next), `활성 규칙 ${next.filter((entry) => entry.active).length}개 · 전체 ${next.length}개`);
       onNotice(`'${recommendation.name}' 추천 자동화를 만들었습니다.`);
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "추천 자동화를 만들지 못했습니다.");
+      onNotice(slackErrorMessage(error, "추천 자동화를 만들지 못했습니다."));
     } finally {
       setBusyId(null);
     }
@@ -6884,7 +6885,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       setEditingId(null);
       onNotice(editingId ? "Slack 자동화를 수정했습니다." : "Slack 자동화를 만들었습니다. 테스트 전송으로 확인해 보세요.");
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "자동화를 저장하지 못했습니다.");
+      onNotice(slackErrorMessage(error, "자동화를 저장하지 못했습니다."));
     } finally {
       setSaving(false);
     }
@@ -6903,7 +6904,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
         return next;
       });
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "상태를 바꾸지 못했습니다.");
+      onNotice(slackErrorMessage(error, "상태를 바꾸지 못했습니다."));
     } finally {
       setBusyId(null);
     }
@@ -6917,7 +6918,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       if (!response.ok) throw new Error(data.error || "테스트 전송에 실패했습니다.");
       onNotice(`#${automation.channelId} 채널로 테스트 메시지를 보냈습니다.`);
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "테스트 전송에 실패했습니다.");
+      onNotice(slackErrorMessage(error, "테스트 전송에 실패했습니다."));
     } finally {
       await loadAutomations(false);
       setBusyId(null);
@@ -6940,7 +6941,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       setDeliveries((current) => current.filter((entry) => entry.automationId !== automation.id));
       onNotice("Slack 자동화를 삭제했습니다.");
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "자동화를 삭제하지 못했습니다.");
+      onNotice(slackErrorMessage(error, "자동화를 삭제하지 못했습니다."));
     } finally {
       setBusyId(null);
     }
@@ -6968,10 +6969,10 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
     </form>}
     {loading ? <div className="slack-automation-loading"><LoaderCircle className="spin" size={16} />자동화를 불러오는 중</div> : automations.length === 0 ? <div className="slack-automation-empty"><Zap size={18} /><b>아직 자동화가 없습니다.</b><p>{canManage ? "새 자동화를 만들어 첫 Slack 알림을 보내보세요." : "워크스페이스 관리자가 자동화를 만들 수 있습니다."}</p></div> : <div className="slack-automation-list">{automations.map((automation) => <article key={automation.id} className={automation.active ? "" : "inactive"}>
       <div className="slack-automation-main"><span className={`slack-delivery-dot ${automation.lastDeliveryStatus}`} /><div><b>{automation.name}</b><p>{slackTriggerLabel(automation)} · #{automation.channelId}</p></div><span className={`slack-automation-state ${automation.active ? "active" : ""}`}>{automation.active ? "활성" : "중지"}</span></div>
-      <div className="slack-automation-meta">{automation.lastDeliveryStatus === "never" ? "아직 전송 이력 없음" : automation.lastDeliveryStatus === "sent" ? `${formatSlackAutomationTime(automation.lastTriggeredAt)} 전송 성공` : automation.lastError || (automation.lastDeliveryStatus === "pending" ? "발송 처리 중" : "최근 전송 실패")}</div>
+      <div className="slack-automation-meta">{automation.lastDeliveryStatus === "never" ? "아직 전송 이력 없음" : automation.lastDeliveryStatus === "sent" ? `${formatSlackAutomationTime(automation.lastTriggeredAt)} 전송 성공` : automation.lastError ? slackErrorMessage(automation.lastError) : (automation.lastDeliveryStatus === "pending" ? "발송 처리 중" : "최근 전송 실패")}</div>
       {canManage && <div className="slack-automation-actions"><button type="button" onClick={() => void testSend(automation)} disabled={busyId === automation.id}>{busyId === automation.id ? <LoaderCircle className="spin" size={12} /> : <Send size={12} />}테스트</button><button type="button" onClick={() => void toggleAutomation(automation)} disabled={busyId === automation.id}>{automation.active ? "중지" : "활성화"}</button><button type="button" onClick={() => startEdit(automation)}><Pencil size={12} />수정</button><button type="button" className="danger" onClick={() => void removeAutomation(automation)} disabled={busyId === automation.id} aria-label={`${automation.name} 삭제`}><Trash2 size={12} /></button></div>}
     </article>)}</div>}
-    {deliveries.length > 0 && <details className="slack-delivery-history"><summary>최근 전송 기록 <span>{deliveries.length}</span><ChevronDown size={13} /></summary><div>{deliveries.slice(0, 8).map((delivery) => <div key={delivery.id}><span className={`slack-delivery-dot ${delivery.status}`} /><p><b>{delivery.status === "sent" ? "전송 성공" : delivery.status === "failed" ? "전송 실패" : "전송 중"}</b><small>#{delivery.channelId} · {formatSlackAutomationTime(delivery.sentAt || delivery.createdAt)}</small>{delivery.error && <em>{delivery.error}</em>}</p></div>)}</div></details>}
+    {deliveries.length > 0 && <details className="slack-delivery-history"><summary>최근 전송 기록 <span>{deliveries.length}</span><ChevronDown size={13} /></summary><div>{deliveries.slice(0, 8).map((delivery) => <div key={delivery.id}><span className={`slack-delivery-dot ${delivery.status}`} /><p><b>{delivery.status === "sent" ? "전송 성공" : delivery.status === "failed" ? "전송 실패" : "전송 중"}</b><small>#{delivery.channelId} · {formatSlackAutomationTime(delivery.sentAt || delivery.createdAt)}</small>{delivery.error && <em>{slackErrorMessage(delivery.error)}</em>}</p></div>)}</div></details>}
   </div>;
 }
 

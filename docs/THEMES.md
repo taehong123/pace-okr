@@ -39,6 +39,9 @@ OKRPTR-specific clarifications, not a replacement design system.
 - The OKR read surface is an unframed document, not a card inside another card.
   Child Projects use dividers, not nested boxes. Root titles have section-sized
   text, execution rows body-sized text, and metadata regular medium-weight text.
+- Project item titles use regular weight (400) in cards, tables, boards, My Work
+  and the OKR tree. Preserve their size, placement and the separate emphasis of
+  page/section headings; do not make the entire item bold to distinguish its type.
 - New layout/typography tests cover 320, 390, 768, 1440, 1920, 2560 and 3840 CSS px,
   larger user text, unchanged navigation, long Korean titles and overlay stacking.
 - Run browser verification with one worker. Test writes use local mocks only;

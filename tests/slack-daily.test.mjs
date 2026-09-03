@@ -16,6 +16,21 @@ function compile(source, dependencies = {}) {
   return loaded.exports;
 }
 const status = compile(await read("../lib/slack-daily-status.ts"));
+const display = compile(await read("../lib/slack-display.ts"));
+
+test("Slack customer messages never echo raw errors or diagnostic payloads", () => {
+  for (const error of ["Slack chat.scheduleMessage failed: invalid_blocks", "D1_ERROR SELECT * FROM secrets", "Error: socket timeout\n at worker.js:123", '<script>alert("token")</script>', null]) {
+    assert.equal(display.slackErrorMessage(error, "예약을 복구하지 못했습니다."), "예약을 복구하지 못했습니다.");
+  }
+  assert.match(display.slackErrorMessage(new Error("missing_scope chat:write")), /연결 권한을 갱신/);
+  assert.match(display.slackErrorMessage("not_in_channel C-internal"), /채널에 봇을 초대/);
+  assert.match(display.slackErrorMessage("ratelimited"), /잠시 후/);
+  assert.match(display.slackErrorMessage("전송 결과를 확인하지 못했습니다. receipt-id=123"), /재발송을 보류/);
+  assert.equal(display.slackErrorMessage("관리 리포트를 받을 Slack 채널을 선택해 주세요."), "메시지를 받을 Slack 채널을 선택해 주세요.");
+  assert.equal(display.slackReminderLabel("scheduled"), "예약됨");
+  assert.equal(display.slackReminderLabel("scheduling"), "예약 중");
+  assert.equal(display.slackReminderLabel("internal-state"), "예약 확인 필요");
+});
 const dataSource = ts.createSourceFile("pace-data.ts", await read("../lib/pace-data.ts"), ts.ScriptTarget.Latest, true);
 const deleteConnectionSource = dataSource.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "deleteSlackConnection").getFullText(dataSource);
 const snake = (key) => key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
