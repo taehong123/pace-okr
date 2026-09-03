@@ -200,6 +200,7 @@ test('Project theme contrast, actual font, keyboard and shared Task/Routine/OKR 
   await expect(task).toBeVisible();
   const taskStyle = await fieldStyle(task.getByRole('combobox', { name: '상태', exact: true }));
   await page.goto('/?view=routines');
+  await page.locator('.routine-expand').click();
   await expect(page.locator('.routine-guide-grid')).toBeVisible();
   const routineStyle = await fieldStyle(page.locator('.routine-guide-grid').getByLabel('트리거 포인트', { exact: true }));
   expect(routineStyle).toEqual(taskStyle);

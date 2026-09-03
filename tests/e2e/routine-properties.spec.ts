@@ -35,6 +35,7 @@ async function setup(page: Page, viewer = false) {
 test("routine values support every type, save and reload, and remain on failure", async ({ page }) => {
   const state = await setup(page);
   await page.goto("/?view=routines");
+  await page.locator(".routine-expand").click();
   const values = page.locator(".routine-card .routine-property-values");
   await values.getByLabel("메모", { exact: true }).fill("재방문 시 확인할 내용");
   await values.getByLabel("점검 수", { exact: true }).fill("0");
@@ -43,11 +44,16 @@ test("routine values support every type, save and reload, and remain on failure"
   await values.getByLabel("재확인", { exact: true }).check();
   await values.getByLabel("검토자", { exact: true }).selectOption("member-1");
   await values.getByLabel("참여자", { exact: true }).selectOption(["member-1"]);
+  await page.locator(".routine-expand").click();
+  await expect(values).toBeHidden();
+  await page.locator(".routine-expand").click();
+  await expect(values.getByLabel("메모", { exact: true })).toHaveValue("재방문 시 확인할 내용");
   await page.locator(".routine-card").getByRole("button", { name: "저장", exact: true }).focus();
   await page.keyboard.press("Enter");
   await expect.poll(() => state.values.number).toBe(0);
   expect(state.values).toEqual({ text: "재방문 시 확인할 내용", number: 0, select: "업무", date: "2026-09-03", checkbox: true, member: "member-1", members: ["member-1"] });
   await page.reload();
+  await page.locator(".routine-expand").click();
   await expect(values.getByLabel("메모", { exact: true })).toHaveValue("재방문 시 확인할 내용");
   state.fail = true;
   await values.getByLabel("점검 수", { exact: true }).fill("12");
@@ -78,6 +84,7 @@ test("routine property manager adds a field and new routine form accepts its val
 
 test("viewer cannot change values or definitions", async ({ page }) => {
   await setup(page, true); await page.goto("/?view=routines");
+  await page.locator(".routine-expand").click();
   await expect(page.locator(".routine-card").getByLabel("점검 수", { exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "루틴 속성 관리", exact: true }).click();
   await expect(page.getByRole("button", { name: "새 속성", exact: true })).toBeDisabled();
@@ -86,6 +93,7 @@ test("viewer cannot change values or definitions", async ({ page }) => {
 test("routine fields wrap and retain contrast/fonts at mobile, wide and enlarged text", async ({ page }, info) => {
   test.skip(info.project.name !== "desktop-chromium"); test.setTimeout(120000);
   await setup(page); await page.goto("/?view=routines");
+  await page.locator(".routine-expand").click();
   await expect(page.getByLabel("점검 수", { exact: true })).toBeVisible();
   for (const theme of ["white", "dark"]) {
     await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; document.documentElement.style.colorScheme = theme === "dark" ? "dark" : "light"; }, theme);

@@ -39,7 +39,7 @@ test("general settings rename immediately, keep the chosen address, and confirm 
   await page.getByLabel("워크스페이스 주소", { exact: true }).fill("our-team");
   await page.getByRole("button", { name: "주소 저장", exact: true }).click();
   await expect(page.getByRole("link", { name: "워크스페이스 열기" })).toHaveAttribute("href", "/api/workspaces/open?address=our-team");
-  await expect(page.getByText(/하위도메인 연결 대기/)).toBeVisible();
+  await expect(page.getByText(/하위도메인은 아직 사용할 수 없습니다/)).toBeVisible();
   await page.getByLabel("워크스페이스 주소", { exact: true }).fill("new-team");
   await page.getByRole("button", { name: "주소 저장", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "워크스페이스 주소 변경" })).toBeVisible();

@@ -16,7 +16,9 @@ function compile(path, imports = {}) {
 }
 const translations = compile("lib/landing-copy.ts");
 const themes = compile("lib/themes.ts");
-const { LandingScreen } = compile("app/landing.tsx", { "@/lib/landing-copy": translations, "@/lib/themes": themes });
+const install = compile("lib/app-install.ts");
+const installButton = compile("app/app-install-button.tsx", { "@/lib/app-install": install });
+const { LandingScreen } = compile("app/landing.tsx", { "@/lib/landing-copy": translations, "@/lib/themes": themes, "./app-install-button": installButton });
 const { landingCopy, landingLanguages, resolveLandingLanguage } = translations;
 
 test("language selection honors the saved five-language preference and browser fallback", () => {

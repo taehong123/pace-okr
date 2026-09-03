@@ -21,7 +21,7 @@ test("Project item names are regular across views without changing hierarchy or 
   await project.focus();
   await page.keyboard.press("Enter");
   await expect(page.locator(".project-title-input")).toHaveValue("모바일 사용성 개선");
-  await expect(page.locator(".project-title-input")).toHaveCSS("font-weight", "700");
+  await expect(page.locator(".project-title-input")).toHaveCSS("font-weight", "600");
   await page.goto("/?view=okr");
   await page.locator("button.okr-tree-kr-row").first().click();
   await page.locator("button.okr-tree-initiative-row").first().click();

@@ -48,6 +48,14 @@ Before enabling the flag in the existing hosted runtime:
 If wildcard registration is unavailable, leave the flag off and report the hosting
 limitation. A working canonical link is not evidence that the subdomain is active.
 
+On 2026-09-03, the approved production registration was attempted. Sites rejected
+`*.okrptr.com` with `invalid_custom_domain`: "custom domain must be a valid
+non-wildcard hostname". This is not an outstanding user approval or propagation
+wait. No domain or environment changes were applied. Keep the flag off until
+wildcard-capable routing and TLS are provisioned, or implement a verified
+per-host provisioning path with DNS administration. Canonical entry links remain
+available meanwhile.
+
 ## Tests
 
 `tests/workspace-identity.test.mjs` executes actual batch SQL against isolated

@@ -52,7 +52,7 @@ test.describe("installation controls", () => {
     await button.click();
     await expect(page.getByRole("alert")).toContainText("설치 창을 열지 못했습니다");
     await page.route("**/api/auth/google?*", route => route.fulfill({ status: 200, contentType: "text/html", body: "<p>Mock Google redirect</p>" }));
-    await page.getByRole("button", { name: "Google 계정으로 계속", exact: true }).click();
+    await page.locator(".landing-login-button").click();
     await expect(page).toHaveURL(/\/api\/auth\/google\?returnTo=/);
     expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/?signedOut=1");
   });
