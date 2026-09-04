@@ -2,13 +2,18 @@ import { expect, test, type Page } from "@playwright/test";
 import { bootstrap, installApiMocks, json } from "./api-mocks";
 import type { Language, LanguagePreferences } from "../../lib/language";
 
-async function fixture(page: Page, state: { preferences: LanguagePreferences; fail?: boolean; conflict?: boolean }) {
-  await installApiMocks(page);
+async function fixture(page: Page, state: { preferences: LanguagePreferences; fail?: boolean; conflict?: boolean; slackState?: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; teamWorkspace?: boolean }) {
+  await installApiMocks(page, { slackState: state.slackState, slackSetupComplete: state.slackSetupComplete, teamWorkspace: state.teamWorkspace });
   const requests: string[] = [], writes: unknown[] = [];
   await page.route("**/api/**", async (route) => {
     const request = route.request(), path = new URL(request.url()).pathname;
     requests.push(`${request.method()} ${path}`);
-    if (path === "/api/bootstrap") return json(route, { ...bootstrap, user: { ...bootstrap.user, preferences: state.preferences } });
+    if (path === "/api/bootstrap") return json(route, {
+      ...bootstrap,
+      user: { ...bootstrap.user, preferences: state.preferences },
+      workspaces: state.teamWorkspace ? bootstrap.workspaces.map((workspace) => ({ ...workspace, kind: "team", personal: false })) : bootstrap.workspaces,
+      team: state.teamWorkspace ? { ...bootstrap.team, workspace: { ...bootstrap.team.workspace, kind: "team" } } : bootstrap.team,
+    });
     if (path === "/api/account/preferences") {
       if (request.method() === "PATCH") {
         const input = request.postDataJSON(); writes.push(input);
@@ -22,6 +27,11 @@ async function fixture(page: Page, state: { preferences: LanguagePreferences; fa
       }
       return json(route, { preferences: state.preferences });
     }
+    if (path === "/api/slack/automations" && request.method() === "GET") return json(route, {
+      automations: [{ id: "custom-rule", name: "사용자 작성 규칙", triggerType: "task_created", triggerStatus: "", channelId: "C123", messageTemplate: "사용자 작성 메시지", messageTemplateKind: "custom", active: true, lastTriggeredAt: null, lastDeliveryStatus: "never", lastError: "", createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z" }],
+      deliveries: [],
+      messageLanguage: state.preferences.resolvedLanguage,
+    });
     // Existing consent-prompt bookkeeping is mocked by the shared fixture.
     if (request.method() !== "GET" && path !== "/api/account/marketing-consent" && path !== "/api/project-documents") throw new Error(`Unexpected write in language test: ${path}`);
     return route.fallback();
@@ -49,6 +59,38 @@ for (const id of ["ko", "en", "ja", "zh", "es"] as const) {
     await page.screenshot({ path: info.outputPath(`language-${id}.png`) });
   });
 }
+
+test("all bot types, management signals and recommended automations follow the selected language", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop-chromium", "Run the bot language matrix once in the desktop project.");
+  const copy = {
+    ko: { daily: "데일리 봇", management: "관리 봇", automation: "업무 자동화", signal: "활성 Project·Task 중 마감일이 비어 있는 항목", blocked: "막힘 상태 알림", created: "새 Task 알림" },
+    en: { daily: "Daily bot", management: "Management bot", automation: "Work automation", signal: "Active Projects and Tasks with no due date", blocked: "Blocked status alert", created: "New Task alert" },
+    ja: { daily: "デイリーボット", management: "管理ボット", automation: "業務の自動化", signal: "期限が設定されていない進行中のProject・Task", blocked: "ブロック状態の通知", created: "新しいTaskの通知" },
+    zh: { daily: "日报机器人", management: "管理机器人", automation: "工作自动化", signal: "没有截止日期的活跃 Project 和 Task", blocked: "阻塞状态提醒", created: "新 Task 提醒" },
+    es: { daily: "Bot diario", management: "Bot de gestión", automation: "Automatización del trabajo", signal: "Projects y Tasks activos sin fecha límite", blocked: "Alerta de estado bloqueado", created: "Alerta de nueva Task" },
+  } as const;
+  const state = { preferences: { language: "ko", resolvedLanguage: "ko", revision: 0 } as LanguagePreferences, slackState: "connected" as const, slackSetupComplete: true, teamWorkspace: true };
+  await fixture(page, state);
+
+  for (const [index, id] of (["ko", "en", "ja", "zh", "es"] as const).entries()) {
+    state.preferences = { language: id, resolvedLanguage: id, revision: index + 1 };
+    await page.goto("/?settings=workspace&tab=integrations&bot=management");
+    const rows = page.locator(".bot-accordion-row");
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0).locator(".bot-accordion-copy > b")).toHaveText(copy[id].daily);
+    await expect(rows.nth(1).locator(".bot-accordion-copy > b")).toHaveText(copy[id].management);
+    await expect(rows.nth(2).locator(".bot-accordion-copy > b")).toHaveText(copy[id].automation);
+
+    await rows.nth(1).locator("details.bot-advanced-settings > summary").click();
+    await expect(rows.nth(1)).toContainText(copy[id].signal);
+    await rows.nth(2).locator("button.bot-accordion-trigger").click();
+    const recommendations = rows.nth(2).locator(".automation-recommendations");
+    await expect(recommendations).toContainText(copy[id].blocked);
+    await expect(recommendations).toContainText(copy[id].created);
+    await expect(rows.nth(2)).toContainText("사용자 작성 규칙");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  }
+});
 
 test("changing language saves only preferences without reloading workspace data", async ({ page }) => {
   const state = { preferences: { language: "ko", resolvedLanguage: "ko", revision: 0 } as LanguagePreferences };

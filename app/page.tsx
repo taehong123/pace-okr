@@ -5,7 +5,10 @@ import { SlackMemberConnections } from "@/app/slack-member-connections";
 import type { DailyWork } from "@/lib/daily-work";
 import { PropertyValueInput } from "@/app/property-value-input";
 import { dailyDeliveryHealth, dailyDeliveryLabel } from "@/lib/slack-daily-status";
-import { slackErrorMessage, slackReminderLabel } from "@/lib/slack-display";
+import {
+  slackErrorMessage as baseSlackErrorMessage,
+  slackReminderLabel as baseSlackReminderLabel,
+} from "@/lib/slack-display";
 
 import {
   Activity,
@@ -90,6 +93,19 @@ import LanguageLoadError from "./language-load-error";
 import type { LanguagePreferences } from "@/lib/language";
 import { LandingScreen } from "./landing";
 import { AppInstallButton } from "./app-install-button";
+
+function slackErrorMessage(error: unknown, fallback?: string) {
+  return t(baseSlackErrorMessage(error, fallback));
+}
+
+function slackReminderLabel(status: string) {
+  return t(baseSlackReminderLabel(status));
+}
+
+function localizedWeekdayLabel(day: number) {
+  return new Intl.DateTimeFormat(getClientLocale(), { weekday: "short", timeZone: "UTC" })
+    .format(new Date(Date.UTC(2026, 7, 2 + day)));
+}
 
 type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "data" | "scrum" | "recommendations" | "reviews" | "trash" | "integrations" | "billing";
 const urlViews = new Set<View>(["my_work", "inbox", "work", "routines", "okr", "data", "scrum", "recommendations", "reviews", "trash", "integrations", "billing"]);
@@ -1123,7 +1139,7 @@ function WorkspaceApp() {
       } else if (Object.prototype.hasOwnProperty.call(slackOAuthIssueCopy, slackResult)) {
         const issue = slackResult as SlackOAuthIssue;
         setSlackOAuthIssue(issue);
-        showNotice(slackOAuthIssueCopy[issue].detail, slackOAuthIssueCopy[issue].tone === "error" ? "error" : undefined);
+        showNotice(t(slackOAuthIssueCopy[issue].detail), slackOAuthIssueCopy[issue].tone === "error" ? "error" : undefined);
       }
       const url = new URL(window.location.href);
       url.searchParams.delete("slack");
@@ -6253,8 +6269,8 @@ const managementBotSignalMeta: Record<ManagementBotSignal, { label: string; deta
 };
 
 function managementScheduleSummary(settings: Pick<ManagementBotSettings, "weekdays" | "reportTime" | "channelId" | "channelName" | "signals">) {
-  const weekdays = settings.weekdays.join(",") === "1,2,3,4,5" ? "평일" : settings.weekdays.map((day) => ["일", "월", "화", "수", "목", "금", "토"][day]).join("·");
-  const channel = settings.channelId ? `#${settings.channelName || settings.channelId}` : "채널 미선택";
+  const weekdays = settings.weekdays.join(",") === "1,2,3,4,5" ? t("평일") : settings.weekdays.map(localizedWeekdayLabel).join("·");
+  const channel = settings.channelId ? `#${settings.channelName || settings.channelId}` : t("채널 미선택");
   return t("{value1} {value2} · {value3} · {value4}개 점검", { value1: messageValue(weekdays), value2: messageValue(settings.reportTime), value3: messageValue(channel), value4: messageValue(settings.signals.length) });
 }
 
@@ -6295,12 +6311,13 @@ function WorkspaceManagementSummary() {
     {loading && !snapshot ? <div className="workspace-management-loading"><LoaderCircle className="spin" size={16} />{t("관리 항목을 정리하고 있습니다.")}</div> : error && !snapshot ? <div className="workspace-management-error" role="alert"><AlertTriangle size={17} /><div><b>{t("관리 요약을 불러오지 못했습니다")}</b><p>{error}</p><button type="button" onClick={() => reload()}>{t("다시 시도")}</button></div></div> : snapshot && <div className="management-summary-content">
       <div className="management-summary-total"><span>{snapshot.date} {t("기준")}</span><b>{t("{count}개", { count: snapshot.totalCount })}</b><small>{t("중복 항목은 각 관리 기준에 각각 집계됩니다.")}</small></div>
       {error && <p className="management-summary-refresh-error">{t("최신 정보를 갱신하지 못해 이전 결과를 표시합니다.")}</p>}
-      <div className="management-summary-groups">{snapshot.groups.map((group) => { const meta = managementBotSignalMeta[group.signal]; return <details className={meta.tone} key={group.signal}><summary><span><b>{meta.label}</b><small>{meta.detail}</small></span><em>{group.count}</em><ChevronDown size={15} /></summary><div>{group.items.length ? <ul>{group.items.map((item) => <li key={item.id}><a href={item.kind === "project" ? `/?project=${encodeURIComponent(item.id)}` : `/?task=${encodeURIComponent(item.id)}`}><span>{item.title}</span><small>{item.kind === "project" ? t("Project") : t("Task")}{item.dueDate ? ` · ${item.dueDate}` : ""}</small><ChevronRight size={14} /></a></li>)}</ul> : <p>{t("해당 항목이 없습니다.")}</p>}</div></details>; })}</div>
+      <div className="management-summary-groups">{snapshot.groups.map((group) => { const meta = managementBotSignalMeta[group.signal]; return <details className={meta.tone} key={group.signal}><summary><span><b>{t(meta.label)}</b><small>{t(meta.detail)}</small></span><em>{group.count}</em><ChevronDown size={15} /></summary><div>{group.items.length ? <ul>{group.items.map((item) => <li key={item.id}><a href={item.kind === "project" ? `/?project=${encodeURIComponent(item.id)}` : `/?task=${encodeURIComponent(item.id)}`}><span>{item.title}</span><small>{item.kind === "project" ? t("Project") : t("Task")}{item.dueDate ? ` · ${item.dueDate}` : ""}</small><ChevronRight size={14} /></a></li>)}</ul> : <p>{t("해당 항목이 없습니다.")}</p>}</div></details>; })}</div>
     </div>}
   </section>;
 }
 
 function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { active: boolean; canManage: boolean; onSummary: (status: string, summary: string) => void; onNotice: (message: string) => void }) {
+  const { language } = useLanguage();
   const [data, setData] = useState<ManagementBotData | null>(null);
   const [draft, setDraft] = useState<ManagementBotSettings | null>(null);
   const [loading, setLoading] = useState(false);
@@ -6332,6 +6349,11 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
       .finally(() => setLoading(false));
     return () => controller.abort();
   }, [active, onSummary, setChannels]);
+
+  useEffect(() => {
+    if (!data) return;
+    onSummary(!data.slackConnected ? "연결 필요" : data.settings.enabled ? data.settings.lastError ? "전송 확인 필요" : "사용 중" : "중지", managementScheduleSummary(data.settings));
+  }, [data, language, onSummary]);
 
   async function save(sendTest = false) {
     if (!draft || saving || !canManage) return;
@@ -6377,7 +6399,7 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
   if (!active && !data) return null;
   if (loading) return <section className="workspace-management-pane embedded"><div className="workspace-management-loading"><LoaderCircle className="spin" size={16} />{t("관리 봇 설정을 확인하고 있습니다.")}</div></section>;
   if (!data || !draft) return <section className="workspace-management-pane embedded"><div className="workspace-management-error" role="alert"><AlertTriangle size={17} /><div><b>{t("관리 봇을 불러오지 못했습니다")}</b><p>{error || t("잠시 후 다시 확인해 주세요.")}</p></div></div></section>;
-  const weekdayLabels = ["일", "월", "화", "수", "목", "금", "토"];
+  const weekdayLabels = Array.from({ length: 7 }, (_, day) => localizedWeekdayLabel(day));
 
   return <section className="workspace-management-pane embedded">
     {data.settings.lastError && <div className="workspace-management-error" role="alert"><AlertTriangle size={17} /><div><b>{t("관리 봇 전송 확인이 필요합니다")}</b><p>{slackErrorMessage(data.settings.lastError)}</p></div></div>}
@@ -6389,7 +6411,7 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
         {canManage && data.slackConnected && <SlackChannelSyncStatus loading={channelsLoading} error={channelLoadError} onRefresh={() => void refreshChannels(false)} />}
         <div className="management-schedule-grid core"><label><span>{t("발송 시간")}</span><input type="time" step="900" value={draft.reportTime} disabled={!canManage} onChange={(event) => setDraft({ ...draft, reportTime: event.target.value })} /></label><label className="management-channel-field"><span>{t("Slack 발송 대상")}</span><select aria-label={t("Slack 발송 채널")} value={draft.channelId} disabled={!canManage || !data.slackConnected} onChange={(event) => setDraft({ ...draft, channelId: event.target.value })}><option value="">{t("채널 선택")}</option>{draft.channelId && !channels.some((channel) => channel.id === draft.channelId) && <option value={draft.channelId}>#{draft.channelName || draft.channelId}</option>}{channels.map((channel) => <option value={channel.id} key={channel.id}>{slackChannelOptionLabel(channel)}</option>)}</select></label></div>
         <div className="management-weekdays" aria-label={t("관리 리포트 발송 요일")}>{weekdayLabels.map((label, day) => <button type="button" className={draft.weekdays.includes(day) ? "active" : ""} aria-pressed={draft.weekdays.includes(day)} disabled={!canManage} onClick={() => toggleDay(day)} key={label}>{label}</button>)}</div>
-        <details className="bot-advanced-settings"><summary>{t("고급 설정")}<ChevronDown size={14} /></summary><div><label className="management-timezone-field"><span>{t("시간대")}</span><select value={draft.timezone} disabled={!canManage} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label><fieldset className="management-signal-picker"><legend>{t("정리할 정보와 Urgency")}</legend>{(Object.keys(managementBotSignalMeta) as ManagementBotSignal[]).map((signal) => { const meta = managementBotSignalMeta[signal]; return <label key={signal} className={meta.tone}><input type="checkbox" checked={draft.signals.includes(signal)} disabled={!canManage} onChange={() => toggleSignal(signal)} /><span><b>{meta.label}</b><small>{meta.detail}</small></span><span className="sr-only">{t("관리 리포트 정리 항목 선택")}</span></label>; })}</fieldset>{(draft.lastSentAt || draft.lastError) && <p className={`management-bot-last ${draft.lastError ? "error" : ""}`}>{draft.lastError ? t("최근 전송 실패 · {value1}", { value1: messageValue(slackErrorMessage(draft.lastError)) }) : t("최근 전송 · {value1}", { value1: messageValue(formatDateTime(draft.lastSentAt!)) })}</p>}</div></details>
+        <details className="bot-advanced-settings"><summary>{t("고급 설정")}<ChevronDown size={14} /></summary><div><label className="management-timezone-field"><span>{t("시간대")}</span><select value={draft.timezone} disabled={!canManage} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label><fieldset className="management-signal-picker"><legend>{t("정리할 정보와 Urgency")}</legend>{(Object.keys(managementBotSignalMeta) as ManagementBotSignal[]).map((signal) => { const meta = managementBotSignalMeta[signal]; return <label key={signal} className={meta.tone}><input type="checkbox" checked={draft.signals.includes(signal)} disabled={!canManage} onChange={() => toggleSignal(signal)} /><span><b>{t(meta.label)}</b><small>{t(meta.detail)}</small></span><span className="sr-only">{t("관리 리포트 정리 항목 선택")}</span></label>; })}</fieldset>{(draft.lastSentAt || draft.lastError) && <p className={`management-bot-last ${draft.lastError ? "error" : ""}`}>{draft.lastError ? t("최근 전송 실패 · {value1}", { value1: messageValue(slackErrorMessage(draft.lastError)) }) : t("최근 전송 · {value1}", { value1: messageValue(formatDateTime(draft.lastSentAt!)) })}</p>}</div></details>
         {error && <p className="management-bot-error" role="alert">{error}</p>}
         {canManage && <div className="management-bot-actions"><button onClick={() => void save(false)} disabled={saving || draft.signals.length === 0 || draft.weekdays.length === 0}>{saving ? t("저장 중") : t("설정 저장")}</button><button onClick={() => void save(true)} disabled={saving || !draft.channelId || draft.signals.length === 0}>{t("테스트 보내기")}</button></div>}
     </div>
@@ -6401,7 +6423,7 @@ type WorkspaceBotId = "daily" | "management" | "automation";
 function BotAccordionRow({ id, icon: Icon, title, description, status, summary, expanded, onToggle, children }: { id: WorkspaceBotId; icon: LucideIcon; title: string; description: string; status: string; summary: string; expanded: boolean; onToggle: (id: WorkspaceBotId) => void; children: ReactNode }) {
   const panelId = `workspace-bot-panel-${id}`;
   return <section className={`bot-accordion-row ${expanded ? "open" : ""}`}>
-    <button type="button" className="bot-accordion-trigger" aria-expanded={expanded} aria-controls={panelId} onClick={() => onToggle(id)}><span className="bot-accordion-icon"><Icon size={17} /></span><span className="bot-accordion-copy"><b>{title}</b><small>{description}</small><em>{summary}</em></span><span className={`bot-accordion-status ${status === "사용 중" || status === "설정 완료" ? "active" : ""}`}>{status}</span><ChevronDown className="bot-accordion-chevron" size={16} /></button>
+    <button type="button" className="bot-accordion-trigger" aria-expanded={expanded} aria-controls={panelId} onClick={() => onToggle(id)}><span className="bot-accordion-icon"><Icon size={17} /></span><span className="bot-accordion-copy"><b>{title}</b><small>{description}</small><em>{t(summary)}</em></span><span className={`bot-accordion-status ${status === "사용 중" || status === "설정 완료" ? "active" : ""}`}>{t(status)}</span><ChevronDown className="bot-accordion-chevron" size={16} /></button>
     <div id={panelId} className="bot-accordion-panel" hidden={!expanded}>{children}</div>
   </section>;
 }
@@ -6476,10 +6498,10 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
     </header>
     <div className="workspace-integration-pane">
       <section className="integration-service-card slack-service-card" aria-labelledby="workspace-slack-heading">
-      <header><span className="integration-service-icon slack"><Hash size={19} /></span><div><h3 id="workspace-slack-heading">Slack</h3><p>{slackConnected ? connectedSlackName : t("{value1}에 사용할 Slack 워크스페이스", { value1: messageValue(workspaceName) })}</p></div><strong className={`integration-status-badge ${slackState}`}>{loading && !slack ? t("확인 중") : slackAction}</strong></header>
-      {slackOAuthIssue && <div className={`integration-state-message ${slackOAuthIssueCopy[slackOAuthIssue].tone}`} role="alert"><AlertTriangle size={17} /><div><b>{slackOAuthIssueCopy[slackOAuthIssue].title}</b><p>{slackOAuthIssueCopy[slackOAuthIssue].detail}</p></div></div>}
+      <header><span className="integration-service-icon slack"><Hash size={19} /></span><div><h3 id="workspace-slack-heading">Slack</h3><p>{slackConnected ? connectedSlackName : t("{value1}에 사용할 Slack 워크스페이스", { value1: messageValue(workspaceName) })}</p></div><strong className={`integration-status-badge ${slackState}`}>{loading && !slack ? t("확인 중") : t(slackAction)}</strong></header>
+      {slackOAuthIssue && <div className={`integration-state-message ${slackOAuthIssueCopy[slackOAuthIssue].tone}`} role="alert"><AlertTriangle size={17} /><div><b>{t(slackOAuthIssueCopy[slackOAuthIssue].title)}</b><p>{t(slackOAuthIssueCopy[slackOAuthIssue].detail)}</p></div></div>}
       {!slackConnected && <section className="slack-one-button-connect" aria-label={t("Slack 팀 연결")}>
-        <div><b>{slackState === "service_unavailable" || slackState === "error" ? t("Slack 연결을 준비하고 있습니다") : t("팀 Slack을 연결하세요")}</b><p>{slackState === "error" ? t("연결 상태를 불러오지 못했습니다.") : slack?.statusMessage || t("Slack 사용자와 채널은 승인 후 자동으로 불러옵니다.")}</p></div>
+        <div><b>{slackState === "service_unavailable" || slackState === "error" ? t("Slack 연결을 준비하고 있습니다") : t("팀 Slack을 연결하세요")}</b><p>{slackState === "error" ? t("연결 상태를 불러오지 못했습니다.") : slack?.statusMessage ? t(slack.statusMessage) : t("Slack 사용자와 채널은 승인 후 자동으로 불러옵니다.")}</p></div>
         {loading && !slack ? <span className="integration-inline-loading"><LoaderCircle className="spin" size={14} />{t("확인 중")}</span>
           : slackState === "error" || slackState === "service_unavailable" ? <span className="integration-role-note">{t("잠시 후 사용 가능")}</span>
           : slackState === "workspace_disconnected" && canManageSlack ? <button className="slack-primary-action" onClick={connectSlack}><Hash size={15} />{t("Slack 연결")}</button>
@@ -6820,6 +6842,7 @@ function slackAutomationHealthLabel(automations: SlackAutomation[]) {
 }
 
 function SlackAutomationManager({ active, connected, canManage, workspaceName, onSummary, onNotice }: { active: boolean; connected: boolean; canManage: boolean; workspaceName: string; onSummary: (status: string, summary: string) => void; onNotice: (message: string) => void }) {
+  const { language } = useLanguage();
   const confirmAction = useAppConfirm();
   const [messageLanguage, setMessageLanguage] = useState<Language>("ko");
   const [automations, setAutomations] = useState<SlackAutomation[]>([]);
@@ -6867,6 +6890,12 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
     onSummary("연결 필요", "Slack 연결 후 설정할 수 있습니다");
   }, [active, connected, onSummary]);
 
+  useEffect(() => {
+    if (!loaded || !connected) return;
+    const activeCount = automations.filter((entry) => entry.active).length;
+    onSummary(slackAutomationHealthLabel(automations), t("활성 규칙 {value1}개 · 전체 {value2}개", { value1: messageValue(activeCount), value2: messageValue(automations.length) }));
+  }, [automations, connected, language, loaded, onSummary]);
+
   async function loadAutomations(showLoading = true) {
     if (showLoading) setLoading(true);
     try {
@@ -6902,13 +6931,14 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
     if (duplicate) { onNotice(t("같은 채널에 '{value1}' 규칙이 이미 있습니다.", { value1: messageValue(duplicate.name) })); return; }
     setBusyId(`recommended:${recommendation.id}`);
     try {
-      const response = await fetch("/api/slack/automations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: recommendation.name, triggerType: recommendation.triggerType, triggerStatus: recommendation.triggerStatus, channelId, messageTemplate: recommendation.messageTemplate, messageTemplateKind: recommendation.id === "blocked" ? "blocked" : "default", active: true }) });
+      const localizedName = translateForLanguage(messageLanguage, recommendation.name);
+      const response = await fetch("/api/slack/automations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: localizedName, triggerType: recommendation.triggerType, triggerStatus: recommendation.triggerStatus, channelId, messageTemplate: recommendation.messageTemplate, messageTemplateKind: recommendation.id === "blocked" ? "blocked" : "default", active: true }) });
       const data = await response.json() as { automation?: SlackAutomation; error?: string };
       if (!response.ok || !data.automation) throw new Error(apiError(data, "추천 자동화를 만들지 못했습니다."));
       const next = [data.automation, ...automations];
       setAutomations(next);
       onSummary(slackAutomationHealthLabel(next), t("활성 규칙 {value1}개 · 전체 {value2}개", { value1: messageValue(next.filter((entry) => entry.active).length), value2: messageValue(next.length) }));
-      onNotice(t("'{value1}' 추천 자동화를 만들었습니다.", { value1: messageValue(recommendation.name) }));
+      onNotice(t("'{value1}' 추천 자동화를 만들었습니다.", { value1: messageValue(t(recommendation.name)) }));
     } catch (error) {
       onNotice(slackErrorMessage(error, "추천 자동화를 만들지 못했습니다."));
     } finally {
@@ -7005,7 +7035,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
 
   return <div className="slack-automation-manager">
     {canManage && <SlackChannelSyncStatus loading={channelsLoading} error={channelLoadError} onRefresh={() => void refreshChannels(false)} />}
-    {canManage && <section className="automation-recommendations"><header><h3>{t("추천 자동화")}</h3><p>{t("발송 채널만 고르면 추천 조건과 메시지로 바로 시작합니다.")}</p></header><div>{slackAutomationRecommendations.map((recommendation) => <article key={recommendation.id}><div><b>{recommendation.name}</b><p>{recommendation.description}</p></div><select aria-label={t("{value1} Slack 채널", { value1: messageValue(recommendation.name) })} value={recommendedChannels[recommendation.id]} onChange={(event) => setRecommendedChannels((current) => ({ ...current, [recommendation.id]: event.target.value }))}><option value="">{t("채널 선택")}</option>{channels.map((channel) => <option value={channel.id} key={channel.id}>{slackChannelOptionLabel(channel)}</option>)}</select><button type="button" disabled={busyId === `recommended:${recommendation.id}`} onClick={() => void createRecommendedAutomation(recommendation)}>{busyId === `recommended:${recommendation.id}` ? <LoaderCircle className="spin" size={13} /> : <Plus size={13} />}{t("추가")}</button></article>)}</div></section>}
+    {canManage && <section className="automation-recommendations"><header><h3>{t("추천 자동화")}</h3><p>{t("발송 채널만 고르면 추천 조건과 메시지로 바로 시작합니다.")}</p></header><div>{slackAutomationRecommendations.map((recommendation) => <article key={recommendation.id}><div><b>{t(recommendation.name)}</b><p>{t(recommendation.description)}</p></div><select aria-label={t("{value1} Slack 채널", { value1: messageValue(t(recommendation.name)) })} value={recommendedChannels[recommendation.id]} onChange={(event) => setRecommendedChannels((current) => ({ ...current, [recommendation.id]: event.target.value }))}><option value="">{t("채널 선택")}</option>{channels.map((channel) => <option value={channel.id} key={channel.id}>{slackChannelOptionLabel(channel)}</option>)}</select><button type="button" disabled={busyId === `recommended:${recommendation.id}`} onClick={() => void createRecommendedAutomation(recommendation)}>{busyId === `recommended:${recommendation.id}` ? <LoaderCircle className="spin" size={13} /> : <Plus size={13} />}{t("추가")}</button></article>)}</div></section>}
     <div className="slack-automation-heading"><div><h3>{t("현재 자동화")}</h3><p>{t("{workspace}에서 작동하는 규칙입니다.", { workspace: workspaceName })}</p></div>{canManage && <button type="button" onClick={startCreate}><Plus size={14} />{t("직접 규칙 만들기")}</button>}</div>
     <div className="slack-bot-note"><Bot size={15} /><p>{t("각 자동화는 독립된 규칙으로 작동하며, 메시지는 연결된 OKRPTR 봇 이름으로 전송됩니다.")}</p></div>
     {formOpen && <form className="slack-automation-form" onSubmit={(event) => void saveAutomation(event)}>
@@ -7032,8 +7062,8 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
 }
 
 function slackTriggerLabel(automation: SlackAutomation) {
-  if (automation.triggerType === "task_created") return "업무 생성";
-  return automation.triggerStatus ? t("상태 변경 → {value1}", { value1: messageValue(statusLabel(automation.triggerStatus as ItemStatus)) }) : "모든 상태 변경";
+  if (automation.triggerType === "task_created") return t("업무 생성");
+  return automation.triggerStatus ? t("상태 변경 → {value1}", { value1: messageValue(statusLabel(automation.triggerStatus as ItemStatus)) }) : t("모든 상태 변경");
 }
 
 function formatSlackAutomationTime(value: string | null) {

@@ -70,6 +70,53 @@ test("all catalogs have identical keys and named variables without empty transla
   }
 });
 
+test("Slack bot types, settings, states and safe errors are localized in every supported language", async () => {
+  const botKeys = [
+    "데일리 봇",
+    "관리 봇",
+    "업무 자동화",
+    "시간과 대상 멤버를 설정합니다",
+    "시간과 발송 채널을 설정합니다",
+    "추천 규칙 또는 직접 규칙을 만듭니다",
+    "Slack 연결 후 설정할 수 있습니다",
+    "Slack 연결을 잠시 사용할 수 없습니다. 서비스 설정을 확인해 주세요.",
+    "Owner 또는 Admin이 이 OKRPTR 워크스페이스에 사용할 Slack을 연결할 수 있습니다.",
+    "데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요.",
+    "OKRPTR 연결이 완료되었습니다. 데일리 발송 설정을 완료해 주세요.",
+    "OKRPTR 연결이 완료되었습니다.",
+    "초기 설정 필요",
+    "권한 업데이트 필요",
+    "잠시 사용 불가",
+    "예약됨",
+    "예약 중",
+    "발송 완료",
+    "예약 취소됨",
+    "막힘 상태 알림",
+    "Task가 막힘 상태가 되면 바로 알립니다.",
+    "새 Task 알림",
+    "새 Task가 만들어지면 담당 채널에 알립니다.",
+    "업무 생성",
+    "모든 상태 변경",
+    "발송 여부를 확인하지 못했습니다. 중복 발송을 막기 위해 재발송을 보류했습니다.",
+    "Slack 연결 권한을 갱신해 주세요. 워크스페이스 관리자가 Slack 연결 관리에서 갱신할 수 있습니다.",
+  ];
+  for (const [id, module] of Object.entries(catalogs)) {
+    for (const key of botKeys) {
+      assert.ok(module.default[key], `${id}: missing bot copy ${key}`);
+      assert.notEqual(module.default[key], key, `${id}: untranslated bot copy ${key}`);
+    }
+  }
+
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /return t\(baseSlackErrorMessage\(error, fallback\)\)/);
+  assert.match(page, /return t\(baseSlackReminderLabel\(status\)\)/);
+  assert.match(page, /<b>\{t\(slackOAuthIssueCopy\[slackOAuthIssue\]\.title\)\}<\/b>/);
+  assert.match(page, /<b>\{t\(recommendation\.name\)\}<\/b><p>\{t\(recommendation\.description\)\}<\/p>/);
+  assert.match(page, /name: localizedName/);
+  assert.match(page, /return t\("업무 생성"\)/);
+  assert.match(page, /: t\("모든 상태 변경"\)/);
+});
+
 test("server translators are bound per recipient and preserve user-authored text", async () => {
   const [ko, en, ja] = await Promise.all(["ko", "en", "ja"].map(serverLanguage.serverTranslator));
   assert.equal(ko("데일리 봇"), "데일리 봇");
