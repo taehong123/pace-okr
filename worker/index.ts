@@ -2,10 +2,12 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { syncDueKrDataConnectionsWithDb } from "@/lib/kr-data-sync";
+import { runDueWorkspaceBackups } from "@/lib/workspace-backups";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
+  WORKSPACE_AVATARS: R2Bucket;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -98,6 +100,8 @@ const worker = {
       syncDueKrDataConnectionsWithDb(_env.DB),
       managementBotRun,
     ]));
+    // Keep backups alive even if an unrelated integration job rejects.
+    ctx.waitUntil(runDueWorkspaceBackups(_env));
   },
 };
 

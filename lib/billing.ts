@@ -19,13 +19,19 @@ type BillingRuntimeEnv = typeof env & {
   PAYPLE_REFUND_KEY?: string;
   PAYPLE_BILLING_KEY_ENCRYPTION_KEY?: string;
   RESEND_API_KEY?: string;
+  OKRI_BILLING_FROM?: string;
   OKRPTR_BILLING_FROM?: string;
+  OKRI_PUBLIC_URL?: string;
   OKRPTR_PUBLIC_URL?: string;
   INTERNAL_BILLING_SECRET?: string;
   BILLING_ENFORCEMENT_STARTED_AT?: string;
 };
 
 export const PAYMENT_RETRY_DAYS = [1, 3, 5, 7] as const;
+
+function billingPublicUrl(runtime: BillingRuntimeEnv) {
+  return String(runtime.OKRI_PUBLIC_URL || runtime.OKRPTR_PUBLIC_URL || "https://okri.ai").replace(/\/$/, "");
+}
 
 type SubscriptionRow = {
   workspace_id: string;
@@ -454,7 +460,7 @@ export async function createPaypleSession(workspaceId: string, userId: string, p
     work: "AUTH",
     authUrl: runtime.PAYPLE_AUTH_URL,
     merchantId: runtime.PAYPLE_CST_ID,
-    returnUrl: `${runtime.OKRPTR_PUBLIC_URL || "https://okrptr.com"}/api/billing/payple/result`,
+    returnUrl: `${billingPublicUrl(runtime)}/api/billing/payple/result`,
     plan,
     priceWon: BILLING_PLANS[plan].priceWon,
   };
@@ -489,7 +495,7 @@ export async function completePaypleRegistration(input: {
   const methodId = crypto.randomUUID();
   const immediatePeriodEnd = new Date(now);
   immediatePeriodEnd.setUTCMonth(immediatePeriodEnd.getUTCMonth() + 1);
-  const immediateOrderId = `okrptr-first-${tokenHash.slice(0, 24)}`;
+  const immediateOrderId = `okri-first-${tokenHash.slice(0, 24)}`;
   const immediatePayment = priorClaim
     ? await paypleCharge(runtime, verified.billingKey, immediateOrderId, BILLING_PLANS[plan].priceWon)
     : null;
@@ -565,7 +571,7 @@ export async function changePlan(workspaceId: string, plan: BillingPlan) {
     const periodStart = new Date();
     const periodEnd = new Date(periodStart);
     periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
-    const orderId = `okrptr-reactivate-${workspaceId.slice(0, 10)}-${plan}-${stableTimestamp(current.updated_at)}`;
+    const orderId = `okri-reactivate-${workspaceId.slice(0, 10)}-${plan}-${stableTimestamp(current.updated_at)}`;
     const paid = await paypleCharge(runtime, await decryptPrivateValue(method.encrypted_billing_key, runtime.PAYPLE_BILLING_KEY_ENCRYPTION_KEY!), orderId, BILLING_PLANS[plan].priceWon);
     await runtime.DB.batch([
       runtime.DB.prepare(`INSERT INTO billing_transactions
@@ -594,7 +600,7 @@ export async function changePlan(workspaceId: string, plan: BillingPlan) {
     const remaining = Math.max(0, periodEnd - Date.now());
     const difference = BILLING_PLANS[plan].priceWon - BILLING_PLANS[current.plan].priceWon;
     const priceWon = Math.max(1, Math.ceil((difference * remaining) / fullPeriod));
-    const orderId = `okrptr-upgrade-${workspaceId.slice(0, 10)}-${plan}-${stableTimestamp(current.current_period_ends_at || current.updated_at)}`;
+    const orderId = `okri-upgrade-${workspaceId.slice(0, 10)}-${plan}-${stableTimestamp(current.current_period_ends_at || current.updated_at)}`;
     const paid = await paypleCharge(runtime, await decryptPrivateValue(method.encrypted_billing_key, runtime.PAYPLE_BILLING_KEY_ENCRYPTION_KEY!), orderId, priceWon);
     await runtime.DB.batch([
       runtime.DB.prepare(`INSERT INTO billing_transactions
@@ -673,8 +679,8 @@ export async function runBillingBatch() {
 export async function verifyInternalBillingRequest(request: Request) {
   const secret = (env as BillingRuntimeEnv).INTERNAL_BILLING_SECRET;
   if (!secret) return false;
-  const timestamp = request.headers.get("x-okrptr-timestamp") ?? "";
-  const signature = request.headers.get("x-okrptr-signature") ?? "";
+  const timestamp = request.headers.get("x-okri-timestamp") ?? request.headers.get("x-okrptr-timestamp") ?? "";
+  const signature = request.headers.get("x-okri-signature") ?? request.headers.get("x-okrptr-signature") ?? "";
   if (!/^\d+$/.test(timestamp) || Math.abs(Date.now() - Number(timestamp)) > 5 * 60_000) return false;
   const expected = await hmacSha256(secret, timestamp);
   return timingSafeEqual(expected, signature);
@@ -695,7 +701,7 @@ async function processDueSubscription(runtime: BillingRuntimeEnv, subscription: 
     await markPaymentFailure(runtime, subscription, now, "payment_method_missing");
     return;
   }
-  const orderId = `okrptr-${subscription.workspace_id.slice(0, 10)}-${stableTimestamp(subscription.next_billing_at || subscription.updated_at)}-${subscription.retry_count}`;
+  const orderId = `okri-${subscription.workspace_id.slice(0, 10)}-${stableTimestamp(subscription.next_billing_at || subscription.updated_at)}-${subscription.retry_count}`;
   const existing = await runtime.DB.prepare("SELECT status FROM billing_transactions WHERE order_id = ? LIMIT 1").bind(orderId).first<{ status: string }>();
   if (existing?.status === "paid") return;
   const periodEnd = new Date(now);
@@ -744,7 +750,8 @@ async function markPaymentFailure(runtime: BillingRuntimeEnv, subscription: Subs
 }
 
 async function sendDueBillingNotifications(runtime: BillingRuntimeEnv, now: Date) {
-  if (!runtime.RESEND_API_KEY || !runtime.OKRPTR_BILLING_FROM) return;
+  const billingFrom = runtime.OKRI_BILLING_FROM || runtime.OKRPTR_BILLING_FROM;
+  if (!runtime.RESEND_API_KEY || !billingFrom) return;
   const rows = await runtime.DB.prepare(`SELECT notification.id, notification.kind, notification.scheduled_for,
       app_user.email_normalized AS email, workspace.name AS workspace_name
     FROM billing_notifications AS notification
@@ -757,8 +764,8 @@ async function sendDueBillingNotifications(runtime: BillingRuntimeEnv, now: Date
       const response = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { Authorization: `Bearer ${runtime.RESEND_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ from: runtime.OKRPTR_BILLING_FROM, to: [row.email], subject: billingEmailSubject(row.kind),
-          html: `<p>${escapeHtml(row.workspace_name)} 워크스페이스의 ${escapeHtml(billingEmailSubject(row.kind))}</p><p><a href="${escapeHtml(runtime.OKRPTR_PUBLIC_URL || "https://okrptr.com")}/?view=billing">결제 설정 보기</a></p>` }),
+        body: JSON.stringify({ from: billingFrom, to: [row.email], subject: billingEmailSubject(row.kind),
+          html: `<p>${escapeHtml(row.workspace_name)} 워크스페이스의 ${escapeHtml(billingEmailSubject(row.kind))}</p><p><a href="${escapeHtml(billingPublicUrl(runtime))}/?view=billing">결제 설정 보기</a></p>` }),
       });
       const payload = await response.json().catch(() => ({})) as { id?: string };
       if (!response.ok) throw new Error(`email_${response.status}`);
@@ -775,7 +782,7 @@ async function verifyPaypleBillingKey(runtime: BillingRuntimeEnv, billingKey: st
   if (!billingKey || !payerId) throw new Error("Payple 카드 등록 결과가 올바르지 않습니다.");
   const response = await fetch(`${runtime.PAYPLE_API_URL!.replace(/\/$/, "")}/inquire`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Referer: runtime.OKRPTR_PUBLIC_URL || "https://okrptr.com" },
+    headers: { "Content-Type": "application/json", Referer: billingPublicUrl(runtime) },
     body: JSON.stringify({ cst_id: runtime.PAYPLE_CST_ID, custKey: runtime.PAYPLE_CUST_KEY, PCD_PAYPLE_PAYER_ID: payerId, PCD_PAYER_AUTHTYPE: "pwd" }),
   });
   const data = await response.json().catch(() => ({})) as Record<string, unknown>;
@@ -804,9 +811,9 @@ async function getEditorEnforcementState(workspaceId: string) {
 async function paypleCharge(runtime: BillingRuntimeEnv, billingKey: string, orderId: string, priceWon: number) {
   const response = await fetch(`${runtime.PAYPLE_API_URL!.replace(/\/$/, "")}/payment`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Referer: runtime.OKRPTR_PUBLIC_URL || "https://okrptr.com" },
+    headers: { "Content-Type": "application/json", Referer: billingPublicUrl(runtime) },
     body: JSON.stringify({ cst_id: runtime.PAYPLE_CST_ID, custKey: runtime.PAYPLE_CUST_KEY, PCD_PAY_TYPE: "card", PCD_PAY_WORK: "PAY",
-      PCD_PAYER_ID: billingKey, PCD_PAY_OID: orderId, PCD_PAY_GOODS: "OKRPTR subscription", PCD_PAY_TOTAL: priceWon }),
+      PCD_PAYER_ID: billingKey, PCD_PAY_OID: orderId, PCD_PAY_GOODS: "OKRI subscription", PCD_PAY_TOTAL: priceWon }),
   });
   const data = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok || String(data.PCD_PAY_RST ?? "") !== "success") throw new Error(String(data.PCD_PAY_CODE ?? "payment_failed"));
@@ -817,7 +824,7 @@ async function paypleOperation(runtime: BillingRuntimeEnv, operation: "cancel", 
   if (!transactionId) throw new Error("Payple 거래번호가 없습니다.");
   const response = await fetch(`${runtime.PAYPLE_API_URL!.replace(/\/$/, "")}/cancel`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Referer: runtime.OKRPTR_PUBLIC_URL || "https://okrptr.com" },
+    headers: { "Content-Type": "application/json", Referer: billingPublicUrl(runtime) },
     body: JSON.stringify({ cst_id: runtime.PAYPLE_CST_ID, custKey: runtime.PAYPLE_CUST_KEY, refundKey: runtime.PAYPLE_REFUND_KEY,
       PCD_PAY_WORK: "CANCEL", PCD_PAY_AUTHNO: transactionId, PCD_REFUND_TOTAL: priceWon, operation }),
   });
@@ -872,7 +879,7 @@ function billingEmailSubject(kind: string) {
   if (kind === "trial_ending_7d") return "무료 체험 종료 7일 전 안내";
   if (kind === "trial_ending_1d") return "무료 체험 종료 1일 전 안내";
   if (kind === "payment_failed") return "정기결제 실패 안내";
-  return "OKRPTR 결제 안내";
+  return "OKRI 결제 안내";
 }
 
 function escapeHtml(value: string) {

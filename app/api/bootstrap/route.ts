@@ -97,7 +97,7 @@ export async function GET(request: Request) {
     const secure = url.protocol === "https:" ? "; Secure" : "";
     headers.append(
       "Set-Cookie",
-      `okrptr_workspace_id=${encodeURIComponent(authorization.ownerId)}; Path=/; HttpOnly${secure}; SameSite=Lax; Max-Age=31536000`,
+      `okri_workspace_id=${encodeURIComponent(authorization.ownerId)}; Path=/; HttpOnly${secure}; SameSite=Lax; Max-Age=31536000`,
     );
     return Response.json(payload, { headers });
   } catch (error) {

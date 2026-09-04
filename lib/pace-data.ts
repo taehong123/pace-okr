@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { effectiveIntegrationProvider, type IntegrationProvider } from "@/lib/integration-providers";
 import { and, asc, desc, eq, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { readGoogleSession } from "@/lib/google-session";
@@ -170,9 +171,10 @@ export type RequestAuthorization = {
   displayName: string;
   role: TeamRole;
   apiToken: boolean;
+  oauthScopes?: string;
 };
 
-export type IntegrationTokenSummary = Pick<IntegrationToken, "id" | "name" | "tokenPrefix" | "createdAt" | "lastUsedAt" | "revokedAt">;
+export type IntegrationTokenSummary = Pick<IntegrationToken, "id" | "name" | "tokenPrefix" | "createdAt" | "lastUsedAt" | "revokedAt"> & { provider: IntegrationProvider };
 
 const DEFAULT_PROJECT_EXECUTION_PROPERTIES: { name: string; type: PropertyType; systemKey?: string; options?: string[]; defaultValue?: PropertyValue }[] = [
   { name: "상위 Initiative", type: "text", systemKey: "parent_id" },
@@ -188,6 +190,7 @@ const DEFAULT_PROJECT_EXECUTION_PROPERTIES: { name: string; type: PropertyType; 
 ];
 
 type RuntimeEnv = typeof env & {
+  OKRI_API_TOKEN?: string;
   OKRPTR_API_TOKEN?: string;
   OKITA_API_TOKEN?: string;
   PACE_API_TOKEN?: string;
@@ -199,7 +202,9 @@ type RuntimeEnv = typeof env & {
   TWILIO_VERIFY_SERVICE_SID?: string;
   SLACK_TOKEN_ENCRYPTION_KEY?: string;
   RESEND_API_KEY?: string;
+  OKRI_PUBLIC_URL?: string;
   OKRPTR_PUBLIC_URL?: string;
+  OKRI_INVITE_FROM?: string;
   OKRPTR_INVITE_FROM?: string;
   WORKSPACE_AVATARS?: R2Bucket;
 };
@@ -1314,6 +1319,9 @@ export async function deleteOkrCycle(ownerId: string, id: string) {
   if (!target) throw new Error("OKR cycle not found");
   if ((countRow?.count ?? 0) <= 1) throw new Error("At least one OKR file is required");
 
+  const { createWorkspaceBackup } = await import("@/lib/workspace-backups");
+  await createWorkspaceBackup(env, ownerId, "before_okr_delete");
+
   await getDb()
     .update(items)
     .set({ cycleId: null, updatedAt: new Date().toISOString() })
@@ -1342,6 +1350,8 @@ export async function deleteOkrCycle(ownerId: string, id: string) {
 
 export async function cleanupWorkspaceExecutionData(ownerId: string, createdByUserId: string | null = null) {
   await ensureSchema();
+  const { createWorkspaceBackup } = await import("@/lib/workspace-backups");
+  await createWorkspaceBackup(env, ownerId, "before_cleanup", createdByUserId);
   const [itemCount, routineCount, cycleCount] = await Promise.all([
     getDb().select({ count: sql<number>`count(*)` }).from(items).where(eq(items.ownerId, ownerId)),
     getDb().select({ count: sql<number>`count(*)` }).from(routines).where(eq(routines.ownerId, ownerId)),
@@ -1960,7 +1970,7 @@ export async function saveSlackConnection(input: {
   if (teamConnection && teamConnection.ownerId !== input.ownerId) {
     throw new SlackWorkspaceConnectionError(
       "workspace_already_connected",
-      "이 Slack 워크스페이스는 다른 OKRPTR 워크스페이스에 연결되어 있습니다. 기존 연결을 해제한 뒤 다시 시도해 주세요.",
+      "이 Slack 워크스페이스는 다른 OKRI 워크스페이스에 연결되어 있습니다. 기존 연결을 해제한 뒤 다시 시도해 주세요.",
     );
   }
   const now = new Date().toISOString();
@@ -1981,7 +1991,7 @@ export async function saveSlackConnection(input: {
     if (conflict && conflict.ownerId !== input.ownerId) {
       throw new SlackWorkspaceConnectionError(
         "workspace_already_connected",
-        "이 Slack 워크스페이스는 다른 OKRPTR 워크스페이스에 연결되어 있습니다. 기존 연결을 해제한 뒤 다시 시도해 주세요.",
+        "이 Slack 워크스페이스는 다른 OKRI 워크스페이스에 연결되어 있습니다. 기존 연결을 해제한 뒤 다시 시도해 주세요.",
       );
     }
     throw error;
@@ -2178,7 +2188,7 @@ async function getSlackAutomation(ownerId: string, id: string) {
 
 async function getWorkspaceName(ownerId: string) {
   const [workspace] = await getDb().select({ name: workspaces.name }).from(workspaces).where(eq(workspaces.id, ownerId)).limit(1);
-  return workspace?.name ?? "OKRPTR";
+  return workspace?.name ?? "OKRI";
 }
 
 async function deliverSlackAutomation(
@@ -2263,15 +2273,19 @@ function serializeSlackAutomationDelivery(delivery: SlackAutomationDelivery) {
 export async function createIntegrationToken(
   authorization: RequestAuthorization,
   name = "Codex",
+  provider: IntegrationProvider = "other",
+  scopes = "okri:read okri:write",
 ) {
   await ensureSchema();
-  const token = `okrptr_${randomTokenPart(32)}`;
+  const token = `okri_${randomTokenPart(32)}`;
   const now = new Date().toISOString();
   const [record] = await getDb().insert(integrationTokens).values({
     id: crypto.randomUUID(),
     workspaceId: authorization.ownerId,
     userId: authorization.userId,
     name: name.trim().slice(0, 50) || "Codex",
+    provider,
+    scopes,
     tokenHash: await hashIntegrationToken(token),
     tokenPrefix: `${token.slice(0, 14)}...`,
     createdAt: now,
@@ -2280,6 +2294,7 @@ export async function createIntegrationToken(
     eq(integrationTokens.workspaceId, authorization.ownerId),
     eq(integrationTokens.userId, authorization.userId),
     isNull(integrationTokens.revokedAt),
+    integrationProviderCondition(provider),
   )).orderBy(desc(integrationTokens.createdAt));
   const staleIds = activeTokens.slice(10).map((entry) => entry.id);
   if (staleIds.length) {
@@ -2288,23 +2303,25 @@ export async function createIntegrationToken(
   return { token, connection: serializeIntegrationToken(record) };
 }
 
-export async function listIntegrationTokens(authorization: RequestAuthorization) {
+export async function listIntegrationTokens(authorization: RequestAuthorization, provider?: IntegrationProvider) {
   await ensureSchema();
   const rows = await getDb().select().from(integrationTokens).where(and(
     eq(integrationTokens.workspaceId, authorization.ownerId),
     eq(integrationTokens.userId, authorization.userId),
     isNull(integrationTokens.revokedAt),
+    provider ? integrationProviderCondition(provider) : undefined,
   )).orderBy(desc(integrationTokens.createdAt));
   return rows.map(serializeIntegrationToken);
 }
 
-export async function revokeIntegrationTokens(authorization: RequestAuthorization, id?: string) {
+export async function revokeIntegrationTokens(authorization: RequestAuthorization, id?: string, provider?: IntegrationProvider) {
   await ensureSchema();
   const now = new Date().toISOString();
   const baseCondition = and(
     eq(integrationTokens.workspaceId, authorization.ownerId),
     eq(integrationTokens.userId, authorization.userId),
     isNull(integrationTokens.revokedAt),
+    provider ? integrationProviderCondition(provider) : undefined,
   );
   const condition = id ? and(baseCondition, eq(integrationTokens.id, id)) : baseCondition;
   const revoked = await getDb().update(integrationTokens).set({ revokedAt: now }).where(condition).returning({ id: integrationTokens.id });
@@ -2315,11 +2332,17 @@ function serializeIntegrationToken(record: IntegrationToken): IntegrationTokenSu
   return {
     id: record.id,
     name: record.name,
+    provider: effectiveIntegrationProvider(record),
     tokenPrefix: record.tokenPrefix,
     createdAt: record.createdAt,
     lastUsedAt: record.lastUsedAt,
     revokedAt: record.revokedAt,
   };
+}
+
+function integrationProviderCondition(provider: IntegrationProvider) {
+  // NULL is a legacy record; preserve every legacy token and classify only the known OAuth name.
+  return sql`COALESCE(${integrationTokens.provider}, CASE WHEN ${integrationTokens.name} = 'ChatGPT OAuth' THEN 'chatgpt' ELSE 'other' END) = ${provider}`;
 }
 
 function randomTokenPart(byteLength: number) {
@@ -2341,9 +2364,12 @@ export async function authorizeRequest(
   // without treating an unauthenticated request as a user or creating an account.
   await ensureSchema();
   await ensureBillingSchema();
-  const configuredToken = (env as RuntimeEnv).OKRPTR_API_TOKEN ?? (env as RuntimeEnv).OKITA_API_TOKEN ?? (env as RuntimeEnv).PACE_API_TOKEN;
+  const configuredToken = (env as RuntimeEnv).OKRI_API_TOKEN
+    ?? (env as RuntimeEnv).OKRPTR_API_TOKEN
+    ?? (env as RuntimeEnv).OKITA_API_TOKEN
+    ?? (env as RuntimeEnv).PACE_API_TOKEN;
   const suppliedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-  if (suppliedToken?.startsWith("okrptr_")) {
+  if (suppliedToken && (suppliedToken.startsWith("okri_") || suppliedToken.startsWith("okrptr_"))) {
     const [tokenRow] = await getDb()
       .select({ token: integrationTokens })
       .from(integrationTokens)
@@ -2356,22 +2382,26 @@ export async function authorizeRequest(
       .limit(1);
     const token = tokenRow?.token;
     if (token) {
-      await getDb().update(integrationTokens).set({ lastUsedAt: new Date().toISOString() }).where(eq(integrationTokens.id, token.id));
       const [membership] = await getDb().select().from(workspaceMembers).where(and(
         eq(workspaceMembers.workspaceId, token.workspaceId),
         eq(workspaceMembers.userId, token.userId),
         eq(workspaceMembers.status, "active"),
       )).limit(1);
       if (!membership) {
-        return Response.json({ error: "This OKRPTR connection no longer has workspace access." }, { status: 403 });
+        return Response.json({ error: "This OKRI connection no longer has workspace access." }, { status: 403 });
       }
       const role = membership.role as TeamRole;
+      if (!options.allowViewerWrite && !["GET", "HEAD", "OPTIONS"].includes(request.method) && token.scopes
+        && !token.scopes.split(" ").some((scope) => scope === "okri:write" || scope === "okrptr:write")) {
+        return Response.json({ error: "This connection only permits read access." }, { status: 403 });
+      }
       if (!options.allowViewerWrite && role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
         return Response.json({ error: "Viewer access is read-only." }, { status: 403 });
       }
       if (!options.allowViewerWrite && !["GET", "HEAD", "OPTIONS"].includes(request.method) && !(await memberCanWrite(token.workspaceId, token.userId, role))) {
         return Response.json({ error: "플랜에서 선택된 활성 편집자가 아니므로 읽기 전용입니다.", code: "editor_read_only", upgradeUrl: "/?view=billing" }, { status: 403 });
       }
+      await getDb().update(integrationTokens).set({ lastUsedAt: new Date().toISOString() }).where(eq(integrationTokens.id, token.id));
       return {
         ownerId: token.workspaceId,
         userId: token.userId,
@@ -2379,19 +2409,25 @@ export async function authorizeRequest(
         displayName: membership.displayName,
         role,
         apiToken: true,
+        oauthScopes: token.scopes ?? "okri:read okri:write",
       };
     }
   }
   if (configuredToken && suppliedToken === configuredToken) {
-    const ownerId = requestedWorkspaceId(request) || request.headers.get("x-okrptr-user-id") || request.headers.get("x-okita-user-id") || request.headers.get("x-pace-user-id") || "api-workspace";
+    const ownerId = requestedWorkspaceId(request)
+      || request.headers.get("x-okri-user-id")
+      || request.headers.get("x-okrptr-user-id")
+      || request.headers.get("x-okita-user-id")
+      || request.headers.get("x-pace-user-id")
+      || "api-workspace";
     await ensureWorkspaceShell(ownerId, null, "API");
     return { ownerId, userId: "api-token", email: null, displayName: "API", role: "owner", apiToken: true };
   }
 
   const hostname = new URL(request.url).hostname;
   if (hostname === "localhost" || hostname === "127.0.0.1") {
-    const membership = await resolveWorkspaceMembership("local-user", "local@okrptr.com", "Local Owner", requestedWorkspaceId(request));
-    return { ownerId: membership?.workspaceId ?? "local-user", userId: "local-user", email: "local@okrptr.com", displayName: "Local Owner", role: (membership?.role as TeamRole | undefined) ?? "owner", apiToken: false };
+    const membership = await resolveWorkspaceMembership("local-user", "local@okri.ai", "Local Owner", requestedWorkspaceId(request));
+    return { ownerId: membership?.workspaceId ?? "local-user", userId: "local-user", email: "local@okri.ai", displayName: "Local Owner", role: (membership?.role as TeamRole | undefined) ?? "owner", apiToken: false };
   }
 
   const googleSession = await readGoogleSession(request, (env as RuntimeEnv).GOOGLE_TOKEN_ENCRYPTION_KEY);
@@ -2417,7 +2453,7 @@ export async function authorizeRequest(
   }
 
   return Response.json(
-    { error: "Authentication required. Sign in or provide an OKRPTR API token." },
+    { error: "Authentication required. Sign in or provide an OKRI API token." },
     { status: 401, headers: { "WWW-Authenticate": "Bearer" } },
   );
 }
@@ -2475,7 +2511,7 @@ async function ensureWorkspaceShell(ownerId: string, email: string | null = null
   const workspaceName = displayName && displayName !== "Workspace Owner" ? `${displayName}의 개인 워크스페이스` : "개인 워크스페이스";
   await getDb().insert(workspaces).values({ id: ownerId, name: workspaceName, ownerUserId: ownerId, kind: "personal", createdAt: now, updatedAt: now }).onConflictDoNothing();
   const [personalWorkspace] = await getDb().select().from(workspaces).where(and(eq(workspaces.id, ownerId), eq(workspaces.ownerUserId, ownerId))).limit(1);
-  if (personalWorkspace && (personalWorkspace.name === "OKRPTR Workspace" || personalWorkspace.name.endsWith(" Workspace"))) {
+  if (personalWorkspace && (personalWorkspace.name === "OKRI Workspace" || personalWorkspace.name.endsWith(" Workspace"))) {
     await getDb().update(workspaces).set({ name: workspaceName, updatedAt: now }).where(eq(workspaces.id, ownerId));
   }
   await getDb().insert(workspaceMembers).values({
@@ -2537,12 +2573,14 @@ async function activeWorkspaceMemberships(userId: string) {
 }
 
 function requestedWorkspaceId(request: Request) {
-  const header = request.headers.get("x-okrptr-workspace-id")?.trim();
+  const header = request.headers.get("x-okri-workspace-id")?.trim()
+    || request.headers.get("x-okrptr-workspace-id")?.trim();
   if (header) return header;
-  const cookie = request.headers.get("cookie")
+  const cookies = request.headers.get("cookie")
     ?.split(";")
-    .map((entry) => entry.trim().split("="))
-    .find(([name]) => name === "okrptr_workspace_id")?.[1];
+    .map((entry) => entry.trim().split("="));
+  const cookie = cookies?.find(([name]) => name === "okri_workspace_id")?.[1]
+    ?? cookies?.find(([name]) => name === "okrptr_workspace_id")?.[1];
   return cookie ? decodeURIComponent(cookie) : null;
 }
 
@@ -2823,7 +2861,7 @@ function displayNameForExistingMember(currentName: string, incomingName: string,
 }
 
 export function canManageTeam(authorization: RequestAuthorization) {
-  return authorization.role === "owner" || authorization.role === "admin" || authorization.apiToken;
+  return authorization.role === "owner" || authorization.role === "admin";
 }
 
 function workspaceAvatarUrl(workspaceId: string, avatarKey: string | null, avatarUpdatedAt: string | null) {
@@ -3187,7 +3225,7 @@ function invitationExpiry() {
 
 async function invitationTokenFor(id: string, email: string, expiresAt: string) {
   const runtime = env as RuntimeEnv;
-  const secret = runtime.GOOGLE_TOKEN_ENCRYPTION_KEY || runtime.OKRPTR_API_TOKEN || runtime.PACE_API_TOKEN;
+  const secret = runtime.GOOGLE_TOKEN_ENCRYPTION_KEY || runtime.OKRI_API_TOKEN || runtime.OKRPTR_API_TOKEN || runtime.PACE_API_TOKEN;
   if (!secret) throw new Error("Invitation signing is not configured");
   const key = await crypto.subtle.importKey(
     "raw",
@@ -3202,27 +3240,29 @@ async function invitationTokenFor(id: string, email: string, expiresAt: string) 
 
 function invitationEmailConfigured() {
   const runtime = env as RuntimeEnv;
+  const settings = invitationEmailSettings(runtime);
   return Boolean(
     runtime.RESEND_API_KEY
-    && runtime.OKRPTR_INVITE_FROM === "OKRPTR <invite@send.okrptr.com>"
+    && settings
     && invitationDomainCache?.verified,
   );
 }
 
 async function verifyInvitationEmailConfigured() {
   const runtime = env as RuntimeEnv;
-  if (!runtime.RESEND_API_KEY || runtime.OKRPTR_INVITE_FROM !== "OKRPTR <invite@send.okrptr.com>") return false;
+  const settings = invitationEmailSettings(runtime);
+  if (!runtime.RESEND_API_KEY || !settings) return false;
   if (invitationDomainCache && Date.now() - invitationDomainCache.checkedAt < 5 * 60 * 1000) {
     return invitationDomainCache.verified;
   }
   let verified = false;
   try {
     const response = await fetch("https://api.resend.com/domains", {
-      headers: { Authorization: `Bearer ${runtime.RESEND_API_KEY}`, "User-Agent": "OKRPTR/1.0" },
+      headers: { Authorization: `Bearer ${runtime.RESEND_API_KEY}`, "User-Agent": "OKRI/1.0" },
     });
     if (response.ok) {
       const payload = await response.json() as { data?: Array<{ name?: string; status?: string; capabilities?: { sending?: string } }> };
-      verified = Boolean(payload.data?.some((domain) => domain.name === "send.okrptr.com" && domain.status === "verified" && domain.capabilities?.sending === "enabled"));
+      verified = Boolean(payload.data?.some((domain) => domain.name === settings.domain && domain.status === "verified" && domain.capabilities?.sending === "enabled"));
     }
   } catch {
     verified = false;
@@ -3231,8 +3271,16 @@ async function verifyInvitationEmailConfigured() {
   return verified;
 }
 
+function invitationEmailSettings(runtime: RuntimeEnv) {
+  const sender = runtime.OKRI_INVITE_FROM || runtime.OKRPTR_INVITE_FROM;
+  if (sender === "OKRI <invite@send.okri.ai>") return { sender, domain: "send.okri.ai" };
+  if (sender === "OKRPTR <invite@send.okrptr.com>") return { sender, domain: "send.okrptr.com" };
+  return null;
+}
+
 function invitationUrl(token: string) {
-  const base = (env as RuntimeEnv).OKRPTR_PUBLIC_URL?.trim() || "https://okrptr.com";
+  const runtime = env as RuntimeEnv;
+  const base = runtime.OKRI_PUBLIC_URL?.trim() || runtime.OKRPTR_PUBLIC_URL?.trim() || "https://okri.ai";
   const url = new URL(base);
   url.hash = `invite=${encodeURIComponent(token)}`;
   return url.toString();
@@ -3271,6 +3319,7 @@ function escapeHtml(value: string) {
 
 async function deliverWorkspaceInvitation(invitation: WorkspaceInvitation, token: string) {
   const runtime = env as RuntimeEnv;
+  const emailSettings = invitationEmailSettings(runtime);
   const now = new Date().toISOString();
   if (!(await verifyInvitationEmailConfigured())) {
     const values = { deliveryStatus: "unavailable" as const, providerMessageId: null, updatedAt: now };
@@ -3297,14 +3346,14 @@ async function deliverWorkspaceInvitation(invitation: WorkspaceInvitation, token
       headers: {
         Authorization: `Bearer ${runtime.RESEND_API_KEY}`,
         "Content-Type": "application/json",
-        "Idempotency-Key": `okrptr-invite-${invitation.id}-${invitation.tokenHash.slice(0, 16)}`,
-        "User-Agent": "OKRPTR/1.0",
+        "Idempotency-Key": `okri-invite-${invitation.id}-${invitation.tokenHash.slice(0, 16)}`,
+        "User-Agent": "OKRI/1.0",
       },
       body: JSON.stringify({
-        from: runtime.OKRPTR_INVITE_FROM,
+        from: emailSettings?.sender,
         to: [invitation.email],
         subject: `${workspace.name} 워크스페이스 초대`,
-        html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#252522"><h1 style="font-size:22px">${workspaceName}에 초대받았습니다</h1><p>${inviterName}님이 OKRPTR 워크스페이스에 <strong>${role}</strong> 역할로 초대했습니다.</p><p><a href="${escapeHtml(inviteUrl)}" style="display:inline-block;background:#252522;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none">워크스페이스 가입</a></p><p style="color:#6f6f69;font-size:13px">이 링크는 30일 동안 유효하며 초대받은 이메일과 같은 Google 계정으로 로그인해야 합니다.</p></div>`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#252522"><h1 style="font-size:22px">${workspaceName}에 초대받았습니다</h1><p>${inviterName}님이 OKRI 워크스페이스에 <strong>${role}</strong> 역할로 초대했습니다.</p><p><a href="${escapeHtml(inviteUrl)}" style="display:inline-block;background:#252522;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none">워크스페이스 가입</a></p><p style="color:#6f6f69;font-size:13px">이 링크는 30일 동안 유효하며 초대받은 이메일과 같은 Google 계정으로 로그인해야 합니다.</p></div>`,
       }),
     });
     if (response.ok) {
@@ -3837,6 +3886,10 @@ export async function createLinkedTasks(
     routineId?: string | null;
     assigneeMemberId?: string | null;
     createdByUserId: string;
+    dueDate?: string | null;
+    priority?: ItemPriority;
+    cadence?: ItemCadence;
+    source?: string;
   },
 ) {
   await ensureWorkspace(ownerId);
@@ -3873,15 +3926,16 @@ export async function createLinkedTasks(
   const rules = await getWorkspaceRules(ownerId);
   const now = new Date().toISOString();
   const d1 = (env as RuntimeEnv).DB;
+  const source = input.source ?? "web";
   const taskRows = titles.map((title) => ({ id: crypto.randomUUID(), title }));
   await d1.batch(taskRows.flatMap((task) => [
     d1.prepare(`INSERT INTO items
-      (id, owner_id, cycle_id, parent_id, routine_id, kind, title, description, status, priority, cadence, progress, source, created_by_user_id, sort_order, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 'task', ?, '', 'todo', ?, ?, 0, 'web', ?, 0, ?, ?)`)
-      .bind(task.id, ownerId, cycleId, projectId, routineId, task.title, rules.defaultPriority, rules.defaultCadence, input.createdByUserId, now, now),
+      (id, owner_id, cycle_id, parent_id, routine_id, kind, title, description, status, priority, cadence, progress, source, created_by_user_id, sort_order, created_at, updated_at, due_date)
+      VALUES (?, ?, ?, ?, ?, 'task', ?, '', 'todo', ?, ?, 0, ?, ?, 0, ?, ?, ?)`)
+      .bind(task.id, ownerId, cycleId, projectId, routineId, task.title, input.priority ?? rules.defaultPriority, input.cadence ?? rules.defaultCadence, source, input.createdByUserId, now, now, input.dueDate ?? null),
     d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
-      VALUES (?, ?, ?, 'created', 'web', ?, ?)`)
-      .bind(crypto.randomUUID(), ownerId, task.id, JSON.stringify({ kind: "task", status: "todo" }), now),
+      VALUES (?, ?, ?, 'created', ?, ?, ?)`)
+      .bind(crypto.randomUUID(), ownerId, task.id, source, JSON.stringify({ kind: "task", status: "todo" }), now),
     ...(assigneeMemberId ? [d1.prepare(`INSERT INTO item_assignments
       (id, owner_id, item_id, member_id, role, created_at, updated_at)
       VALUES (?, ?, ?, ?, 'task_assignee', ?, ?)`)
@@ -4707,11 +4761,12 @@ export async function setPropertyValue(
   return stored;
 }
 
-export async function getPropertyValueMap(ownerId: string) {
+export async function getPropertyValueMap(ownerId: string, itemIds?: string[]) {
+  if (itemIds?.length === 0) return {} as Record<string, Record<string, PropertyValue>>;
   const rows = await getDb()
     .select()
     .from(itemPropertyValues)
-    .where(eq(itemPropertyValues.ownerId, ownerId));
+    .where(and(eq(itemPropertyValues.ownerId, ownerId), itemIds ? inArray(itemPropertyValues.itemId, itemIds) : undefined));
   const result: Record<string, Record<string, PropertyValue>> = {};
   for (const row of rows) {
     result[row.itemId] ??= {};
@@ -4804,10 +4859,11 @@ export async function setProjectPropertyHidden(
   return { projectId, propertyId, hidden };
 }
 
-export async function getItemPropertiesByName(ownerId: string) {
+export async function getItemPropertiesByName(ownerId: string, itemIds?: string[]) {
+  if (itemIds?.length === 0) return {} as Record<string, Record<string, PropertyValue>>;
   const [definitions, values] = await Promise.all([
     listProjectPropertyDefinitions(ownerId),
-    getPropertyValueMap(ownerId),
+    getPropertyValueMap(ownerId, itemIds),
   ]);
   const names = new Map(definitions.map((property) => [property.id, property.name]));
   const result: Record<string, Record<string, PropertyValue>> = {};
@@ -4832,6 +4888,30 @@ export async function setItemPropertiesByName(
     const property = byName.get(name.toLocaleLowerCase());
     if (!property) throw new Error(`Property not found: ${name}`);
     await setPropertyValue(ownerId, itemId, property.id, value);
+  }
+}
+
+/** Preflight MCP values before creating/updating the item, avoiding partial saves on bad input. */
+export async function validateItemPropertiesByName(ownerId: string, values: Record<string, PropertyValue>) {
+  const definitions = await listProjectPropertyDefinitions(ownerId);
+  const byName = new Map(definitions.map((property) => [property.name.toLocaleLowerCase(), property]));
+  const memberIds = new Set<string>();
+  for (const [name, value] of Object.entries(values)) {
+    const property = byName.get(name.toLocaleLowerCase());
+    if (!property) throw new Error(`Property not found: ${name}`);
+    if (property.systemKey) throw new Error("System properties must be changed through the Project fields");
+    const normalized = normalizePropertyValue(property, value);
+    if ((property.type === "member" || property.type === "members") && normalized !== null) {
+      for (const memberId of Array.isArray(normalized) ? normalized : [normalized]) {
+        if (typeof memberId === "string") memberIds.add(memberId);
+      }
+    }
+  }
+  if (memberIds.size) {
+    const found = await getDb().select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(
+      eq(workspaceMembers.workspaceId, ownerId), eq(workspaceMembers.status, "active"), inArray(workspaceMembers.id, [...memberIds]),
+    ));
+    if (found.length !== memberIds.size) throw new Error("Property members must be active workspace members");
   }
 }
 
@@ -5994,7 +6074,7 @@ function parsePropertyValue(value: string): PropertyValue {
   }
 }
 
-function normalizePropertyValue(property: PropertyDefinition, value: PropertyValue): PropertyValue {
+export function normalizePropertyValue(property: PropertyDefinition, value: PropertyValue): PropertyValue {
   if (value === null || value === "" || (Array.isArray(value) && value.length === 0)) return null;
   if (property.type === "members") {
     if (!Array.isArray(value)) throw new Error(`${property.name} must be a member list`);

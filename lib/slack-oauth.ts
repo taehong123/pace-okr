@@ -1,3 +1,5 @@
+import { slackSummonScopes } from "@/lib/slack-summon-command";
+
 export type SlackRuntimeEnv = {
   SLACK_CLIENT_ID?: string;
   SLACK_CLIENT_SECRET?: string;
@@ -37,7 +39,7 @@ export class SlackOAuthExchangeError extends Error {
   }
 }
 
-export const slackScopes = [
+export const slackDailyScopes = [
   "commands",
   "chat:write",
   "im:write",
@@ -49,11 +51,17 @@ export const slackScopes = [
   "groups:read",
 ];
 
+export const slackScopes = [...slackDailyScopes, ...slackSummonScopes];
+
 export function slackConfigured(runtime: SlackRuntimeEnv) {
   return Boolean(runtime.SLACK_CLIENT_ID && runtime.SLACK_CLIENT_SECRET && runtime.SLACK_SIGNING_SECRET && runtime.SLACK_TOKEN_ENCRYPTION_KEY);
 }
 
 export function slackRedirectUri(runtime: SlackRuntimeEnv, request: Request) {
+  const requestUrl = new URL(request.url);
+  if (["okri.ai", "okrptr.com"].includes(requestUrl.hostname)) {
+    return new URL("/api/slack/callback", requestUrl.origin).toString();
+  }
   return runtime.SLACK_OAUTH_REDIRECT_URI || new URL("/api/slack/callback", request.url).toString();
 }
 

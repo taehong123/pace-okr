@@ -2,8 +2,10 @@ import type { GoogleProfile } from "@/lib/google-oauth";
 
 export const GOOGLE_SIGN_IN_STATE_OWNER = "__google_signin__";
 export const GOOGLE_SIGN_IN_STATE_USER = "__google_signin__";
-const SESSION_COOKIE_NAME = "__Host-okrptr_session";
-const GOOGLE_SIGN_IN_STATE_COOKIE_NAME = "__Host-okrptr_google_signin";
+const SESSION_COOKIE_NAME = "__Host-okri_session";
+const GOOGLE_SIGN_IN_STATE_COOKIE_NAME = "__Host-okri_google_signin";
+const LEGACY_SESSION_COOKIE_NAME = "__Host-okrptr_session";
+const LEGACY_GOOGLE_SIGN_IN_STATE_COOKIE_NAME = "__Host-okrptr_google_signin";
 const SESSION_DURATION_SECONDS = 7 * 24 * 60 * 60;
 const GOOGLE_SIGN_IN_STATE_DURATION_SECONDS = 10 * 60;
 export const GOOGLE_SIGN_IN_STATE_PREFIX = "signin_";
@@ -39,7 +41,8 @@ export async function createGoogleSignInState(returnTo: string, secret: string) 
 
 export async function readGoogleSignInState(request: Request, expectedState: string, secret: string | undefined) {
   if (!secret || !expectedState.startsWith(GOOGLE_SIGN_IN_STATE_PREFIX)) return null;
-  const cookie = readCookie(request, GOOGLE_SIGN_IN_STATE_COOKIE_NAME);
+  const cookie = readCookie(request, GOOGLE_SIGN_IN_STATE_COOKIE_NAME)
+    ?? readCookie(request, LEGACY_GOOGLE_SIGN_IN_STATE_COOKIE_NAME);
   if (!cookie) return null;
   const [payload, signature] = cookie.split(".");
   if (!payload || !signature || !(await verify(payload, signature, secret))) return null;
@@ -56,6 +59,7 @@ export async function readGoogleSignInState(request: Request, expectedState: str
 export function clearGoogleSignInStateCookies() {
   return [
     `${GOOGLE_SIGN_IN_STATE_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
+    `${LEGACY_GOOGLE_SIGN_IN_STATE_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
   ];
 }
 
@@ -77,9 +81,17 @@ export function clearGoogleSessionCookie() {
   return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 }
 
+export function clearGoogleSessionCookies() {
+  return [
+    clearGoogleSessionCookie(),
+    `${LEGACY_SESSION_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
+  ];
+}
+
 export async function readGoogleSession(request: Request, secret: string | undefined): Promise<GoogleSession | null> {
   if (!secret) return null;
-  const cookie = readCookie(request, SESSION_COOKIE_NAME);
+  const cookie = readCookie(request, SESSION_COOKIE_NAME)
+    ?? readCookie(request, LEGACY_SESSION_COOKIE_NAME);
   if (!cookie) return null;
   const [payload, signature] = cookie.split(".");
   if (!payload || !signature || !(await verify(payload, signature, secret))) return null;

@@ -35,6 +35,7 @@ export type ManagementBotSettings = {
 
 type RuntimeEnv = {
   DB: D1Database;
+  OKRI_APP_URL?: string;
   OKRPTR_APP_URL?: string;
 };
 
@@ -204,16 +205,17 @@ async function sendReport(ownerId: string, settings: ManagementBotSettings, snap
   const body = selected.length
     ? selected.map((group) => `*${signalLabel(group.signal)} · ${group.count}개*\n${group.items.slice(0, 5).map((item) => `• ${escapeSlack(item.title)} _(${item.kind === "project" ? "Project" : "Task"})_`).join("\n")}${group.count > 5 ? `\n_외 ${group.count - 5}개_` : ""}`).join("\n\n")
     : "현재 선택한 관리 항목은 모두 정리되어 있습니다. ✅";
-  const appUrl = `${String((env as RuntimeEnv).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?settings=workspace&tab=summary`;
+  const runtime = env as RuntimeEnv;
+  const appUrl = `${String(runtime.OKRI_APP_URL || runtime.OKRPTR_APP_URL || "https://okri.ai").replace(/\/$/, "")}/?settings=workspace&tab=summary`;
   await slackApi(token, "chat.postMessage", {
     channel: settings.channelId,
-    text: `[관리 봇] ${workspace?.name || "OKRPTR"} 워크스페이스 관리 리포트 · ${snapshot.date}`,
+    text: `[관리 봇] ${workspace?.name || "OKRI"} 워크스페이스 관리 리포트 · ${snapshot.date}`,
     unfurl_links: false,
     blocks: [
       { type: "header", text: { type: "plain_text", text: `${test ? "테스트 · " : ""}관리 봇 · 워크스페이스 관리 리포트`.slice(0, 150) } },
-      { type: "context", elements: [{ type: "mrkdwn", text: `*${escapeSlack(workspace?.name || "OKRPTR")}* · ${snapshot.date}` }] },
+      { type: "context", elements: [{ type: "mrkdwn", text: `*${escapeSlack(workspace?.name || "OKRI")}* · ${snapshot.date}` }] },
       { type: "section", text: { type: "mrkdwn", text: body.slice(0, 2900) } },
-      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRPTR에서 정리" }, url: appUrl }] },
+      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRI에서 정리" }, url: appUrl }] },
     ],
   });
 }

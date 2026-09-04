@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 /* eslint-disable @next/next/no-img-element */
 
 import {
@@ -61,10 +61,17 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { startTransition, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { ConfirmationProvider, OverlayDialog, useAppConfirm } from "./overlay-dialog";
+import AIConnectionsDialog from "./ai-connections";
+import SlackSummonBot from "./slack-summon-bot";
+import { slackSummonScopes } from "@/lib/slack-summon-command";
+import WorkspaceBackups from "./workspace-backups";
 import { OkrFileSurface, type OkrFileCycleSummary } from "./okr-file-surface";
 import BillingView, { ProjectQuotaBadge } from "./billing-view";
+import { DEFAULT_THEME, THEME_STORAGE_KEY, isThemeMode, themeColorScheme, type ThemeMode } from "@/lib/themes";
+import { ThemePicker } from "./theme-picker";
+import { readMyWorkSort, saveMyWorkSort, sortMyWorkItems, type MyWorkSort } from "@/lib/my-work-sort";
 
 type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "data" | "scrum" | "recommendations" | "reviews" | "trash" | "integrations" | "billing";
 const urlViews = new Set<View>(["my_work", "inbox", "work", "routines", "okr", "data", "scrum", "recommendations", "reviews", "trash", "integrations", "billing"]);
@@ -89,7 +96,7 @@ function workspaceSettingsFromLocation() {
   const params = new URLSearchParams(window.location.search);
   const rawTab = params.get("tab") as WorkspaceSettingsTab | "management" | null;
   const normalizedTab = rawTab === "management" ? "summary" : rawTab;
-  const supported = new Set<WorkspaceSettingsTab>(["general", "members", "groups", "projects", "summary", "integrations", "danger", "scheduled"]);
+  const supported = new Set<WorkspaceSettingsTab>(["general", "members", "groups", "projects", "summary", "integrations", "backups", "danger", "scheduled"]);
   return {
     open: params.get("settings") === "workspace",
     tab: normalizedTab && supported.has(normalizedTab) ? normalizedTab : "general",
@@ -106,17 +113,11 @@ type TeamRole = "owner" | "admin" | "member" | "viewer";
 type GroupColor = "gray" | "blue" | "green" | "yellow" | "orange" | "red" | "purple";
 type GroupVisibility = "open" | "private";
 type GroupRole = "lead" | "member";
-type WorkspaceSettingsTab = "general" | "members" | "groups" | "projects" | "summary" | "integrations" | "danger" | "scheduled";
+type WorkspaceSettingsTab = "general" | "members" | "groups" | "projects" | "summary" | "integrations" | "backups" | "danger" | "scheduled";
 type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
-type ThemeMode = "beige" | "gray" | "dark";
 type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "local" };
 type AuthState = { status: "loading" | "authenticated" | "unauthenticated"; user: AuthUser | null; reason: string | null };
 
-const THEME_STORAGE_KEY = "okrptr.theme";
-
-function isThemeMode(value: string | null | undefined): value is ThemeMode {
-  return value === "beige" || value === "gray" || value === "dark";
-}
 
 type ItemAssignment = {
   id: string;
@@ -126,7 +127,7 @@ type ItemAssignment = {
   role: ItemAssignmentRole;
 };
 
-type OkrptrItem = {
+type OkriItem = {
   id: string;
   cycleId: string | null;
   parentId: string | null;
@@ -164,7 +165,7 @@ type OkrCycle = {
 
 type DataViewProps = {
   cacheKey: string;
-  items: Pick<OkrptrItem, "id" | "kind" | "cycleId" | "parentId" | "title" | "progress">[];
+  items: Pick<OkriItem, "id" | "kind" | "cycleId" | "parentId" | "title" | "progress">[];
   cycles: Pick<OkrCycle, "id" | "name">[];
   readOnly: boolean;
   onProgressChange: (id: string, progress: number) => void;
@@ -205,8 +206,8 @@ type ProjectDataConnection = {
 
 type PropertyValueMap = Record<string, Record<string, PropertyValue>>;
 type ProjectHiddenPropertyMap = Record<string, string[]>;
-type ArchivedProject = OkrptrItem & { archivedTaskCount: number };
-type TrashedItem = OkrptrItem & { trashedTaskCount: number; canDelete: boolean; restoreParentRequired: boolean };
+type ArchivedProject = OkriItem & { archivedTaskCount: number };
+type TrashedItem = OkriItem & { trashedTaskCount: number; canDelete: boolean; restoreParentRequired: boolean };
 type TrashInitiativeOption = { id: string; title: string; cycleId: string };
 type ChecklistItem = { id: string; taskId: string; title: string; completed: boolean; sortOrder: number };
 type DailySkipReason = "workload" | "vacation" | "personal" | "other";
@@ -329,7 +330,7 @@ type OrganizedOkr = {
 
 type PlanCreationResult = {
   cycleId: string | null;
-  items: OkrptrItem[];
+  items: OkriItem[];
   keyResultIds: string[];
   initiativeIds: string[];
   projectIds: string[];
@@ -349,7 +350,7 @@ type TaskContainerOption = {
 };
 
 type OkrPlanApplyResult = {
-  items: OkrptrItem[];
+  items: OkriItem[];
   cycleId: string;
   objectiveId: string | null;
   keyResultIds: string[];
@@ -456,7 +457,7 @@ type BootstrapShellData = {
   team: TeamData;
 };
 type BootstrapWorkspaceData = {
-  items: OkrptrItem[];
+  items: OkriItem[];
   properties: PropertyDefinition[];
   propertyValues: PropertyValueMap;
   hiddenByProject: ProjectHiddenPropertyMap;
@@ -468,7 +469,7 @@ type BootstrapFetchResult = { ok: boolean; status: number; data: BootstrapData |
 
 declare global {
   interface Window {
-    __OKRPTR_BOOTSTRAP_REQUEST__?: {
+    __OKRI_BOOTSTRAP_REQUEST__?: {
       path: string;
       request: Promise<BootstrapFetchResult>;
     };
@@ -485,7 +486,7 @@ async function fetchBootstrapPayload(path: string): Promise<BootstrapFetchResult
   };
 }
 
-const BOOTSTRAP_CACHE_KEY = "okrptr.bootstrap.v1";
+const BOOTSTRAP_CACHE_KEY = "okri.bootstrap.v1";
 const BOOTSTRAP_CACHE_TTL_MS = 30 * 60 * 1000;
 
 function readCachedBootstrap(path: string): BootstrapData | null {
@@ -564,7 +565,7 @@ type IntegrationStatusCache = {
   google: GoogleConnectionStatus | null;
   slack: SlackConnectionStatus | null;
 };
-const INTEGRATION_STATUS_CACHE_KEY = "okrptr.integration-status.v1";
+const INTEGRATION_STATUS_CACHE_KEY = "okri.integration-status.v1";
 const INTEGRATION_STATUS_CACHE_TTL_MS = 10 * 60 * 1000;
 
 function readCachedIntegrationStatuses(workspaceId: string): IntegrationStatusCache | null {
@@ -604,9 +605,9 @@ type ManagementBotData = {
 };
 type SlackOAuthIssue = "workspace_admin_required" | "slack_admin_approval_required" | "workspace_already_connected" | "authorization_cancelled" | "missing_scope" | "oauth_exchange_failed" | "service_unavailable";
 const slackOAuthIssueCopy: Record<SlackOAuthIssue, { title: string; detail: string; tone: "warning" | "error" }> = {
-  workspace_admin_required: { title: "OKRPTR 관리자 권한이 필요합니다", detail: "이 워크스페이스의 Owner 또는 Admin에게 Slack 연결을 요청해 주세요.", tone: "warning" },
+  workspace_admin_required: { title: "OKRI 관리자 권한이 필요합니다", detail: "이 워크스페이스의 Owner 또는 Admin에게 Slack 연결을 요청해 주세요.", tone: "warning" },
   slack_admin_approval_required: { title: "Slack 관리자 승인이 필요합니다", detail: "선택한 Slack 워크스페이스의 앱 설치 정책에 따라 관리자 승인을 받은 뒤 다시 연결해 주세요.", tone: "warning" },
-  workspace_already_connected: { title: "이미 다른 OKRPTR 워크스페이스에 연결된 Slack입니다", detail: "기존 OKRPTR 워크스페이스에서 연결을 해제한 뒤 다시 시도해 주세요.", tone: "warning" },
+  workspace_already_connected: { title: "이미 다른 OKRI 워크스페이스에 연결된 Slack입니다", detail: "기존 OKRI 워크스페이스에서 연결을 해제한 뒤 다시 시도해 주세요.", tone: "warning" },
   authorization_cancelled: { title: "Slack 승인이 취소되었습니다", detail: "연결할 워크스페이스를 다시 선택하려면 아래 연결 버튼을 눌러 주세요.", tone: "warning" },
   missing_scope: { title: "Slack 권한 업데이트가 필요합니다", detail: "데일리 DM과 채널 공유에 필요한 권한을 Slack에서 한 번 더 승인해 주세요.", tone: "warning" },
   oauth_exchange_failed: { title: "Slack 연결을 완료하지 못했습니다", detail: "승인 정보가 만료되었거나 Slack 응답을 확인하지 못했습니다. 다시 연결해 주세요.", tone: "error" },
@@ -638,14 +639,6 @@ type SlackAutomationDelivery = {
   error: string;
   createdAt: string;
   sentAt: string | null;
-};
-type IntegrationConnection = {
-  id: string;
-  name: string;
-  tokenPrefix: string;
-  createdAt: string;
-  lastUsedAt: string | null;
-  revokedAt: string | null;
 };
 
 type TrashRecord = {
@@ -711,7 +704,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
     languageLabel: "안내 언어",
     eyebrow: "목표를 실행으로 바꾸는 워크스페이스",
     title: "OKR이 오늘의 일로 이어지도록.",
-    description: "OKRPTR은 목표, 프로젝트, 할 일과 Routine을 한곳에 연결하고 대화와 봇에서도 바로 기록할 수 있는 실행 관리 서비스입니다.",
+    description: "OKRI는 목표, 프로젝트, 할 일과 Routine을 한곳에 연결하고 대화와 봇에서도 바로 기록할 수 있는 실행 관리 서비스입니다.",
     hierarchyLabel: "목표에서 실행까지",
     routineNote: "Routine은 Project처럼 Task를 담는 실행 컨테이너지만 OKR 계층과 독립적입니다.",
     points: [
@@ -726,7 +719,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
     languageLabel: "Guide language",
     eyebrow: "A workspace that turns goals into action",
     title: "Connect your OKRs to today's work.",
-    description: "OKRPTR brings goals, projects, tasks, and recurring routines together, with fast capture from AI conversations and bots.",
+    description: "OKRI brings goals, projects, tasks, and recurring routines together, with fast capture from AI conversations and bots.",
     hierarchyLabel: "From goal to execution",
     routineNote: "Routines are Project-like Task containers, but remain independent from the OKR hierarchy.",
     points: [
@@ -741,7 +734,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
     languageLabel: "案内言語",
     eyebrow: "目標を実行に変えるワークスペース",
     title: "OKRを、今日やる仕事までつなげる。",
-    description: "OKRPTRは目標、プロジェクト、タスク、繰り返しルーティンを一か所につなぎ、AIとの会話やボットからすぐに記録できる実行管理サービスです。",
+    description: "OKRIは目標、プロジェクト、タスク、繰り返しルーティンを一か所につなぎ、AIとの会話やボットからすぐに記録できる実行管理サービスです。",
     hierarchyLabel: "目標から実行まで",
     routineNote: "RoutineはProjectのようにTaskを持てますが、OKR階層とは独立しています。",
     points: [
@@ -756,7 +749,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
     languageLabel: "指南语言",
     eyebrow: "把目标变成行动的工作空间",
     title: "让 OKR 真正落到今天的工作。",
-    description: "OKRPTR 将目标、项目、任务和周期性例行工作连接在一起，并支持从 AI 对话和机器人中快速记录。",
+    description: "OKRI 将目标、项目、任务和周期性例行工作连接在一起，并支持从 AI 对话和机器人中快速记录。",
     hierarchyLabel: "从目标到执行",
     routineNote: "Routine 像 Project 一样可以包含 Task，但独立于 OKR 层级。",
     points: [
@@ -771,7 +764,7 @@ const introCopy: Record<IntroLanguage, IntroCopy> = {
     languageLabel: "Idioma de la guía",
     eyebrow: "Un espacio para convertir objetivos en acción",
     title: "Conecta tus OKR con el trabajo de hoy.",
-    description: "OKRPTR reúne objetivos, proyectos, tareas y rutinas recurrentes, con captura rápida desde conversaciones con IA y bots.",
+    description: "OKRI reúne objetivos, proyectos, tareas y rutinas recurrentes, con captura rápida desde conversaciones con IA y bots.",
     hierarchyLabel: "Del objetivo a la ejecución",
     routineNote: "Las rutinas pueden contener Task como un Project, pero son independientes de la jerarquía OKR.",
     points: [
@@ -834,7 +827,7 @@ function ClientDataView(props: DataViewProps) {
 
 function WorkspaceApp() {
   const confirmAction = useAppConfirm();
-  const [items, setItems] = useState<OkrptrItem[]>([]);
+  const [items, setItems] = useState<OkriItem[]>([]);
   const [properties, setProperties] = useState<PropertyDefinition[]>([]);
   const [propertyValues, setPropertyValues] = useState<PropertyValueMap>({});
   const [hiddenProperties, setHiddenProperties] = useState<ProjectHiddenPropertyMap>({});
@@ -893,9 +886,9 @@ function WorkspaceApp() {
   const [freshWorkspaceDataReady, setFreshWorkspaceDataReady] = useState(false);
   const [workspaceDataAttempt, setWorkspaceDataAttempt] = useState(0);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
-    if (typeof document === "undefined") return "beige";
+    if (typeof document === "undefined") return DEFAULT_THEME;
     const preference = document.documentElement.dataset.themePreference;
-    return isThemeMode(preference) ? preference : "beige";
+    return isThemeMode(preference) ? preference : DEFAULT_THEME;
   });
   const workspaceNameInputRef = useRef<HTMLInputElement>(null);
   const assistantAutoHandledWorkspaceRef = useRef<string | null>(null);
@@ -909,7 +902,7 @@ function WorkspaceApp() {
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
-      const savedLanguage = window.localStorage.getItem("okrptr.intro-language");
+      const savedLanguage = window.localStorage.getItem("okri.intro-language");
       const language = isIntroLanguage(savedLanguage) ? savedLanguage : preferredIntroLanguage();
       setIntroLanguage(language);
     }, 0);
@@ -917,10 +910,10 @@ function WorkspaceApp() {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+    try { window.localStorage.setItem(THEME_STORAGE_KEY, themeMode); } catch { /* A blocked preference store must not prevent theme switching. */ }
     document.documentElement.dataset.themePreference = themeMode;
     document.documentElement.dataset.theme = themeMode;
-    document.documentElement.style.colorScheme = themeMode === "dark" ? "dark" : "light";
+    document.documentElement.style.colorScheme = themeColorScheme(themeMode);
   }, [themeMode]);
 
   useEffect(() => {
@@ -935,7 +928,7 @@ function WorkspaceApp() {
     workspaceRefreshAtRef.current = Date.now();
     const date = encodeURIComponent(localDate());
     const path = `/api/bootstrap?date=${date}`;
-    const preload = window.__OKRPTR_BOOTSTRAP_REQUEST__;
+    const preload = window.__OKRI_BOOTSTRAP_REQUEST__;
     const request = workspaceDataAttempt === 0 && preload?.path === path
       ? preload.request
       : fetchBootstrapPayload(path);
@@ -1010,7 +1003,7 @@ function WorkspaceApp() {
       const url = new URL(window.location.href);
       url.searchParams.set("settings", "workspace");
       url.searchParams.set("tab", "groups");
-      window.history.replaceState({ ...window.history.state, __okrptrWorkspaceSettings: true }, "", url);
+      window.history.replaceState({ ...window.history.state, __okriWorkspaceSettings: true }, "", url);
     }, 0);
     return () => window.clearTimeout(timeout);
   }, []);
@@ -1040,16 +1033,14 @@ function WorkspaceApp() {
     const cached = readCachedIntegrationStatuses(integrationWorkspaceId);
     let nextGoogle = cached?.google ?? null;
     let nextSlack = cached?.slack ?? null;
-    if (cached) {
-      setGoogleStatus(cached.google);
-      setSlackStatus(cached.slack);
-      setIntegrationStatusesLoaded(true);
-    } else {
-      setGoogleStatus(null);
-      setSlackStatus(null);
-    }
-    setIntegrationStatusRefreshing(true);
-    setIntegrationStatusError(false);
+    // Cached status is provisional while the requests below refresh it.
+    startTransition(() => {
+      setGoogleStatus(cached?.google ?? null);
+      setSlackStatus(cached?.slack ?? null);
+      setIntegrationStatusesLoaded(Boolean(cached));
+      setIntegrationStatusRefreshing(true);
+      setIntegrationStatusError(false);
+    });
 
     const googleRequest = fetch("/api/google/status", { cache: "no-store", signal: controller.signal }).then(async (response) => {
       if (!response.ok) throw new Error("Google status unavailable");
@@ -1085,7 +1076,7 @@ function WorkspaceApp() {
         showNotice("선택한 Slack 워크스페이스를 연결했습니다.");
       } else if (slackResult === "setup_required") {
         setSlackOAuthIssue(null);
-        showNotice("OKRPTR 연결이 완료되었습니다. 데일리 초기 설정을 마쳐 주세요.");
+        showNotice("OKRI 연결이 완료되었습니다. 데일리 초기 설정을 마쳐 주세요.");
       } else if (Object.prototype.hasOwnProperty.call(slackOAuthIssueCopy, slackResult)) {
         const issue = slackResult as SlackOAuthIssue;
         setSlackOAuthIssue(issue);
@@ -1219,8 +1210,8 @@ function WorkspaceApp() {
     else url.searchParams.set("view", view);
     if (projectId) url.searchParams.set("project", projectId); else url.searchParams.delete("project");
     if (taskId && !projectId) url.searchParams.set("task", taskId); else url.searchParams.delete("task");
-    const state = { ...window.history.state, __okrptrNavigation: true };
-    delete state.__okrptrOverlay;
+    const state = { ...window.history.state, __okriNavigation: true };
+    delete state.__okriOverlay;
     window.history[mode === "push" ? "pushState" : "replaceState"](state, "", url);
   }
 
@@ -1234,7 +1225,7 @@ function WorkspaceApp() {
     url.searchParams.set("settings", "workspace");
     url.searchParams.set("tab", tab);
     if (tab !== "groups") url.searchParams.delete("group");
-    window.history[mode === "push" ? "pushState" : "replaceState"]({ ...window.history.state, __okrptrWorkspaceSettings: true }, "", url);
+    window.history[mode === "push" ? "pushState" : "replaceState"]({ ...window.history.state, __okriWorkspaceSettings: true }, "", url);
   }
 
   function closeWorkspaceSettings() {
@@ -1245,7 +1236,7 @@ function WorkspaceApp() {
     url.searchParams.delete("tab");
     url.searchParams.delete("group");
     const state = { ...window.history.state };
-    delete state.__okrptrWorkspaceSettings;
+    delete state.__okriWorkspaceSettings;
     window.history.replaceState(state, "", url);
   }
 
@@ -1292,7 +1283,7 @@ function WorkspaceApp() {
 
   function closeDetail() {
     const hasDetailParam = new URLSearchParams(window.location.search).has("project") || new URLSearchParams(window.location.search).has("task");
-    if (hasDetailParam && window.history.state?.__okrptrNavigation) {
+    if (hasDetailParam && window.history.state?.__okriNavigation) {
       window.history.back();
       return;
     }
@@ -1450,7 +1441,7 @@ function WorkspaceApp() {
     }
   }
 
-  async function patchItem(id: string, patch: Partial<OkrptrItem>) {
+  async function patchItem(id: string, patch: Partial<OkriItem>) {
     const previous = items;
     setItems((current) => current.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)));
     try {
@@ -1460,7 +1451,7 @@ function WorkspaceApp() {
         body: JSON.stringify({ id, ...patch }),
       });
       if (!response.ok) throw new Error("update failed");
-      const data = (await response.json()) as { item: OkrptrItem };
+      const data = (await response.json()) as { item: OkriItem };
       setItems((current) => current.map((entry) => (entry.id === id ? data.item : entry)));
       return true;
     } catch {
@@ -1550,7 +1541,7 @@ function WorkspaceApp() {
       if (!response.ok) throw new Error(data.error ?? "선택 항목을 휴지통으로 이동하지 못했습니다.");
       const refreshed = await fetch("/api/items", { cache: "no-store" });
       if (refreshed.ok) {
-        const itemData = await refreshed.json() as { items: OkrptrItem[] };
+        const itemData = await refreshed.json() as { items: OkriItem[] };
         setItems(itemData.items);
       } else {
         setItems((current) => current.filter((item) => !projectIds.has(item.id) && !taskIds.has(item.id)));
@@ -1568,7 +1559,7 @@ function WorkspaceApp() {
     }
   }
 
-  async function archiveProjectItem(project: OkrptrItem) {
+  async function archiveProjectItem(project: OkriItem) {
     if (!deletableItemIds.has(project.id)) {
       showNotice("Project는 생성자 또는 주 DRI만 삭제할 수 있습니다.", "error");
       return;
@@ -1584,7 +1575,7 @@ function WorkspaceApp() {
       showNotice("Project를 휴지통으로 이동하지 못했습니다.");
       return;
     }
-    const data = await response.json() as { project: OkrptrItem; archivedTaskCount: number };
+    const data = await response.json() as { project: OkriItem; archivedTaskCount: number };
     setItems((current) => current.filter((entry) => entry.id !== project.id && entry.parentId !== project.id));
     closeDetail();
     clearCachedBootstrap();
@@ -1690,7 +1681,7 @@ function WorkspaceApp() {
           assigneeMemberId,
         }),
       });
-      const data = await response.json().catch(() => ({})) as { items?: OkrptrItem[]; error?: string };
+      const data = await response.json().catch(() => ({})) as { items?: OkriItem[]; error?: string };
       if (!response.ok || !data.items) throw new Error(data.error ?? "Task를 만들지 못했습니다.");
       const created = data.items;
       setItems((current) => [...current, ...created]);
@@ -1711,7 +1702,7 @@ function WorkspaceApp() {
     writeNavigation("work", id, null);
   }
 
-  function addCreatedItem(created: OkrptrItem, initialValues: Record<string, PropertyValue> = {}, warning?: string) {
+  function addCreatedItem(created: OkriItem, initialValues: Record<string, PropertyValue> = {}, warning?: string) {
     setItems((current) => [...current, created]);
     if (Object.keys(initialValues).length) {
       setPropertyValues((current) => ({ ...current, [created.id]: { ...current[created.id], ...initialValues } }));
@@ -1936,11 +1927,11 @@ function WorkspaceApp() {
           driMemberId: driMemberId || currentTeamMember?.id || null,
         }),
       });
-      const projectData = await projectResponse.json().catch(() => ({})) as { item?: OkrptrItem; error?: string };
+      const projectData = await projectResponse.json().catch(() => ({})) as { item?: OkriItem; error?: string };
       if (!projectResponse.ok || !projectData.item) throw new Error(projectData.error ?? "Project를 만들지 못했습니다.");
       const projectItem = projectData.item;
       const taskTitles = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean);
-      let createdTasks: OkrptrItem[] = [];
+      let createdTasks: OkriItem[] = [];
       if (taskTitles.length) {
         const taskResponse = await fetch("/api/items", {
           method: "POST",
@@ -1951,7 +1942,7 @@ function WorkspaceApp() {
             parentId: projectItem.id,
           }),
         });
-        const taskData = await taskResponse.json().catch(() => ({})) as { items?: OkrptrItem[]; error?: string };
+        const taskData = await taskResponse.json().catch(() => ({})) as { items?: OkriItem[]; error?: string };
         if (!taskResponse.ok || !taskData.items) {
           setItems((current) => [...current, projectItem]);
           setOkrChatContext(null);
@@ -2008,7 +1999,7 @@ function WorkspaceApp() {
       const routine = data.routine;
       setRoutines((current) => [...current, routine]);
       const taskTitles = plan.tasks.split("\n").map((entry) => entry.trim()).filter(Boolean);
-      let createdTasks: OkrptrItem[] = [];
+      let createdTasks: OkriItem[] = [];
       if (taskTitles.length) {
         const taskResponse = await fetch("/api/items", {
           method: "POST",
@@ -2019,7 +2010,7 @@ function WorkspaceApp() {
             routineId: routine.id,
           }),
         });
-        const taskData = await taskResponse.json().catch(() => ({})) as { items?: OkrptrItem[]; error?: string };
+        const taskData = await taskResponse.json().catch(() => ({})) as { items?: OkriItem[]; error?: string };
         if (!taskResponse.ok || !taskData.items) {
           setOkrChatContext(null);
           navigateView("routines");
@@ -2135,7 +2126,7 @@ function WorkspaceApp() {
           <button className={`nav-item ${mobileMenuOpen ? "active" : ""}`} onClick={() => setMobileMenuOpen(true)}><Menu size={16} /><span>더보기</span></button>
         </nav>
         <div className="sidebar-bottom">
-          <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>ChatGPT 연동</span></button>
+          <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>AI 연결</span></button>
           <button className={`nav-item ${activeView === "integrations" && !selectedProject && !selectedTask ? "active" : ""}`} aria-current={activeView === "integrations" && !selectedProject && !selectedTask ? "page" : undefined} onClick={() => navigateView("integrations")}><Plug size={16} /><span>개인 앱 연동</span></button>
           <button className={`nav-item ${activeView === "billing" && !selectedProject && !selectedTask ? "active" : ""}`} aria-current={activeView === "billing" && !selectedProject && !selectedTask ? "page" : undefined} onClick={() => navigateView("billing")}><CreditCard size={16} /><span>요금제 및 결제</span></button>
           <button className="profile-row" onClick={() => setPropertyPanelOpen(true)}><span className="avatar">{accountInitial}</span><span>{accountDisplayName}</span><MoreHorizontal size={15} /></button>
@@ -2148,7 +2139,7 @@ function WorkspaceApp() {
             <header><div><b>{currentWorkspace?.name || "개인 워크스페이스"}</b><small>{currentWorkspace?.personal ? "개인 워크스페이스" : "팀 워크스페이스"}</small></div><span className="mobile-menu-header-actions"><button className="icon-button" onClick={() => openWorkspaceSettings("general")} aria-label="워크스페이스 설정"><Settings size={17} /></button><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="닫기"><X size={17} /></button></span></header>
             <div className="mobile-menu-list">
               {navItems.slice(5).map((entry) => { const Icon = entry.icon; return <button key={entry.id} onClick={() => { navigateView(entry.id); setMobileMenuOpen(false); }}><Icon size={16} /><span>{entry.label}</span><ChevronRight size={14} /></button>; })}
-              <button onClick={() => { setMobileMenuOpen(false); setIntegrationOpen(true); }}><Link2 size={16} /><span>ChatGPT 연동</span><ChevronRight size={14} /></button>
+              <button onClick={() => { setMobileMenuOpen(false); setIntegrationOpen(true); }}><Link2 size={16} /><span>AI 연결</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); navigateView("integrations"); }}><Plug size={16} /><span>개인 앱 연동</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); navigateView("billing"); }}><CreditCard size={16} /><span>요금제 및 결제</span><ChevronRight size={14} /></button>
               <button className="mobile-account-entry" onClick={() => { setMobileMenuOpen(false); setPropertyPanelOpen(true); }}><span className="avatar">{accountInitial}</span><span><b>{accountDisplayName}</b><small>개인 설정</small></span><ChevronRight size={14} /></button>
@@ -2159,7 +2150,7 @@ function WorkspaceApp() {
 
       <section className="workspace">
         <header className="workspace-topbar">
-          <span className="workspace-brand">OKRPTR</span>
+          <span className="workspace-brand">OKRI</span>
           <button
             type="button"
             className="workspace-mobile-home"
@@ -2248,7 +2239,7 @@ function WorkspaceApp() {
             />
           ) : (
             <>
-          {activeView === "my_work" && <MyWorkView items={activeItems} routines={routines} currentMember={currentTeamMember ?? null} onOpenProject={openProjectPage} onOpenTask={openTaskDetail} onRoutinesChange={setRoutines} onNotice={showNotice} />}
+          {activeView === "my_work" && <MyWorkView key={`${currentWorkspace?.id ?? ""}:${currentTeamMember?.id ?? ""}`} workspaceId={currentWorkspace?.id ?? ""} items={activeItems} routines={routines} currentMember={currentTeamMember ?? null} onOpenProject={openProjectPage} onOpenTask={openTaskDetail} onRoutinesChange={setRoutines} onNotice={showNotice} />}
           {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={openTaskDetail} onPatch={patchItem} canDeleteItem={(item) => deletableItemIds.has(item.id)} selectedItemIds={selectedDeleteItemIds} onToggleSelect={toggleDeleteSelection} onSelectItems={addDeleteItems} onClearItems={removeDeleteItems} onTrashSelected={() => void moveSelectedItemsToTrash()} trashing={trashingItems} />}
           {activeView === "work" && (
             <section className="project-workspace">
@@ -2345,14 +2336,14 @@ function WorkspaceApp() {
           language={introLanguage}
           onLanguageChange={(language) => {
             setIntroLanguage(language);
-            window.localStorage.setItem("okrptr.intro-language", language);
+            window.localStorage.setItem("okri.intro-language", language);
           }}
           onClose={() => {
-            window.localStorage.setItem("okrptr.intro-seen", "1");
+            window.localStorage.setItem("okri.intro-seen", "1");
             setOnboardingOpen(false);
           }}
           onOpenMcp={() => {
-            window.localStorage.setItem("okrptr.intro-seen", "1");
+            window.localStorage.setItem("okri.intro-seen", "1");
             setOnboardingOpen(false);
             setIntegrationOpen(true);
           }}
@@ -2387,7 +2378,7 @@ function WorkspaceApp() {
           }}
         />
       )}
-      {integrationOpen && <IntegrationModal onNotice={showNotice} onClose={() => setIntegrationOpen(false)} />}
+      {integrationOpen && <AIConnectionsDialog onNotice={showNotice} onClose={() => setIntegrationOpen(false)} />}
       {propertyPanelOpen && (
         <PropertyPanel
           user={authState.user}
@@ -2463,9 +2454,9 @@ function WorkspaceApp() {
 
 function AppLoadingScreen() {
   return (
-    <main className="app-loading-shell" aria-busy="true" aria-label="OKRPTR 불러오는 중">
+    <main className="app-loading-shell" aria-busy="true" aria-label="OKRI 불러오는 중">
       <aside className="app-loading-sidebar" aria-hidden="true">
-        <div className="app-loading-brand"><span className="brand-mark">O</span><span><b>OKRPTR</b><small>Workspace</small></span></div>
+        <div className="app-loading-brand"><span className="brand-mark">O</span><span><b>OKRI</b><small>Workspace</small></span></div>
         <div className="app-loading-nav">
           <i /><i /><i /><i /><i />
         </div>
@@ -2488,7 +2479,7 @@ function AppLoadingScreen() {
           </div>
         </div>
       </section>
-      <span className="sr-only" aria-live="polite">OKRPTR 워크스페이스를 불러오고 있습니다.</span>
+      <span className="sr-only" aria-live="polite">OKRI 워크스페이스를 불러오고 있습니다.</span>
     </main>
   );
 }
@@ -2499,7 +2490,7 @@ function AuthScreen({ reason }: { reason: string | null }) {
   return (
     <main className="auth-shell">
       <section className="auth-panel">
-        <header><span className="brand-mark">O</span><div><b>OKRPTR</b><span>목표를 오늘의 실행으로</span></div></header>
+        <header><span className="brand-mark">O</span><div><b>OKRI</b><span>목표를 오늘의 실행으로</span></div></header>
         <div className="auth-content">
           <h1>로그인 또는 회원가입</h1>
           <p>Google이 확인한 이메일로 바로 시작하세요. 휴대전화 번호나 별도 본인인증은 요구하지 않습니다.</p>
@@ -2567,7 +2558,7 @@ function InvitationDialog({ token, preview, loadError, onClose, onAccepted }: {
     <OverlayDialog title="워크스페이스 초대" dismissPolicy="critical" onRequestClose={() => onClose()}>
       {(requestClose) => <section className="invitation-dialog">
         <header>
-          <div><span>OKRPTR 초대</span><h2>워크스페이스에 가입하기</h2></div>
+          <div><span>OKRI 초대</span><h2>워크스페이스에 가입하기</h2></div>
           <button className="icon-button" onClick={() => requestClose("close-button")} aria-label="초대 창 닫기" title="닫기"><X size={17} /></button>
         </header>
         {!preview && !loadError ? (
@@ -2609,7 +2600,7 @@ function WelcomeModal({ language, onLanguageChange, onClose, onOpenMcp }: {
     <OverlayDialog title={copy.title} className="welcome-backdrop" onRequestClose={() => onClose()}>
       {(requestClose) => <section className="welcome-modal">
         <header className="welcome-toolbar">
-          <div className="welcome-brand"><span className="brand-mark">O</span><strong>OKRPTR</strong></div>
+          <div className="welcome-brand"><span className="brand-mark">O</span><strong>OKRI</strong></div>
           <div className="language-select">
             <Languages size={14} />
             <label className="sr-only" htmlFor="intro-language">{copy.languageLabel}</label>
@@ -2752,19 +2743,19 @@ function CadenceSwitch({ value, onChange }: { value: Cadence; onChange: (value: 
 }
 
 function TaskDatabase({ items, allItems, properties, values, hiddenProperties, display, onDisplayChange, onPatch, onPropertyChange, onOpenProperties, onOpenTask, onOpenProject, canDeleteItem, selectedItemIds, onToggleSelect, onSelectItems, onClearItems }: {
-  items: OkrptrItem[];
-  allItems: OkrptrItem[];
+  items: OkriItem[];
+  allItems: OkriItem[];
   properties: PropertyDefinition[];
   values: PropertyValueMap;
   hiddenProperties: ProjectHiddenPropertyMap;
   display: "cards" | "table" | "board";
   onDisplayChange: (display: "cards" | "table" | "board") => void;
-  onPatch: (id: string, patch: Partial<OkrptrItem>) => Promise<unknown>;
+  onPatch: (id: string, patch: Partial<OkriItem>) => Promise<unknown>;
   onPropertyChange: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void>;
   onOpenProperties: () => void;
   onOpenTask: (id: string) => void;
   onOpenProject: (id: string) => void;
-  canDeleteItem: (item: OkrptrItem) => boolean;
+  canDeleteItem: (item: OkriItem) => boolean;
   selectedItemIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onSelectItems: (ids: string[]) => void;
@@ -2832,7 +2823,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
     setDueFilter("all");
   }
 
-  function propertyPreview(entry: OkrptrItem) {
+  function propertyPreview(entry: OkriItem) {
     return customProperties
       .filter((property) => !(hiddenProperties[entry.id] ?? []).includes(property.id))
       .map((property) => ({ property, value: values[entry.id]?.[property.id] ?? null }))
@@ -2923,23 +2914,23 @@ function PropertyCell({ itemId, property, value, onChange }: { itemId: string; p
 }
 
 function ProjectPageView({ project, allItems, properties, propertyValues, hiddenPropertyIds, teamMembers, onClose, onPatch, onPropertyChange, onPropertyVisibility, onAssignmentsChange, onTaskCreated, onOpenTask, readOnly, onNotice, onArchive, canDeleteItem, selectedItemIds, onToggleSelect }: {
-  project: OkrptrItem;
-  allItems: OkrptrItem[];
+  project: OkriItem;
+  allItems: OkriItem[];
   properties: PropertyDefinition[];
   propertyValues: PropertyValueMap;
   hiddenPropertyIds: string[];
   teamMembers: TeamMember[];
   onClose: () => void;
-  onPatch: (id: string, patch: Partial<OkrptrItem>) => Promise<unknown>;
+  onPatch: (id: string, patch: Partial<OkriItem>) => Promise<unknown>;
   onPropertyChange: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void>;
   onPropertyVisibility: (propertyId: string, hidden: boolean) => void;
   onAssignmentsChange: (itemId: string, assignments: ItemAssignment[]) => void;
-  onTaskCreated: (task: OkrptrItem) => void;
+  onTaskCreated: (task: OkriItem) => void;
   onOpenTask: (id: string) => void;
   readOnly: boolean;
   onNotice: (message: string) => void;
   onArchive: () => void;
-  canDeleteItem: (item: OkrptrItem) => boolean;
+  canDeleteItem: (item: OkriItem) => boolean;
   selectedItemIds: Set<string>;
   onToggleSelect: (id: string) => void;
 }) {
@@ -2980,7 +2971,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
     onAssignmentsChange(project.id, data.assignments);
   }
 
-  async function saveTaskAssignee(task: OkrptrItem, memberId: string) {
+  async function saveTaskAssignee(task: OkriItem, memberId: string) {
     const response = await fetch("/api/item-assignments", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -3003,7 +2994,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
     });
     setCreatingTask(false);
     if (!response.ok) { onNotice("Task를 만들지 못했습니다."); return; }
-    const data = await response.json() as { item: OkrptrItem };
+    const data = await response.json() as { item: OkriItem };
     onTaskCreated(data.item);
     setQuickTaskTitle("");
     onNotice("Project에 Task를 추가했습니다.");
@@ -3079,7 +3070,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
   );
 }
 
-function ProjectDataSection({ project }: { project: OkrptrItem }) {
+function ProjectDataSection({ project }: { project: OkriItem }) {
   const [connection, setConnection] = useState<ProjectDataConnection | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -3266,12 +3257,12 @@ function ProjectPropertyField({ projectId, property, value, members, readOnly, o
 }
 
 function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPatch, onProgress, onAssignmentsChange, onNotice, canDelete, selected, onToggleSelect }: {
-  task: OkrptrItem;
-  allItems: OkrptrItem[];
+  task: OkriItem;
+  allItems: OkriItem[];
   routines: Routine[];
   teamMembers: TeamMember[];
   onClose: () => void;
-  onPatch: (patch: Partial<OkrptrItem>) => Promise<unknown>;
+  onPatch: (patch: Partial<OkriItem>) => Promise<unknown>;
   onProgress: (progress: number) => void;
   onAssignmentsChange: (assignments: ItemAssignment[]) => void;
   onNotice: (message: string) => void;
@@ -3452,7 +3443,7 @@ function memberNameNeedsConfirmation(member: Pick<TeamMember, "displayName" | "e
 }
 
 function profileNameConfirmationKey(member: Pick<TeamMember, "id">) {
-  return `okrptr.profile-name-confirmed.${member.id}`;
+  return `okri.profile-name-confirmed.${member.id}`;
 }
 
 function matchesMember(member: TeamMember, query: string) {
@@ -3466,12 +3457,12 @@ function pickMembers(members: TeamMember[], ids: string[]) {
   return ids.map((id) => byId.get(id)).filter((member): member is TeamMember => Boolean(member));
 }
 
-function assignmentLabel(item: OkrptrItem, role: ItemAssignmentRole) {
+function assignmentLabel(item: OkriItem, role: ItemAssignmentRole) {
   const names = item.assignments.filter((entry) => entry.role === role).map((entry) => `@${entry.displayName}`);
   return names.length ? names.join(", ") : "미지정";
 }
 
-function canUserDeleteItem(item: OkrptrItem, currentMember: TeamMember | undefined, userId: string | null) {
+function canUserDeleteItem(item: OkriItem, currentMember: TeamMember | undefined, userId: string | null) {
   if (userId && item.createdByUserId === userId) return true;
   if (!currentMember) return false;
   const accountableRole: ItemAssignmentRole | null = item.kind === "project"
@@ -3597,12 +3588,12 @@ function MemberMentionPicker({
 function CreateItemPanel({ initialKind, cycleId, items, routines, properties, teamMembers, onClose, onCreated, onCreateWithChat }: {
   initialKind: ItemKind;
   cycleId: string | null;
-  items: OkrptrItem[];
+  items: OkriItem[];
   routines: Routine[];
   properties: PropertyDefinition[];
   teamMembers: TeamMember[];
   onClose: () => void;
-  onCreated: (item: OkrptrItem, initialValues?: Record<string, PropertyValue>, warning?: string) => void;
+  onCreated: (item: OkriItem, initialValues?: Record<string, PropertyValue>, warning?: string) => void;
   onCreateWithChat?: (draft: { kind: ItemKind; title: string }) => void;
 }) {
   const kind = initialKind;
@@ -3678,7 +3669,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
           templateId: kind === "project" ? templateId || undefined : undefined,
         }),
       });
-      const responseData = await response.json().catch(() => ({})) as { item?: OkrptrItem; error?: string };
+      const responseData = await response.json().catch(() => ({})) as { item?: OkriItem; error?: string };
       if (!response.ok || !responseData.item) throw new Error(responseData.error ?? "항목을 만들지 못했습니다.");
       const filledValues = Object.fromEntries(Object.entries(customValues).filter(([, value]) => value !== null && value !== ""));
       const propertyResults = await Promise.all((kind === "project" ? Object.entries(filledValues) : []).map(async ([propertyId, value]) => fetch("/api/property-values", {
@@ -3975,7 +3966,7 @@ function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRo
               </header>
               {routine.systemKey !== "general" && <div className="routine-guide-grid">
                 <label><span>트리거 포인트</span><input value={draft.triggerPoint} onChange={(event) => updateDraft(routine, "triggerPoint", event.target.value)} placeholder="예: 오전 9시, Slack 알림 확인 후" /></label>
-                <label><span>어디서</span><input value={draft.actionPlace} onChange={(event) => updateDraft(routine, "actionPlace", event.target.value)} placeholder="예: OKRPTR 작업 탭, 캘린더, 책상" /></label>
+                <label><span>어디서</span><input value={draft.actionPlace} onChange={(event) => updateDraft(routine, "actionPlace", event.target.value)} placeholder="예: OKRI 작업 탭, 캘린더, 책상" /></label>
                 <label><span>목적/메모</span><input value={draft.description} onChange={(event) => updateDraft(routine, "description", event.target.value)} placeholder="왜 반복하는지" /></label>
                 <label className="routine-steps"><span>무엇을 어떻게</span><textarea value={draft.actionSteps} onChange={(event) => updateDraft(routine, "actionSteps", event.target.value)} placeholder="1. 확인할 것&#10;2. 실행할 것&#10;3. 끝났다고 판단하는 기준" rows={3} /></label>
               </div>}
@@ -4007,8 +3998,9 @@ function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRo
   </>);
 }
 
-function MyWorkView({ items, routines, currentMember, onOpenProject, onOpenTask, onRoutinesChange, onNotice }: {
-  items: OkrptrItem[];
+function MyWorkView({ workspaceId, items, routines, currentMember, onOpenProject, onOpenTask, onRoutinesChange, onNotice }: {
+  workspaceId: string;
+  items: OkriItem[];
   routines: Routine[];
   currentMember: TeamMember | null;
   onOpenProject: (id: string) => void;
@@ -4017,12 +4009,13 @@ function MyWorkView({ items, routines, currentMember, onOpenProject, onOpenTask,
   onNotice: (message: string) => void;
 }) {
   const [includeCompleted, setIncludeCompleted] = useState(false);
+  const [sort, setSort] = useState<MyWorkSort>(() => readMyWorkSort(workspaceId, currentMember?.id ?? ""));
   const [savingRoutineId, setSavingRoutineId] = useState<string | null>(null);
   if (!currentMember) return <EmptyState icon={Briefcase} title="현재 멤버 정보를 확인할 수 없습니다" />;
 
   const visible = (status: ItemStatus) => includeCompleted || !isCompletedStatus(status);
-  const projects = items.filter((entry) => entry.kind === "project" && visible(entry.status) && entry.assignments.some((assignment) => assignment.memberId === currentMember.id && (assignment.role === "project_dri" || assignment.role === "project_worker")));
-  const tasks = items.filter((entry) => entry.kind === "task" && visible(entry.status) && entry.assignments.some((assignment) => assignment.memberId === currentMember.id && assignment.role === "task_assignee"));
+  const projects = sortMyWorkItems(items.filter((entry) => entry.kind === "project" && visible(entry.status) && entry.assignments.some((assignment) => assignment.memberId === currentMember.id && (assignment.role === "project_dri" || assignment.role === "project_worker"))), sort);
+  const tasks = sortMyWorkItems(items.filter((entry) => entry.kind === "task" && visible(entry.status) && entry.assignments.some((assignment) => assignment.memberId === currentMember.id && assignment.role === "task_assignee")), sort);
   const assignedRoutines = routines.filter((entry) => entry.systemKey !== "general" && entry.assigneeMemberId === currentMember.id && (includeCompleted || !entry.completed));
   const byId = new Map(items.map((entry) => [entry.id, entry]));
 
@@ -4046,19 +4039,24 @@ function MyWorkView({ items, routines, currentMember, onOpenProject, onOpenTask,
     <section className="my-work-view">
       <header className="my-work-toolbar">
         <div><b>{currentMember.displayName}의 업무</b><span>명시적으로 담당된 항목만 표시합니다.</span></div>
-        <label><input type="checkbox" checked={includeCompleted} onChange={(event) => setIncludeCompleted(event.target.checked)} />완료 포함</label>
+        <div className="my-work-toolbar-actions">
+          <div className="my-work-sort" role="group" aria-label="내 업무 정렬">
+            {([ ["due", "기한순"], ["priority", "우선순위순"] ] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={sort === value} onClick={() => { setSort(value); saveMyWorkSort(workspaceId, currentMember.id, value); }}>{label}</button>)}
+          </div>
+          <label><input type="checkbox" checked={includeCompleted} onChange={(event) => setIncludeCompleted(event.target.checked)} />완료 포함</label>
+        </div>
       </header>
       <MyWorkSection title="Task" count={tasks.length}>
         {tasks.map((task) => {
           const project = task.parentId ? byId.get(task.parentId) : null;
           const routine = task.routineId ? routines.find((entry) => entry.id === task.routineId) : null;
-          return <button className="my-work-item" key={task.id} onClick={() => onOpenTask(task.id)}><span className="type-icon type-task">T</span><span><b>{task.title}</b><small>{statusLabel(task.status)} · {routine?.systemKey === "general" ? "미분류 Task" : routine ? routine.title : project?.title ?? "미분류 Task"} · {dueLabel(task.dueDate)}</small></span><ChevronRight size={15} /></button>;
+          return <button className="my-work-item" key={task.id} onClick={() => onOpenTask(task.id)}><span className="type-icon type-task">T</span><span><b>{task.title}</b><span className="my-work-item-meta"><small>{statusLabel(task.status)} · {routine?.systemKey === "general" ? "미분류 Task" : routine ? routine.title : project?.title ?? "미분류 Task"}</small><span className={`my-work-priority priority-${task.priority}`}>{priorityLabels[task.priority]}</span><span className="my-work-due">{dueLabel(task.dueDate)}</span></span></span><ChevronRight size={15} /></button>;
         })}
       </MyWorkSection>
       <MyWorkSection title="Project" count={projects.length}>
         {projects.map((project) => {
           const roles = project.assignments.filter((assignment) => assignment.memberId === currentMember.id).map((assignment) => assignment.role === "project_dri" ? "주 담당" : "보조 담당");
-          return <button className="my-work-item" key={project.id} onClick={() => onOpenProject(project.id)}><span className="type-icon type-project">P</span><span><b>{project.title}</b><small>{roles.join(" · ")} · {statusLabel(project.status)} · {dueLabel(project.dueDate)}</small></span><ChevronRight size={15} /></button>;
+          return <button className="my-work-item" key={project.id} onClick={() => onOpenProject(project.id)}><span className="type-icon type-project">P</span><span><b>{project.title}</b><span className="my-work-item-meta"><small>{roles.join(" · ")} · {statusLabel(project.status)}</small><span className={`my-work-priority priority-${project.priority}`}>{priorityLabels[project.priority]}</span><span className="my-work-due">{dueLabel(project.dueDate)}</span></span></span><ChevronRight size={15} /></button>;
         })}
       </MyWorkSection>
       <MyWorkSection title="Routine" count={assignedRoutines.length}>
@@ -4194,7 +4192,7 @@ function DailyScrumView({ workspaceId, onOpenTask, onNotice }: { workspaceId: st
 
 function defaultDailyParent(scrum: DailyDashboard) { const project = scrum.createTargets.projects.find((entry) => entry.needsTask) ?? scrum.createTargets.projects[0]; if (project) return `project:${project.id}`; if (scrum.createTargets.routines[0]) return `routine:${scrum.createTargets.routines[0].id}`; return scrum.createTargets.allowGeneral ? "general:" : ""; }
 
-function RecommendationsView({ workspaceId, items, onOpenTask, onOpenProject, onNavigate }: { workspaceId: string; items: OkrptrItem[]; onOpenTask: (id: string) => void; onOpenProject: (id: string) => void; onNavigate: (view: View) => void }) {
+function RecommendationsView({ workspaceId, items, onOpenTask, onOpenProject, onNavigate }: { workspaceId: string; items: OkriItem[]; onOpenTask: (id: string) => void; onOpenProject: (id: string) => void; onNavigate: (view: View) => void }) {
   const date = localDate();
   const cacheKey = `recommendations:${workspaceId}:${date}`;
   const [rows, setRows] = useState<Recommendation[] | null>(() => recommendationMemoryCache.get(cacheKey) ?? null);
@@ -4301,13 +4299,15 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   const [plan, setPlan] = useState<OnboardingPlan>({
     ...emptyPlan,
   });
-  const [guideQuestions, setGuideQuestions] = useState<string[]>(() => assistantOpeningGuides(context));
-  const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>(() => [{ id: "initial", role: "assistant", content: assistantOpeningMessage(context, workspaceContext) }]);
+  const [guideQuestions, setGuideQuestions] = useState<string[]>([]);
+  const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>(() => [{ id: "initial", role: "assistant", content: assistantOpeningMessage() }]);
   const [visibleFields, setVisibleFields] = useState<Set<StringPlanField>>(new Set());
   const [mode, setMode] = useState<ConversationMode>(context?.entry === "onboarding" ? "onboarding" : context?.entry === "coach" ? "coach" : context?.entry === "project" ? "project" : context?.entry === "routine" ? "routine" : context?.entry === "task" ? "task" : "okr");
   const [okrTarget, setOkrTarget] = useState<OkrPlanTarget | null>(context?.target ?? null);
   const [targetCandidates, setTargetCandidates] = useState<OkrPlanTarget[]>(context?.targetCandidates ?? []);
   const [targetSearch, setTargetSearch] = useState("");
+  const [referencesOpen, setReferencesOpen] = useState(false);
+  const referenceButtonRef = useRef<HTMLButtonElement>(null);
   const [projectTarget, setProjectTarget] = useState<ProjectChatTarget | null>(null);
   const [projectDriMemberId, setProjectDriMemberId] = useState(defaultDriMemberId ?? members[0]?.id ?? "");
   const [routineAssigneeMemberId, setRoutineAssigneeMemberId] = useState("");
@@ -4376,8 +4376,9 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
         const restored = data.draft.payload;
         setMessage(restored.message);
         setPlan(restored.plan);
-        setGuideQuestions(restored.guideQuestions);
-        setConversationHistory(restored.conversationHistory);
+        const hasUserConversation = restored.conversationHistory.some((entry) => entry.role === "user");
+        setGuideQuestions(hasUserConversation ? restored.guideQuestions : []);
+        setConversationHistory(hasUserConversation ? restored.conversationHistory : [{ id: "initial", role: "assistant", content: assistantOpeningMessage() }]);
         setVisibleFields(new Set(restored.visibleFields));
         setMode(restored.mode);
         setOkrTarget(restored.okrTarget);
@@ -4439,13 +4440,14 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
     clearAssistantDraft();
     setMessage("");
     setPlan({ ...emptyPlan });
-    setGuideQuestions(assistantOpeningGuides(context));
-    setConversationHistory([{ id: "initial-reset", role: "assistant", content: assistantOpeningMessage(context, workspaceContext) }]);
+    setGuideQuestions([]);
+    setConversationHistory([{ id: "initial-reset", role: "assistant", content: assistantOpeningMessage() }]);
     setVisibleFields(new Set());
     setMode(context?.entry === "onboarding" ? "onboarding" : context?.entry === "coach" ? "coach" : context?.entry === "project" ? "project" : context?.entry === "routine" ? "routine" : context?.entry === "task" ? "task" : "okr");
     setOkrTarget(context?.target ?? null);
     setTargetCandidates(context?.targetCandidates ?? []);
     setTargetSearch("");
+    setReferencesOpen(false);
     setProjectTarget(null);
     setProjectDriMemberId(defaultDriMemberId ?? members[0]?.id ?? "");
     setRoutineAssigneeMemberId("");
@@ -4525,7 +4527,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   }
   async function organizeMessage() {
     const text = message.trim();
-    if (!text) return;
+    if (!text || saving) return;
     setConversationHistory((current) => [...current, { id: `user-${Date.now()}`, role: "user", content: text }]);
     setMessage("");
     setSaving(true);
@@ -4546,7 +4548,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
       if (!response.ok) {
         if (data.code?.startsWith("ai_")) {
           setAssistantResponse(aiLimitMessage(data));
-          setGuideQuestions(data.options?.length ? data.options : ["유료 플랜으로 서버 AI 정리 계속 사용", "개인 OpenAI API 키 연결", "ChatGPT에서 OKRPTR MCP로 연결해 직접 정리"]);
+          setGuideQuestions(data.options?.length ? data.options : ["유료 플랜으로 서버 AI 정리 계속 사용", "개인 OpenAI API 키 연결", "ChatGPT에서 OKRI MCP로 연결해 직접 정리"]);
           return;
         }
         throw new Error("organize failed");
@@ -4565,11 +4567,18 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   function chooseTarget(target: OkrPlanTarget) {
     setOkrTarget(target);
     setTargetSearch("");
+    setReferencesOpen(false);
     setPlan({ ...emptyPlan });
     setVisibleFields(new Set());
     setMode("coach");
     setAssistantResponse(targetPrompt(target));
     setGuideQuestions([]);
+  }
+  function closeReferencesOnEscape(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    setReferencesOpen(false);
+    referenceButtonRef.current?.focus();
   }
   function chooseQuickReply(question: string) {
     if (question.includes("나중에")) {
@@ -4580,25 +4589,6 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
       : question === "개인 성장 목표를 말해볼게요" ? "이번 분기에 개인적으로 이루고 싶은 목표는 "
         : question;
     setMessage(starter);
-  }
-  function chooseGuide(kind: "team" | "personal" | "free") {
-    setPlan({ ...emptyPlan });
-    setVisibleFields(new Set());
-    setMode("okr");
-    setProjectTarget(null);
-    setMessage("");
-    if (kind === "team") {
-      setAssistantResponse("팀 OKR로 시작하겠습니다. 팀이 이번 주기 끝에 달라져야 하는 상태부터 잡고, 공동 지표와 실행 책임을 나눕니다.");
-      setGuideQuestions(["팀이 달성해야 하는 결과는 무엇인가요?", "성공 여부를 숫자나 상태로 어떻게 확인할까요?", "어떤 프로젝트와 담당자가 먼저 움직여야 하나요?"]);
-      return;
-    }
-    if (kind === "personal") {
-      setAssistantResponse("개인 OKR로 시작하겠습니다. 역할 안에서 만들고 싶은 변화, 측정 기준, 바로 실행할 일을 분리합니다.");
-      setGuideQuestions(["이번 주기 동안 본인이 만들고 싶은 변화는 무엇인가요?", "완료가 아니라 성과를 보여주는 기준은 무엇인가요?", "이번 주에 바로 시작할 일은 무엇인가요?"]);
-      return;
-    }
-    setAssistantResponse("좋습니다. 정해진 양식 없이 질문하거나 지금 생각나는 대로 적어 주세요. 실행 계획이 보이면 OKR 구조도 함께 제안합니다.");
-    setGuideQuestions([]);
   }
   async function save() {
     if (mode === "task") {
@@ -4714,46 +4704,36 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   return (
     <section className="home-okr-chat" aria-labelledby="home-okr-chat-title">
       <header>
-        <div><Bot size={16} /><div><h2 id="home-okr-chat-title">{mode === "task" ? "Task 도우미" : mode === "project" ? "Project 도우미" : mode === "routine" ? "Routine 도우미" : "AI 대화"}</h2><p>{mode === "task" ? "할 일을 짧고 명확하게 다듬고, 미선택 시 General에 저장합니다." : mode === "project" ? "결과와 범위를 정리한 뒤 저장 전에 상위 Initiative를 선택합니다." : mode === "routine" ? "반복할 시점과 실행 방법을 독립된 Routine으로 정리합니다." : "현재 OKR과 실행 상황을 읽고, 필요한 다음 질문부터 이어갑니다."}</p></div></div>
+        <div><Bot size={16} /><h2 id="home-okr-chat-title">AI 대화</h2></div>
         <div className="assistant-chat-header-actions">
           <span className={`assistant-draft-status ${draftSaveState}`} aria-live="polite">{draftSaveState === "loading" ? <><LoaderCircle className="spin" size={12} />이전 초안 확인 중</> : draftSaveState === "saving" ? <><LoaderCircle className="spin" size={12} />임시저장 중</> : draftSaveState === "saved" ? <><CheckCircle2 size={12} />임시저장됨</> : draftSaveState === "error" ? <><AlertTriangle size={12} />임시저장 재시도 예정</> : null}</span>
           {hasPersistableDraft && <button type="button" className="assistant-reset-draft" onClick={resetConversationDraft}>새로 시작</button>}
-          {assistantFlow && okrTarget && <span className="assistant-stage">{kindLabel(okrTarget.kind)} 다음 단계</span>}
+          {targetCandidates.length > 0 && <button ref={referenceButtonRef} type="button" className="icon-button" aria-label="참고 항목 선택" title="참고 항목 선택" aria-expanded={referencesOpen} aria-controls={referencesOpen ? "assistant-references" : undefined} onKeyDown={closeReferencesOnEscape} onClick={() => setReferencesOpen((open) => !open)}><Link2 size={15} /></button>}
         </div>
       </header>
       <div className="home-chat-surface">
         <div className="chat-thread">
-          {context && mode !== "task" && mode !== "project" && mode !== "routine" && <div className="chat-okr-context"><Target size={14} /><span><b>{context.cycleName}</b>{context.entry === "onboarding" ? " 첫 OKR 온보딩" : " 상황 기반 대화"}</span></div>}
-          {mode === "task" && <div className="chat-okr-context"><ListChecks size={14} /><span><b>Task 추가</b> Project·Routine 미선택 시 General</span></div>}
-          {mode === "project" && <><div className="chat-okr-context"><Briefcase size={14} /><span><b>{projectTarget?.initiativeTitle ?? "상위 Initiative 미선택"}</b> · 저장 전에 선택</span></div><ProjectQuotaBadge /></>}
-          {mode === "routine" && <div className="chat-okr-context"><Repeat2 size={14} /><span><b>독립 Routine</b> · Initiative 연결 없음</span></div>}
-          {context?.entry === "onboarding" && <div className="assistant-example"><b>간단한 예시</b><span>Objective · 신규 사용자가 제품 가치를 더 빨리 경험하게 한다</span><span>Key Result · 가입 후 7일 내 핵심 기능 사용률을 35%에서 55%로 높인다</span></div>}
           {conversationHistory.map((entry) => <p className={entry.role === "user" ? "user-message" : "assistant-message"} key={entry.id}>{entry.content}</p>)}
-          {mode === "coach" && targetCandidates.length > 0 && <div className="assistant-target-picker" aria-label="대화 대상 선택">
+          {referencesOpen && targetCandidates.length > 0 && <div id="assistant-references" className="assistant-target-picker" aria-label="대화 대상 선택">
             <header>
               <div><Search size={13} /><b>대화 대상</b></div>
               {okrTarget ? <span>{kindLabel(okrTarget.kind)} · {okrTarget.title}</span> : <span>전체 OKR 문맥</span>}
             </header>
             <label>
               <span className="sr-only">Objective, Key Result, Initiative, Project 검색</span>
-              <input value={targetSearch} onChange={(event) => setTargetSearch(event.target.value)} placeholder="Objective, KR, Initiative, Project 검색" />
+              <input value={targetSearch} onKeyDown={closeReferencesOnEscape} onChange={(event) => setTargetSearch(event.target.value)} placeholder="Objective, KR, Initiative, Project 검색" />
             </label>
             {visibleTargetCandidates.length > 0 && <div className="assistant-target-options">
-              {visibleTargetCandidates.map((target) => <button key={target.id} onClick={() => chooseTarget(target)}><span>{kindLabel(target.kind)}</span>{target.title}</button>)}
+              {visibleTargetCandidates.map((target) => <button key={target.id} onKeyDown={closeReferencesOnEscape} onClick={() => chooseTarget(target)}><span>{kindLabel(target.kind)}</span>{target.title}</button>)}
             </div>}
           </div>}
-          {guideQuestions.length > 0 && <div className="assistant-followups">{guideQuestions.map((question) => <button className="followup-message" onClick={() => chooseQuickReply(question)} key={question}>{question}</button>)}</div>}
+          {conversationHistory.some((entry) => entry.role === "user") && guideQuestions.length > 0 && <div className="assistant-followups">{guideQuestions.map((question) => <button className="followup-message" onClick={() => chooseQuickReply(question)} key={question}>{question}</button>)}</div>}
           {!canWrite && <div className="assistant-readonly"><Eye size={14} /><span>Viewer는 대화와 분석을 이용할 수 있지만 항목을 생성할 수 없습니다.</span></div>}
           <div className="chat-input"><label htmlFor="assistant-message">메시지</label><div className="chat-composer"><textarea id="assistant-message" value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void organizeMessage(); }} rows={4} placeholder={mode === "task" ? "해야 할 일을 편하게 설명해 주세요" : mode === "project" ? "만들 Project의 결과와 범위를 설명해 주세요" : mode === "routine" ? "언제 무엇을 반복할지 설명해 주세요" : "지금 이루고 싶은 목표나 막힌 일을 편하게 적어 주세요"} /><button type="button" className="chat-send-button" onClick={() => void organizeMessage()} disabled={saving || !message.trim()} aria-label={saving ? "답변 생성 중" : "메시지 보내기"}>{saving ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}<span>{saving ? "답변 중" : "보내기"}</span></button></div></div>
-          {mode === "okr" && context?.entry !== "onboarding" && <div className="chat-presets">
-            <button onClick={() => chooseGuide("team")}>팀 OKR</button>
-            <button onClick={() => chooseGuide("personal")}>개인 OKR</button>
-            <button onClick={() => chooseGuide("free")}>그냥 말하기</button>
-          </div>}
           <div className="chat-actions">
             {hasDraft && canWrite && <button className="welcome-primary" onClick={() => void save()} disabled={saving || !canApplyDraft}>{saving ? "생성 중" : saveLabel}<ChevronRight size={14} /></button>}
           </div>
-          {assistantFlow && okrTarget && (okrTarget.kind === "key_result" || okrTarget.kind === "initiative") && <button className="assistant-skip" onClick={skipOptionalStep}>지금은 건너뛰기</button>}
+          {hasDraft && assistantFlow && okrTarget && (okrTarget.kind === "key_result" || okrTarget.kind === "initiative") && <button className="assistant-skip" onClick={skipOptionalStep}>지금은 건너뛰기</button>}
         </div>
         {mode !== "task" && hasOkrDraft(plan) && <OkrDraftTree
           plan={plan}
@@ -4768,6 +4748,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
           onMoveInitiative={moveInitiative}
         />}
         {visibleFields.size > 0 && <div className="okr-setup-fields home-draft-fields">
+          {mode === "project" && visibleFields.has("project") && <ProjectQuotaBadge />}
           {mode === "project" && visibleFields.has("project") && <label><span>Project</span><input value={plan.project} onChange={(event) => patch("project", event.target.value)} placeholder="결과와 범위가 분명한 첫 Project" /></label>}
           {mode === "project" && visibleFields.has("project") && <label><span>상위 Initiative</span><select value={projectTarget?.initiativeId ?? ""} onChange={(event) => setProjectTarget(projectTargets.find((entry) => entry.initiativeId === event.target.value) ?? null)}><option value="">저장 전에 선택</option>{projectTargets.map((entry) => <option value={entry.initiativeId} key={entry.initiativeId}>{entry.cycleName} · {entry.initiativeTitle}</option>)}</select></label>}
           {mode === "project" && visibleFields.has("project") && members.length > 0 && <label><span>Project DRI</span><select value={projectDriMemberId} onChange={(event) => setProjectDriMemberId(event.target.value)}>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
@@ -4895,7 +4876,7 @@ function planStringFieldsWithValues(plan: OnboardingPlan) {
   return fields.filter((field) => plan[field].trim());
 }
 
-function buildAssistantWorkspaceContext(activeItems: OkrptrItem[], cycle: OkrCycle | null, focusedProject: OkrptrItem | null): AssistantWorkspaceContext {
+function buildAssistantWorkspaceContext(activeItems: OkriItem[], cycle: OkrCycle | null, focusedProject: OkriItem | null): AssistantWorkspaceContext {
   const cycleItems = cycle ? activeItems.filter((entry) => entry.cycleId === cycle.id) : [];
   const includedIds = new Set(cycleItems.map((entry) => entry.id));
   const linkedTasks = activeItems.filter((entry) => entry.kind === "task" && entry.parentId && includedIds.has(entry.parentId));
@@ -4925,40 +4906,8 @@ function deriveAssistantTargeting(context: AssistantWorkspaceContext) {
   return { target: focused, candidates };
 }
 
-function assistantOpeningMessage(context: OkrChatContext | null, workspace: AssistantWorkspaceContext) {
-  if (context?.entry === "task") {
-    return "추가할 Task를 편하게 설명해 주세요. 문구를 실행 가능한 단위로 다듬고, Project나 Routine을 고르지 않으면 General에 저장하겠습니다.";
-  }
-  if (context?.entry === "project") {
-    return "만들 Project의 결과와 범위를 편하게 설명해 주세요. Task까지 말씀하시면 함께 정리하고, 저장 전에 상위 Initiative를 선택하게 하겠습니다.";
-  }
-  if (context?.entry === "routine") {
-    return "반복할 일과 시작 시점, 장소나 도구, 실행 순서를 편하게 설명해 주세요. Routine은 Initiative와 연결하지 않고 독립적으로 만듭니다.";
-  }
-  if (context?.entry === "onboarding") {
-    return "OKR은 이루고 싶은 변화인 Objective와, 그 변화가 일어났는지 확인하는 측정 가능한 Key Result를 연결하는 방식이에요. 이번 주기에 달성하고 싶은 목표가 있나요? 편하게 말해 주세요.";
-  }
-  if (context?.entry === "create") {
-    return `‘${context.cycleName}’에 ${kindLabel(context.sourceKind ?? "objective")}부터 같이 만들어볼게요. 이번 주기 끝에 어떤 상태가 달라져야 하는지 편하게 적어 주세요.`;
-  }
-  if (context?.target) return targetPrompt(context.target);
-  if ((context?.targetCandidates?.length ?? 0) > 1) return "현재 OKR과 Project 전체를 함께 볼 수 있습니다. 특정 항목을 기준으로 이야기하고 싶으면 아래에서 검색해 선택해 주세요.";
-  const focused = workspace.items.find((item) => item.id === workspace.focusedItemId);
-  if (focused?.kind === "project") {
-    return `‘${focused.title}’ Project는 현재 ${statusLabel(focused.status)} 상태입니다. 지금 막힌 점이나 다음으로 정리할 일을 말씀해 주세요.`;
-  }
-  if (!workspace.items.some((item) => item.kind === "objective")) return "현재 워크스페이스에는 활성 Objective가 없습니다. 새 목표를 함께 정리할까요?";
-  if (workspace.blockedTaskCount > 0) return `현재 막힌 Task가 ${workspace.blockedTaskCount}개 있습니다. 가장 먼저 풀어야 할 병목부터 같이 보겠습니다.`;
-  return "현재 OKR 구조를 확인했습니다. 진행 상황, 막힌 점, 다음 우선순위 중 무엇부터 이야기할까요?";
-}
-
-function assistantOpeningGuides(context: OkrChatContext | null) {
-  if (context?.entry === "task") return ["해야 할 일을 한 문장으로 말할게요", "여러 Task를 한꺼번에 정리할게요"];
-  if (context?.entry === "project") return ["Project가 끝났을 때 달라질 결과를 말할게요", "첫 Task까지 함께 정리할게요"];
-  if (context?.entry === "routine") return ["언제 무엇을 반복할지 말할게요", "실행 순서까지 함께 정리할게요"];
-  if (context?.entry === "onboarding") return ["업무 목표를 말해볼게요", "개인 성장 목표를 말해볼게요", "아직 목표가 잘 떠오르지 않아요"];
-  if (context?.entry === "create") return ["달성하고 싶은 변화는 무엇인가요?", "성공 여부는 어떤 숫자나 상태로 확인할까요?"];
-  return [];
+function assistantOpeningMessage() {
+  return "목표나 할 일을 편하게 이야기해 주세요. 기존 OKR과 업무를 참고해 함께 정리할게요.";
 }
 
 function targetPrompt(target: OkrPlanTarget) {
@@ -5067,7 +5016,7 @@ function OkrFileRow({
   );
 }
 
-function DeleteSelectCheckbox({ item, selected, onToggle }: { item: Pick<OkrptrItem, "id" | "kind" | "title">; selected: boolean; onToggle: (id: string) => void }) {
+function DeleteSelectCheckbox({ item, selected, onToggle }: { item: Pick<OkriItem, "id" | "kind" | "title">; selected: boolean; onToggle: (id: string) => void }) {
   return (
     <label className="delete-select" title={`${item.title} 삭제 선택`}>
       <input type="checkbox" checked={selected} onChange={() => onToggle(item.id)} aria-label={`${item.kind === "project" ? "Project" : "Task"} ${item.title} 삭제 선택`} />
@@ -5076,7 +5025,7 @@ function DeleteSelectCheckbox({ item, selected, onToggle }: { item: Pick<OkrptrI
   );
 }
 
-function BoardView({ items, onOpenItem, canDeleteItem, selectedItemIds, onToggleSelect, selectionMode }: { items: OkrptrItem[]; onOpenItem: (item: OkrptrItem) => void; canDeleteItem: (item: OkrptrItem) => boolean; selectedItemIds: Set<string>; onToggleSelect: (id: string) => void; selectionMode: boolean }) {
+function BoardView({ items, onOpenItem, canDeleteItem, selectedItemIds, onToggleSelect, selectionMode }: { items: OkriItem[]; onOpenItem: (item: OkriItem) => void; canDeleteItem: (item: OkriItem) => boolean; selectedItemIds: Set<string>; onToggleSelect: (id: string) => void; selectionMode: boolean }) {
   const columns: { status: ItemStatus; label: string }[] = [
     { status: "backlog", label: "백로그" },
     { status: "todo", label: "할 일" },
@@ -5089,7 +5038,7 @@ function BoardView({ items, onOpenItem, canDeleteItem, selectedItemIds, onToggle
   return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <article className={`board-selectable-item ${selectionMode ? "selection-mode" : ""}`} key={entry.id}>{selectionMode && canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<button className="board-item" onClick={() => onOpenItem(entry)}><b>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button></article>)}{!rows.length && <span className="empty-column">작업 없음</span>}</div></section>; })}</div>;
 }
 
-function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDeleteItem, selectedItemIds, onToggleSelect, onSelectItems, onClearItems, onTrashSelected, trashing }: { items: OkrptrItem[]; allItems: OkrptrItem[]; routines: Routine[]; onOpenTask: (id: string) => void; onPatch: (id: string, patch: Partial<OkrptrItem>) => Promise<unknown>; canDeleteItem: (item: OkrptrItem) => boolean; selectedItemIds: Set<string>; onToggleSelect: (id: string) => void; onSelectItems: (ids: string[]) => void; onClearItems: (ids: string[]) => void; onTrashSelected: () => void; trashing: boolean }) {
+function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDeleteItem, selectedItemIds, onToggleSelect, onSelectItems, onClearItems, onTrashSelected, trashing }: { items: OkriItem[]; allItems: OkriItem[]; routines: Routine[]; onOpenTask: (id: string) => void; onPatch: (id: string, patch: Partial<OkriItem>) => Promise<unknown>; canDeleteItem: (item: OkriItem) => boolean; selectedItemIds: Set<string>; onToggleSelect: (id: string) => void; onSelectItems: (ids: string[]) => void; onClearItems: (ids: string[]) => void; onTrashSelected: () => void; trashing: boolean }) {
   const [selectionMode, setSelectionMode] = useState(false);
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
   const routineIds = new Set(routines.map((entry) => entry.id));
@@ -5284,7 +5233,7 @@ function TrashView({ workspaceId, onNotice, canDeleteRecords, canRestore }: { wo
   );
 }
 
-function ReviewView({ items, cadence, completed, blocked, averageProgress, onOpenTask, onOpenProject }: { items: OkrptrItem[]; cadence: Cadence; completed: number; blocked: number; averageProgress: number; onOpenTask: (id: string) => void; onOpenProject: (id: string) => void }) {
+function ReviewView({ items, cadence, completed, blocked, averageProgress, onOpenTask, onOpenProject }: { items: OkriItem[]; cadence: Cadence; completed: number; blocked: number; averageProgress: number; onOpenTask: (id: string) => void; onOpenProject: (id: string) => void }) {
   return <section className="review-content"><div className="metrics-row"><div><span>완료</span><strong>{completed}<small> / {items.length}</small></strong></div><div><span>평균 진행</span><strong>{averageProgress}<small>%</small></strong></div><div><span>막힘</span><strong>{blocked}</strong></div></div><div className="review-progress"><div><b>{cadenceLabels[cadence]} 측정 항목 진행률</b><span>{averageProgress}%</span></div><span><i style={{ width: `${averageProgress}%` }} /></span></div><div className="review-list"><span>검토할 항목</span>{items.slice(0, 7).map((entry) => { const tracksProgress = entry.kind !== "objective" && entry.kind !== "initiative"; return entry.kind === "task" || entry.kind === "project" ? <button key={entry.id} onClick={() => entry.kind === "task" ? onOpenTask(entry.id) : onOpenProject(entry.id)}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b>{tracksProgress && <em>{entry.progress}%</em>}<ChevronRight size={14} /></button> : <div key={entry.id}><span className={`status-dot status-${entry.status}`} /><b>{entry.title}</b>{tracksProgress && <em>{entry.progress}%</em>}</div>; })}{!items.length && <p className="my-work-empty">이 기간에 검토할 항목이 없습니다.</p>}</div></section>;
 }
 
@@ -5656,6 +5605,7 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
     { id: "projects", label: "Project 설정", icon: Briefcase, visible: true },
     { id: "summary", label: "관리 요약", icon: Activity, visible: !currentWorkspace.personal },
     { id: "integrations", label: "봇 연동", icon: Bot, visible: !currentWorkspace.personal },
+    { id: "backups", label: "백업 및 복원", icon: Database, visible: canManageWorkspace },
     { id: "danger", label: "위험 구역", icon: AlertTriangle, visible: canManageWorkspace },
     { id: "scheduled", label: "삭제 예정", icon: Trash2, visible: scheduledWorkspaces.length > 0, count: scheduledWorkspaces.length },
   ];
@@ -5671,6 +5621,7 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
         {activeTab === "members" && <div className="workspace-settings-section team-settings-section"><header><span>ORGANIZATION</span><h3>멤버</h3><p>초대, 역할과 워크스페이스 구성원을 관리합니다.</p></header><TeamPanel key={`${currentWorkspace.id}:members`} initialTeam={teamData} initialTab="members" initialGroupHandle={null} embedded onTeamChange={onTeamChange} onClose={onClose} onNotice={onNotice} /></div>}
         {activeTab === "groups" && <div className="workspace-settings-section team-settings-section"><header><span>ORGANIZATION</span><h3>그룹</h3><p>조직 그룹과 구성원, Lead 권한을 관리합니다.</p></header><TeamPanel key={`${currentWorkspace.id}:groups`} initialTeam={teamData} initialTab="groups" initialGroupHandle={requestedGroupHandle} embedded onTeamChange={onTeamChange} onClose={onClose} onNotice={onNotice} /></div>}
         {activeTab === "projects" && <div className="workspace-project-settings"><header className="workspace-settings-section-header"><div><span>WORKSPACE DATA</span><h3>Project 설정</h3><p>모든 Project에서 함께 사용하는 속성과 본문 템플릿입니다.</p></div><div className="workspace-project-tabs" role="tablist" aria-label="Project 설정"><button role="tab" aria-selected={projectSettingsTab === "properties"} className={projectSettingsTab === "properties" ? "active" : ""} onClick={() => setProjectSettingsTab("properties")}><Settings2 size={14} />속성</button><button role="tab" aria-selected={projectSettingsTab === "templates"} className={projectSettingsTab === "templates" ? "active" : ""} onClick={() => setProjectSettingsTab("templates")}><BookTemplate size={14} />템플릿</button></div></header>{projectSettingsTab === "properties" ? <ProjectPropertyManager workspaceId={currentWorkspace.id} properties={properties} teamMembers={teamMembers} readOnly={!canManageWorkspace} onChanged={(next) => onPropertiesChanged([...next].sort((left, right) => left.sortOrder - right.sortOrder))} onNotice={onNotice} /> : <ProjectTemplateManager workspaceId={currentWorkspace.id} readOnly={!canManageWorkspace} onNotice={onNotice} />}</div>}
+        {activeTab === "backups" && <WorkspaceBackups key={`${currentWorkspace.id}:backups`} workspaceId={currentWorkspace.id} workspaceName={currentWorkspace.name} onNotice={onNotice} />}
         {activeTab === "summary" && <WorkspaceManagementSummary key={`${currentWorkspace.id}:summary`} />}
         {activeTab === "integrations" && <WorkspaceSlackIntegration key={`${currentWorkspace.id}:bots`} slack={slack} slackOAuthIssue={slackOAuthIssue} loading={integrationLoading} loadError={integrationLoadError} workspaceName={currentWorkspace.name} canManageSlack={canManageWorkspace} onSlackChange={onSlackChange} onRefresh={onRefreshIntegrations} onNotice={onNotice} />}
         {activeTab === "danger" && <div className="workspace-settings-section danger-settings"><header><span>WORKSPACE CONTROL</span><h3>위험 구역</h3><p>현재 워크스페이스의 실행 데이터와 워크스페이스 자체를 정리합니다.</p></header><article><div><b>OKR 실행 데이터 클린업</b><p>워크스페이스와 그룹은 유지하고 OKR·Project·Task를 휴지통으로 이동합니다.</p></div><button onClick={onCleanup}><Trash2 size={14} />클린업 열기</button></article>{!currentWorkspace.personal && currentWorkspace.role === "owner" && <article><div><b>워크스페이스 삭제 예약</b><p>즉시 접근을 중단하고 30일 동안 복구할 수 있도록 삭제 예약합니다.</p></div><button onClick={() => onDeleteWorkspace(currentWorkspace)} disabled={workspaceSaving}><Trash2 size={14} />삭제 예약</button></article>}</div>}
@@ -5681,12 +5632,7 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
 }
 
 function PropertyPanel({ user, displayName, themeMode, onThemeModeChange, onClose, onSignOut }: { user: AuthUser | null; displayName: string; themeMode: ThemeMode; onThemeModeChange: (mode: ThemeMode) => void; onClose: () => void; onSignOut: () => void }) {
-  const themes: { mode: ThemeMode; label: string }[] = [
-    { mode: "beige", label: "베이지" },
-    { mode: "gray", label: "그레이" },
-    { mode: "dark", label: "다크" },
-  ];
-  return <OverlayDialog title="내 설정" variant="drawer" onRequestClose={() => onClose()}>{(requestClose) => <aside className="property-panel"><header><div><h2>내 설정</h2><p>내 계정과 화면 설정</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section"><h3>내 계정</h3><div className="settings-account-card"><span className="avatar">{displayName.slice(0, 1).toLocaleUpperCase()}</span><div><b>{displayName}</b><small>{user?.email || "로그인 계정"}</small></div></div></section><MarketingConsentSettings email={user?.email ?? ""} /><section className="settings-section appearance-settings"><h3>테마</h3><div className="theme-picker" role="group" aria-label="색상 테마">{themes.map(({ mode, label }) => <button className={themeMode === mode ? "active" : ""} aria-pressed={themeMode === mode} onClick={() => onThemeModeChange(mode)} key={mode}><i className={`theme-swatch theme-swatch-${mode}`} aria-hidden="true" /><span>{label}</span></button>)}</div><p>선택한 테마는 이 브라우저에 저장됩니다.</p></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section></aside>}</OverlayDialog>;
+  return <OverlayDialog title="내 설정" variant="drawer" onRequestClose={() => onClose()}>{(requestClose) => <aside className="property-panel"><header><div><h2>내 설정</h2><p>내 계정과 화면 설정</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="내 설정 닫기" title="내 설정 닫기"><X size={17} /></button></header><section className="settings-section"><h3>내 계정</h3><div className="settings-account-card"><span className="avatar">{displayName.slice(0, 1).toLocaleUpperCase()}</span><div><b>{displayName}</b><small>{user?.email || "로그인 계정"}</small></div></div></section><MarketingConsentSettings email={user?.email ?? ""} /><section className="settings-section appearance-settings"><h3>테마</h3><ThemePicker value={themeMode} onChange={onThemeModeChange} /><p>선택한 테마는 이 브라우저에 저장됩니다.</p></section><section className="settings-account-actions"><button onClick={onSignOut}><LogOut size={13} />Google 계정 로그아웃</button></section></aside>}</OverlayDialog>;
 }
 
 type EmailMarketingConsentSettings = {
@@ -5702,7 +5648,7 @@ function MarketingConsentNudge({ userId, onOpenSettings }: { userId: string; onO
 
   useEffect(() => {
     if (!userId) return;
-    const storageKey = `okrptr:marketing-consent-nudge:${userId}`;
+    const storageKey = `okri:marketing-consent-nudge:${userId}`;
     try {
       if (window.localStorage.getItem(storageKey)) return;
     } catch {
@@ -5721,7 +5667,7 @@ function MarketingConsentNudge({ userId, onOpenSettings }: { userId: string; onO
 
   function dismiss(openSettings: boolean) {
     try {
-      window.localStorage.setItem(`okrptr:marketing-consent-nudge:${userId}`, new Date().toISOString());
+      window.localStorage.setItem(`okri:marketing-consent-nudge:${userId}`, new Date().toISOString());
     } catch {
       // Dismissing for this render is enough when storage is unavailable.
     }
@@ -6268,73 +6214,6 @@ function GroupDetail({ detail, team, onBack, onChange, onGroupChange, onDeleted,
   );
 }
 
-function IntegrationModal({ onNotice, onClose }: { onNotice: (message: string) => void; onClose: () => void }) {
-  const [connections, setConnections] = useState<IntegrationConnection[]>([]);
-  const [loadingConnections, setLoadingConnections] = useState(true);
-  const [creatingConnection, setCreatingConnection] = useState(false);
-  const [revokingConnections, setRevokingConnections] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    const refreshConnections = () => {
-      void fetch("/api/integration-tokens")
-        .then(async (response) => response.ok ? response.json() as Promise<{ connections: IntegrationConnection[] }> : Promise.reject())
-        .then((data) => { if (active) setConnections(data.connections); })
-        .catch(() => undefined)
-        .finally(() => { if (active) setLoadingConnections(false); });
-    };
-    refreshConnections();
-    const interval = window.setInterval(refreshConnections, 5000);
-    return () => { active = false; window.clearInterval(interval); };
-  }, []);
-
-  async function copyChatGptConnectionPrompt() {
-    setCreatingConnection(true);
-    try {
-      const response = await fetch("/api/integration-tokens", { method: "POST" });
-      const data = await response.json() as { prompt?: string; error?: string };
-      if (!response.ok || !data.prompt) {
-        onNotice(data.error || "연결 내용을 만들지 못했습니다.");
-        return;
-      }
-      try {
-        await navigator.clipboard.writeText(data.prompt);
-      } catch {
-        onNotice("클립보드에 복사하지 못했습니다. 브라우저의 클립보드 권한을 확인해 주세요.");
-        return;
-      }
-      onNotice("연결 내용을 복사했습니다. 브라우저 제어가 가능한 ChatGPT 대화에 붙여넣으세요.");
-    } catch {
-      onNotice("연결 내용을 만들지 못했습니다.");
-    } finally {
-      setCreatingConnection(false);
-    }
-  }
-
-  async function revokeChatGptConnections() {
-    setRevokingConnections(true);
-    try {
-      const response = await fetch("/api/integration-tokens", { method: "DELETE" });
-      if (!response.ok) throw new Error("revoke failed");
-      setConnections([]);
-      onNotice("이 워크스페이스의 대화 연결을 해제했습니다.");
-    } catch {
-      onNotice("대화 연결을 해제하지 못했습니다.");
-    } finally {
-      setRevokingConnections(false);
-    }
-  }
-
-  const hasConnectedConversation = connections.some((connection) => connection.lastUsedAt);
-  const connectionStatus = loadingConnections ? "확인 중" : hasConnectedConversation ? "연결됨" : connections.length > 0 ? "연결 대기" : "연결 없음";
-  return <OverlayDialog title="ChatGPT 연동" onRequestClose={() => onClose()}>{(requestClose) => <section className="integration-modal"><header><h2>ChatGPT 연동</h2><button className="icon-button" onClick={() => requestClose("close-button")} aria-label="닫기"><X size={17} /></button></header><div className="integration-sections">
-    <section className="integration-card chatgpt-simple">
-      <header><Bot size={18} /><div><b>ChatGPT에 OKRPTR MCP 연결</b><p>문구를 복사해 브라우저 제어가 가능한 ChatGPT 대화에 붙여넣으면 설정 화면에서 연결을 진행합니다.</p></div><div className={`connection-state ${hasConnectedConversation ? "active" : connections.length > 0 ? "pending" : "inactive"}`}><i />{connectionStatus}</div></header>
-      <div className="chatgpt-simple-actions"><button className="copy-primary" onClick={() => void copyChatGptConnectionPrompt()} disabled={creatingConnection}>{creatingConnection ? <LoaderCircle className="spin" size={13} /> : <Copy size={13} />}{creatingConnection ? "복사 준비 중" : "ChatGPT 연결 문구 복사"}</button></div>
-      <details className="connection-management"><summary><span>연결 관리</span><ChevronDown size={13} /></summary><div><span>발급된 연결 키 {connections.length}개</span>{connections.length > 0 && <button onClick={() => void revokeChatGptConnections()} disabled={revokingConnections}>{revokingConnections ? "해제 중" : "연결 해제"}</button>}</div></details>
-    </section>
-  </div><footer><span><CheckCircle2 size={15} />OKR · Objective → Key Result → Initiative → Project → Task / Routine → Task</span><button onClick={() => requestClose("close-button")}>닫기</button></footer></section>}</OverlayDialog>;
-}
 
 function AppIntegrationsView({ google, slack, loading, loadError, onGoogleChange, onRefresh, onNotice }: { google: GoogleConnectionStatus | null; slack: SlackConnectionStatus | null; loading: boolean; loadError: boolean; onGoogleChange: (status: GoogleConnectionStatus | null) => void; onRefresh: () => void; onNotice: (message: string) => void }) {
   const [disconnectingGoogle, setDisconnectingGoogle] = useState(false);
@@ -6405,7 +6284,6 @@ function WorkspaceManagementSummary() {
       })
       .catch((loadError: unknown) => {
         if (loadError instanceof DOMException && loadError.name === "AbortError") {
-          loadedRef.current = false;
           return;
         }
         setError(loadError instanceof Error ? loadError.message : "관리 요약을 불러오지 못했습니다.");
@@ -6521,7 +6399,7 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
   </section>;
 }
 
-type WorkspaceBotId = "daily" | "management" | "automation";
+type WorkspaceBotId = "daily" | "management" | "automation" | "summon";
 
 function BotAccordionRow({ id, icon: Icon, title, description, status, summary, expanded, onToggle, children }: { id: WorkspaceBotId; icon: LucideIcon; title: string; description: string; status: string; summary: string; expanded: boolean; onToggle: (id: WorkspaceBotId) => void; children: ReactNode }) {
   const panelId = `workspace-bot-panel-${id}`;
@@ -6537,27 +6415,31 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
   const [openBot, setOpenBot] = useState<WorkspaceBotId | null>(() => {
     if (typeof window === "undefined") return null;
     const value = new URLSearchParams(window.location.search).get("bot");
-    return value === "daily" || value === "management" || value === "automation" ? value : null;
+    return value === "daily" || value === "management" || value === "automation" || value === "summon" ? value : null;
   });
   const [botSummaries, setBotSummaries] = useState<Record<WorkspaceBotId, { status: string; summary: string }>>({
     daily: { status: "설정 확인", summary: "시간과 대상 멤버를 설정합니다" },
     management: { status: "설정 확인", summary: "시간과 발송 채널을 설정합니다" },
     automation: { status: "설정 확인", summary: "추천 규칙 또는 직접 규칙을 만듭니다" },
+    summon: { status: "연결 확인", summary: "!테스크생성 · !프로젝트생성" },
   });
   const slackState = loadError && !slack ? "error" : slack?.state ?? "service_unavailable";
   const slackConnected = Boolean(slack?.connected && slackState !== "service_unavailable" && slackState !== "error");
+  const summonNeedsScopes = slack?.missingScopes?.some((scope) => slackSummonScopes.some((required) => required === scope));
+  const summonStatus = !slackConnected ? "연결 필요" : summonNeedsScopes || slackState === "reauthorization_required" ? "권한 업데이트" : "연결됨";
   const connectedSlackName = slack?.connectedTeam?.name || slack?.teamName || "Slack";
   const slackAction = slackState === "connected" ? "연결 완료" : slackState === "setup_required" ? "초기 설정 필요" : slackState === "reauthorization_required" ? "권한 업데이트 필요" : slackState === "workspace_disconnected" ? "연결 필요" : "잠시 사용 불가";
   const displayedBotSummaries = slackConnected ? botSummaries : {
     daily: { status: "연결 필요", summary: "Slack 연결 후 설정할 수 있습니다" },
     management: { status: "연결 필요", summary: "Slack 연결 후 설정할 수 있습니다" },
     automation: { status: "연결 필요", summary: "Slack 연결 후 설정할 수 있습니다" },
+    summon: { status: "연결 필요", summary: "!테스크생성 · !프로젝트생성" },
   };
 
   useEffect(() => {
     function syncBotFromHistory() {
       const value = new URLSearchParams(window.location.search).get("bot");
-      setOpenBot(value === "daily" || value === "management" || value === "automation" ? value : null);
+      setOpenBot(value === "daily" || value === "management" || value === "automation" || value === "summon" ? value : null);
     }
     window.addEventListener("popstate", syncBotFromHistory);
     return () => window.removeEventListener("popstate", syncBotFromHistory);
@@ -6590,7 +6472,7 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
     const response = await fetch("/api/slack/disconnect", { method: "POST" });
     setDisconnectingSlack(false);
     if (!response.ok) { onNotice("Slack 연결을 해제하지 못했습니다."); return; }
-    onSlackChange(slack ? { ...slack, connected: false, state: "workspace_disconnected", statusMessage: "Owner 또는 Admin이 이 OKRPTR 워크스페이스에 사용할 Slack을 선택하고 승인할 수 있습니다.", missingScopes: [], connectedTeam: null, teamName: null, teamId: null, botUserId: null, connectedAt: null, updatedAt: null } : null);
+    onSlackChange(slack ? { ...slack, connected: false, state: "workspace_disconnected", statusMessage: "Owner 또는 Admin이 이 OKRI 워크스페이스에 사용할 Slack을 선택하고 승인할 수 있습니다.", missingScopes: [], connectedTeam: null, teamName: null, teamId: null, botUserId: null, connectedAt: null, updatedAt: null } : null);
     onNotice("Slack 연결을 해제했습니다. 자동화 규칙은 보관됩니다.");
   }
 
@@ -6612,10 +6494,11 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
           : slackState === "reauthorization_required" && canManageSlack ? <button className="slack-primary-action" onClick={connectSlack}>권한 업데이트</button>
           : <span className="integration-role-note">관리자가 권한을 업데이트해야 합니다.</span>}
       </section>}
-      {slackState === "reauthorization_required" && <div className="integration-state-message warning"><AlertTriangle size={17} /><div><b>새 봇 기능 권한이 필요합니다</b><p>권한 업데이트 전까지 일부 DM·채널 기능이 작동하지 않을 수 있습니다.</p></div></div>}
+      {slackState === "reauthorization_required" && <div className="integration-state-message warning"><AlertTriangle size={17} /><div><b>새 봇 기능 권한이 필요합니다</b><p>권한 업데이트 전까지 일부 DM·채널 기능이 작동하지 않을 수 있습니다.</p></div>{canManageSlack && slackConnected && <button className="slack-primary-action" onClick={connectSlack}><RefreshCw size={14} />권한 업데이트</button>}</div>}
       {slackConnected && canManageSlack && <details className="slack-advanced-settings"><summary>Slack 연결 관리 <ChevronDown size={14} /></summary><div><button className="secondary-danger" onClick={() => void disconnectSlack()} disabled={disconnectingSlack}>{disconnectingSlack ? "연결 해제 중" : "Slack 연결 해제"}</button></div></details>}
       </section>
       <div className="bot-accordion" aria-label="워크스페이스 봇 목록">
+        <BotAccordionRow id="summon" icon={AtSign} title="소환 봇" description="Slack에서 Task와 Project 만들기" status={summonStatus} summary={displayedBotSummaries.summon.summary} expanded={openBot === "summon"} onToggle={toggleBot}><SlackSummonBot onNotice={onNotice} /></BotAccordionRow>
         <BotAccordionRow id="daily" icon={Bot} title="데일리 봇" description="멤버별 데일리 DM과 공유 채널" status={displayedBotSummaries.daily.status} summary={displayedBotSummaries.daily.summary} expanded={openBot === "daily"} onToggle={toggleBot}><SlackDailySettingsPanel key={`daily-${botRefreshAttempt}`} active={openBot === "daily"} connected={slackConnected} canManage={canManageSlack} teamName={connectedSlackName} onSummary={updateDailySummary} onNotice={onNotice} /></BotAccordionRow>
         <BotAccordionRow id="management" icon={Activity} title="관리 봇" description="누락 정보와 긴급 업무 리포트" status={displayedBotSummaries.management.status} summary={displayedBotSummaries.management.summary} expanded={openBot === "management"} onToggle={toggleBot}><WorkspaceManagementBot key={`management-${botRefreshAttempt}`} active={openBot === "management"} canManage={canManageSlack} onSummary={updateManagementSummary} onNotice={onNotice} /></BotAccordionRow>
         <BotAccordionRow id="automation" icon={Zap} title="업무 자동화" description="Task 생성과 상태 변경 알림" status={displayedBotSummaries.automation.status} summary={displayedBotSummaries.automation.summary} expanded={openBot === "automation"} onToggle={toggleBot}><SlackAutomationManager key={`automation-${botRefreshAttempt}`} active={openBot === "automation"} connected={slackConnected} canManage={canManageSlack} workspaceName={workspaceName} onSummary={updateAutomationSummary} onNotice={onNotice} /></BotAccordionRow>
@@ -6688,8 +6571,8 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
     };
   }, [active, connected, canManage, loadAttempt, onSummary]);
 
+  const shouldLoadChannels = Boolean(admin && (!admin.setupComplete || editing));
   useEffect(() => {
-    const shouldLoadChannels = Boolean(admin && (!admin.setupComplete || editing));
     if (!active || !connected || !canManage || !shouldLoadChannels || channelsLoadedRef.current) return;
     channelsLoadedRef.current = true;
     const controller = new AbortController();
@@ -6708,7 +6591,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
       controller.abort();
       channelsLoadedRef.current = false;
     };
-  }, [active, admin?.setupComplete, canManage, channelLoadAttempt, connected, editing]);
+  }, [active, shouldLoadChannels, canManage, channelLoadAttempt, connected]);
 
 
   useEffect(() => {
@@ -6794,7 +6677,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
 
   if (!active && !admin) return null;
   if (!connected) return <div className="slack-daily-locked"><LockKeyhole size={18} /><div><b>Slack 연결 후 데일리 봇을 설정할 수 있습니다</b><p>기존 설정은 그대로 유지되며 Slack 연결을 완료하면 다시 사용할 수 있습니다.</p></div></div>;
-  if (!canManage) return <section className="slack-connected-summary"><div><CheckCircle2 size={18} /><p><b>OKRPTR 연결 완료</b><span>연결된 Slack 워크스페이스: {teamName}</span><span>관리자가 설정한 시간에 내 Slack DM으로 데일리를 받을 수 있습니다.</span></p></div></section>;
+  if (!canManage) return <section className="slack-connected-summary"><div><CheckCircle2 size={18} /><p><b>OKRI 연결 완료</b><span>연결된 Slack 워크스페이스: {teamName}</span><span>관리자가 설정한 시간에 내 Slack DM으로 데일리를 받을 수 있습니다.</span></p></div></section>;
   if (loadError) return <section className="integration-state-message error"><AlertTriangle size={17} /><div><b>Slack 설정을 불러오지 못했습니다</b><p>연결은 유지됩니다. 잠시 후 다시 확인해 주세요.</p></div><button onClick={() => { loadedRef.current = false; setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }}>다시 불러오기</button></section>;
   if (!admin) return <div className="slack-daily-loading"><LoaderCircle className="spin" size={15} />데일리 설정 확인 중</div>;
 
@@ -6871,15 +6754,15 @@ function SlackDailyAdvancedSettings({ connected, canManage, mode = "workspace", 
   if (loadError) return <section className="integration-state-message error"><AlertTriangle size={17} /><div><b>Slack 데일리 설정을 불러오지 못했습니다</b><p>연결은 유지됩니다. 잠시 후 다시 불러와 주세요.</p></div><button onClick={() => { setLoadError(false); setPreference(null); setAdmin(null); setLoadAttempt((attempt) => attempt + 1); }}>다시 불러오기</button></section>;
   return <div className="slack-setup-flow">
     {mode === "workspace" && <section className="integration-step" aria-labelledby="slack-step-members">
-      <span className="integration-step-number">2</span><div className="integration-step-copy"><h4 id="slack-step-members">사용자 이메일 연결 상태</h4><p>OKRPTR와 Slack 이메일이 같으면 자동으로 연결됩니다.</p></div>
+      <span className="integration-step-number">2</span><div className="integration-step-copy"><h4 id="slack-step-members">사용자 이메일 연결 상태</h4><p>OKRI와 Slack 이메일이 같으면 자동으로 연결됩니다.</p></div>
       <div className="integration-step-body">
-        {canManage && !admin ? <div className="slack-daily-loading"><LoaderCircle className="spin" size={14} />사용자 연결 상태 확인 중</div> : canManage && admin ? <><div className="integration-step-summary"><b>{admin.members.filter((member) => member.linked).length}/{admin.members.length}명 연결</b><span>미연결 사용자는 Slack의 `/okrptr daily`에서 일회용 연결 링크를 받을 수 있습니다.</span></div><div className="slack-member-links">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? "Slack 연결됨" : "Slack 미연결"}{member.reminder ? ` · 알림 ${member.reminder.status}` : ""}</small></p></div>)}</div></> : <div className="integration-connected-note"><CheckCircle2 size={15} />사용자별 Slack 연결 상태는 Owner 또는 Admin이 확인합니다.</div>}
+        {canManage && !admin ? <div className="slack-daily-loading"><LoaderCircle className="spin" size={14} />사용자 연결 상태 확인 중</div> : canManage && admin ? <><div className="integration-step-summary"><b>{admin.members.filter((member) => member.linked).length}/{admin.members.length}명 연결</b><span>미연결 사용자는 Slack의 `/okri daily`에서 일회용 연결 링크를 받을 수 있습니다.</span></div><div className="slack-member-links">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? "Slack 연결됨" : "Slack 미연결"}{member.reminder ? ` · 알림 ${member.reminder.status}` : ""}</small></p></div>)}</div></> : <div className="integration-connected-note"><CheckCircle2 size={15} />사용자별 Slack 연결 상태는 Owner 또는 Admin이 확인합니다.</div>}
       </div>
     </section>}
 
     {mode === "personal" && <><section className="integration-step" aria-labelledby="slack-personal-link">
       <span className="integration-step-number">1</span><div className="integration-step-copy"><h4 id="slack-personal-link">내 Slack 계정</h4><p>워크스페이스 멤버와 Slack 사용자를 연결합니다.</p></div>
-      <div className="integration-step-body">{preference ? <div className={`integration-personal-link ${preference.linked ? "linked" : "unlinked"}`}><span>{preference.linked ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}</span><p><b>{preference.linked ? "내 Slack 계정이 연결되었습니다" : "내 Slack 계정 연결이 필요합니다"}</b><small>{preference.linked ? "개인 DM 알림을 설정할 수 있습니다." : "Slack에서 `/okrptr daily`를 입력해 일회용 연결 링크를 받아 주세요."}</small></p></div> : <div className="slack-daily-loading"><LoaderCircle className="spin" size={14} />개인 연결 상태 확인 중</div>}</div>
+      <div className="integration-step-body">{preference ? <div className={`integration-personal-link ${preference.linked ? "linked" : "unlinked"}`}><span>{preference.linked ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}</span><p><b>{preference.linked ? "내 Slack 계정이 연결되었습니다" : "내 Slack 계정 연결이 필요합니다"}</b><small>{preference.linked ? "개인 DM 알림을 설정할 수 있습니다." : "Slack에서 `/okri daily`를 입력해 일회용 연결 링크를 받아 주세요."}</small></p></div> : <div className="slack-daily-loading"><LoaderCircle className="spin" size={14} />개인 연결 상태 확인 중</div>}</div>
     </section><section className="integration-step" aria-labelledby="slack-step-preference">
       <span className="integration-step-number">3</span><div className="integration-step-copy"><h4 id="slack-step-preference">개인 데일리 알림 시간</h4><p>평일 아침에 오늘 할 Task를 고르는 DM을 받습니다.</p></div>
       <div className="integration-step-body">{preference ? <div className="slack-personal-preference"><label><input type="checkbox" checked={preference.enabled} disabled={busy || !preference.linked} onChange={(event) => void savePreference({ enabled: event.target.checked })} /><span>내 Slack DM 알림 사용</span></label><label><span>시간</span><input aria-label="개인 데일리 알림 시간" type="time" value={preference.reminderTime} disabled={busy || !preference.linked} onChange={(event) => void savePreference({ reminderTime: event.target.value })} /></label><label><span>시간대</span><select aria-label="개인 데일리 알림 시간대" value={preference.timezone} disabled={busy || !preference.linked} onChange={(event) => void savePreference({ timezone: event.target.value })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label>{!preference.linked && <p>Slack 사용자 연결을 완료하면 알림 설정이 활성화됩니다.</p>}</div> : <div className="slack-daily-loading"><LoaderCircle className="spin" size={14} />개인 알림 설정 확인 중</div>}</div>
@@ -6890,14 +6773,14 @@ function SlackDailyAdvancedSettings({ connected, canManage, mode = "workspace", 
       <div className="integration-step-body">{canManage && admin ? <div className="slack-daily-admin">
         <div className="slack-admin-grid"><label><span>기본 시간</span><input aria-label="Slack 데일리 기본 시간" type="time" value={admin.settings.reminderTime} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, reminderTime: event.target.value } })} /></label><label><span>기본 시간대</span><select aria-label="Slack 데일리 기본 시간대" value={admin.settings.timezone} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, timezone: event.target.value } })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label></div>
         <div className="slack-weekdays" aria-label="Slack 데일리 기본 요일">{["일", "월", "화", "수", "목", "금", "토"].map((label, day) => <label key={label}><input type="checkbox" checked={admin.settings.weekdays.includes(day)} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, weekdays: event.target.checked ? [...admin.settings.weekdays, day].sort() : admin.settings.weekdays.filter((entry) => entry !== day) } })} />{label}</label>)}</div>
-        <fieldset><legend>개인 카드 공유 채널</legend>{availableChannels.length ? availableChannels.map((channel) => <label key={channel.id}><input type="checkbox" checked={admin.channels.some((entry) => entry.id === channel.id)} onChange={(event) => setAdmin({ ...admin, channels: event.target.checked ? [...admin.channels, channel] : admin.channels.filter((entry) => entry.id !== channel.id) })} /><span>#{channel.name}{channel.isPrivate ? " · 비공개" : ""}</span></label>) : <p>봇이 참여한 채널이 없습니다. Slack에서 OKRPTR 봇을 채널에 초대한 뒤 5단계의 재동기화를 실행하세요.</p>}</fieldset>
+        <fieldset><legend>개인 카드 공유 채널</legend>{availableChannels.length ? availableChannels.map((channel) => <label key={channel.id}><input type="checkbox" checked={admin.channels.some((entry) => entry.id === channel.id)} onChange={(event) => setAdmin({ ...admin, channels: event.target.checked ? [...admin.channels, channel] : admin.channels.filter((entry) => entry.id !== channel.id) })} /><span>#{channel.name}{channel.isPrivate ? " · 비공개" : ""}</span></label>) : <p>봇이 참여한 채널이 없습니다. Slack에서 OKRI 봇을 채널에 초대한 뒤 5단계의 재동기화를 실행하세요.</p>}</fieldset>
         <div className="slack-admin-actions"><button disabled={busy} onClick={() => void patchAdmin({ reminderTime: admin.settings.reminderTime, timezone: admin.settings.timezone, weekdays: admin.settings.weekdays, channelIds: admin.channels.map((channel) => channel.id) }, "Slack 데일리 기본 설정을 저장했습니다.")}>{busy ? "저장 중" : "팀 공유 설정 저장"}</button></div>
       </div> : <div className="integration-role-note">팀 기본 시간과 공유 채널은 Owner 또는 Admin이 관리합니다.</div>}</div>
     </section>
 
     <section className="integration-step" aria-labelledby="slack-step-test">
       <span className="integration-step-number">5</span><div className="integration-step-copy"><h4 id="slack-step-test">테스트 DM과 작동 확인</h4><p>사용자 연결과 다음 알림 예약을 확인하고 실제 테스트 DM을 보냅니다.</p></div>
-      <div className="integration-step-body">{canManage && admin ? <><div className="slack-admin-actions"><button disabled={busy} onClick={() => void patchAdmin({ action: "resync" }, "Slack 사용자와 예약을 재동기화했습니다.")}><RefreshCw size={13} />사용자·예약 재동기화</button></div><div className="slack-member-links slack-test-list">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? member.reminder ? `다음 알림 · ${member.reminder.status}` : "알림 예약 확인 필요" : "Slack 미연결"}</small></p>{member.linked && <button disabled={busy} onClick={() => void patchAdmin({ action: "test_dm", memberId: member.memberId }, `${member.displayName}님에게 테스트 DM을 보냈습니다.`)}>테스트 DM</button>}</div>)}</div>{admin.failedPublications.length > 0 && <div className="slack-publication-failures"><b>채널 전송 실패</b>{admin.failedPublications.map((failure) => <div key={failure.id}><p>{failure.memberName} · {failure.date} · {failure.channelId}<small>{failure.error}</small></p><button disabled={busy} onClick={() => void patchAdmin({ action: "retry_publication", publicationId: failure.id }, "채널 전송을 다시 시도했습니다.")}>재시도</button></div>)}</div>}</> : <div className="integration-connected-note"><CheckCircle2 size={15} />연결된 사용자는 Slack에서 `/okrptr daily`로 언제든 데일리를 열 수 있습니다.</div>}</div>
+      <div className="integration-step-body">{canManage && admin ? <><div className="slack-admin-actions"><button disabled={busy} onClick={() => void patchAdmin({ action: "resync" }, "Slack 사용자와 예약을 재동기화했습니다.")}><RefreshCw size={13} />사용자·예약 재동기화</button></div><div className="slack-member-links slack-test-list">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? member.reminder ? `다음 알림 · ${member.reminder.status}` : "알림 예약 확인 필요" : "Slack 미연결"}</small></p>{member.linked && <button disabled={busy} onClick={() => void patchAdmin({ action: "test_dm", memberId: member.memberId }, `${member.displayName}님에게 테스트 DM을 보냈습니다.`)}>테스트 DM</button>}</div>)}</div>{admin.failedPublications.length > 0 && <div className="slack-publication-failures"><b>채널 전송 실패</b>{admin.failedPublications.map((failure) => <div key={failure.id}><p>{failure.memberName} · {failure.date} · {failure.channelId}<small>{failure.error}</small></p><button disabled={busy} onClick={() => void patchAdmin({ action: "retry_publication", publicationId: failure.id }, "채널 전송을 다시 시도했습니다.")}>재시도</button></div>)}</div>}</> : <div className="integration-connected-note"><CheckCircle2 size={15} />연결된 사용자는 Slack에서 `/okri daily`로 언제든 데일리를 열 수 있습니다.</div>}</div>
     </section></>}
   </div>;
 }
@@ -7124,7 +7007,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
   return <div className="slack-automation-manager">
     {canManage && <section className="automation-recommendations"><header><h3>추천 자동화</h3><p>발송 채널만 고르면 추천 조건과 메시지로 바로 시작합니다.</p></header><div>{slackAutomationRecommendations.map((recommendation) => <article key={recommendation.id}><div><b>{recommendation.name}</b><p>{recommendation.description}</p></div><select aria-label={`${recommendation.name} Slack 채널`} value={recommendedChannels[recommendation.id]} onChange={(event) => setRecommendedChannels((current) => ({ ...current, [recommendation.id]: event.target.value }))}><option value="">채널 선택</option>{channels.map((channel) => <option value={channel.id} key={channel.id}>#{channel.name}{channel.isPrivate ? " · 비공개" : ""}</option>)}</select><button type="button" disabled={busyId === `recommended:${recommendation.id}`} onClick={() => void createRecommendedAutomation(recommendation)}>{busyId === `recommended:${recommendation.id}` ? <LoaderCircle className="spin" size={13} /> : <Plus size={13} />}추가</button></article>)}</div></section>}
     <div className="slack-automation-heading"><div><h3>현재 자동화</h3><p>{workspaceName}에서 작동하는 규칙입니다.</p></div>{canManage && <button type="button" onClick={startCreate}><Plus size={14} />직접 규칙 만들기</button>}</div>
-    <div className="slack-bot-note"><Bot size={15} /><p>각 자동화는 독립된 규칙으로 작동하며, 메시지는 연결된 <b>OKRPTR 봇</b> 이름으로 전송됩니다.</p></div>
+    <div className="slack-bot-note"><Bot size={15} /><p>각 자동화는 독립된 규칙으로 작동하며, 메시지는 연결된 <b>OKRI 봇</b> 이름으로 전송됩니다.</p></div>
     {formOpen && <form className="slack-automation-form" onSubmit={(event) => void saveAutomation(event)}>
       <div className="slack-form-title"><b>{editingId ? "자동화 수정" : "새 자동화"}</b><button type="button" className="icon-button" onClick={() => setFormOpen(false)} aria-label="작성 취소"><X size={14} /></button></div>
       <div className="slack-form-grid">
@@ -7135,7 +7018,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       </div>
       <label className="slack-message-field"><span>보낼 메시지</span><textarea value={draft.messageTemplate} onChange={(event) => setDraft({ ...draft, messageTemplate: event.target.value })} maxLength={3000} rows={4} /></label>
       <div className="slack-variable-row"><span>변수</span>{["{{title}}", "{{status}}", "{{from_status}}", "{{priority}}", "{{workspace}}"].map((variable) => <button type="button" key={variable} onClick={() => setDraft({ ...draft, messageTemplate: `${draft.messageTemplate}${draft.messageTemplate.endsWith(" ") || draft.messageTemplate.endsWith("\n") ? "" : " "}${variable}` })}>{variable}</button>)}</div>
-      <p className="slack-channel-help">비공개 채널은 OKRPTR 봇이 참여한 채널만 선택할 수 있습니다.</p>
+      <p className="slack-channel-help">비공개 채널은 OKRI 봇이 참여한 채널만 선택할 수 있습니다.</p>
       <div className="slack-form-actions"><label><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /><span>저장 즉시 활성화</span></label><div><button type="button" onClick={() => setFormOpen(false)}>취소</button><button type="submit" disabled={saving}>{saving ? <LoaderCircle className="spin" size={13} /> : <Check size={13} />}{saving ? "저장 중" : "저장"}</button></div></div>
     </form>}
     {loading ? <div className="slack-automation-loading"><LoaderCircle className="spin" size={16} />자동화를 불러오는 중</div> : automations.length === 0 ? <div className="slack-automation-empty"><Zap size={18} /><b>아직 자동화가 없습니다.</b><p>{canManage ? "새 자동화를 만들어 첫 Slack 알림을 보내보세요." : "워크스페이스 관리자가 자동화를 만들 수 있습니다."}</p></div> : <div className="slack-automation-list">{automations.map((automation) => <article key={automation.id} className={automation.active ? "" : "inactive"}>

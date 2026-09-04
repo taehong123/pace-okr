@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const externalBaseUrl = process.env.OKRPTR_E2E_BASE_URL;
-const requestedWorkers = Number(process.env.OKRPTR_E2E_WORKERS ?? "1");
+const externalBaseUrl = process.env.OKRI_E2E_BASE_URL;
+const requestedWorkers = Number(process.env.OKRI_E2E_WORKERS ?? "1");
 const workers = Number.isInteger(requestedWorkers) && requestedWorkers > 0 ? requestedWorkers : 1;
 
 export default defineConfig({
@@ -21,6 +21,7 @@ export default defineConfig({
     { name: "desktop-chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
     { name: "mobile-390", use: { ...devices["iPhone 13"], browserName: "chromium", viewport: { width: 390, height: 844 } } },
     { name: "mobile-320", use: { ...devices["iPhone SE"], browserName: "chromium", viewport: { width: 320, height: 568 } } },
+    { name: "desktop-4k-themes", testMatch: "**/themes.spec.ts", use: { ...devices["Desktop Chrome"], viewport: { width: 3840, height: 2160 } } },
   ],
   webServer: externalBaseUrl ? undefined : {
     command: "npm run dev",

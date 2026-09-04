@@ -3,6 +3,7 @@ declare namespace Cloudflare {
     DB: D1Database;
     ASSETS: Fetcher;
     WORKSPACE_AVATARS: R2Bucket;
+    OKRI_API_TOKEN?: string;
     OKRPTR_API_TOKEN?: string;
     OKITA_API_TOKEN?: string;
     PACE_API_TOKEN?: string;

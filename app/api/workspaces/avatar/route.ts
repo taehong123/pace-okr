@@ -15,10 +15,15 @@ import { BillingLimitError, assertAiBudget } from "@/lib/billing";
 type AvatarRuntimeEnv = typeof env & {
   WORKSPACE_AVATARS?: R2Bucket;
   OPENAI_API_KEY?: string;
+  OKRI_WORKSPACE_AVATAR_MODEL?: string;
   OKRPTR_WORKSPACE_AVATAR_MODEL?: string;
+  OKRI_AI_FREE_BUDGET_WON?: string;
   OKRPTR_AI_FREE_BUDGET_WON?: string;
+  OKRI_AI_MAX_REQUESTS_PER_MINUTE?: string;
   OKRPTR_AI_MAX_REQUESTS_PER_MINUTE?: string;
+  OKRI_AI_MAX_IMAGE_REQUESTS_PER_DAY?: string;
   OKRPTR_AI_MAX_IMAGE_REQUESTS_PER_DAY?: string;
+  OKRI_AI_IMAGE_COST_WON?: string;
   OKRPTR_AI_IMAGE_COST_WON?: string;
 };
 
@@ -81,7 +86,7 @@ export async function POST(request: Request) {
     const apiKey = runtime.OPENAI_API_KEY?.trim();
     if (!apiKey) return Response.json({ error: "AI image generation is not configured" }, { status: 503 });
 
-    const model = runtime.OKRPTR_WORKSPACE_AVATAR_MODEL?.trim() || "gpt-image-2";
+    const model = runtime.OKRI_WORKSPACE_AVATAR_MODEL?.trim() || runtime.OKRPTR_WORKSPACE_AVATAR_MODEL?.trim() || "gpt-image-2";
     const imagePrompt = [
       `Create a polished square team workspace avatar for a productivity app. Workspace name: ${workspace.name}.`,
       prompt ? `Creative direction: ${prompt}.` : "Use a confident, friendly abstract symbol with a distinctive color palette.",
@@ -215,14 +220,14 @@ function imageUsage(data: Record<string, unknown>) {
 
 async function checkImageUsageLimit(runtime: AvatarRuntimeEnv, authorization: RequestAuthorization) {
   const summary = await getAiUsageSummary(authorization.ownerId, authorization.userId);
-  const minuteLimit = positiveNumber(runtime.OKRPTR_AI_MAX_REQUESTS_PER_MINUTE, 5);
+  const minuteLimit = positiveNumber(runtime.OKRI_AI_MAX_REQUESTS_PER_MINUTE ?? runtime.OKRPTR_AI_MAX_REQUESTS_PER_MINUTE, 5);
   if (summary.requestsThisMinute >= minuteLimit) {
     return Response.json({ error: "AI 요청이 너무 빠르게 반복되고 있습니다. 잠시 후 다시 시도해 주세요." }, { status: 429 });
   }
   const dayStart = new Date();
   dayStart.setUTCHours(0, 0, 0, 0);
   const imageRequestsToday = await countAiUsageEvents(authorization.ownerId, authorization.userId, AVATAR_SOURCE, dayStart.toISOString());
-  if (imageRequestsToday >= positiveNumber(runtime.OKRPTR_AI_MAX_IMAGE_REQUESTS_PER_DAY, 5)) {
+  if (imageRequestsToday >= positiveNumber(runtime.OKRI_AI_MAX_IMAGE_REQUESTS_PER_DAY ?? runtime.OKRPTR_AI_MAX_IMAGE_REQUESTS_PER_DAY, 5)) {
     return Response.json({ error: "오늘의 워크스페이스 이미지 생성 횟수를 모두 사용했습니다." }, { status: 429 });
   }
   try {
@@ -238,7 +243,7 @@ async function checkImageUsageLimit(runtime: AvatarRuntimeEnv, authorization: Re
 }
 
 function imageCostWonMicros(runtime: AvatarRuntimeEnv) {
-  return positiveNumber(runtime.OKRPTR_AI_IMAGE_COST_WON, 15) * 1_000_000;
+  return positiveNumber(runtime.OKRI_AI_IMAGE_COST_WON ?? runtime.OKRPTR_AI_IMAGE_COST_WON, 15) * 1_000_000;
 }
 
 function positiveNumber(value: string | undefined, fallback: number) {

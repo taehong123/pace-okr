@@ -1,9 +1,19 @@
+import { WORK_CLASSIFICATION, WORK_FIELDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
+
 const guide = {
-  service: "OKRPTR Codex conversation API",
-  version: "1.1",
+  service: "OKRI Codex conversation API",
+  version: "1.2",
+  quickStart: {
+    classification: WORK_CLASSIFICATION,
+    fields: WORK_FIELDS,
+    workflow: WORKFLOW_INSTRUCTIONS,
+    firstRead: "GET /api/work-context?kind=task|project|routine|objective|key_result|initiative|unsure&query=<short-parent-topic>&memberQuery=<person>",
+    mcp: "prepare_work → one essential clarification only if needed → create_item / create_tasks / create_routine. Skip prepare_work if IDs are already known; do not re-read after a successful save.",
+    note: "prepare_work supplies context, not an LLM classification. The current conversation explains the recommended type and respects the user's choice. Missing optional owner/date values do not block a clear save request.",
+  },
   authentication: {
-    header: "Authorization: Bearer <OKRPTR_ACCESS_TOKEN>",
-    note: "The token is scoped to one OKRPTR workspace. Never print or persist it in source files or logs.",
+    header: "Authorization: Bearer <OKRI_ACCESS_TOKEN>",
+    note: "The token is scoped to one OKRI workspace. Never print or persist it in source files or logs.",
   },
   hierarchy: "OKR: Objective > Key Result > Initiative > Project > Task. Routine is an independent Project-like container and may own Tasks without an Initiative.",
   values: {
@@ -13,6 +23,7 @@ const guide = {
     cadence: ["daily", "weekly", "monthly", "quarterly"],
   },
   endpoints: [
+    { purpose: "One read for work classification criteria, required/optional fields, parent paths, active members, rules, and Project property definitions", method: "GET", path: "/api/work-context?kind=unsure&query=&memberQuery=&includeMembers=true&limit=6" },
     { purpose: "Read workspace name and current role", method: "GET", path: "/api/team" },
     { purpose: "Read shared capture and structure rules", method: "GET", path: "/api/workspace-rules" },
     { purpose: "Update shared rules", method: "PUT", path: "/api/workspace-rules", body: "Any of captureInstruction, structureInstruction, routineInstruction, defaultPriority, defaultCadence, reviewBeforeCreate" },
@@ -56,10 +67,12 @@ const guide = {
     { purpose: "Delete a group after explicit confirmation", method: "DELETE", path: "/api/groups?id=<group-id>", requiresConfirmation: true },
   ],
   behavior: [
-    "Fetch workspace rules before interpreting unstructured work.",
-    "Use the unclassified Task container when no Project or named Routine is known.",
+    "Use work-context once when interpreting new work needs workspace context; it already contains workspace rules. Reuse it within the same conversation and workspace.",
+    "Classify by completion boundary: one action is Task, a finite deliverable containing independent Tasks is Project, recurring execution is Routine. Ask one short question when ambiguous; respect the user's choice.",
+    "Use General only for a clear Task without a known container. A Project without its Initiative remains an unsaved conversation draft; never invent ancestors or silently downgrade it.",
+    "Apply all user-supplied fields in one save. Only ask required gaps, not every optional field. Use the successful write response as confirmation without listing again.",
     "Treat Project templates as body-only copies: never infer or copy properties, assignments, or Tasks from a template.",
-    "For counts, fetch items once and group locally by kind; fetch routines separately.",
+    "List results are bounded: a returned row count is not necessarily the total workspace count. Do not claim completeness without verifying it.",
     "Do not delete cycles, routines, groups, members, or workspace data without immediate user confirmation.",
     "Return concise summaries instead of raw JSON unless raw data is requested.",
   ],

@@ -102,7 +102,7 @@ function escapeSlackText(value: string) {
 
 function slackErrorMessage(code?: string) {
   if (code === "channel_not_found") return "채널을 찾을 수 없습니다. 채널 ID와 봇 초대 여부를 확인해 주세요.";
-  if (code === "not_in_channel") return "OKRPTR 봇을 이 채널에 먼저 초대해 주세요.";
+  if (code === "not_in_channel") return "OKRI 봇을 이 채널에 먼저 초대해 주세요.";
   if (code === "invalid_auth" || code === "token_revoked") return "Slack 연결이 만료되었습니다. 다시 연결해 주세요.";
   if (code === "missing_scope") return "Slack 앱에 메시지 전송 권한이 없습니다. 앱을 다시 연결해 주세요.";
   return `Slack 전송에 실패했습니다${code ? ` (${code})` : ""}`;

@@ -1,4 +1,5 @@
-import { isAllowedChatGptRedirectUri, registerMcpOAuthClient } from "@/lib/mcp-oauth";
+import { registerMcpOAuthClient } from "@/lib/mcp-oauth";
+import { providerLabels, registeredOAuthProvider } from "@/lib/integration-providers";
 
 type RegistrationPayload = {
   redirect_uris?: unknown;
@@ -15,15 +16,17 @@ export async function POST(request: Request) {
   } catch {
     return registrationError("invalid_client_metadata", "Registration metadata must be valid JSON.");
   }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return registrationError("invalid_client_metadata", "Registration metadata must be an object.");
 
   const redirectUris = Array.isArray(payload.redirect_uris)
     ? [...new Set(payload.redirect_uris.filter((entry): entry is string => typeof entry === "string"))]
     : [];
-  if (!redirectUris.length || !redirectUris.every(isAllowedChatGptRedirectUri)) {
-    return registrationError("invalid_redirect_uri", "Only current ChatGPT OAuth callback URLs are allowed.");
+  const provider = registeredOAuthProvider(redirectUris);
+  if (!provider || redirectUris.length > 10 || !Array.isArray(payload.redirect_uris) || payload.redirect_uris.some((uri) => typeof uri !== "string")) {
+    return registrationError("invalid_redirect_uri", "Register callbacks for one supported client: ChatGPT, Claude, or Claude Code loopback.");
   }
   if (payload.token_endpoint_auth_method != null && payload.token_endpoint_auth_method !== "none") {
-    return registrationError("invalid_client_metadata", "OKRPTR supports public OAuth clients with token_endpoint_auth_method=none.");
+    return registrationError("invalid_client_metadata", "OKRI supports public OAuth clients with token_endpoint_auth_method=none.");
   }
   if (Array.isArray(payload.grant_types) && !payload.grant_types.includes("authorization_code")) {
     return registrationError("invalid_client_metadata", "The authorization_code grant is required.");
@@ -34,7 +37,7 @@ export async function POST(request: Request) {
 
   const client = await registerMcpOAuthClient({
     redirectUris,
-    clientName: typeof payload.client_name === "string" ? payload.client_name : "ChatGPT",
+    clientName: typeof payload.client_name === "string" ? payload.client_name : providerLabels[provider],
   });
   return Response.json({
     client_id: client.clientId,

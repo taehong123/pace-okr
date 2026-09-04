@@ -62,7 +62,7 @@ function taskToCalendarEvent(item: Awaited<ReturnType<typeof getItem>>): GoogleC
   return {
     summary: item.title,
     description: [
-      "Created from OKRPTR.",
+      "Created from OKRI.",
       `Status: ${item.status}`,
       `Priority: ${item.priority}`,
       `Progress: ${item.progress}%`,

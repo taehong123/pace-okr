@@ -80,15 +80,15 @@ export function OverlayDialog({
     if (!isTopOverlay(overlayId)) return;
     if (dirty) {
       if (reason === "history" && useHistory) {
-        window.history.pushState({ ...window.history.state, __okrptrOverlay: overlayId }, "", window.location.href);
+        window.history.pushState({ ...window.history.state, __okriOverlay: overlayId }, "", window.location.href);
       }
       setConfirmingDiscard(true);
       return;
     }
     if (dismissPolicy === "critical" && reason === "backdrop") return;
-    if (useHistory && reason !== "history" && window.history.state?.__okrptrOverlay === overlayId) {
+    if (useHistory && reason !== "history" && window.history.state?.__okriOverlay === overlayId) {
       const nextState = { ...window.history.state };
-      delete nextState.__okrptrOverlay;
+      delete nextState.__okriOverlay;
       window.history.replaceState(nextState, "", window.location.href);
     }
     finishClose(reason);
@@ -120,13 +120,13 @@ export function OverlayDialog({
     window.requestAnimationFrame(() => (focusTarget ?? dialog.querySelector<HTMLElement>("button, input, select, textarea, [tabindex]:not([tabindex='-1'])"))?.focus());
 
     if (useHistory) {
-      window.history.pushState({ ...window.history.state, __okrptrOverlay: overlayId }, "", window.location.href);
+      window.history.pushState({ ...window.history.state, __okriOverlay: overlayId }, "", window.location.href);
     }
 
     const handlePopState = () => {
       if (!useHistory) return;
       if (!isTopOverlay(overlayId)) return;
-      if (window.history.state?.__okrptrOverlay === overlayId) return;
+      if (window.history.state?.__okriOverlay === overlayId) return;
       requestCloseRef.current("history");
     };
     window.addEventListener("popstate", handlePopState);
@@ -138,9 +138,9 @@ export function OverlayDialog({
       bodyOverlayCount = Math.max(0, bodyOverlayCount - 1);
       if (bodyOverlayCount === 0) document.body.style.overflow = previousBodyOverflow;
       if (dialog.open) dialog.close();
-      if (window.history.state?.__okrptrOverlay === overlayId) {
+      if (window.history.state?.__okriOverlay === overlayId) {
         const nextState = { ...window.history.state };
-        delete nextState.__okrptrOverlay;
+        delete nextState.__okriOverlay;
         window.history.replaceState(nextState, "", window.location.href);
       }
       returnFocusRef.current?.focus({ preventScroll: true });

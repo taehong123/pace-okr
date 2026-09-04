@@ -39,6 +39,10 @@ export function googleConfigured(runtime: GoogleRuntimeEnv) {
 }
 
 export function googleRedirectUri(runtime: GoogleRuntimeEnv, request: Request) {
+  const requestUrl = new URL(request.url);
+  if (["okri.ai", "okrptr.com"].includes(requestUrl.hostname)) {
+    return new URL("/api/google/callback", requestUrl.origin).toString();
+  }
   return runtime.GOOGLE_OAUTH_REDIRECT_URI || new URL("/api/google/callback", request.url).toString();
 }
 

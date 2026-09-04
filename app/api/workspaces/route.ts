@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     }
     const hostname = new URL(request.url).hostname;
     const name = typeof payload.name === "string" ? payload.name : "";
-    if (hostname !== "localhost" && hostname !== "127.0.0.1" && /^OKRPTR(?:\s+|[-_])QA\b/i.test(name.trim())) {
+    if (hostname !== "localhost" && hostname !== "127.0.0.1" && /^OKRI(?:\s+|[-_])QA\b/i.test(name.trim())) {
       return Response.json({ error: "Test workspace names cannot be created in production" }, { status: 400 });
     }
     const workspace = await createWorkspaceForUser(
@@ -91,7 +91,7 @@ function withWorkspaceCookie(response: Response, workspaceId: string, request: R
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
   headers.append(
     "Set-Cookie",
-    `okrptr_workspace_id=${encodeURIComponent(workspaceId)}; Path=/; HttpOnly${secure}; SameSite=Lax; Max-Age=31536000`,
+    `okri_workspace_id=${encodeURIComponent(workspaceId)}; Path=/; HttpOnly${secure}; SameSite=Lax; Max-Age=31536000`,
   );
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }

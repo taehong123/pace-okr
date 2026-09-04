@@ -3,6 +3,7 @@ import { createExplicitDailyTask, getDailyDashboard, normalizeDailySkipReason, s
 import { getSlackConnectionByTeam } from "@/lib/pace-data";
 import { createSlackMemberLinkUrl, dailyMemberBySlack, externalTaskOptions, openDailyModal, publishDailySubmission, reconcileDailyReminders } from "@/lib/slack-daily";
 import { slackConfigured, verifySlackRequest, type SlackRuntimeEnv } from "@/lib/slack-oauth";
+import { handleSlackProjectInteraction } from "@/lib/slack-project-drafts";
 
 type SlackInteraction = {
   type?: string;
@@ -27,6 +28,13 @@ export async function POST(request: Request) {
   const encoded = new URLSearchParams(rawBody).get("payload") ?? "{}";
   let payload: SlackInteraction;
   try { payload = JSON.parse(encoded) as SlackInteraction; } catch { return new Response("invalid payload", { status: 400 }); }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return new Response("invalid payload", { status: 400 });
+  const projectResponse = await handleSlackProjectInteraction(payload);
+  if (projectResponse) return projectResponse;
+  if (payload?.type === "block_actions" && payload.actions?.length === 1
+    && ["okri_summon_link", "okri_summon_open", "okrptr_summon_link", "okrptr_summon_open"].includes(payload.actions[0].action_id ?? "")) {
+    return new Response(null, { status: 200 });
+  }
   const teamId = payload.team?.id ?? "";
   const slackUserId = payload.user?.id ?? "";
   const connection = teamId ? await getSlackConnectionByTeam(teamId) : null;
@@ -34,7 +42,7 @@ export async function POST(request: Request) {
   const linked = await dailyMemberBySlack(teamId, slackUserId);
   if (!linked) {
     const link = await createSlackMemberLinkUrl(connection.ownerId, teamId, slackUserId, request);
-    return Response.json({ response_type: "ephemeral", text: `OKRPTR 계정을 먼저 연결해 주세요: ${link}` });
+    return Response.json({ response_type: "ephemeral", text: `OKRI 계정을 먼저 연결해 주세요: ${link}` });
   }
 
   if (payload.type === "block_suggestion") {

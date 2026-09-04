@@ -523,14 +523,14 @@ test("adds routine execution guide fields", async () => {
   db.exec(`
     UPDATE routines
     SET trigger_point = '오전 9시',
-        action_place = 'OKRPTR 작업 탭',
+        action_place = 'OKRI 작업 탭',
         action_steps = '인박스를 비우고 오늘 집중할 Task를 고른다'
     WHERE id = 'routine'
   `);
 
   assert.deepEqual({ ...db.prepare("SELECT trigger_point, action_place, action_steps FROM routines WHERE id = 'routine'").get() }, {
     trigger_point: "오전 9시",
-    action_place: "OKRPTR 작업 탭",
+    action_place: "OKRI 작업 탭",
     action_steps: "인박스를 비우고 오늘 집중할 Task를 고른다",
   });
   db.close();
@@ -667,7 +667,7 @@ test("creates Slack bot connection and OAuth state tables", async () => {
   db.close();
 });
 
-test("keeps the latest Slack connection while enforcing one team per OKRPTR workspace", async () => {
+test("keeps the latest Slack connection while enforcing one team per OKRI workspace", async () => {
   const db = new DatabaseSync(":memory:");
   const [baseMigration, workspaceIsolation] = await Promise.all([
     readFile(new URL("../drizzle/0012_parallel_vindicator.sql", import.meta.url), "utf8"),
@@ -703,7 +703,7 @@ test("creates revocable workspace-scoped integration tokens", async () => {
   db.exec(`
     INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
     INSERT INTO integration_tokens (id, workspace_id, user_id, name, token_hash, token_prefix)
-      VALUES ('token', 'workspace', 'owner', 'Codex conversation', 'hash', 'okrptr_123...');
+      VALUES ('token', 'workspace', 'owner', 'Codex conversation', 'hash', 'okri_123...');
   `);
 
   assert.deepEqual({ ...db.prepare("SELECT workspace_id, user_id, last_used_at, revoked_at FROM integration_tokens WHERE id = 'token'").get() }, {
@@ -713,7 +713,7 @@ test("creates revocable workspace-scoped integration tokens", async () => {
     revoked_at: null,
   });
   assert.throws(
-    () => db.exec("INSERT INTO integration_tokens (id, workspace_id, user_id, token_hash, token_prefix) VALUES ('duplicate', 'workspace', 'owner', 'hash', 'okrptr_456...')"),
+    () => db.exec("INSERT INTO integration_tokens (id, workspace_id, user_id, token_hash, token_prefix) VALUES ('duplicate', 'workspace', 'owner', 'hash', 'okri_456...')"),
     /UNIQUE/i,
   );
   db.exec("UPDATE integration_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE id = 'token'");
@@ -736,7 +736,7 @@ test("creates ChatGPT OAuth DCR clients and single-use PKCE authorization codes"
     ) VALUES (
       'hash', '{"ownerId":"workspace","userId":"owner","role":"owner"}', 'client',
       'https://chatgpt.com/connector_platform_oauth_redirect', 'challenge',
-      'https://okrptr.com/api/mcp', 'okrptr:read okrptr:write', '2099-01-01T00:00:00.000Z'
+      'https://okri.ai/api/mcp', 'okri:read okri:write', '2099-01-01T00:00:00.000Z'
     );
   `);
 
@@ -1064,7 +1064,7 @@ test("adds member daily drafts, immutable submissions, and Slack daily delivery 
       VALUES ('channel', 'workspace', 'C123', 'daily');
     INSERT INTO slack_daily_reminders
       (id, owner_id, member_id, slack_user_id, dm_channel_id, scheduled_message_id, post_at, block_id)
-      VALUES ('reminder', 'workspace', 'member-1', 'U123', 'D123', 'Q123', 1788120000, 'okrptr_daily_reminder:1');
+      VALUES ('reminder', 'workspace', 'member-1', 'U123', 'D123', 'Q123', 1788120000, 'okri_daily_reminder:1');
     INSERT INTO slack_daily_publications
       (id, owner_id, member_id, submission_id, scrum_date, channel_id)
       VALUES ('publication', 'workspace', 'member-1', 'submission-v2', '2026-08-30', 'C123');

@@ -26,12 +26,12 @@ export async function GET(request: Request) {
   const statusMessage = state === "service_unavailable"
     ? "Slack 연결을 잠시 사용할 수 없습니다. 서비스 설정을 확인해 주세요."
     : state === "workspace_disconnected"
-      ? "Owner 또는 Admin이 이 OKRPTR 워크스페이스에 사용할 Slack을 연결할 수 있습니다."
+      ? "Owner 또는 Admin이 이 OKRI 워크스페이스에 사용할 Slack을 연결할 수 있습니다."
       : state === "reauthorization_required"
         ? "데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요."
         : state === "setup_required"
-          ? "OKRPTR 연결이 완료되었습니다. 데일리 발송 설정을 완료해 주세요."
-          : "OKRPTR 연결이 완료되었습니다.";
+          ? "OKRI 연결이 완료되었습니다. 데일리 발송 설정을 완료해 주세요."
+          : "OKRI 연결이 완료되었습니다.";
   return Response.json({
     slack: {
       ...serializeSlackConnection(connection, {

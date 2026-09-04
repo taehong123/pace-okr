@@ -225,6 +225,34 @@
       "when": 1788811200000,
       "tag": "0033_workspace_management_bot",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1788331485070,
+      "tag": "0035_ai_connections",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1788334450111,
+      "tag": "0036_workspace_backups",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1788335244375,
+      "tag": "0037_restore_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1788337916214,
+      "tag": "0038_slack_summon_drafts",
+      "breakpoints": true
     }
   ]
 }

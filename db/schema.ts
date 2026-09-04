@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const workspaces = sqliteTable(
   "workspaces",
@@ -32,6 +32,49 @@ export const appMigrations = sqliteTable(
     appliedAt: text("applied_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
 );
+
+export const workspaceBackupState = sqliteTable("workspace_backup_state", {
+  ownerId: text("owner_id").primaryKey(),
+  revision: integer("revision").notNull().default(0),
+  lastDailyDate: text("last_daily_date"),
+  lastSuccessAt: text("last_success_at"),
+  lastAttemptAt: text("last_attempt_at"),
+  lastError: text("last_error"),
+  leaseToken: text("lease_token"),
+  leaseUntil: text("lease_until"),
+});
+
+// Metadata outlives workspace deletion until the separate R2 objects are purged.
+export const workspaceBackups = sqliteTable("workspace_backups", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  objectKey: text("object_key").notNull(),
+  reason: text("reason").notNull(),
+  status: text("status").notNull().default("pending"),
+  schemaVersion: integer("schema_version").notNull().default(1),
+  checksum: text("checksum").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  summary: text("summary").notNull(),
+  createdByUserId: text("created_by_user_id"),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+}, (table) => [
+  index("idx_workspace_backups_owner_created").on(table.ownerId, table.createdAt),
+  index("idx_workspace_backups_expires").on(table.expiresAt),
+]);
+
+export const workspaceBackupGuards = sqliteTable("workspace_backup_guards", {
+  id: text("id").primaryKey(),
+  verified: integer("verified").notNull(),
+}, (table) => [check("workspace_backup_guard_verified", sql`${table.verified} = 1`)]);
+
+export const workspaceRestoreLinks = sqliteTable("workspace_restore_links", {
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  tableName: text("table_name").notNull(),
+  rowId: text("row_id").notNull(),
+  payload: text("payload").notNull(),
+  expiresAt: text("expires_at").notNull(),
+}, (table) => [uniqueIndex("idx_workspace_restore_links_unique").on(table.ownerId, table.tableName, table.rowId)]);
 
 export const users = sqliteTable(
   "users",
@@ -207,6 +250,8 @@ export const integrationTokens = sqliteTable(
     workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
     userId: text("user_id").notNull(),
     name: text("name").notNull().default("Codex"),
+    provider: text("provider", { enum: ["chatgpt", "claude", "claude_code", "other"] }),
+    scopes: text("scopes"),
     tokenHash: text("token_hash").notNull(),
     tokenPrefix: text("token_prefix").notNull(),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -244,6 +289,21 @@ export const mcpOAuthClients = sqliteTable(
     clientName: text("client_name").notNull().default("ChatGPT"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
+);
+
+export const mcpOAuthApprovals = sqliteTable(
+  "mcp_oauth_approvals",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    requestJson: text("request_json").notNull(),
+    csrfHash: text("csrf_hash").notNull(),
+    createdAt: text("created_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    usedAt: text("used_at"),
+  },
+  (table) => [index("idx_mcp_oauth_approvals_expires").on(table.expiresAt)],
 );
 
 export const mcpOAuthCodes = sqliteTable(
@@ -968,6 +1028,36 @@ export const slackEventReceipts = sqliteTable(
     receivedAt: text("received_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [index("idx_slack_event_receipts_received").on(table.receivedAt)],
+);
+
+export const slackProjectDrafts = sqliteTable(
+  "slack_project_drafts",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    teamId: text("team_id").notNull(),
+    slackUserId: text("slack_user_id").notNull(),
+    userId: text("user_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    messageTs: text("message_ts").notNull(),
+    threadTs: text("thread_ts"),
+    sourceRef: text("source_ref").notNull(),
+    seedJson: text("seed_json").notNull(),
+    formJson: text("form_json").notNull().default("{}"),
+    inputJson: text("input_json").notNull().default("{}"),
+    status: text("status").notNull().default("draft"),
+    viewId: text("view_id"),
+    operationId: text("operation_id"),
+    itemId: text("item_id"),
+    lastError: text("last_error").notNull().default(""),
+    expiresAt: text("expires_at").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_slack_project_drafts_source").on(table.ownerId, table.sourceRef),
+    index("idx_slack_project_drafts_expiry").on(table.expiresAt),
+  ],
 );
 
 export const slackLinkTokens = sqliteTable(

@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     const result = await acceptWorkspaceInvitation(authorization, token);
     return Response.json(result, {
       headers: {
-        "Set-Cookie": `okrptr_workspace_id=${encodeURIComponent(result.workspaceId)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 365}`,
+        "Set-Cookie": `okri_workspace_id=${encodeURIComponent(result.workspaceId)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${60 * 60 * 24 * 365}`,
       },
     });
   } catch (error) {

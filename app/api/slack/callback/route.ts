@@ -22,7 +22,7 @@ async function handleSlackCallback(request: Request) {
 
   if (!state) return redirectWithSlackStatus(request, returnTo, "oauth_exchange_failed");
   const callbackHeaders = new Headers(request.headers);
-  callbackHeaders.set("x-okrptr-workspace-id", state.ownerId);
+  callbackHeaders.set("x-okri-workspace-id", state.ownerId);
   const callbackRequest = new Request(request.url, { method: "GET", headers: callbackHeaders });
   const callbackAuthorization = await authorizeRequest(callbackRequest, { allowViewerWrite: true });
   const stateStillAuthorized = await hasWorkspaceAdminAccess(state.ownerId, state.userId);

@@ -26,7 +26,7 @@ const cacheVersion = precacheUrls
   ?.match(/index-([A-Za-z0-9_-]+)\.js$/)?.[1] ?? "v4";
 const serviceWorkerTemplate = await readFile(join(process.cwd(), "public", "sw.js"), "utf8");
 const serviceWorker = serviceWorkerTemplate
-  .replace(/const CACHE_NAME = "[^"]+"; \/\/ build:cache/, `const CACHE_NAME = "okrptr-assets-${cacheVersion}"; // build:cache`)
+  .replace(/const CACHE_NAME = "[^"]+"; \/\/ build:cache/, `const CACHE_NAME = "okri-assets-${cacheVersion}"; // build:cache`)
   .replace(
     /const PRECACHE_URLS = \[[^;]*\]; \/\/ build:precache/,
     `const PRECACHE_URLS = ${JSON.stringify(precacheUrls)}; // build:precache`,

@@ -1,11 +1,12 @@
 import { env } from "cloudflare:workers";
 import { createIntegrationToken, type RequestAuthorization } from "@/lib/pace-data";
 import { mcpResourceUrl, oauthIssuer } from "@/lib/mcp-oauth-metadata";
+import { matchesOAuthRedirect, oauthProviderForRedirect, providerLabels, registeredOAuthProvider } from "@/lib/integration-providers";
 
 export { mcpResourceUrl, oauthIssuer };
 
 const OAUTH_CODE_TTL_MS = 5 * 60 * 1000;
-const ALLOWED_SCOPES = new Set(["okrptr:read", "okrptr:write"]);
+const ALLOWED_SCOPES = new Set(["okri:read", "okri:write", "okrptr:read", "okrptr:write"]);
 
 type McpOAuthClientRow = {
   client_id: string;
@@ -36,21 +37,18 @@ export type McpOAuthClient = {
 let oauthSchemaReady: Promise<void> | null = null;
 
 export function normalizeOAuthScope(value: string | null | undefined) {
-  const requested = (value ?? "okrptr:read okrptr:write").split(/\s+/).filter(Boolean);
+  const requested = (value ?? "okri:read okri:write").split(/\s+/).filter(Boolean);
   const scopes = [...new Set(requested.filter((scope) => ALLOWED_SCOPES.has(scope)))];
   return scopes.length ? scopes.join(" ") : "";
 }
 
 export function isAllowedChatGptRedirectUri(value: string) {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && url.hostname === "chatgpt.com" && (
-      url.pathname === "/connector_platform_oauth_redirect"
-      || url.pathname.startsWith("/connector/oauth/")
-    );
-  } catch {
-    return false;
-  }
+  return oauthProviderForRedirect(value) === "chatgpt";
+}
+
+// Never expand a previously approved scope when a member's role changes.
+export function limitOAuthScopeForRole(scope: string, role: RequestAuthorization["role"]) {
+  return scope.split(/\s+/).filter((entry) => entry && (role !== "viewer" || !["okri:write", "okrptr:write"].includes(entry))).join(" ");
 }
 
 export async function registerMcpOAuthClient(input: {
@@ -58,7 +56,9 @@ export async function registerMcpOAuthClient(input: {
   clientName?: string;
 }) {
   await ensureMcpOAuthSchema();
-  const clientId = `okrptr_chatgpt_${randomHex(24)}`;
+  const provider = registeredOAuthProvider(input.redirectUris);
+  if (!provider) throw new Error("invalid_redirect_uri");
+  const clientId = `okri_${provider}_${randomHex(24)}`;
   const createdAt = new Date().toISOString();
   await database().prepare(`
     INSERT INTO mcp_oauth_clients (client_id, redirect_uris, client_name, created_at)
@@ -95,7 +95,9 @@ export async function createMcpOAuthAuthorizationCode(
   },
 ) {
   await ensureMcpOAuthSchema();
-  const code = `okrptr_oauth_code_${randomHex(32)}`;
+  const scope = limitOAuthScopeForRole(input.scope, authorization.role);
+  if (!scope) throw new Error("invalid_scope");
+  const code = `okri_oauth_code_${randomHex(32)}`;
   const now = new Date();
   await database().prepare(`
     INSERT INTO mcp_oauth_codes (
@@ -109,7 +111,7 @@ export async function createMcpOAuthAuthorizationCode(
     input.redirectUri,
     input.codeChallenge,
     input.resource,
-    input.scope,
+    scope,
     now.toISOString(),
     new Date(now.getTime() + OAUTH_CODE_TTL_MS).toISOString(),
   ).run();
@@ -145,6 +147,9 @@ export async function exchangeMcpOAuthAuthorizationCode(input: {
     throw new Error("invalid_grant");
   }
   if (!authorization.ownerId || !authorization.userId || !authorization.role) throw new Error("invalid_grant");
+  const client = await getMcpOAuthClient(input.clientId);
+  const provider = oauthProviderForRedirect(row.redirect_uri);
+  if (!client || !provider || !matchesOAuthRedirect(client.redirectUris, row.redirect_uri)) throw new Error("invalid_grant");
 
   const consumedAt = new Date().toISOString();
   const consumed = await database().prepare(`
@@ -154,7 +159,7 @@ export async function exchangeMcpOAuthAuthorizationCode(input: {
   `).bind(consumedAt, codeHash, consumedAt).run();
   if ((consumed.meta.changes ?? 0) !== 1) throw new Error("invalid_grant");
 
-  const { token } = await createIntegrationToken({ ...authorization, apiToken: false }, "ChatGPT OAuth");
+  const { token } = await createIntegrationToken({ ...authorization, apiToken: false }, `${providerLabels[provider]} OAuth`, provider, row.scope);
   return { accessToken: token, scope: row.scope };
 }
 

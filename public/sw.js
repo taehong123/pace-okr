@@ -1,4 +1,4 @@
-const CACHE_NAME = "okrptr-assets-v4"; // build:cache
+const CACHE_NAME = "okri-assets-v4"; // build:cache
 const PRECACHE_URLS = ["/"]; // build:precache
 
 self.addEventListener("install", (event) => {

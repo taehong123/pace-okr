@@ -1,11 +1,7 @@
-import { clearGoogleSessionCookie } from "@/lib/google-session";
+import { clearGoogleSessionCookies } from "@/lib/google-session";
 
 export async function GET(request: Request) {
-  return new Response(null, {
-    status: 303,
-    headers: {
-      Location: new URL("/?signedOut=1", request.url).toString(),
-      "Set-Cookie": clearGoogleSessionCookie(),
-    },
-  });
+  const headers = new Headers({ Location: new URL("/?signedOut=1", request.url).toString() });
+  for (const cookie of clearGoogleSessionCookies()) headers.append("Set-Cookie", cookie);
+  return new Response(null, { status: 303, headers });
 }

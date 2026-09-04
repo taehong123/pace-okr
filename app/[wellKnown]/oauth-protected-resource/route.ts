@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     {
       resource: mcpResourceUrl(request),
       authorization_servers: [oauthIssuer(request)],
-      scopes_supported: ["okrptr:read", "okrptr:write"],
+      scopes_supported: ["okri:read", "okri:write"],
       bearer_methods_supported: ["header"],
       resource_documentation: `${oauthIssuer(request)}/#integrations`,
     },

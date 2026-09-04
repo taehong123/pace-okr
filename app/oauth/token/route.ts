@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   const codeVerifier = body.get("code_verifier") ?? "";
   const resource = body.get("resource") ?? "";
   if (!code || !clientId || !redirectUri || !codeVerifier || resource !== mcpResourceUrl(request)) {
-    return tokenError("invalid_request", "code, client_id, redirect_uri, code_verifier, and the OKRPTR resource are required.");
+    return tokenError("invalid_request", "code, client_id, redirect_uri, code_verifier, and the OKRI resource are required.");
   }
 
   try {
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     const oauthError = error instanceof Error && error.message === "invalid_grant" ? "invalid_grant" : "server_error";
     return tokenError(oauthError, oauthError === "invalid_grant"
       ? "The authorization code is invalid, expired, already used, or failed PKCE verification."
-      : "OKRPTR could not complete the token exchange.", oauthError === "server_error" ? 500 : 400);
+      : "OKRI could not complete the token exchange.", oauthError === "server_error" ? 500 : 400);
   }
 }
 

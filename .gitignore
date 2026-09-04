@@ -44,9 +44,12 @@ yarn-error.log*
 /.codex-remote-attachments/
 /.deploy-*/
 /.sites-*/
+/.sites-*.tar
 /.validate-*/
 /.verify-*/
 /test-results/
 /debug.log
 /okrptr-*.tar.gz
+/okri-*.tar.gz
+/*.patch
 /%SystemDrive%/

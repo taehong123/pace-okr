@@ -1,24 +1,25 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
+import ts from "typescript";
 
 const projectRoot = new URL("../", import.meta.url);
 
-test("brands connection completion as OKRPTR while preserving workspace names", async () => {
+test("brands connection completion as OKRI while preserving workspace names", async () => {
   const [promptRoute, slackStatus, page] = await Promise.all([
     readFile(new URL("../app/api/integration-tokens/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/status/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
   ]);
-  assert.match(promptRoute, /연결 서비스: OKRPTR/);
-  assert.match(promptRoute, /실제 연결 확인에 성공한 경우 완료 안내는 'OKRPTR 연결이 완료되었습니다\.'/);
+  assert.match(promptRoute, /연결 서비스: OKRI/);
+  assert.match(promptRoute, /실제 연결 확인에 성공한 경우 완료 안내는 'OKRI 연결이 완료되었습니다\.'/);
   assert.match(promptRoute, /연결된 워크스페이스: …/);
   assert.match(promptRoute, /확인에 실패하면 완료로 안내하지 않습니다/);
   assert.match(promptRoute, /워크스페이스: \$\{workspaceName\}/);
-  assert.match(slackStatus, /OKRPTR 연결이 완료되었습니다\./);
+  assert.match(slackStatus, /OKRI 연결이 완료되었습니다\./);
   assert.doesNotMatch(slackStatus, /\$\{connection\?\.teamName[^\n]*연결/);
   assert.match(slackStatus, /connectedTeam: connection \? \{ id: connection\.teamId, name: connection\.teamName \}/);
-  assert.match(page, /<b>OKRPTR 연결 완료<\/b>/);
+  assert.match(page, /<b>OKRI 연결 완료<\/b>/);
   assert.match(page, /연결된 Slack 워크스페이스: \{teamName\}/);
   assert.doesNotMatch(page, /\{teamName\} 연결 완료/);
 });
@@ -63,7 +64,7 @@ async function renderAsset(path) {
   );
 }
 
-test("server-renders the OKRPTR application loading shell", async () => {
+test("server-renders the OKRI application loading shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
@@ -71,8 +72,8 @@ test("server-renders the OKRPTR application loading shell", async () => {
   assert.equal(response.headers.get("cloudflare-cdn-cache-control"), "no-cache, must-revalidate");
 
   const html = await response.text();
-  assert.match(html, /<title>OKRPTR - 목표를 오늘의 실행으로<\/title>/);
-  assert.match(html, /OKRPTR/);
+  assert.match(html, /<title>OKRI - 목표를 오늘의 실행으로<\/title>/);
+  assert.match(html, /OKRI/);
   assert.match(html, /app-loading-shell/);
   assert.match(html, /목표와 실행을 준비하고 있습니다/);
   assert.match(html, /워크스페이스와 오늘의 할 일을 불러오는 중입니다/);
@@ -88,7 +89,7 @@ test("serves ChatGPT OAuth discovery metadata from well-known URLs", async () =>
   assert.deepEqual(await protectedResourceResponse.json(), {
     resource: "http://localhost/api/mcp",
     authorization_servers: ["http://localhost"],
-    scopes_supported: ["okrptr:read", "okrptr:write"],
+    scopes_supported: ["okri:read", "okri:write"],
     bearer_methods_supported: ["header"],
     resource_documentation: "http://localhost/#integrations",
   });
@@ -100,6 +101,18 @@ test("serves ChatGPT OAuth discovery metadata from well-known URLs", async () =>
   assert.equal(authorizationServer.registration_endpoint, "http://localhost/oauth/register");
   assert.deepEqual(authorizationServer.code_challenge_methods_supported, ["S256"]);
   assert.deepEqual(authorizationServer.token_endpoint_auth_methods_supported, ["none"]);
+});
+
+test("Google OAuth keeps callback cookies on both official domains", async () => {
+  const source = await readFile(new URL("../lib/google-oauth.ts", import.meta.url), "utf8");
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+  }).outputText;
+  const oauthModule = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+  const runtime = { GOOGLE_OAUTH_REDIRECT_URI: "https://okri.ai/api/google/callback" };
+  assert.equal(oauthModule.googleRedirectUri(runtime, new Request("https://okri.ai/api/auth/google")), "https://okri.ai/api/google/callback");
+  assert.equal(oauthModule.googleRedirectUri(runtime, new Request("https://okrptr.com/api/auth/google")), "https://okrptr.com/api/google/callback");
+  assert.equal(oauthModule.googleRedirectUri(runtime, new Request("http://localhost/api/auth/google")), "https://okri.ai/api/google/callback");
 });
 
 test("ships product metadata and removes starter assets", async () => {
@@ -138,7 +151,9 @@ test("ships product metadata and removes starter assets", async () => {
 
   assert.match(layout, /openGraph/);
   assert.doesNotMatch(layout, /\/og\.png/);
-  assert.match(page, /ChatGPT 연결 문구 복사/);
+  const aiConnections = await readFile(new URL("../app/ai-connections.tsx", import.meta.url), "utf8");
+  assert.match(page, /AIConnectionsDialog/);
+  assert.match(aiConnections, /ChatGPT 연결 문구 복사/);
   assert.match(page, /개인 앱 연동/);
   assert.match(page, /mobile-navigation/);
   assert.match(page, /workspace-mobile-home/);
@@ -188,7 +203,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(avatarRoute, /quality: "low"/);
   assert.match(avatarRoute, /output_format: "webp"/);
   assert.match(avatarRoute, /verifiedImageType/);
-  assert.match(avatarRoute, /OKRPTR_AI_MAX_IMAGE_REQUESTS_PER_DAY/);
+  assert.match(avatarRoute, /OKRI_AI_MAX_IMAGE_REQUESTS_PER_DAY/);
   assert.match(schema, /avatarKey: text\("avatar_key"\)/);
   assert.match(hosting, /"r2": "WORKSPACE_AVATARS"/);
   assert.match(page, /삭제 예정/);
@@ -200,20 +215,20 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(workspaceRoute, /Test workspace names cannot be created in production/);
   assert.match(page, /permanentlyDeleteWorkspace/);
   assert.match(bootstrapRoute, /Cache-Control": "no-store"/);
-  assert.match(bootstrapRoute, /okrptr_workspace_id/);
+  assert.match(bootstrapRoute, /okri_workspace_id/);
   assert.doesNotMatch(page, /OAuth Redirect URL|Slash Command URL/);
   assert.match(page, /연결 관리/);
-  assert.match(page, /연결됨/);
-  assert.match(page, /연결 대기/);
-  assert.match(page, /연결 없음/);
-  assert.match(page, /발급된 연결 키/);
-  assert.match(page, /lastUsedAt/);
+  assert.match(aiConnections, /연결됨/);
+  assert.match(aiConnections, /연결 대기/);
+  assert.match(aiConnections, /연결 없음/);
+  assert.match(aiConnections, /발급된 연결 키/);
+  assert.match(aiConnections, /lastUsedAt/);
   assert.doesNotMatch(page, /<span>ChatGPT 연동<\/span><i/);
   assert.doesNotMatch(page, /revoke-link/);
-  assert.match(page, /\/api\/integration-tokens/);
+  assert.match(aiConnections, /\/api\/integration-tokens/);
   assert.match(page, /\/api\/okr-organize/);
-  assert.match(page, /현재 OKR과 실행 상황을 읽고/);
-  assert.match(page, /필요한 다음 질문부터 이어갑니다/);
+  assert.match(page, /기존 OKR과 업무를 참고해/);
+  assert.match(page, /referencesOpen && targetCandidates.length > 0/);
   assert.match(page, /답변 중/);
   assert.match(page, /보내기/);
   assert.match(page, /Objective 1개.*KR/);
@@ -234,15 +249,13 @@ test("ships product metadata and removes starter assets", async () => {
   assert.doesNotMatch(page, /첫 Project를 만들어볼까요\?/);
   assert.match(page, /mode === "project"/);
   assert.match(page, /my_work: "내 업무"/);
-  assert.match(layout, /okrptr\.theme/);
-  assert.match(page, /type ThemeMode = "beige" \| "gray" \| "dark"/);
-  assert.match(page, /베이지.*그레이.*다크/s);
-  assert.match(page, /theme-picker/);
+  assert.match(layout, /themeBootstrapScript/);
+  assert.match(page, /type ThemeMode.*from "@\/lib\/themes"/);
+  assert.match(page, /ThemePicker value=\{themeMode\}/);
   assert.match(page, /chat-send-button/);
   assert.match(page, /메시지 보내기/);
-  assert.match(globals, /--paper: #f3f2ee/);
-  assert.match(globals, /html\[data-theme="gray"\]/);
-  assert.match(globals, /html\[data-theme="dark"\]/);
+  assert.match(globals, /var\(--button-primary-bg\)/);
+  assert.match(globals, /var\(--button-primary-fg\)/);
   const myWorkView = page.match(/function MyWorkView[\s\S]*?function MyWorkSection/)?.[0] ?? "";
   assert.ok(
     myWorkView.indexOf('title="Task"') < myWorkView.indexOf('title="Project"')
@@ -256,18 +269,18 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(okrOrganizeRoute, /UI will require the user to choose an existing Initiative before saving/);
   assert.match(okrOrganizeRoute, /Always answer in the user's language/);
   assert.match(okrOrganizeRoute, /leave every plan field empty/);
-  assert.match(page, /팀 OKR/);
-  assert.match(page, /개인 OKR/);
+  assert.doesNotMatch(page, /className="chat-presets"/);
+  assert.doesNotMatch(page, /className="assistant-example"/);
   assert.doesNotMatch(page, /루틴부터/);
-  assert.match(page, /Routine 도우미/);
-  assert.match(page, /브라우저 제어가 가능한 ChatGPT 대화/);
-  assert.match(integrationRoute, /현재 로그인된 내 ChatGPT 계정에 아래 OKRPTR MCP를 개인 연결로 지금 추가해 주세요/);
+  assert.match(page, /언제 무엇을 반복할지 설명해 주세요/);
+  assert.match(aiConnections, /브라우저 제어가 가능한 대화/);
+  assert.match(integrationRoute, /현재 로그인된 내 ChatGPT 계정에 아래 OKRI MCP를 개인 연결로 지금 추가해 주세요/);
   assert.match(integrationRoute, /최종 실행 지시이자 명시적 사전 승인/);
   assert.match(integrationRoute, /'진행할까요\?' 같은 재확인 질문도 하지 마세요/);
   assert.match(integrationRoute, /OAuth 2\.1 메타데이터와 DCR, S256 PKCE 흐름/);
-  assert.doesNotMatch(integrationRoute, /OKRPTR_ACCESS_TOKEN|Authorization: Bearer <OKRPTR_ACCESS_TOKEN>/);
+  assert.doesNotMatch(integrationRoute, /OKRI_ACCESS_TOKEN|Authorization: Bearer <OKRI_ACCESS_TOKEN>/);
   assert.match(integrationRoute, /같은 내용을 대화로 다시 묻지 않습니다/);
-  assert.doesNotMatch(integrationRoute, /OKRPTR 연결을 계속할까요\?/);
+  assert.doesNotMatch(integrationRoute, /OKRI 연결을 계속할까요\?/);
   assert.match(integrationRoute, /로그인, 계정 선택, 2단계 인증 또는 CAPTCHA/);
   assert.match(protectedResourceRoute, /authorization_servers/);
   assert.match(authorizationServerRoute, /registration_endpoint/);
@@ -297,7 +310,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /트리거 포인트/);
   assert.match(page, /무엇을 어떻게/);
   assert.match(page, /연결 해제/);
-  assert.match(page, /Objective → Key Result → Initiative → Project → Task \/ Routine → Task/);
+  assert.match(aiConnections, /ChatGPT \/ Claude \/ Claude Code|"chatgpt", "claude", "claude_code"/);
   assert.match(page, /taskParent/);
   assert.match(page, /parentId: projectItem\.id/);
   assert.match(page, /routineId: routine\.id/);
@@ -326,7 +339,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.doesNotMatch(page, /accounts\.google\.com\/o\/oauth2\/v2\/auth/);
   assert.match(page, /\/api\/auth\/google\?returnTo=/);
   assert.match(page, /\/api\/bootstrap/);
-  assert.match(page, /__OKRPTR_BOOTSTRAP_REQUEST__/);
+  assert.match(page, /__OKRI_BOOTSTRAP_REQUEST__/);
   assert.match(page, /fetchBootstrapPayload/);
   assert.doesNotMatch(page, /scope=shell|scope=data/);
   assert.match(page, /workspaceDataState/);
@@ -402,7 +415,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(googleCallbackRoute, /"Set-Cookie": await createGoogleSessionCookie/);
   assert.match(googleCallbackRoute, /const headers = new Headers/);
   assert.match(googleCallbackRoute, /return new Response\(null, \{ status: 303, headers \}\)/);
-  assert.match(logoutRoute, /"Set-Cookie": clearGoogleSessionCookie/);
+  assert.match(logoutRoute, /clearGoogleSessionCookies/);
+  assert.match(logoutRoute, /headers\.append\("Set-Cookie", cookie\)/);
   assert.match(paceData, /canonicalUserIdForGoogle/);
   assert.doesNotMatch(paceData, /oai-authenticated-user/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
@@ -423,7 +437,7 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   ]);
 
   assert.doesNotMatch(layout, /next\/headers|await headers\(\)/);
-  assert.match(layout, /__OKRPTR_BOOTSTRAP_REQUEST__/);
+  assert.match(layout, /__OKRI_BOOTSTRAP_REQUEST__/);
   assert.match(layout, /serviceWorker\.register\("\/sw\.js"/);
   assert.match(viteConfig, /prerender:\s*\{\s*routes:\s*"\*"\s*\}/);
   assert.match(viteConfig, /idle Worker does not add a cold start before the first paint/);
@@ -435,7 +449,7 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   assert.doesNotMatch(layout, /Geist_Mono|font-geist-mono/);
   assert.doesNotMatch(paceData, /LEFT JOIN workspace_members AS member ON 1 = 0/);
   assert.match(paceData, /deletion_requested_by_user_id[\s\S]*FROM workspaces[\s\S]*LIMIT 0/);
-  assert.match(staticHtml, /__OKRPTR_BOOTSTRAP_REQUEST__/);
+  assert.match(staticHtml, /__OKRI_BOOTSTRAP_REQUEST__/);
   assert.match(staticHtml, /app-loading-shell/);
   assert.match(worker, /Cloudflare-CDN-Cache-Control/);
   assert.match(worker, /pathname\.startsWith\("\/_next\/static\/"\)/);
@@ -453,7 +467,7 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   const indexAsset = staticHtml.match(/\/_next\/static\/chunks\/index-[A-Za-z0-9_-]+\.js/)?.[0];
   assert.ok(indexAsset);
   assert.match(generatedServiceWorker, new RegExp(indexAsset.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(generatedServiceWorker, /const CACHE_NAME = "okrptr-assets-[A-Za-z0-9_-]+"; \/\/ build:cache/);
+  assert.match(generatedServiceWorker, /const CACHE_NAME = "okri-assets-[A-Za-z0-9_-]+"; \/\/ build:cache/);
 });
 
 test("ships atomic OKR file editing and safe Project recovery contracts", async () => {
@@ -559,13 +573,13 @@ test("ships workspace plans, fail-closed Payple billing, and one billing screen"
   assert.match(billing, /priorClaim.*billing_trial_claims/s);
   assert.match(billing, /\[1, 3, 5, 7\]/);
   assert.match(billing, /UPDATE billing_sessions SET used_at = \?/);
-  assert.match(billing, /okrptr-reactivate-.*stableTimestamp/s);
+  assert.match(billing, /okri-reactivate-.*stableTimestamp/s);
   assert.match(billing, /BILLING_ENFORCEMENT_STARTED_AT/);
   assert.match(statusRoute, /getBillingStatus/);
   assert.match(sessionRoute, /payload\?\.contractAccepted === true/);
   assert.match(internalRoute, /verifyInternalBillingRequest/);
   assert.match(workflow, /schedule:/);
-  assert.match(workflow, /x-okrptr-signature/);
+  assert.match(workflow, /x-okri-signature/);
   assert.match(terms, /Free 0원, Team 11,000원, Business 55,000원/);
 });
 
@@ -711,10 +725,10 @@ test("uses distinct Project and Routine AI creation flows", async () => {
   ]);
 
   assert.ok((page.match(/AI 대화로 추가/g) ?? []).length >= 3);
-  assert.match(page, /Project 도우미/);
-  assert.match(page, /Routine 도우미/);
+  assert.match(page, /mode === "project" && visibleFields.has\("project"\)/);
+  assert.match(page, /mode === "routine" && visibleFields.has\("routineTitle"\)/);
   assert.match(page, /상위 Initiative/);
-  assert.match(page, /Initiative 연결 없음/);
+  assert.match(page, /참고 항목 선택/);
   assert.match(page, /createOpen=\{routineCreateOpen\}/);
   assert.match(styles, /\.page-create-actions > button[^}]*min-height: 36px/);
   assert.match(styles, /\.page-create-actions > button \{ min-height: 44px/);
@@ -863,7 +877,7 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(slackDaily, /오늘 데일리 스킵/);
   assert.match(interactions, /block_suggestion/);
   assert.match(events, /slack_event_receipts/);
-  assert.match(manifest, /https:\/\/okrptr\.com\/api\/slack\/interactions/);
+  assert.match(manifest, /https:\/\/okri\.ai\/api\/slack\/interactions/);
   assert.match(manifest, /message\.im/);
   assert.match(manifest, /channels:join/);
   assert.doesNotMatch(manifest, /incoming-webhook/);
@@ -874,7 +888,7 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   for (const code of ["slack_admin_approval_required", "workspace_already_connected", "authorization_cancelled", "missing_scope", "oauth_exchange_failed"]) assert.match(`${oauth}\n${slackCallback}`, new RegExp(code));
   assert.match(slackCallback, /setup_required/);
   assert.match(slackCallback, /hasWorkspaceAdminAccess/);
-  assert.match(slackCallback, /x-okrptr-workspace-id/);
+  assert.match(slackCallback, /x-okri-workspace-id/);
   assert.match(slackCallback, /new Request\(request\.url, \{ method: "GET", headers: callbackHeaders \}\)/);
   assert.doesNotMatch(slackCallback, /new Request\(request, \{ headers: callbackHeaders \}\)/);
   assert.match(slackCallback, /Slack OAuth callback failed/);
@@ -900,20 +914,16 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
 
 test("uses warm-neutral KR and Initiative hierarchy surfaces", async () => {
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-
-  assert.match(styles, /--okr-card-bg: #fdfdfc/);
-  assert.match(styles, /--okr-card-border: #dad9d6/);
-  assert.match(styles, /--kr-badge-bg: #f6edea/);
-  assert.match(styles, /--kr-badge-text: #7d5e54/);
-  assert.match(styles, /--kr-rail: #a18072/);
-  assert.match(styles, /--initiative-badge-bg: #eff1ef/);
-  assert.match(styles, /--initiative-badge-text: #60655f/);
-  assert.match(styles, /--initiative-rail: #898e87/);
+  const themes = await readFile(new URL("../lib/themes.ts", import.meta.url), "utf8");
+  assert.match(themes, /"okr-card-bg": "bg-raised"/);
+  assert.match(themes, /"kr-badge-bg": dark \? "#43302B" : "#F6EDEA"/);
+  assert.match(themes, /"kr-badge-text": dark \? "#D4B3A5" : "#7D5E54"/);
+  assert.match(themes, /"kr-rail": "#A18072"/);
+  assert.match(themes, /"initiative-badge-bg": dark \? "#30322E" : "#EFF1EF"/);
+  assert.match(themes, /"initiative-badge-text": dark \? "#AFB5AD" : "#60655F"/);
   assert.match(styles, /\.hierarchy-kind-key_result \{[^}]*border-left: 2px solid var\(--kr-rail\)[^}]*box-shadow: none/);
   assert.match(styles, /\.hierarchy-kind-initiative \{[^}]*border-left: 2px solid var\(--initiative-rail\)[^}]*box-shadow: none/);
   assert.match(styles, /\.hierarchy-kind-initiative \.initiative-execution-summary \{ color: var\(--muted\); \}/);
-  assert.match(styles, /--kr-badge-bg: #43302b/);
-  assert.match(styles, /--initiative-badge-bg: #30322e/);
   assert.doesNotMatch(styles, /--kr-soft|--initiative-soft|#42627a|#426653|#e8eff4|#e8f0eb/);
 });
 
@@ -961,7 +971,7 @@ test("uses verified Google identities and explicit pending workspace invitations
   assert.match(invitationRoute, /revokeWorkspaceInvitation/);
   assert.match(previewRoute, /previewWorkspaceInvitation/);
   assert.match(acceptRoute, /acceptWorkspaceInvitation/);
-  assert.match(acceptRoute, /okrptr_workspace_id/);
+  assert.match(acceptRoute, /okri_workspace_id/);
   assert.match(page, /function InvitationDialog/);
   assert.match(page, /대기 중인 초대/);
   assert.match(page, /재전송/);
@@ -991,8 +1001,8 @@ test("implements a workspace management bot for data quality and urgency reporti
   assert.match(page, /rawTab === "management" \? "summary"/);
   assert.match(page, /function WorkspaceManagementSummary/);
   assert.match(page, /function WorkspaceManagementBot/);
-  assert.match(page, /<WorkspaceManagementBot active=\{openBot === "management"\}/);
-  assert.match(page, /업무 자동화 봇/);
+  assert.match(page, /<WorkspaceManagementBot\b[^>]*active=\{openBot === "management"\}/);
+  assert.match(page, /title="업무 자동화"/);
   assert.match(page, /워크스페이스 관리 봇 사용/);
   assert.doesNotMatch(page, /LIVE PREVIEW/);
   assert.match(page, /막힘 상태 알림/);

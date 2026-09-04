@@ -11,7 +11,7 @@ import {
 } from "@/db/schema";
 import { dailySkipReasonLabel, getDailyDashboard, normalizeDailySkipReason, type DailySkipReason, type DailySubmissionValue } from "@/lib/daily-bot";
 import { ensureWorkspace, getSlackConnection, getSlackConnectionByTeam, type RequestAuthorization } from "@/lib/pace-data";
-import { decryptSlackSecret, slackScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
+import { decryptSlackSecret, slackDailyScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 
 export { dailyMemberBySlack } from "@/lib/daily-bot";
 
@@ -24,9 +24,9 @@ type SlackUser = {
 };
 
 export type SlackDailyChannel = { id: string; name: string; isPrivate: boolean; isMember: boolean };
-export const DAILY_REMINDER_BLOCK_PREFIX = "okrptr_daily_reminder:";
+export const DAILY_REMINDER_BLOCK_PREFIX = "okri_daily_reminder:";
 
-export async function slackTokenForConnection(connection: SlackConnection) {
+export async function slackTokenForConnection(connection: Pick<SlackConnection, "encryptedBotToken">) {
   return decryptSlackSecret(connection.encryptedBotToken, (env as SlackRuntimeEnv).SLACK_TOKEN_ENCRYPTION_KEY!);
 }
 
@@ -48,7 +48,7 @@ export async function syncSlackDailyInstallation(ownerId: string) {
     await upsertSlackDailySettings(ownerId, { installStatus: "not_connected", lastError: "" });
     return { linked: 0, unmatched: 0, status: "not_connected" };
   }
-  const missingScopes = slackScopes.filter((scope) => !scopeSet(connection.scope).has(scope));
+  const missingScopes = slackDailyScopes.filter((scope) => !scopeSet(connection.scope).has(scope));
   if (missingScopes.length) {
     await upsertSlackDailySettings(ownerId, {
       installStatus: "needs_reauthorization",
@@ -107,7 +107,10 @@ export async function createSlackMemberLinkUrl(ownerId: string, teamId: string, 
     (token_hash, owner_id, team_id, slack_user_id, slack_email, created_at, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)`)
     .bind(tokenHash, ownerId, teamId, slackUserId, profile.user?.profile?.email ?? "", now.toISOString(), new Date(now.getTime() + 15 * 60_000).toISOString()).run();
-  const appBase = String((env as unknown as Record<string, unknown>).OKRPTR_APP_URL || new URL(request.url).origin).replace(/\/$/, "");
+  const runtime = env as unknown as { OKRI_APP_URL?: string; OKRPTR_APP_URL?: string };
+  const appBase = runtime.OKRI_APP_URL || runtime.OKRPTR_APP_URL
+    ? String(runtime.OKRI_APP_URL || runtime.OKRPTR_APP_URL).replace(/\/$/, "")
+    : new URL(request.url).origin;
   return `${appBase}/?view=scrum&slack_link=${encodeURIComponent(rawToken)}`;
 }
 
@@ -320,7 +323,7 @@ export async function configureSlackDailyOnboarding(authorization: RequestAuthor
 }) {
   const connection = await getSlackConnection(authorization.ownerId);
   if (!connection) throw new Error("Slack을 먼저 연결해 주세요.");
-  const missingScopes = slackScopes.filter((scope) => !scopeSet(connection.scope).has(scope));
+  const missingScopes = slackDailyScopes.filter((scope) => !scopeSet(connection.scope).has(scope));
   if (missingScopes.length) throw new Error(`Slack 권한 업데이트가 필요합니다: ${missingScopes.join(", ")}`);
 
   const weekdays = normalizeWeekdays(input.weekdays);
@@ -598,7 +601,7 @@ export async function openDailyModal(triggerId: string, authorization: RequestAu
   }
   await slackApi(token, "views.open", { trigger_id: triggerId, view: {
     type: "modal", callback_id: "daily_submit", private_metadata: JSON.stringify({ ownerId: authorization.ownerId, date: dashboard.date, requestId: crypto.randomUUID() }),
-    title: { type: "plain_text", text: "OKRPTR 데일리" }, submit: { type: "plain_text", text: "확정 및 공유" }, close: { type: "plain_text", text: "취소" }, blocks,
+    title: { type: "plain_text", text: "OKRI 데일리" }, submit: { type: "plain_text", text: "확정 및 공유" }, close: { type: "plain_text", text: "취소" }, blocks,
   } });
 }
 
@@ -626,7 +629,7 @@ async function listAllSlackUsers(token: string) {
 async function ensureDailySettingsRow(ownerId: string, connection: SlackConnection | null) {
   let [settings] = await getDb().select().from(slackDailySettings).where(eq(slackDailySettings.ownerId, ownerId)).limit(1);
   if (!settings) {
-    const missingScopes = connection ? slackScopes.filter((scope) => !scopeSet(connection.scope).has(scope)) : slackScopes;
+    const missingScopes = connection ? slackDailyScopes.filter((scope) => !scopeSet(connection.scope).has(scope)) : slackDailyScopes;
     [settings] = await getDb().insert(slackDailySettings).values({
       ownerId,
       installStatus: !connection ? "not_connected" : missingScopes.length ? "needs_reauthorization" : "connected",
@@ -690,11 +693,12 @@ function dailyCard(submission: DailySubmissionValue) {
   if (submission.skipReason) {
     const reason = dailySkipReasonLabel(submission.skipReason);
     const detail = submission.skipNote ? `\n${escapeSlack(submission.skipNote)}` : "";
-    const appUrl = `${String((env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?view=scrum`;
+    const runtime = env as unknown as { OKRI_APP_URL?: string; OKRPTR_APP_URL?: string };
+    const appUrl = `${String(runtime.OKRI_APP_URL || runtime.OKRPTR_APP_URL || "https://okri.ai").replace(/\/$/, "")}/?view=scrum`;
     return { text: `[데일리 봇] ${submission.memberName}님의 ${submission.date} 데일리 스킵 · ${reason}`, unfurl_links: false, unfurl_media: false, blocks: [
       { type: "header", text: { type: "plain_text", text: `데일리 봇 · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
       { type: "section", text: { type: "mrkdwn", text: `*⏭️ 오늘 데일리 스킵*\n*사유:* ${reason}${detail}`.slice(0, 2900) } },
-      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRPTR에서 보기" }, url: appUrl }] },
+      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRI에서 보기" }, url: appUrl }] },
     ] };
   }
   const visible = submission.tasks.slice(0, 20);
@@ -702,12 +706,13 @@ function dailyCard(submission: DailySubmissionValue) {
   const overflow = submission.tasks.length > 20 ? `\n_외 ${submission.tasks.length - 20}개_` : "";
   const blocker = submission.blockersNote ? `\n*블로커*\n${escapeSlack(submission.blockersNote)}` : "";
   const note = submission.todayNote ? `\n*오늘 메모*\n${escapeSlack(submission.todayNote)}` : "";
-  const appUrl = `${String((env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?view=scrum`;
+  const runtime = env as unknown as { OKRI_APP_URL?: string; OKRPTR_APP_URL?: string };
+  const appUrl = `${String(runtime.OKRI_APP_URL || runtime.OKRPTR_APP_URL || "https://okri.ai").replace(/\/$/, "")}/?view=scrum`;
   const text = `[데일리 봇] ${submission.memberName}님의 ${submission.date} 데일리`;
   return { text, unfurl_links: false, unfurl_media: false, blocks: [
     { type: "header", text: { type: "plain_text", text: `데일리 봇 · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
     { type: "section", text: { type: "mrkdwn", text: `*오늘 Task*\n${taskLines}${overflow}${note}${blocker}`.slice(0, 2900) } },
-    { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRPTR에서 보기" }, url: appUrl }] },
+    { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "OKRI에서 보기" }, url: appUrl }] },
   ] };
 }
 
@@ -820,7 +825,7 @@ async function sha256(value: string) {
 
 function slackApiError(code: string | undefined, method: string) {
   if (code === "missing_scope") return "Slack 권한 업데이트가 필요합니다.";
-  if (code === "not_in_channel") return "OKRPTR 봇을 해당 채널에 먼저 초대해 주세요.";
+  if (code === "not_in_channel") return "OKRI 봇을 해당 채널에 먼저 초대해 주세요.";
   if (code === "invalid_auth" || code === "token_revoked") return "Slack 연결이 만료되었습니다. 다시 연결해 주세요.";
   return `Slack ${method} 요청에 실패했습니다${code ? ` (${code})` : ""}.`;
 }

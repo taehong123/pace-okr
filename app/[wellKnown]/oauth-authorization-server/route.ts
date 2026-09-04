@@ -17,7 +17,7 @@ export async function GET(request: Request) {
       grant_types_supported: ["authorization_code"],
       token_endpoint_auth_methods_supported: ["none"],
       code_challenge_methods_supported: ["S256"],
-      scopes_supported: ["okrptr:read", "okrptr:write"],
+      scopes_supported: ["okri:read", "okri:write"],
     },
     {
       headers: {

@@ -4,9 +4,9 @@
 
 ## 1. Payple 승인
 
-1. 기존 Payple 계약에 `okrptr.com`과 OKRPTR 월 구독 상품을 추가하거나 별도 상점키를 발급받는다.
+1. 기존 Payple 계약에 `okri.ai`과 OKRI 월 구독 상품을 추가하거나 별도 상점키를 발급받는다.
 2. 국내 카드 정기결제 `AUTH`, 결제, 전액 취소, 빌링키 해지를 모두 승인받는다.
-3. 등록 도메인과 브라우저 `Referer`가 `https://okrptr.com`으로 일치하는지 확인한다.
+3. 등록 도메인과 브라우저 `Referer`가 `https://okri.ai`으로 일치하는지 확인한다.
 4. Orderflow의 상점키나 빌링키 암호화 키를 복사하지 않는다.
 
 Sites 운영 보안값:
@@ -18,10 +18,10 @@ Sites 운영 보안값:
 - `PAYPLE_REFUND_KEY`
 - `PAYPLE_BILLING_KEY_ENCRYPTION_KEY`: 다른 서비스·OAuth와 분리된 무작위 키
 - `RESEND_API_KEY`
-- `OKRPTR_BILLING_FROM`
+- `OKRI_BILLING_FROM`
 - `EMAIL_UNSUBSCRIBE_SECRET`
 - `INTERNAL_BILLING_SECRET`
-- `OKRPTR_PUBLIC_URL=https://okrptr.com`
+- `OKRI_PUBLIC_URL=https://okri.ai`
 - `BILLING_ENFORCEMENT_ENABLED=false`
 - `BILLING_ENFORCEMENT_STARTED_AT`: 한도 활성화 시각의 ISO 8601 값. 이 시각 이전에 만든 워크스페이스에는 여기서부터 30일간 편집자 정리 유예가 자동 적용된다.
 
@@ -39,8 +39,8 @@ Sites 운영 보안값:
 
 GitHub 저장소에 다음 Actions secret을 등록한다.
 
-- `OKRPTR_BILLING_RUN_URL=https://okrptr.com/api/internal/billing/run`
-- `OKRPTR_INTERNAL_BILLING_SECRET`: Sites의 `INTERNAL_BILLING_SECRET`과 동일한 값
+- `OKRI_BILLING_RUN_URL=https://okri.ai/api/internal/billing/run`
+- `OKRI_INTERNAL_BILLING_SECRET`: Sites의 `INTERNAL_BILLING_SECRET`과 동일한 값
 
 `.github/workflows/billing-hourly.yml`을 수동 실행해 서명 검증, D1 lease, 고유 주문번호 중복 방지를 확인한 뒤 스케줄을 사용한다.
 

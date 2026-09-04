@@ -1,6 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
+import { env } from "cloudflare:workers";
+import { isReadOnlyMcpRequest, readWorkContext, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
 import {
   ITEM_CADENCES,
   ITEM_KINDS,
@@ -17,6 +19,7 @@ import {
   createChecklistItem,
   createGroup,
   createItem,
+  createLinkedTasks,
   createPropertyDefinition,
   createProjectTemplate,
   createRoutine,
@@ -25,6 +28,7 @@ import {
   deleteRoutine,
   ensureWorkspace,
   getProjectDocument,
+  getItem,
   getTeam,
   getDailyScrum,
   getItemPropertiesByName,
@@ -61,6 +65,7 @@ import {
   updateItem,
   updateRoutine,
   updateTeamMember,
+  validateItemPropertiesByName,
   setRoutineCompletion,
   type ItemCadence,
   type ItemKind,
@@ -119,7 +124,9 @@ const projectTemplateOutput = z.object({
 
 const itemOutput = z.object({
   id: z.string(),
+  cycleId: z.string().nullable(),
   parentId: z.string().nullable(),
+  routineId: z.string().nullable(),
   kind: z.string(),
   title: z.string(),
   description: z.string(),
@@ -239,15 +246,38 @@ const groupMemberOutput = z.object({
   createdAt: z.string(),
 });
 
-async function createOkrptrServer(authorization: RequestAuthorization) {
+const workFieldOutput = z.object({
+  required: z.array(z.string()), recommended: z.array(z.string()), optional: z.array(z.string()),
+  placement: z.string(), tool: z.string(),
+});
+const workContextOutput = z.object({
+  kind: z.enum(WORK_KINDS),
+  workspace: z.object({ id: z.string(), name: z.string(), kind: z.string() }),
+  rules: workspaceRulesOutput,
+  classification: z.record(z.string(), z.string()),
+  fields: z.record(z.string(), workFieldOutput),
+  parents: z.array(z.object({ id: z.string(), kind: z.string(), title: z.string(), cycleId: z.string().nullable(), path: z.array(z.string()) })),
+  routines: z.array(z.object({ id: z.string(), title: z.string(), systemKey: z.string().nullable() })),
+  fallback: z.object({ id: z.string(), title: z.string() }).nullable(),
+  members: z.array(z.object({ id: z.string(), displayName: z.string(), role: z.string(), isCurrent: z.boolean() })),
+  cycles: z.array(z.object({ id: z.string(), name: z.string(), status: z.string(), startDate: z.string(), endDate: z.string() })),
+  projectProperties: z.array(z.object({ id: z.string(), name: z.string(), type: z.string(), options: z.array(z.string()), defaultValue: propertyValueSchema, systemKey: z.string().nullable() })),
+  truncated: z.record(z.string(), z.boolean()),
+  nextStep: z.string(),
+});
+
+const memberIdInput = z.string().trim().min(1);
+const dueDateInput = z.iso.date().describe("User-stated due date in YYYY-MM-DD; omit when unknown");
+
+async function createOkriServer(authorization: RequestAuthorization) {
   const { ownerId } = authorization;
   const rules = await getWorkspaceRules(ownerId);
   const server = new McpServer(
-    { name: "okrptr", version: "0.7.0" },
+    { name: "okri", version: "0.8.0" },
     {
       instructions:
         [
-          "Capture first, structure later. Use capture_item for quick natural-language intake. The OKR hierarchy is Objective > Key Result > Initiative > Project > Task. Routine is an independent Project-like execution container that does not require an Initiative and may own Tasks. Routines add trigger points, places/tools, concrete action steps, and dated completion records. Tasks have one assignee and belong to either a Project or Routine; managed properties and block documents belong to Projects. Team access uses Owner, Admin, Member, and read-only Viewer roles. Workspace groups have @handles, open or private visibility, and Lead or Member roles. Use list_properties before setting unfamiliar Project property names and list_project_templates before applying a template.",
+          WORKFLOW_INSTRUCTIONS,
           `Workspace capture rule: ${rules.captureInstruction}`,
           `Workspace structure rule: ${rules.structureInstruction}`,
           `Workspace routine rule: ${rules.routineInstruction}`,
@@ -257,24 +287,50 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   );
 
   server.registerTool(
+    "prepare_work",
+    {
+      title: "Prepare work with classification and connection choices",
+      description: "Use when the user wants to organize/save work ('이거 해야 해') and needs Task/Project/Routine guidance or missing parent/member IDs. One read returns classification criteria, required vs optional fields, workspace rules, parent paths, member IDs and Project property definitions. No records are saved. Skip when all necessary IDs are already known; do not follow with redundant list calls.",
+      inputSchema: {
+        kind: z.enum(WORK_KINDS).default("unsure").describe("Your semantic hypothesis or the user's chosen type; unsure does not silently classify or save"),
+        query: z.string().max(120).optional().describe("Short existing parent title/topic to filter candidates, not the full work request. Omit to browse recent parents."),
+        member_query: z.string().max(120).optional().describe("Named person's name/email to narrow members; never guess IDs"),
+        include_members: z.boolean().default(true),
+        limit: z.number().int().min(1).max(20).default(6),
+      },
+      outputSchema: { context: workContextOutput },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ kind, query, member_query, include_members, limit }) => {
+      const context = await readWorkContext(env.DB, ownerId, authorization.userId, {
+        kind, query, memberQuery: member_query, includeMembers: include_members, limit,
+      });
+      return {
+        structuredContent: { context: { ...context, rules } },
+        content: [{ type: "text", text: "Work context ready. Choose the type/connection from the user's intent, ask only essential gaps, then save once. Nothing has been saved." }],
+      };
+    },
+  );
+
+  server.registerTool(
     "get_workspace_rules",
     {
-      title: "Get OKRPTR workspace rules",
-      description: "Read the shared rules that guide web, API, and MCP capture behavior for the active workspace.",
+      title: "Get OKRI workspace rules",
+      description: "Read shared workspace rules when explicitly requested or changed. For new-work classification and connection choices use prepare_work instead; do not fetch rules twice.",
       inputSchema: {},
       outputSchema: { rules: workspaceRulesOutput },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async () => ({
-      structuredContent: { rules: await getWorkspaceRules(ownerId) },
-      content: [{ type: "text", text: "Returned the active OKRPTR workspace rules." }],
+      structuredContent: { rules },
+      content: [{ type: "text", text: "Returned the active OKRI workspace rules." }],
     }),
   );
 
   server.registerTool(
     "update_workspace_rules",
     {
-      title: "Update OKRPTR workspace rules",
+      title: "Update OKRI workspace rules",
       description: "Update the shared rules that guide web, API, and MCP capture behavior for the active workspace.",
       inputSchema: {
         captureInstruction: z.string().optional(),
@@ -299,7 +355,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       });
       return {
         structuredContent: { rules: updated },
-        content: [{ type: "text", text: "Updated the OKRPTR workspace rules." }],
+        content: [{ type: "text", text: "Updated the OKRI workspace rules." }],
       };
     },
   );
@@ -307,20 +363,21 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   server.registerTool(
     "capture_item",
     {
-      title: "Capture unclassified work to OKRPTR",
-      description: "Use this first when the user mentions a task, follow-up, idea, or commitment that should be saved quickly without interrupting the conversation.",
+      title: "Capture unclassified work to OKRI",
+      description: "Save one explicitly requested, clear Task to General when no Project/Routine is known. Do not use for mere discussion, a Project/Routine idea, or unresolved Task-vs-Project classification; use prepare_work for those. If a container is known use create_item with its ID.",
       inputSchema: {
-        title: z.string().min(1).describe("Short actionable title in the user's language"),
+        title: z.string().trim().min(1).max(500).describe("Short actionable title in the user's language"),
         description: z.string().optional().describe("Useful context from the conversation"),
-        due_date: z.string().optional().describe("Due date in YYYY-MM-DD format when stated"),
+        due_date: dueDateInput.optional(),
         priority: z.enum(ITEM_PRIORITIES).optional(),
         source_ref: z.string().optional().describe("Message or conversation identifier for traceability"),
-        assignee_member_id: z.string().optional().describe("Active workspace member ID for the single Task assignee"),
+        assignee_member_id: memberIdInput.optional().describe("Active workspace member ID for the single Task assignee"),
       },
       outputSchema: { item: itemOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     async ({ title, description, due_date, priority, source_ref, assignee_member_id }) => {
+      await validateMcpMembers(ownerId, [assignee_member_id]);
       const item = await createItem(ownerId, {
         title,
         description,
@@ -329,12 +386,13 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
         kind: "task",
         source: "mcp",
         sourceRef: source_ref,
+        createdByUserId: authorization.userId,
       });
       if (assignee_member_id) await replaceItemAssignmentRole(ownerId, item.id, "task_assignee", [assignee_member_id]);
       const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
       return {
         structuredContent: { item: serialized },
-        content: [{ type: "text", text: `Captured "${item.title}" as an unclassified OKRPTR Task.` }],
+        content: [{ type: "text", text: `Captured "${item.title}" as an unclassified OKRI Task.` }],
       };
     },
   );
@@ -343,17 +401,19 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     "create_item",
     {
       title: "Create a structured OKR item",
-      description: "Create a known Objective, Key Result, Initiative, Project, or Task when its hierarchy and parent are already clear.",
+      description: "Save one correctly classified item with all known fields, assignments and Project properties in one call. Reuse IDs from prepare_work. Task: one action under Project or Routine (General if omitted). Project: finite multi-Task deliverable under an existing Initiative. Do not invent ancestors/owners/dates; do not re-list after success.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS),
-        title: z.string().min(1),
-        parent_id: z.string().optional().describe("Required except for Objective"),
+        title: z.string().trim().min(1).max(500),
+        parent_id: memberIdInput.optional().describe("KR→Objective, Initiative→KR, Project→Initiative, Task→Project; never a Routine ID"),
+        routine_id: memberIdInput.optional().describe("Task-only alternative to parent_id for an independent Routine"),
+        cycle_id: memberIdInput.optional().describe("Objective's selected OKR file; children inherit their parent's cycle when omitted"),
         description: z.string().optional(),
         status: z.enum(ITEM_STATUSES).optional(),
         priority: z.enum(ITEM_PRIORITIES).optional(),
         cadence: z.enum(ITEM_CADENCES).optional(),
         progress: z.number().min(0).max(100).optional(),
-        due_date: z.string().optional(),
+        due_date: dueDateInput.optional(),
         template_id: z.string().optional().describe("Optional Project body template ID; ignored for non-Project items"),
         properties: z.record(z.string(), propertyValueSchema).optional().describe("Project-only custom values keyed by property name"),
         dri_member_id: z.string().optional().describe("Active workspace member ID for a Project DRI"),
@@ -364,10 +424,18 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     async (input) => {
+      assertMcpItemFields(input);
+      await Promise.all([
+        validateMcpMembers(ownerId, [input.dri_member_id, ...(input.worker_member_ids ?? []), input.assignee_member_id]),
+        input.properties ? validateItemPropertiesByName(ownerId, input.properties) : Promise.resolve(),
+      ]);
+      const cycleId = await resolveMcpCycle(ownerId, input.parent_id, input.routine_id, input.cycle_id);
       const item = await createItem(ownerId, {
         title: input.title,
         kind: input.kind as ItemKind,
         parentId: input.parent_id,
+        routineId: input.routine_id,
+        cycleId,
         description: input.description,
         status: input.status as ItemStatus | undefined,
         priority: input.priority as ItemPriority | undefined,
@@ -393,9 +461,37 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   );
 
   server.registerTool(
+    "create_tasks",
+    {
+      title: "Create multiple explicitly requested Tasks together",
+      description: "Save 1–50 explicitly supplied Task titles sharing one Project/Routine, assignee, due date, priority and cadence in one batch. Do not invent Tasks from a Project idea. For different per-Task fields or descriptions use create_item. Returns saved records; no follow-up list is needed.",
+      inputSchema: {
+        titles: z.array(z.string().trim().min(1).max(500)).min(1).max(50),
+        parent_id: memberIdInput.optional().describe("Existing Project ID; mutually exclusive with routine_id"),
+        routine_id: memberIdInput.optional(),
+        assignee_member_id: memberIdInput.optional(),
+        due_date: dueDateInput.optional(),
+        priority: z.enum(ITEM_PRIORITIES).optional(),
+        cadence: z.enum(ITEM_CADENCES).optional(),
+      },
+      outputSchema: { items: z.array(itemOutput), count: z.number() },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async (input) => {
+      const rows = await createLinkedTasks(ownerId, {
+        titles: input.titles, projectId: input.parent_id, routineId: input.routine_id,
+        assigneeMemberId: input.assignee_member_id, dueDate: input.due_date,
+        priority: input.priority, cadence: input.cadence, source: "mcp", createdByUserId: authorization.userId,
+      });
+      const serialized = await serializeItemsForMcp(ownerId, rows);
+      return { structuredContent: { items: serialized, count: serialized.length }, content: [{ type: "text", text: `Saved ${serialized.length} Tasks.` }] };
+    },
+  );
+
+  server.registerTool(
     "list_items",
     {
-      title: "List and search OKRPTR items",
+      title: "List and search OKRI items",
       description: "Find existing OKRs, projects, tasks, or unclassified captures before reviewing, updating, or linking them.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS).optional(),
@@ -422,7 +518,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       const serialized = await serializeItemsForMcp(ownerId, rows);
       return {
         structuredContent: { items: serialized, count: serialized.length },
-        content: [{ type: "text", text: `Found ${serialized.length} OKRPTR items.` }],
+        content: [{ type: "text", text: `Found ${serialized.length} OKRI items.` }],
       };
     },
   );
@@ -430,17 +526,17 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
   server.registerTool(
     "update_item",
     {
-      title: "Update an OKRPTR item",
+      title: "Update an OKRI item",
       description: "Change the title, status, progress, priority, cadence, or due date of an existing item. Use list_items first when the ID is unknown.",
       inputSchema: {
         id: z.string(),
-        title: z.string().min(1).optional(),
+        title: z.string().trim().min(1).max(500).optional(),
         description: z.string().optional(),
         status: z.enum(ITEM_STATUSES).optional(),
         priority: z.enum(ITEM_PRIORITIES).optional(),
         cadence: z.enum(ITEM_CADENCES).optional(),
         progress: z.number().min(0).max(100).optional(),
-        due_date: z.string().nullable().optional(),
+        due_date: dueDateInput.nullable().optional(),
         properties: z.record(z.string(), propertyValueSchema).optional().describe("Project-only custom values keyed by property name"),
         dri_member_id: z.string().nullable().optional(),
         worker_member_ids: z.array(z.string()).optional(),
@@ -450,6 +546,13 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     async (input) => {
+      const current = await getItem(ownerId, input.id);
+      if (!current) throw new Error("Item not found");
+      assertMcpAssignmentFields({ ...input, kind: current.kind });
+      await Promise.all([
+        validateMcpMembers(ownerId, [input.dri_member_id, ...(input.worker_member_ids ?? []), input.assignee_member_id]),
+        input.properties ? validateItemPropertiesByName(ownerId, input.properties) : Promise.resolve(),
+      ]);
       const item = await updateItem(ownerId, input.id, {
         title: input.title,
         description: input.description,
@@ -478,16 +581,21 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     "link_item",
     {
       title: "Link an item into the OKR hierarchy",
-      description: "Move an unclassified Task or existing item under its correct parent. Project requires Initiative; Task requires Project.",
-      inputSchema: { id: z.string(), parent_id: z.string() },
+      description: "Link to an existing parent: Project→Initiative, Task→Project OR independent Routine. Pass exactly one of parent_id/routine_id. Preserves status. Cross-cycle moves of non-Task items need a separate explicit restructuring flow.",
+      inputSchema: { id: memberIdInput, parent_id: memberIdInput.optional(), routine_id: memberIdInput.optional() },
       outputSchema: { item: itemOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ id, parent_id }) => {
+    async ({ id, parent_id, routine_id }) => {
+      if (Boolean(parent_id) === Boolean(routine_id)) throw new Error("Provide exactly one parent_id or routine_id");
+      const current = await getItem(ownerId, id);
+      if (!current) throw new Error("Item not found");
+      const cycleId = await resolveMcpCycle(ownerId, parent_id, routine_id);
+      if (current.kind !== "task" && cycleId !== current.cycleId) throw new Error("Moving a non-Task between OKR cycles requires an explicit subtree move");
       const item = await updateItem(ownerId, id, {
-        parentId: parent_id,
-        routineId: null,
-        status: "todo",
+        parentId: parent_id ?? null,
+        routineId: routine_id ?? null,
+        cycleId,
         source: "mcp",
       });
       const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
@@ -936,7 +1044,7 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
     "get_recommendations",
     {
       title: "Get execution recommendations",
-      description: "Prioritize blocked, overdue, due-soon, and empty Project work from current OKRPTR data.",
+      description: "Prioritize blocked, overdue, due-soon, and empty Project work from current OKRI data.",
       inputSchema: { date: z.string().optional().describe("YYYY-MM-DD; defaults to today") },
       outputSchema: { recommendations: z.array(recommendationOutput), count: z.number() },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -1325,10 +1433,58 @@ async function createOkrptrServer(authorization: RequestAuthorization) {
 
 async function serializeItemsForMcp(ownerId: string, rows: Parameters<typeof serializeItem>[0][]) {
   const [properties, assignments] = await Promise.all([
-    getItemPropertiesByName(ownerId),
+    getItemPropertiesByName(ownerId, rows.filter((item) => item.kind === "project").map((item) => item.id)),
     getItemAssignmentMap(ownerId, rows.map((item) => item.id)),
   ]);
   return rows.map((item) => serializeItem(item, item.kind === "project" ? properties[item.id] ?? {} : {}, assignments[item.id] ?? []));
+}
+
+type McpAssignmentFields = {
+  kind: string; properties?: Record<string, unknown>; dri_member_id?: string | null;
+  worker_member_ids?: string[]; assignee_member_id?: string | null;
+};
+
+function assertMcpAssignmentFields(input: McpAssignmentFields) {
+  if (input.kind !== "project" && (input.properties !== undefined || input.dri_member_id !== undefined || input.worker_member_ids !== undefined)) {
+    throw new Error("Properties, DRI and workers are Project-only; Tasks use assignee_member_id");
+  }
+  if (input.kind !== "task" && input.assignee_member_id !== undefined) throw new Error("Only Tasks use assignee_member_id");
+}
+
+function assertMcpItemFields(input: McpAssignmentFields & { parent_id?: string; routine_id?: string; template_id?: string }) {
+  assertMcpAssignmentFields(input);
+  if (input.parent_id && input.routine_id) throw new Error("Choose Project or Routine, not both");
+  if (input.kind !== "task" && input.routine_id) throw new Error("Only Tasks can belong to a Routine");
+  if (input.kind !== "project" && input.template_id) throw new Error("Only Projects can use a body template");
+  if (["key_result", "initiative", "project"].includes(input.kind) && !input.parent_id) throw new Error("Choose an existing parent from prepare_work before saving this type");
+}
+
+async function validateMcpMembers(ownerId: string, values: (string | null | undefined)[]) {
+  const ids = [...new Set(values.filter((value): value is string => value !== undefined && value !== null))];
+  if (!ids.length) return;
+  const result = await env.DB.prepare(`SELECT id FROM workspace_members
+    WHERE workspace_id = ? AND status = 'active' AND id IN (${ids.map(() => "?").join(",")})`).bind(ownerId, ...ids).all();
+  if (result.results.length !== ids.length) throw new Error("Choose active workspace member IDs from prepare_work before saving");
+}
+
+async function resolveMcpCycle(ownerId: string, parentId?: string, routineId?: string, explicitCycleId?: string) {
+  if (routineId) {
+    if (explicitCycleId) throw new Error("Routine Tasks are independent of OKR cycles");
+    const routine = await env.DB.prepare("SELECT id FROM routines WHERE owner_id = ? AND id = ? AND active = 1").bind(ownerId, routineId).first();
+    if (!routine) throw new Error("Active Routine not found");
+    return null;
+  }
+  if (parentId) {
+    const parent = await getItem(ownerId, parentId);
+    if (!parent || parent.archivedAt) throw new Error("Active parent not found");
+    if (explicitCycleId && explicitCycleId !== parent.cycleId) throw new Error("Parent and child must belong to the same OKR cycle");
+    return parent.cycleId;
+  }
+  if (explicitCycleId) {
+    const cycle = await env.DB.prepare("SELECT id FROM okr_cycles WHERE owner_id = ? AND id = ? AND status != 'closed'").bind(ownerId, explicitCycleId).first();
+    if (!cycle) throw new Error("Active or planned OKR cycle not found");
+  }
+  return explicitCycleId;
 }
 
 async function resolveProperty(ownerId: string, value: string) {
@@ -1346,15 +1502,30 @@ async function handleMcp(request: Request) {
     return new Response(null, { status: 204, headers: corsHeaders() });
   }
 
-  const authorization = await authorizeRequest(request);
+  const startedAt = performance.now();
+  const payload = request.method === "POST" ? await request.clone().json().catch(() => null) : null;
+  const authorization = await authorizeRequest(request, { allowViewerWrite: isReadOnlyMcpRequest(payload) });
   if (authorization instanceof Response) return withCors(withMcpAuthChallenge(authorization, request));
+  const authorizedAt = performance.now();
 
   try {
     await ensureWorkspace(authorization.ownerId);
+    const workspaceAt = performance.now();
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
-    const server = await createOkrptrServer(authorization);
+    const server = await createOkriServer(authorization);
     await server.connect(transport);
-    return withCors(await transport.handleRequest(request));
+    const preparedAt = performance.now();
+    const response = withCors(await transport.handleRequest(request));
+    const completedAt = performance.now();
+    response.headers.set("Server-Timing", [
+      `auth;dur=${(authorizedAt - startedAt).toFixed(1)}`,
+      `workspace;dur=${(workspaceAt - authorizedAt).toFixed(1)}`,
+      `prepare;dur=${(preparedAt - workspaceAt).toFixed(1)}`,
+      `handler;dur=${(completedAt - preparedAt).toFixed(1)}`,
+      `total;dur=${(completedAt - startedAt).toFixed(1)}`,
+    ].join(", "));
+    response.headers.set("Cache-Control", "no-store");
+    return response;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected MCP error";
     return withCors(Response.json({ error: message }, { status: 500 }));
@@ -1365,8 +1536,8 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, X-Okrptr-Workspace-Id, X-Okrptr-User-Id, X-Okita-User-Id, X-Pace-User-Id",
-    "Access-Control-Expose-Headers": "MCP-Protocol-Version, MCP-Session-Id",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, X-Okri-Workspace-Id, X-Okri-User-Id, X-Okrptr-Workspace-Id, X-Okrptr-User-Id, X-Okita-User-Id, X-Pace-User-Id",
+    "Access-Control-Expose-Headers": "MCP-Protocol-Version, MCP-Session-Id, Server-Timing",
   };
 }
 
@@ -1380,7 +1551,7 @@ function withMcpAuthChallenge(response: Response, request: Request) {
   if (response.status !== 401) return response;
   const headers = new Headers(response.headers);
   const metadataUrl = new URL("/.well-known/oauth-protected-resource", request.url).toString();
-  headers.set("WWW-Authenticate", `Bearer resource_metadata="${metadataUrl}", scope="okrptr:read okrptr:write"`);
+  headers.set("WWW-Authenticate", `Bearer resource_metadata="${metadataUrl}", scope="okri:read okri:write"`);
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 

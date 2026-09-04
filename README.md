@@ -1,6 +1,6 @@
-# OKRPTR
+# OKRI
 
-OKRPTR is an MCP-first OKR and execution-management service. It keeps the
+OKRI is an MCP-first OKR and execution-management service. It keeps the
 management hierarchy explicit while making capture nearly frictionless:
 
 ```text
@@ -27,10 +27,12 @@ a bot webhook. Unstructured captures land in the protected General routine and c
 - D1 persistence and a Streamable HTTP MCP endpoint at `/api/mcp`
 - Generic bot capture webhook at `/api/webhooks/capture`
 - Google Calendar connection for sending due-dated Tasks to a user's primary calendar
-- Slack bot installation with a `/okrptr` slash command for capturing work into General Tasks
+- Slack bot installation with a `/okri` slash command for capturing work into General Tasks
 
 ## MCP tools
 
+- `prepare_work` — one bounded read for classification criteria, required/optional fields, parent paths, member IDs, workspace rules and Project property definitions
+- `create_tasks` — atomic batch of explicitly supplied Task titles sharing a container and common fields
 - `capture_item`, `create_item`, `list_items`, `update_item`, `link_item`
 - `review_period`
 - `list_properties`, `create_property`, `set_property_value`, `delete_property`
@@ -52,6 +54,20 @@ Private groups are only listed for their members and workspace administrators.
 Group Leads can edit their group and manage its membership; only workspace
 Owners and Admins can create, archive, restore, or permanently delete groups.
 
+### Fast conversational intake
+
+Classify once in the current conversation, fetch missing connection context once,
+ask only essential gaps together, and save all supplied fields in one call. Do not
+use a second LLM to classify, manufacture OKR ancestors, or re-list after success.
+`create_item` supports Task `routine_id` and explicit `cycle_id`; linked children
+inherit the selected parent's cycle. `link_item` preserves status.
+
+The same guide is available through `/api/codex-guide` and the read-only
+`/api/work-context` endpoint. See [the intake contract and evaluation plan](docs/fast-work-intake.md).
+Run `node --test --test-concurrency=1 tests/work-intake.test.mjs` for contract and
+SQLite tests, and `node scripts/benchmark-mcp-intake.mjs` for a read-only workflow
+comparison. The benchmark defaults to localhost and excludes ChatGPT generation.
+
 ## Local development
 
 Requires Node.js 22.13 or newer.
@@ -68,16 +84,21 @@ npm run test:mcp
 npm test
 ```
 
-Set `OKRPTR_MCP_URL` to run the MCP smoke test against a different endpoint.
+Set `OKRI_MCP_URL` to run the MCP smoke test against a different endpoint.
 Hosted writes use the signed-in Sites user or a bearer token configured as
-`OKRPTR_API_TOKEN`. Clients can send `X-Okrptr-Workspace-Id` to target a
-workspace; the previous `X-Okrptr-User-Id` selection header remains supported
+`OKRI_API_TOKEN`. Clients can send `X-Okri-Workspace-Id` to target a
+workspace; the previous `X-Okri-User-Id` selection header remains supported
 for token integrations. Signed-in users otherwise use their most recently
 selected workspace, and the web app also stores that selection in an HTTP-only
 cookie.
-The previous `OKITA_API_TOKEN`, `X-Okita-User-Id`, `PACE_API_TOKEN`, and
-`X-Pace-User-Id` names remain supported for
-existing integrations.
+The previous OKRPTR names remain accepted during the domain migration:
+`OKRPTR_API_TOKEN`, `OKRPTR_PUBLIC_URL`, `OKRPTR_APP_URL`,
+`X-Okrptr-Workspace-Id`, `X-Okrptr-User-Id`, `okrptr:read`, and
+`okrptr:write`. Existing `okrptr_` bearer tokens, workspace cookies, and
+Google session cookies continue to work on `okrptr.com`; browsers must sign in
+once on `okri.ai` because cookies cannot be transferred between domains.
+Earlier `OKITA_API_TOKEN`, `X-Okita-User-Id`, `PACE_API_TOKEN`, and
+`X-Pace-User-Id` names also remain supported for existing integrations.
 
 ## Google sign-in and Calendar
 
@@ -88,7 +109,7 @@ production:
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
 - `GOOGLE_TOKEN_ENCRYPTION_KEY`
-- `GOOGLE_OAUTH_REDIRECT_URI`, usually `https://okrptr.com/api/google/callback`
+- `GOOGLE_OAUTH_REDIRECT_URI`, usually `https://okri.ai/api/google/callback`
 
 The OAuth client must allow that redirect URI and the Calendar API must be
 enabled in the Google Cloud project. Sign-in requests only OpenID profile and
@@ -105,10 +126,10 @@ these hosted runtime values before enabling it in production:
 - `SLACK_CLIENT_SECRET`
 - `SLACK_SIGNING_SECRET`
 - `SLACK_TOKEN_ENCRYPTION_KEY`
-- `SLACK_OAUTH_REDIRECT_URI`, usually `https://okrptr.com/api/slack/callback`
+- `SLACK_OAUTH_REDIRECT_URI`, usually `https://okri.ai/api/slack/callback`
 
 In the Slack app settings, add the redirect URL above and create a slash command
-that points to `https://okrptr.com/api/slack/commands`. OKRPTR requests the
+that points to `https://okri.ai/api/slack/commands`. OKRI requests the
 `commands` and `chat:write` bot scopes, verifies Slack request signatures, and
 stores the bot token encrypted with `SLACK_TOKEN_ENCRYPTION_KEY`.
 
