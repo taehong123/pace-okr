@@ -1,6 +1,45 @@
 import { expect, test } from "@playwright/test";
 import { installApiMocks } from "./api-mocks";
 
+test("Slack channel selectors refresh on focus and label every supported channel kind", async ({ page }) => {
+  await installApiMocks(page, { slackState: "setup_required", slackSetupComplete: false, teamWorkspace: true });
+  let channelRevision = 1;
+  let channelReads = 0;
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() !== "GET" && path.startsWith("/api/slack/")) writes.push(`${request.method()} ${path}`);
+  });
+  await page.route("**/api/slack/channels**", (route) => {
+    channelReads += 1;
+    const channels = channelRevision === 1
+      ? [
+        { id: "C-public", name: "announcements", isPrivate: false, isMember: false, isShared: false, isExternal: false },
+        { id: "G-private", name: "leadership", isPrivate: true, isMember: true, isShared: false, isExternal: false },
+      ]
+      : [
+        { id: "C-connect", name: "partner", isPrivate: false, isMember: true, isShared: true, isExternal: true },
+        { id: "C-org", name: "company", isPrivate: false, isMember: true, isShared: true, isExternal: false },
+      ];
+    return route.fulfill({ json: { channels, observedAt: "2026-09-04T00:00:00.000Z" } });
+  });
+
+  await page.goto("/?settings=workspace&tab=integrations&bot=daily&slack=setup_required");
+  await expect(page.getByText("#announcements", { exact: true })).toBeVisible();
+  await expect(page.getByText("공개 · 선택 시 참여", { exact: true })).toBeVisible();
+  await expect(page.getByText("비공개 · 봇 참여 중", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "지금 새로고침" })).toBeVisible();
+
+  channelRevision = 2;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(page.getByText("#partner", { exact: true })).toBeVisible();
+  await expect(page.getByText("Slack Connect · 봇 참여 중", { exact: true })).toBeVisible();
+  await expect(page.getByText("조직 공유 · 봇 참여 중", { exact: true })).toBeVisible();
+  expect(channelReads).toBeGreaterThanOrEqual(2);
+  expect(writes).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+});
+
 test("management failure stays visible outside advanced settings without sending a message", async ({ page }) => {
   await installApiMocks(page, { slackState: "connected", teamWorkspace: true });
   const writes: string[] = [];

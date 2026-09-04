@@ -102,7 +102,7 @@ function harness(t) {
     "@/lib/daily-work": {}, "@/lib/slack-daily-form": {}, "@/lib/slack-member-matching": {},
   });
   const calls = [], pending = [];
-  const behavior = { rejectSchedule: false, loseResponse: false, rejectCancellation: false, lockedCancellation: false, rejectTeam: "", onSchedule: null, paginate: false };
+  const behavior = { rejectSchedule: false, loseResponse: false, rejectCancellation: false, lockedCancellation: false, rejectTeam: "", onSchedule: null, paginate: false, channelPages: [] };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, options) => {
     assert.ok(url.startsWith("https://slack.com/api/"), "only mocked Slack requests are allowed");
@@ -110,6 +110,11 @@ function harness(t) {
     const owner = options.headers.Authorization.replace("Bearer mock-token-", "");
     assert.ok(["workspace", "other"].includes(owner), "each Slack call uses its own workspace token");
     calls.push({ method, body, owner });
+    if (method === "conversations.list") {
+      const page = body.cursor ? 1 : 0;
+      const result = behavior.channelPages[page] ?? { channels: [], nextCursor: "" };
+      return Response.json({ ok: true, channels: result.channels, response_metadata: { next_cursor: result.nextCursor || "" } });
+    }
     if (method === "chat.scheduledMessages.list") {
       if (behavior.paginate && !body.cursor) return Response.json({ ok: true, scheduled_messages: [], response_metadata: { next_cursor: "next" } });
       return Response.json({ ok: true, scheduled_messages: pending.filter((entry) => entry.owner === owner && entry.channel_id === body.channel && entry.post_at > Number(body.oldest) && entry.post_at < Number(body.latest)) });
@@ -152,6 +157,43 @@ test("scheduled, manual and test reminders have unique block IDs and keep the de
     assert.equal(new Set(ids).size, ids.length);
     assert.equal(blocks.find((block) => block.type === "actions").block_id, marker);
   }
+});
+
+test("channel discovery classifies public, private, organization-shared and Slack Connect destinations", async (t) => {
+  const { api, behavior, calls } = harness(t);
+  behavior.channelPages = [
+    {
+      channels: [
+        { id: "C-public", name: "announcements", is_private: false, is_member: false },
+        { id: "G-private", name: "leadership", is_private: true, is_member: true },
+        { id: "C-connect", name: "partner", is_private: false, is_member: true, is_shared: true, is_ext_shared: true },
+        { id: "C-connect-away", name: "vendor", is_private: false, is_member: false, is_shared: true, is_ext_shared: true },
+      ],
+      nextCursor: "next",
+    },
+    {
+      channels: [
+        { id: "C-org", name: "company", is_private: false, is_member: true, is_shared: true, is_org_shared: true },
+        { id: "G-hidden", name: "hidden", is_private: true, is_member: false },
+        { id: "C-archived", name: "old", is_private: false, is_member: true, is_archived: true },
+      ],
+      nextCursor: "",
+    },
+  ];
+
+  const channels = await api.listSlackChannels("workspace", { includeJoinablePublic: true });
+  assert.deepEqual(channels, [
+    { id: "C-public", name: "announcements", isPrivate: false, isMember: false, isShared: false, isExternal: false },
+    { id: "C-org", name: "company", isPrivate: false, isMember: true, isShared: true, isExternal: false },
+    { id: "G-private", name: "leadership", isPrivate: true, isMember: true, isShared: false, isExternal: false },
+    { id: "C-connect", name: "partner", isPrivate: false, isMember: true, isShared: true, isExternal: true },
+  ]);
+  assert.equal(calls.filter((call) => call.method === "conversations.list").length, 2);
+  assert.equal(calls.find((call) => call.method === "conversations.list").body.types, "public_channel,private_channel");
+  assert.equal(api.canAutoJoinSlackChannel(channels[0]), true);
+  assert.equal(api.canAutoJoinSlackChannel(channels[1]), false);
+  assert.equal(api.canAutoJoinSlackChannel(channels[2]), false);
+  assert.equal(api.canAutoJoinSlackChannel(channels[3]), false);
 });
 
 test("failed/missing/overdue/partial reservations never appear as ready", () => {

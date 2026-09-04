@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getSlackConnection } from "@/lib/pace-data";
-import { listSlackChannels, slackApi, slackTokenForConnection, type SlackDailyChannel } from "@/lib/slack-daily";
+import { canAutoJoinSlackChannel, listSlackChannels, slackApi, slackTokenForConnection, type SlackDailyChannel } from "@/lib/slack-daily";
 import { deliverSlackBotMessage } from "@/lib/slack-bot-delivery";
 
 export const managementBotSignalIds = [
@@ -194,8 +194,8 @@ async function prepareSlackChannel(ownerId: string, channelId: string): Promise<
   if (!connection) throw new Error("워크스페이스 Slack을 먼저 연결해 주세요.");
   const available = await listSlackChannels(ownerId, { includeJoinablePublic: true });
   const channel = available.find((entry) => entry.id === channelId);
-  if (!channel) throw new Error("공개 채널 또는 봇이 참여한 비공개 채널만 선택할 수 있습니다.");
-  if (!channel.isPrivate && !channel.isMember) {
+  if (!channel) throw new Error("공개 채널 또는 봇이 참여한 비공개·공유 채널만 선택할 수 있습니다.");
+  if (canAutoJoinSlackChannel(channel)) {
     const token = await slackTokenForConnection(connection);
     await slackApi(token, "conversations.join", { channel: channel.id });
   }

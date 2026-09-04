@@ -2204,11 +2204,11 @@ async function getSlackAutomation(ownerId: string, id: string) {
 }
 
 async function validateSlackAutomationChannel(ownerId: string, channelId: string) {
-  const { listSlackChannels, slackApi, slackTokenForConnection } = await import("@/lib/slack-daily");
+  const { canAutoJoinSlackChannel, listSlackChannels, slackApi, slackTokenForConnection } = await import("@/lib/slack-daily");
   const channels = await listSlackChannels(ownerId, { includeJoinablePublic: true });
   const channel = channels.find((value) => value.id === channelId);
-  if (!channel) throw new Error("현재 워크스페이스의 공개 채널 또는 봇이 참여한 비공개 채널을 선택해 주세요.");
-  if (!channel.isPrivate && !channel.isMember) {
+  if (!channel) throw new Error("현재 워크스페이스의 공개 채널 또는 봇이 참여한 비공개·공유 채널을 선택해 주세요.");
+  if (canAutoJoinSlackChannel(channel)) {
     const connection = await getSlackConnection(ownerId);
     if (!connection) throw new Error("Slack을 먼저 연결해 주세요.");
     await slackApi(await slackTokenForConnection(connection), "conversations.join", { channel: channelId });

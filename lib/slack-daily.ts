@@ -30,7 +30,14 @@ type SlackUser = {
   profile?: { email?: string; display_name?: string; real_name?: string };
 };
 
-export type SlackDailyChannel = { id: string; name: string; isPrivate: boolean; isMember: boolean };
+export type SlackDailyChannel = {
+  id: string;
+  name: string;
+  isPrivate: boolean;
+  isMember: boolean;
+  isShared: boolean;
+  isExternal: boolean;
+};
 export const DAILY_REMINDER_BLOCK_PREFIX = "okrptr_daily_reminder:";
 const DAILY_REMINDER_TEXT = "[데일리 봇] 오늘의 데일리를 작성해 주세요.";
 const REMINDER_LEASE_MS = 120_000;
@@ -281,19 +288,37 @@ export async function listSlackChannels(ownerId: string, options: { includeJoina
   const channels: SlackDailyChannel[] = [];
   let cursor = "";
   do {
-    const result = await slackApi<SlackApiResult & { channels?: Array<{ id?: string; name?: string; is_private?: boolean; is_member?: boolean; is_archived?: boolean }> }>(token, "conversations.list", {
+    const result = await slackApi<SlackApiResult & { channels?: Array<{
+      id?: string;
+      name?: string;
+      is_private?: boolean;
+      is_member?: boolean;
+      is_archived?: boolean;
+      is_shared?: boolean;
+      is_ext_shared?: boolean;
+      is_ext_ws_shared?: boolean;
+      is_org_shared?: boolean;
+      is_pending_ext_shared?: boolean;
+    }> }>(token, "conversations.list", {
       types: "public_channel,private_channel", exclude_archived: true, limit: 200, cursor: cursor || undefined,
     });
     for (const channel of result.channels ?? []) {
       const isPrivate = Boolean(channel.is_private);
       const isMember = Boolean(channel.is_member);
-      if (channel.id && channel.name && !channel.is_archived && (isMember || (options.includeJoinablePublic && !isPrivate))) {
-        channels.push({ id: channel.id, name: channel.name, isPrivate, isMember });
+      const isExternal = Boolean(channel.is_ext_shared || channel.is_ext_ws_shared || channel.is_pending_ext_shared);
+      const isShared = Boolean(channel.is_shared || channel.is_org_shared || isExternal);
+      const canSelect = isMember || Boolean(options.includeJoinablePublic && !isPrivate && !isShared);
+      if (channel.id && channel.name && !channel.is_archived && canSelect) {
+        channels.push({ id: channel.id, name: channel.name, isPrivate, isMember, isShared, isExternal });
       }
     }
     cursor = result.response_metadata?.next_cursor ?? "";
   } while (cursor);
-  return channels.sort((left, right) => left.name.localeCompare(right.name));
+  return channels.sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+}
+
+export function canAutoJoinSlackChannel(channel: SlackDailyChannel) {
+  return !channel.isPrivate && !channel.isShared && !channel.isMember;
 }
 
 export async function sendDailyReminderNow(ownerId: string, memberId: string) {
@@ -925,7 +950,7 @@ function serializeSettings(settings: typeof slackDailySettings.$inferSelect) {
 }
 
 function serializeStoredChannel(channel: typeof slackDailyChannels.$inferSelect) {
-  return { id: channel.channelId, name: channel.channelName, isPrivate: channel.isPrivate, isMember: true };
+  return { id: channel.channelId, name: channel.channelName, isPrivate: channel.isPrivate, isMember: true, isShared: false, isExternal: false };
 }
 
 async function prepareSlackDailyChannels(ownerId: string, channelIds: string[]) {
@@ -936,10 +961,10 @@ async function prepareSlackDailyChannels(ownerId: string, channelIds: string[]) 
   const available = await listSlackChannels(ownerId, { includeJoinablePublic: true });
   const byId = new Map(available.map((channel) => [channel.id, channel]));
   const selected = uniqueChannelIds.map((id) => byId.get(id)).filter((channel): channel is SlackDailyChannel => Boolean(channel));
-  if (selected.length !== uniqueChannelIds.length) throw new Error("공개 채널 또는 봇이 참여한 비공개 채널만 선택할 수 있습니다.");
+  if (selected.length !== uniqueChannelIds.length) throw new Error("공개 채널 또는 봇이 참여한 비공개·공유 채널만 선택할 수 있습니다.");
   const token = await slackTokenForConnection(connection);
   for (const channel of selected) {
-    if (!channel.isPrivate && !channel.isMember) await slackApi(token, "conversations.join", { channel: channel.id });
+    if (canAutoJoinSlackChannel(channel)) await slackApi(token, "conversations.join", { channel: channel.id });
   }
   return selected.map((channel) => ({ ...channel, isMember: true }));
 }

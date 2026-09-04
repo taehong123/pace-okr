@@ -849,11 +849,16 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(styles, /\.integrations-page/);
   assert.match(styles, /\.integration-step/);
   assert.match(styles, /\.slack-manual-send/);
+  assert.match(styles, /\.slack-channel-sync/);
   assert.ok(styles.includes(".workspace-integration-section .integration-service-card"));
   assert.match(page, /INTEGRATION_STATUS_CACHE_KEY/);
   assert.ok(page.includes("Promise.allSettled([googleRequest, slackRequest])"));
   assert.match(page, /channelsLoadedRef/);
   assert.ok(page.includes('member.linked ? t("Slack 연결됨") : t("Slack 계정 미연결")'));
+  assert.match(page, /SLACK_CHANNEL_REFRESH_MS = 15_000/);
+  assert.match(page, /useLiveSlackChannels/);
+  assert.match(page, /visibilitychange/);
+  assert.match(page, /Slack Connect · 봇 참여 중/);
   assert.ok(!page.includes("member.slackDisplayName"));
   assert.match(slackDaily, /member.display_name/);
   assert.ok(slackDaily.includes("COALESCE(member.display_name, submission.member_name) AS member_name"));
@@ -896,6 +901,8 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.doesNotMatch(paceData, /serializeSlackConnection\(connection: SlackConnection \| null, configured/);
   assert.match(onboardingRoute, /configureSlackDailyOnboarding/);
   assert.match(slackDaily, /conversations\.join/);
+  assert.match(slackDaily, /is_ext_shared/);
+  assert.match(slackDaily, /canAutoJoinSlackChannel/);
   assert.match(slackDaily, /chat\.scheduleMessage/);
   assert.match(slackDaily, /testDailyChannel/);
   assert.match(slackDaily, /sendDailyReminderNow/);
@@ -903,6 +910,7 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(settingsRoute, /payload\.action === "send_now"/);
   assert.match(slackAutomation, /업무 자동화 봇/);
   assert.match(channelRoute, /includeJoinablePublic/);
+  assert.match(channelRoute, /private, no-store, max-age=0/);
   assert.match(operationsGuide, /apps\.manifest\.create/);
   assert.match(operationsGuide, /일반 고객은 이 절차를 수행하지 않으며/);
   assert.doesNotMatch(operationsGuide, /AllVibe/i);
