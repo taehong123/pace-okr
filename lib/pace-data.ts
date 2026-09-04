@@ -61,6 +61,7 @@ import {
 import { syncDueKrDataConnectionsWithDb, syncKrDataConnectionWithDb } from "@/lib/kr-data-sync";
 import {
   isSlackAutomationTrigger,
+  isSupportedTaskAutomation,
   normalizeSlackChannelId,
   renderSlackAutomationMessage,
   systemAutomationTemplate,
@@ -861,6 +862,16 @@ async function ensureSchema() {
           received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_event_receipts_received ON slack_event_receipts(received_at)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_work_command_operations (
+          request_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          team_id TEXT NOT NULL, slack_user_id TEXT NOT NULL, command TEXT NOT NULL, target_id TEXT,
+          status TEXT NOT NULL DEFAULT 'processing', result_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_work_commands_owner_created ON slack_work_command_operations(owner_id, created_at)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_work_commands_actor ON slack_work_command_operations(team_id, slack_user_id, created_at)"),
+        d1.prepare(`UPDATE slack_automations SET active = 0, updated_at = CURRENT_TIMESTAMP
+          WHERE trigger_type = 'task_status_changed' AND trigger_status NOT IN ('todo', 'done') AND active = 1`),
         d1.prepare(`CREATE TABLE IF NOT EXISTS slack_link_tokens (
           token_hash TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
           team_id TEXT NOT NULL, slack_user_id TEXT NOT NULL, slack_email TEXT NOT NULL DEFAULT '',
@@ -2136,6 +2147,7 @@ export async function testSlackAutomation(ownerId: string, id: string) {
   await ensureSchema();
   const automation = await getSlackAutomation(ownerId, id);
   if (!automation) throw new Error("Slack 자동화를 찾을 수 없습니다");
+  if (!isSupportedTaskAutomation(automation.triggerType, automation.triggerStatus)) throw new Error("현재 Task 상태 모델에서는 사용할 수 없는 규칙입니다");
   const workspace = await getWorkspaceName(ownerId);
   const context: SlackAutomationContext = {
     title: "Slack 자동화 테스트 업무",
@@ -2175,6 +2187,7 @@ export async function dispatchSlackAutomationEvent(ownerId: string, event: {
       workspace,
     };
     for (const automation of automations) {
+      if (!isSupportedTaskAutomation(automation.triggerType, automation.triggerStatus)) continue;
       if (!slackAutomationMatches(automation, { triggerType: event.triggerType, status: event.item.status })) continue;
       const eventKey = `${ownerId}:${event.triggerType}:${automation.id}:${event.item.id}:${event.fromStatus ?? ""}:${event.item.status}:${event.item.updatedAt}`;
       try { await deliverSlackAutomation(automation, context, event.item.id, eventKey, event.triggerType); }
@@ -2194,6 +2207,7 @@ function validateSlackAutomationInput(input: SlackAutomationInput, partial: bool
   if (triggerType && !isSlackAutomationTrigger(triggerType)) throw new Error("지원하지 않는 트리거입니다");
   const triggerStatus = triggerType === "task_status_changed" ? input.triggerStatus?.trim() ?? "" : "";
   if (triggerStatus && !ITEM_STATUSES.includes(triggerStatus as ItemStatus)) throw new Error("지원하지 않는 업무 상태입니다");
+  if (triggerType && !isSupportedTaskAutomation(triggerType, triggerStatus)) throw new Error("현재 Task 상태 모델에서는 사용할 수 없는 규칙입니다");
   const channelId = input.channelId === undefined && partial ? undefined : normalizeSlackChannelId(input.channelId ?? "");
   const messageTemplate = input.messageTemplate?.trim();
   if (!partial && !messageTemplate) throw new Error("Slack 메시지를 입력해 주세요");
@@ -2288,6 +2302,7 @@ function serializeSlackAutomation(automation: SlackAutomation) {
     channelId: automation.channelId,
     messageTemplate: automation.messageTemplate,
     messageTemplateKind: automation.messageTemplateKind,
+    supported: isSupportedTaskAutomation(automation.triggerType, automation.triggerStatus),
     active: automation.active,
     lastTriggeredAt: automation.lastTriggeredAt,
     lastDeliveryStatus: automation.lastDeliveryStatus,

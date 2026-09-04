@@ -179,11 +179,11 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /workspace-settings-trigger/);
   assert.match(page, /Slack 연결 후 데일리 봇을 설정할 수 있습니다/);
   assert.match(page, /bot-accordion-trigger/);
-  assert.match(page, /워크스페이스 설정.*일반.*멤버.*그룹.*Project 설정.*관리 요약.*봇 연동.*위험 구역/s);
+  assert.match(page, /워크스페이스 설정.*일반.*멤버.*그룹.*Project 설정.*관리 요약.*자동화 봇.*위험 구역/s);
   assert.match(page, /settings=workspace&tab=integrations/);
   assert.match(page, /자동화 봇/);
-  assert.match(page, /업무가 생성될 때/);
-  assert.match(page, /업무 상태가 바뀔 때/);
+  assert.match(page, /Task 완료 또는 다시 열림/);
+  assert.match(page, /Task 다시 열림/);
   assert.match(page, /테스트 전송/);
   assert.match(paceData, /ALTER TABLE slack_daily_settings ADD COLUMN onboarding_completed_at TEXT/);
   assert.match(page, /최근 전송 기록/);
@@ -930,7 +930,7 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(slackDaily, /sendDailyReminderNow/);
   assert.match(slackDaily, /\[데일리 봇\]/);
   assert.match(settingsRoute, /payload\.action === "send_now"/);
-  assert.match(slackAutomation, /업무 자동화 봇/);
+  assert.match(slackAutomation, /Task 변동 알림 봇/);
   assert.match(channelRoute, /includeJoinablePublic/);
   assert.match(channelRoute, /private, no-store, max-age=0/);
   assert.match(operationsGuide, /apps\.manifest\.create/);
@@ -1026,15 +1026,18 @@ test("implements a workspace management bot for data quality and urgency reporti
     assert.match(domain, new RegExp(signal));
   }
   assert.match(page, /id: "summary", label: "관리 요약"/);
-  assert.match(page, /id: "integrations", label: "봇 연동"/);
+  assert.match(page, /id: "integrations", label: "자동화 봇"/);
   assert.match(page, /rawTab === "management" \? "summary"/);
   assert.match(page, /function WorkspaceManagementSummary/);
   assert.match(page, /function WorkspaceManagementBot/);
   assert.match(page, /<WorkspaceManagementBot\b[^>]*active=\{openBot === "management"\}/);
-  assert.match(page, /title=\{t\("업무 자동화"\)\}/);
+  assert.match(page, /title=\{t\("업무 관리 봇"\)\}/);
+  assert.match(page, /title=\{t\("Task 변동 알림 봇"\)\}/);
   assert.match(page, /워크스페이스 관리 봇 사용/);
   assert.doesNotMatch(page, /LIVE PREVIEW/);
-  assert.match(page, /막힘 상태 알림/);
+  assert.doesNotMatch(page, /id: "blocked", name: "막힘 상태 알림"/);
+  assert.match(page, /Task 완료 알림/);
+  assert.match(page, /Task 다시 열림 알림/);
   assert.match(page, /새 Task 알림/);
   assert.doesNotMatch(page, /BOT CONNECTIONS|WORKSPACE HEALTH|RECOMMENDED|CURRENT RULES/);
   assert.match(page, /workspace-settings-section-header workspace-bot-header/);

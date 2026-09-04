@@ -62,6 +62,10 @@ function harness() {
       async handleDeliveredDailyReminder(value) { calls.push(["delivery", value]); },
       async getSlackDailySettings(auth) { calls.push(["settings", auth.ownerId]); return { ownerId: auth.ownerId, delivery: { status: "ready" } }; },
     },
+    "@/lib/slack-work-command": {
+      parseSlackWorkCommand: () => null,
+      async handleSlackWorkCommandEvent() { calls.push(["work-command"]); },
+    },
     "@/lib/slack-oauth": {
       slackConfigured: () => state.configured,
       async verifySlackRequest() { calls.push(["verify"]); return state.signature; },

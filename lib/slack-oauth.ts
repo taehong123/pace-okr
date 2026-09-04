@@ -47,6 +47,8 @@ export const slackScopes = [
   "channels:read",
   "channels:join",
   "groups:read",
+  "channels:history",
+  "groups:history",
 ];
 
 export function slackConfigured(runtime: SlackRuntimeEnv) {

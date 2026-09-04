@@ -1109,6 +1109,26 @@ export const slackEventReceipts = sqliteTable(
   (table) => [index("idx_slack_event_receipts_received").on(table.receivedAt)],
 );
 
+export const slackWorkCommandOperations = sqliteTable(
+  "slack_work_command_operations",
+  {
+    requestId: text("request_id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    teamId: text("team_id").notNull(),
+    slackUserId: text("slack_user_id").notNull(),
+    command: text("command").notNull(),
+    targetId: text("target_id"),
+    status: text("status").notNull().default("processing"),
+    resultJson: text("result_json").notNull().default("{}"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_slack_work_commands_owner_created").on(table.ownerId, table.createdAt),
+    index("idx_slack_work_commands_actor").on(table.teamId, table.slackUserId, table.createdAt),
+  ],
+);
+
 export const slackLinkTokens = sqliteTable(
   "slack_link_tokens",
   {

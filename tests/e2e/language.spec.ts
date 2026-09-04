@@ -63,11 +63,11 @@ for (const id of ["ko", "en", "ja", "zh", "es"] as const) {
 test("all bot types, management signals and recommended automations follow the selected language", async ({ page }, info) => {
   test.skip(info.project.name !== "desktop-chromium", "Run the bot language matrix once in the desktop project.");
   const copy = {
-    ko: { daily: "데일리 봇", management: "관리 봇", automation: "업무 자동화", signal: "활성 Project·Task 중 마감일이 비어 있는 항목", blocked: "막힘 상태 알림", created: "새 Task 알림" },
-    en: { daily: "Daily bot", management: "Management bot", automation: "Work automation", signal: "Active Projects and Tasks with no due date", blocked: "Blocked status alert", created: "New Task alert" },
-    ja: { daily: "デイリーボット", management: "管理ボット", automation: "業務の自動化", signal: "期限が設定されていない進行中のProject・Task", blocked: "ブロック状態の通知", created: "新しいTaskの通知" },
-    zh: { daily: "日报机器人", management: "管理机器人", automation: "工作自动化", signal: "没有截止日期的活跃 Project 和 Task", blocked: "阻塞状态提醒", created: "新 Task 提醒" },
-    es: { daily: "Bot diario", management: "Bot de gestión", automation: "Automatización del trabajo", signal: "Projects y Tasks activos sin fecha límite", blocked: "Alerta de estado bloqueado", created: "Alerta de nueva Task" },
+    ko: { daily: "데일리 봇", management: "관리 봇", work: "업무 관리 봇", automation: "Task 변동 알림 봇", signal: "활성 Project·Task 중 마감일이 비어 있는 항목", completed: "Task 완료 알림", created: "새 Task 알림" },
+    en: { daily: "Daily bot", management: "Management bot", work: "Work management bot", automation: "Task change notification bot", signal: "Active Projects and Tasks with no due date", completed: "Task completion alert", created: "New Task alert" },
+    ja: { daily: "デイリーボット", management: "管理ボット", work: "業務管理ボット", automation: "Task変更通知ボット", signal: "期限が設定されていない進行中のProject・Task", completed: "Task完了通知", created: "新しいTaskの通知" },
+    zh: { daily: "日报机器人", management: "管理机器人", work: "工作管理机器人", automation: "Task 变更通知机器人", signal: "没有截止日期的活跃 Project 和 Task", completed: "Task 完成提醒", created: "新 Task 提醒" },
+    es: { daily: "Bot diario", management: "Bot de gestión", work: "Bot de gestión del trabajo", automation: "Bot de avisos de cambios de Task", signal: "Projects y Tasks activos sin fecha límite", completed: "Aviso de Task completada", created: "Alerta de nueva Task" },
   } as const;
   const state = { preferences: { language: "ko", resolvedLanguage: "ko", revision: 0 } as LanguagePreferences, slackState: "connected" as const, slackSetupComplete: true, teamWorkspace: true };
   await fixture(page, state);
@@ -76,18 +76,19 @@ test("all bot types, management signals and recommended automations follow the s
     state.preferences = { language: id, resolvedLanguage: id, revision: index + 1 };
     await page.goto("/?settings=workspace&tab=integrations&bot=management");
     const rows = page.locator(".bot-accordion-row");
-    await expect(rows).toHaveCount(3);
+    await expect(rows).toHaveCount(4);
     await expect(rows.nth(0).locator(".bot-accordion-copy > b")).toHaveText(copy[id].daily);
     await expect(rows.nth(1).locator(".bot-accordion-copy > b")).toHaveText(copy[id].management);
-    await expect(rows.nth(2).locator(".bot-accordion-copy > b")).toHaveText(copy[id].automation);
+    await expect(rows.nth(2).locator(".bot-accordion-copy > b")).toHaveText(copy[id].work);
+    await expect(rows.nth(3).locator(".bot-accordion-copy > b")).toHaveText(copy[id].automation);
 
     await rows.nth(1).locator("details.bot-advanced-settings > summary").click();
     await expect(rows.nth(1)).toContainText(copy[id].signal);
-    await rows.nth(2).locator("button.bot-accordion-trigger").click();
-    const recommendations = rows.nth(2).locator(".automation-recommendations");
-    await expect(recommendations).toContainText(copy[id].blocked);
+    await rows.nth(3).locator("button.bot-accordion-trigger").click();
+    const recommendations = rows.nth(3).locator(".automation-recommendations");
+    await expect(recommendations).toContainText(copy[id].completed);
     await expect(recommendations).toContainText(copy[id].created);
-    await expect(rows.nth(2)).toContainText("사용자 작성 규칙");
+    await expect(rows.nth(3)).toContainText("사용자 작성 규칙");
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
   }
 });

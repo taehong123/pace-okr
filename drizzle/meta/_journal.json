@@ -295,6 +295,13 @@
       "when": 1788487658580,
       "tag": "0047_daily_yesterday_selection",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1788505200000,
+      "tag": "0048_slack_work_commands",
+      "breakpoints": true
     }
   ]
 }

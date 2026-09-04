@@ -26,6 +26,8 @@ oauth_config:
       - channels:read
       - channels:join
       - groups:read
+      - channels:history
+      - groups:history
 settings:
   interactivity:
     is_enabled: true
@@ -34,6 +36,8 @@ settings:
     request_url: https://okrptr.com/api/slack/events
     bot_events:
       - message.im
+      - message.channels
+      - message.groups
   org_deploy_enabled: false
   socket_mode_enabled: false
   token_rotation_enabled: false

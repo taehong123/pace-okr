@@ -74,7 +74,9 @@ test("Slack bot types, settings, states and safe errors are localized in every s
   const botKeys = [
     "데일리 봇",
     "관리 봇",
-    "업무 자동화",
+    "자동화 봇",
+    "업무 관리 봇",
+    "Task 변동 알림 봇",
     "시간과 대상 멤버를 설정합니다",
     "시간과 발송 채널을 설정합니다",
     "추천 규칙 또는 직접 규칙을 만듭니다",
@@ -91,12 +93,12 @@ test("Slack bot types, settings, states and safe errors are localized in every s
     "예약 중",
     "발송 완료",
     "예약 취소됨",
-    "막힘 상태 알림",
-    "Task가 막힘 상태가 되면 바로 알립니다.",
+    "Task 완료 알림",
+    "Task 다시 열림 알림",
     "새 Task 알림",
     "새 Task가 만들어지면 담당 채널에 알립니다.",
     "업무 생성",
-    "모든 상태 변경",
+    "현재 Task 상태 모델에서는 사용할 수 없음",
     "Project 기한 초과",
     "Task 기한 초과",
     "기한 초과 Task {count}개",
@@ -118,8 +120,8 @@ test("Slack bot types, settings, states and safe errors are localized in every s
   assert.match(page, /<b>\{t\(slackOAuthIssueCopy\[slackOAuthIssue\]\.title\)\}<\/b>/);
   assert.match(page, /<b>\{t\(recommendation\.name\)\}<\/b><p>\{t\(recommendation\.description\)\}<\/p>/);
   assert.match(page, /name: localizedName/);
-  assert.match(page, /return t\("업무 생성"\)/);
-  assert.match(page, /: t\("모든 상태 변경"\)/);
+  assert.match(page, /return t\("Task 생성"\)/);
+  assert.match(page, /return t\("지원하지 않는 과거 상태 규칙"\)/);
 });
 
 test("server translators are bound per recipient and preserve user-authored text", async () => {

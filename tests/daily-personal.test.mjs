@@ -292,6 +292,7 @@ test("signed Slack submission passes every personal checklist and rejects other-
     "@/lib/language-preferences": { memberMessageLanguage: async () => state.language, workspaceMessageLanguage: async () => "ko" },
     "@/lib/server-language": serverLanguage,
     "@/lib/slack-daily": { dailyMemberBySlack: async () => ({ authorization: { ...authorization, role: state.role } }), publishDailySubmission: async () => {}, reconcileDailyReminders: async () => {} },
+    "@/lib/slack-work-command": { openSlackWorkCommandModal: async () => {}, slackWorkCommandOptions: async () => ({ options: [] }), submitSlackWorkCommand: async () => ({}) },
     "@/lib/daily-bot": { currentDailyMember: async () => ({ id: "me" }), normalizeDailySkipReason: (v) => v || null,
       saveDailyDraft: async (...args) => { if (state.fail) throw new Error("저장 실패"); saved.push(args); },
       submitDailyDraft: async (...args) => { submitted.push(args); return { id: "submission" }; } },

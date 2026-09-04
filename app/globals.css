@@ -2299,6 +2299,12 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .bot-accordion-panel[hidden] { display: none; }
 .bot-accordion-panel .workspace-management-pane.embedded { margin: 0; padding: 0; border: 0; }
 .bot-accordion-panel .workspace-settings-note { margin: 0 0 12px; }
+.slack-work-command-panel { display: grid; gap: 12px; }
+.slack-work-command-groups { display: grid; gap: 0; border-top: 1px solid var(--line); }
+.slack-work-command-groups > section { display: grid; grid-template-columns: minmax(88px, .3fr) minmax(0, 1fr); align-items: start; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.slack-work-command-groups > section > b { font-size: var(--type-label); }
+.slack-work-command-groups > section > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.slack-work-command-groups code { padding: 4px 7px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--raised); color: var(--ink); font-family: inherit; font-size: var(--type-meta); }
 .management-bot-config.compact { border: 1px solid var(--line); border-radius: var(--radius-container); background: var(--raised); box-shadow: none; }
 .management-schedule-grid.core { grid-template-columns: minmax(120px, .7fr) minmax(180px, 1.3fr); }
 .management-schedule-grid.core .management-channel-field { padding: 0; }
@@ -2345,6 +2351,7 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .slack-channel-sync button { flex: 0 0 auto; min-height: var(--control-height); display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--raised); color: var(--ink); font-size: var(--type-label); cursor: pointer; }
 .slack-channel-sync button:disabled { color: var(--muted); cursor: default; }
 @media (max-width: 700px) {
+  .slack-work-command-groups > section { grid-template-columns: 1fr; gap: 7px; }
   .workspace-topbar { flex-wrap: wrap; }
   .workspace-integration-section .workspace-integration-pane { padding: 10px 12px 22px; }
   .workspace-integration-section .slack-connected-summary dl > div { border-top: 1px solid var(--line); border-left: 0; }

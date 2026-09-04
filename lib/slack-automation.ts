@@ -42,6 +42,11 @@ export function isSlackAutomationTrigger(value: string): value is SlackAutomatio
   return (SLACK_AUTOMATION_TRIGGERS as readonly string[]).includes(value);
 }
 
+export function isSupportedTaskAutomation(triggerType: string, triggerStatus: string) {
+  return triggerType === "task_created"
+    || (triggerType === "task_status_changed" && ["todo", "done"].includes(triggerStatus));
+}
+
 export function defaultSlackAutomationTemplate(triggerType: SlackAutomationTrigger) {
   if (triggerType === "task_status_changed") {
     return "*{{title}}* 상태가 `{{from_status}}` → `{{status}}`로 바뀌었습니다.\n우선순위: {{priority}} · {{workspace}}";
@@ -66,7 +71,7 @@ export function renderSlackAutomationMessage(template: string, context: SlackAut
   };
 
   const message = template.replace(/{{\s*(title|status|from_status|priority|kind|workspace)\s*}}/g, (_, key: string) => escapeSlackText(variables[key] ?? ""));
-  return `*${t("업무 자동화 봇")}*\n${message}`;
+  return `*${t("Task 변동 알림 봇")}*\n${message}`;
 }
 
 export function slackAutomationMatches(input: {

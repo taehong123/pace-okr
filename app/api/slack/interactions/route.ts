@@ -5,6 +5,7 @@ import { createSlackMemberLinkUrl, dailyMemberBySlack, externalTaskOptions, open
 import { slackConfigured, verifySlackRequest, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { memberMessageLanguage, workspaceMessageLanguage } from "@/lib/language-preferences";
 import { serverTranslator, type Translator } from "@/lib/server-language";
+import { openSlackWorkCommandModal, slackWorkCommandOptions, submitSlackWorkCommand } from "@/lib/slack-work-command";
 
 type SlackInteraction = {
   type?: string;
@@ -13,7 +14,7 @@ type SlackInteraction = {
   user?: { id?: string };
   action_id?: string;
   value?: string;
-  actions?: Array<{ action_id?: string }>;
+  actions?: Array<{ action_id?: string; value?: string }>;
   view?: {
     callback_id?: string;
     private_metadata?: string;
@@ -42,10 +43,20 @@ export async function POST(request: Request) {
   const t = await serverTranslator(await memberMessageLanguage(env.DB, linked.authorization.ownerId, linked.memberId));
 
   if (payload.type === "block_suggestion") {
+    if (payload.action_id?.startsWith("work_")) {
+      return Response.json(await slackWorkCommandOptions(linked.authorization, linked.memberId, payload.action_id, payload.value ?? ""));
+    }
     const mode = payload.action_id === "selected_yesterday_work" ? "yesterday"
       : payload.action_id === "selected_today_work" ? "today"
         : payload.action_id === "selected_more_work" ? true : false;
     return Response.json({ options: await externalTaskOptions(linked.authorization, payload.value ?? "", mode, parseMetadata(payload.view?.private_metadata).date) });
+  }
+  if (payload.type === "block_actions") {
+    const action = payload.actions?.find((entry) => entry.action_id === "work_command_open");
+    if (action?.value && payload.trigger_id) {
+      await openSlackWorkCommandModal(payload.trigger_id, linked.authorization, linked.memberId, action.value, teamId, slackUserId);
+      return new Response(null, { status: 200 });
+    }
   }
   if (payload.type === "block_actions" && payload.actions?.some((action) => action.action_id === "daily_open")) {
     if (payload.trigger_id) await openDailyModal(payload.trigger_id, linked.authorization);
@@ -53,6 +64,17 @@ export async function POST(request: Request) {
   }
   if (payload.type === "view_submission" && payload.view?.callback_id === "daily_submit") {
     return submitFromModal(payload, linked.authorization, t);
+  }
+  if (payload.type === "view_submission" && payload.view?.callback_id === "work_command_submit") {
+    try {
+      const view = await submitSlackWorkCommand(linked.authorization, linked.memberId, payload.view.private_metadata ?? "", payload.view.state?.values ?? {}, teamId, slackUserId);
+      return Response.json({ response_action: "update", view });
+    } catch (error) {
+      let command = "";
+      try { command = (JSON.parse(payload.view.private_metadata ?? "{}") as { command?: string }).command ?? ""; } catch { /* use target field */ }
+      const errorBlock = command.endsWith("_create") ? "work_title" : "work_target";
+      return Response.json({ response_action: "errors", errors: { [errorBlock]: t(error instanceof Error ? error.message : "요청을 처리하지 못했습니다.") } });
+    }
   }
   return new Response(null, { status: 200 });
 }
