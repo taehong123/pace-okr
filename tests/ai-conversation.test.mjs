@@ -18,6 +18,7 @@ function compile(source, dependencies = {}) {
 }
 
 const intake = compile(await readFile(new URL("../lib/work-intake.ts", import.meta.url), "utf8"));
+const assistantCommand = compile(await readFile(new URL("../lib/assistant-command.ts", import.meta.url), "utf8"));
 const routeSource = await readFile(new URL("../app/api/okr-organize/route.ts", import.meta.url), "utf8");
 const pageSource = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const ast = ts.createSourceFile("page.tsx", pageSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -26,10 +27,11 @@ const components = ast.statements.filter((node) => ts.isFunctionDeclaration(node
 const { HomeOkrChat } = compile(`
 import { useState, useMemo, useRef, useEffect } from "react";
 import { t, messageValue } from "@/lib/client-language";
+import { parseAssistantCommand } from "@/lib/assistant-command";
 import { Bot, Link2, LoaderCircle, CheckCircle2, AlertTriangle, Eye, Send } from "lucide-react";
 ${components}
 export { HomeOkrChat };
-`);
+`, { "@/lib/assistant-command": assistantCommand });
 
 for (const entry of ["coach", "onboarding", "create", "task", "project", "routine"]) {
   test(`${entry} starts with conversation, not examples or an inventory`, () => {

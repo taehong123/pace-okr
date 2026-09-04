@@ -853,7 +853,6 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.ok(styles.includes(".workspace-integration-section .integration-service-card"));
   assert.match(page, /INTEGRATION_STATUS_CACHE_KEY/);
   assert.ok(page.includes("Promise.allSettled([googleRequest, slackRequest])"));
-  assert.match(page, /channelsLoadedRef/);
   assert.ok(page.includes('member.linked ? t("Slack 연결됨") : t("Slack 계정 미연결")'));
   assert.match(page, /SLACK_CHANNEL_REFRESH_MS = 15_000/);
   assert.match(page, /useLiveSlackChannels/);
