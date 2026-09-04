@@ -149,15 +149,23 @@ function mcpFixture() {
   const fullItem = (input) => ({
     id: "created", cycleId: null, parentId: null, routineId: null, kind: "task", title: "Task", description: "", status: "todo", priority: "medium", cadence: "weekly", progress: 0, dueDate: null, source: "mcp", archivedAt: null, archivedFromStatus: null, archiveRootId: null, createdAt: "", updatedAt: "", properties: {}, assignments: [], ...Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)),
   });
+  const initiativeChoice = { id: "ini", title: "Initiative", cycleId: "cycle-a", cycleName: "Q3", path: ["O", "KR", "Initiative"],
+    description: "", keyResultDescription: "", objectiveDescription: "", fingerprint: "a".repeat(64),
+    revision: { initiative: "1", keyResult: "1", objective: "1", cycleStatus: "active" } };
   const data = {
     ITEM_CADENCES: ["daily", "weekly", "monthly", "quarterly"], ITEM_KINDS: ["objective", "key_result", "initiative", "project", "task"],
     ITEM_PRIORITIES: ["low", "medium", "high", "urgent"], ITEM_STATUSES: ["todo", "in_progress", "done", "blocked", "archived"],
     GROUP_COLORS: ["gray"], GROUP_VISIBILITIES: ["open", "private"], PROPERTY_TYPES: ["text", "number"], ROUTINE_CADENCES: ["daily", "weekly", "monthly"],
     getWorkspaceRules: async () => rules,
-    getItem: async (_owner, id) => id === "task" ? fullItem({ id, status: "in_progress", cycleId: "cycle-a" }) : id === "p" || id === "ini" ? fullItem({ id, kind: id === "p" ? "project" : "initiative", cycleId: "cycle-a" }) : null,
+    getItem: async (_owner, id) => id === "task" ? fullItem({ id, status: "in_progress", cycleId: "cycle-a" })
+      : id === "approved-project" ? fullItem({ id, kind: "project", title: reviewReceipt.proposal.title,
+        description: reviewReceipt.proposal.description, progress: reviewReceipt.proposal.progress, cycleId: "cycle-a", parentId: "ini" })
+        : id === "p" || id === "ini" ? fullItem({ id, kind: id === "p" ? "project" : "initiative", cycleId: "cycle-a" }) : null,
     createItem: async (_owner, input) => { calls.push({ method: "create", input }); return fullItem(input); },
     updateItem: async (_owner, id, input) => { calls.push({ method: "update", input }); return fullItem({ id, status: "in_progress", ...input }); },
     createLinkedTasks: async (_owner, input) => { calls.push({ method: "batch", input }); return input.titles.map((title) => fullItem({ title, cycleId: "cycle-a", parentId: input.projectId, dueDate: input.dueDate })); },
+    archiveProject: async (_owner, _user, id) => { calls.push({ method: "archive", id }); return { project: fullItem({ id, kind: "project", title: "Archived", archivedAt: "now" }), affectedCount: 3 }; },
+    restoreProject: async (_owner, id) => { calls.push({ method: "restore", id }); return { project: fullItem({ id, kind: "project", title: "Restored" }), restoredCount: 3 }; },
     getItemPropertiesByName: async (_owner, ids) => { calls.push({ method: "properties", ids }); return {}; },
     getItemAssignmentMap: async () => ({}),
     replaceItemAssignmentRole: async () => {},
@@ -179,9 +187,19 @@ function mcpFixture() {
     "@/lib/project-review-mcp": compile(reviewMcpSource, {
       "cloudflare:workers": { env: { DB: fixtureData.d1 } },
       "@/lib/project-review": { ...reviewCore, getProjectReview: async () => reviewReceipt,
-        listReviewInitiatives: async () => ({ choices: [], truncated: false }), getReviewInitiative: async () => null },
-      "@/lib/project-review-editor": { getProjectReviewEditor: async () => ({ revision: "test-catalog", properties: [], members: [], templates: [], cycles: [] }) },
-      "@/lib/project-review-writer": {},
+        listReviewInitiatives: async () => ({ choices: [initiativeChoice], truncated: false }), getReviewInitiative: async (_db, _owner, id) => id === "ini" ? initiativeChoice : null,
+        approveProjectReview: async (_db, _identity, _input, create, prepare) => {
+          const prepared = await prepare(reviewReceipt, initiativeChoice);
+          const created = { ...prepared, state: "created", projectId: "approved-project", selectedParent: initiativeChoice };
+          await create(reviewReceipt, initiativeChoice, created);
+          Object.assign(reviewReceipt, created);
+          return reviewReceipt;
+        } },
+      "@/lib/project-review-editor": {
+        getProjectReviewEditor: async () => ({ revision: "b".repeat(64), properties: [], members: [], templates: [], cycles: [] }),
+        prepareEditedProjectReview: async (_owner, review, parent, proposal) => ({ ...review, proposal, selectedParent: parent }),
+      },
+      "@/lib/project-review-writer": { writeReviewedProject: async () => { calls.push({ method: "approved" }); } },
       "@/lib/project-review-service": { stageProjectReview: async (_auth, input, recommendations) => {
       if (input.properties?.invalid) throw new Error("Property not found");
       calls.push({ method: "review", input, recommendations });
@@ -245,8 +263,32 @@ test("MCP approval requires an explicit confirmation snapshot and never redirect
     assert.equal(staged.review.projectId, null);
     assert.ok(staged.review.proposal);
     assert.ok(staged.review.editor);
-    assert.match(staged.review.nextStep, /confirm_project/);
+    assert.match(staged.review.nextStep, /manage_project|same_tool_confirmation/);
     assert.equal(f.calls.filter((call) => call.method === "create").length, 0);
+  } finally { f.db.close(); }
+});
+
+test("manage_project keeps proposal, approval, edits, trash and restore in one tool", async () => {
+  const f = mcpFixture();
+  try {
+    await f.init();
+    assert.equal([...f.tools.keys()][0], "manage_project");
+    const proposed = await f.call("manage_project", { title: "명함 만들기" });
+    assert.equal(proposed.action, "propose");
+    assert.equal(proposed.review.projectId, null);
+    const confirmed = await f.call("manage_project", { action: "confirm", confirmation: {
+      review_id: f.reviewReceipt.id, version: f.reviewReceipt.version, confirmed: true,
+      initiative_id: "ini", initiative_fingerprint: "a".repeat(64), editor_revision: "b".repeat(64), proposal: f.reviewReceipt.proposal,
+    } });
+    assert.equal(confirmed.action, "confirm");
+    assert.equal(confirmed.review.projectId, "approved-project");
+    const updated = await f.call("manage_project", { action: "update", project_id: "p", changes: { title: "새 명함 만들기", progress: 20 } });
+    assert.equal(updated.item.title, "새 명함 만들기");
+    await assert.rejects(() => f.call("manage_project", { action: "archive", project_id: "p" }), /confirmation/);
+    const archived = await f.call("manage_project", { action: "archive", project_id: "p", confirmed: true });
+    assert.equal(archived.affectedTaskCount, 2);
+    const restored = await f.call("manage_project", { action: "restore", project_id: "p" });
+    assert.equal(restored.affectedTaskCount, 2);
   } finally { f.db.close(); }
 });
 
@@ -310,20 +352,29 @@ test("Invalid placement, field types, assignments and dates fail before any writ
   } finally { f.db.close(); }
 });
 
-test("Even a known or guessed Initiative cannot directly create a Project through legacy MCP", async () => {
+test("Legacy create_item stages once and can complete the approved Project without another exposed tool", async () => {
   const f = mcpFixture();
   try {
     await f.init();
     for (const parent_id of [undefined, "ini", "unrelated-id"]) {
       const result = await f.call("create_item", { kind: "project", title: "결제 개편", parent_id });
-      assert.equal(result.isError, true);
-      assert.match(result.content[0].text, /Project NOT created/);
+      assert.equal(result.review.projectId, null);
+      assert.match(result.review.same_tool_confirmation.template_id, /^okrptr-confirm:/);
     }
+    const pending = await f.call("create_item", { kind: "project", title: "결제 개편", parent_id: "ini" });
+    const created = await f.call("create_item", { kind: "project", title: "최종 결제 개편", description: "승인 전에 수정", progress: 25,
+      parent_id: "ini", template_id: pending.review.same_tool_confirmation.template_id });
+    assert.equal(created.item.kind, "project");
+    assert.equal(created.item.title, "최종 결제 개편");
+    assert.equal(created.item.description, "승인 전에 수정");
+    assert.equal(created.item.progress, 25);
+    assert.equal(created.item.parentId, "ini");
+    assert.equal(f.calls.filter((call) => call.method === "approved").length, 1);
     const staged = await f.call("propose_project", { title: "결제 개편", recommended_initiatives: [] });
     assert.equal(staged.review.selectedInitiative, null);
     assert.equal(staged.review.state, "awaiting_user_confirmation");
     assert.equal(f.calls.filter((call) => call.method === "create").length, 0);
-    assert.equal(f.calls.filter((call) => call.method === "review").length, 4);
+    assert.equal(f.calls.filter((call) => call.method === "review").length, 5);
   } finally { f.db.close(); }
 });
 
@@ -348,7 +399,7 @@ test("Relinking preserves status and batch creation carries shared fields in one
 test("MCP read-only dispatch fails closed for writes, unknown tools and mixed batches", () => {
   assert.equal(intake.isReadOnlyMcpRequest({ method: "tools/call", params: { name: "prepare_work" } }), true);
   assert.equal(intake.isReadOnlyMcpRequest({ method: "initialize" }), true);
-  for (const name of ["create_item", "create_tasks", "confirm_project", "cancel_project_review", "update_workspace_rules", "delete_routine", "future_tool"]) {
+  for (const name of ["manage_project", "create_item", "create_tasks", "confirm_project", "cancel_project_review", "update_workspace_rules", "delete_routine", "future_tool"]) {
     assert.equal(intake.isReadOnlyMcpRequest({ method: "tools/call", params: { name } }), false);
   }
   assert.equal(intake.isReadOnlyMcpRequest([{ method: "tools/call", params: { name: "prepare_work" } }]), false);

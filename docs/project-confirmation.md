@@ -6,8 +6,10 @@ AI recommendations are not permission to attach a Project. All new Projects
 from MCP (including cached legacy `create_item` calls) or integration-token
 `POST /api/items` requests first create an unsaved review. The same user and
 workspace must choose a current Initiative and approve the final summary.
-MCP completes this in the conversation with `confirm_project`; a web visit is
-not required. The existing browser confirmation page remains an optional path.
+MCP completes this in the conversation with `manage_project`; a web visit is
+not required. The same tool handles proposal, confirmation, edits, recoverable
+deletion and restoration. The existing browser confirmation page remains an
+optional path.
 No candidate is preselected, even if only one exists.
 Integration-token bulk OKR plans containing a Project are rejected before any
 ancestors are created; that endpoint cannot bypass the review flow.
@@ -22,17 +24,28 @@ server validation proves lineage/permissions, not business relevance.
 
 ## MCP conversation completion
 
-`propose_project` returns the frozen proposal, review version, editor catalog and
+`manage_project` returns the frozen proposal, review version, editor catalog and
 revision, and candidate/recommendation fingerprints without a mandatory web URL.
 The assistant presents human-readable fields and lineage, accepts changes and
-waits for explicit approval. `get_project_review(include_context=true, query,
+waits for explicit approval, then calls the same tool with `action=confirm`.
+`get_project_review(include_context=true, query,
 cycle_id)` refreshes choices; null cycle searches all files. It does not reset
-edits held in the conversation. `confirm_project` takes the complete final
+edits held in the conversation. `confirm_project` remains a compatibility alias
+and takes the complete final
 proposal, version, chosen Initiative/fingerprint, editor revision and
 `confirmed: true`, then uses the same validated atomic writer as the web page.
 It returns the saved receipt, not another approval link. A lost response can be
 resolved by reading the receipt or repeating the identical confirmation.
 `cancel_project_review` cancels a pending proposal in MCP.
+
+Older connections whose cached tool catalog exposes only `create_item` receive
+an internal `same_tool_confirmation` value with the pending proposal. After the
+user explicitly approves in that same conversation, the assistant reuses the
+value through `create_item`; the server resolves the frozen review, current
+Initiative fingerprint and editor revision and executes the same atomic writer.
+The value and review ID are implementation details and must not be shown to or
+copied by the user. The assistant must not request a new chat, an `@OKRPTR`
+mention or a browser approval page.
 
 Explicit confirmation is a client assertion made only after the user's actual
 approval; the server cannot independently prove what a third-party chat displayed.

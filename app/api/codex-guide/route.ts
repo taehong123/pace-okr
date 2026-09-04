@@ -2,14 +2,14 @@ import { WORK_CLASSIFICATION, WORK_FIELDS, WORKFLOW_INSTRUCTIONS } from "@/lib/w
 
 const guide = {
   service: "OKRPTR Codex conversation API",
-  version: "1.3",
+  version: "1.4",
   quickStart: {
     classification: WORK_CLASSIFICATION,
     fields: WORK_FIELDS,
     workflow: WORKFLOW_INSTRUCTIONS,
     firstRead: "GET /api/work-context?kind=task|project|routine|objective|key_result|initiative|unsure&query=<short-parent-topic>&memberQuery=<person>",
-    mcp: "Project: prepare_work if needed → explain relevant Initiative recommendations/alternatives → propose_project → user directly selects and approves at review URL → get_project_review after the user reports approval. Task/Routine: prepare_work if needed → create_item/create_tasks/create_routine. Never bypass Project review even when IDs are known.",
-    note: "prepare_work supplies context, not approval or an LLM relevance ranking. Project requests require final user review regardless of reviewBeforeCreate. No suitable Initiative means offer other search or defer, never choose an unrelated parent. Configured defaults are displayed in the final proposal.",
+    mcp: "Project: use manage_project for proposal, explicit approval, creation, edits, recoverable deletion and restoration in the same conversation. Older tool lists can use create_item twice: the first call returns an internal same_tool_confirmation value and the second call reuses it only after approval. Task/Routine: prepare_work if needed, then create_item/create_tasks/create_routine.",
+    note: "Keep review IDs and confirmation values internal. Never tell the user to open a new chat, reactivate or mention OKRPTR, paste an ID, or visit a browser approval page. No suitable Initiative means offer another search or defer; never choose an unrelated parent.",
   },
   authentication: {
     header: "Authorization: Bearer <OKRPTR_ACCESS_TOKEN>",
@@ -71,7 +71,7 @@ const guide = {
     "Use work-context once when interpreting new work needs workspace context; it already contains workspace rules. Reuse it within the same conversation and workspace.",
     "Classify by completion boundary: one action is Task, a finite deliverable containing independent Tasks is Project, recurring execution is Routine. Ask one short question when ambiguous; respect the user's choice.",
     "Use General only for a clear Task without a known container. A Project without its Initiative remains an unsaved conversation draft; never invent ancestors or silently downgrade it.",
-    "Project creation always requires recommendations with reasons/ancestor paths, alternatives including defer, and final user approval in the returned review URL. A parent ID alone or general creation intent is never confirmation of an AI-chosen connection. Do not manipulate the approval UI on the user's behalf.",
+    "Project creation always requires recommendations with reasons and ancestor paths, alternatives including defer, and final user approval. Complete it in the same conversation with manage_project. If only the legacy create_item tool is available, keep its same_tool_confirmation value internal and reuse it after approval. A parent ID alone or general creation intent is never confirmation of an AI-chosen connection.",
     "Preserve all user-supplied fields; show defaulted values in Project review. Other clear writes may save once without optional-field questionnaires. A pending review or HTTP 202 is not successful Project creation.",
     "Treat Project templates as body-only copies: never infer or copy properties, assignments, or Tasks from a template.",
     "List results are bounded: a returned row count is not necessarily the total workspace count. Do not claim completeness without verifying it.",

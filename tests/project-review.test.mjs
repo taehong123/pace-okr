@@ -131,7 +131,7 @@ test("personal MCP proposes, edits, chooses another file and completes without a
     seedEditableFields(f);
     const staged = await f.mcp.stageMcpProjectReview(mcpIdentity, { title: "결제 개편" }, [{ initiativeId: "i", reason: "가입 이탈 개선" }], "https://okrptr.com");
     assert.equal(staged.state, "awaiting_user_confirmation"); assert.equal(staged.projectId, null);
-    assert.equal(staged.url, undefined); assert.match(staged.nextStep, /confirm_project/);
+    assert.equal(staged.url, undefined); assert.match(staged.nextStep, /manage_project/);
     assert.equal(staged.recommendations[0].initiative.id, "i");
     const input = await mcpConfirmation(f, staged, "in", { title: "확정된 재방문 개선", driMemberId: "peer", workerMemberIds: ["me"], dueDate: "2026-09-25",
       properties: { 예산: 0, 메모: "대화에서 수정", 분류: "운영", 출시일: "2026-09-25", 검토됨: false, 검토자: "peer", 협업자: ["me"] } });

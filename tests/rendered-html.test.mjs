@@ -275,6 +275,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(integrationRoute, /최종 실행 지시이자 명시적 사전 승인/);
   assert.match(integrationRoute, /'진행할까요\?' 같은 재확인 질문도 하지 마세요/);
   assert.match(integrationRoute, /OAuth 2\.1 메타데이터와 DCR, S256 PKCE 흐름/);
+  assert.match(integrationRoute, /same_tool_confirmation/);
+  assert.match(integrationRoute, /Project 승인 후 새 대화, @OKRPTR 재활성화, 검토 ID 복사/);
   assert.doesNotMatch(integrationRoute, /OKRPTR_ACCESS_TOKEN|Authorization: Bearer <OKRPTR_ACCESS_TOKEN>/);
   assert.match(integrationRoute, /같은 내용을 대화로 다시 묻지 않습니다/);
   assert.doesNotMatch(integrationRoute, /OKRPTR 연결을 계속할까요\?/);
@@ -290,6 +292,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(mcpOAuth, /mcp_oauth_codes/);
   assert.match(mcpOAuth, /sha256Base64Url/);
   assert.match(mcpRoute, /resource_metadata/);
+  assert.match(mcpRoute, /"manage_project"/);
+  assert.match(mcpRoute, /MCP_CREATE_ITEM_CONFIRM_PREFIX/);
   assert.match(googleSession, /slice\(0, 4000\)/);
   assert.match(slackAuthRoute, /canManageTeam/);
   assert.match(slackDisconnectRoute, /canManageTeam/);
