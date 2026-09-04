@@ -223,7 +223,11 @@ test.describe("개인 데일리와 팀 롤업", () => {
   });
 
   test("데일리 스킵 사유를 저장하고 공유 확정할 수 있다", async ({ page }) => {
+    await expect(page.getByLabel("데일리 스킵 사유")).toHaveCount(0);
+    await expect(page.getByLabel("데일리 스킵 상세 사유")).toHaveCount(0);
     await page.getByRole("checkbox", { name: "오늘은 데일리를 스킵합니다" }).check();
+    await expect(page.getByLabel("데일리 스킵 사유")).toBeVisible();
+    await expect(page.getByLabel("데일리 스킵 상세 사유")).toBeVisible();
     await page.getByLabel("데일리 스킵 사유").selectOption("other");
     await expect(page.getByLabel("데일리 스킵 상세 사유")).toHaveAttribute("required", "");
     await page.getByLabel("데일리 스킵 사유").selectOption("vacation");

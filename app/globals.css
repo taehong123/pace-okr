@@ -1718,7 +1718,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .routine-switch input:checked + span::after { transform: translateX(12px); }
 
 .scrum-section, .recommendation-list { border-top: 1px solid var(--line); }
-.scrum-toolbar { min-height: 53px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+.scrum-toolbar { min-height: var(--row-height); display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--line); }
 .scrum-toolbar label { min-height: var(--row-height); display: flex; align-items: center; gap: 6px; color: var(--muted); }
 .scrum-toolbar input { min-height: var(--control-height); padding: 0 6px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--bg-raised); color: var(--ink); font-size: var(--type-body); }
 .scrum-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -1740,20 +1740,21 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .scrum-toolbar > div > button { min-height: var(--control-height); padding: 0 13px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--raised); color: var(--ink); font-size: var(--type-label); cursor: pointer; }
 .scrum-toolbar > div > button.primary-action { display: inline-flex; align-items: center; gap: 6px; border-color: var(--button-primary-bg); background: var(--button-primary-bg); color: var(--button-primary-fg); }
 .daily-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, .75fr); align-items: start; }
-.daily-editor { min-width: 0; padding: 22px; border-right: 1px solid var(--line); }
-.daily-editor > header, .daily-rollup > header { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.daily-editor { min-width: 0; padding: var(--space-6); border-right: 1px solid var(--line); }
+.daily-editor > header, .daily-rollup > header { display: flex; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); }
 .daily-editor > header span, .daily-rollup > header > span { color: var(--muted); font-size: var(--type-meta); font-weight: 800; letter-spacing: 0; }
 .daily-editor > header h2, .daily-rollup > header h2 { margin: 3px 0; font-size: var(--type-section); }
 .daily-editor > header p, .daily-rollup > header p { margin: 0; color: var(--muted); font-size: var(--type-meta); }
 .daily-editor > header small { align-self: flex-start; color: var(--muted); font-size: var(--type-meta); }
-.daily-skip-panel { display: grid; gap: 11px; margin: 0 0 16px; padding: 13px 14px; border: 1px solid var(--line); border-radius: var(--radius-container); background: var(--raised); }
-.daily-skip-panel.active { border-color: var(--border-default); background: var(--warning-bg); }
-.daily-skip-panel legend { padding: 0 5px; color: var(--muted); font-size: var(--type-label); font-weight: 800; letter-spacing: 0; }
-.daily-skip-toggle { min-height: 44px; display: grid; grid-template-columns: 19px minmax(0, 1fr); align-items: center; gap: 2px 10px; font-size: var(--type-meta); font-weight: 700; cursor: pointer; }
-.daily-skip-toggle input { width: var(--control-height); min-height: var(--control-height); flex: 0 0 auto; }
-.daily-skip-toggle small { grid-column: 2; color: var(--muted); font-size: var(--type-meta); font-weight: 400; line-height: 1.4; }
-.daily-skip-panel > div { display: grid; grid-template-columns: minmax(130px, .6fr) minmax(180px, 1.4fr); gap: 8px; }
-.daily-skip-panel > div label { min-width: 0; display: grid; gap: 5px; color: var(--muted); font-size: var(--type-label); font-weight: 650; }
+.daily-skip-panel { display: grid; gap: 0; margin: 0 0 var(--space-4); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-container); background: var(--raised); }
+.daily-skip-panel.active { gap: var(--space-3); border-color: var(--border-default); background: var(--warning-bg); }
+.daily-skip-toggle { min-height: var(--row-height); display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: var(--space-3); cursor: pointer; }
+.daily-skip-toggle input { width: 18px; height: 18px; min-height: 18px; margin: 0; accent-color: var(--button-primary-bg); }
+.daily-skip-toggle > span { min-width: 0; display: grid; gap: 2px; }
+.daily-skip-toggle b { font-size: var(--type-body); font-weight: 650; }
+.daily-skip-toggle small { color: var(--muted); font-size: var(--type-meta); font-weight: 400; line-height: 1.4; }
+.daily-skip-fields { display: grid; grid-template-columns: minmax(130px, .6fr) minmax(180px, 1.4fr); gap: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--line); }
+.daily-skip-fields label { min-width: 0; display: grid; gap: 5px; color: var(--muted); font-size: var(--type-label); font-weight: 650; }
 .daily-skip-panel select, .daily-skip-panel input:not([type="checkbox"]) { width: 100%; min-width: 0; min-height: var(--control-height); padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--raised); color: var(--ink); font-size: var(--type-body); }
 .daily-skip-panel select:disabled, .daily-skip-panel input:disabled { cursor: not-allowed; }
 .daily-skip-panel > p { margin: 0; color: var(--red); font-size: var(--type-meta); }
@@ -1787,7 +1788,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .daily-new-task > div { display: grid; grid-template-columns: minmax(150px, .75fr) minmax(180px, 1fr) auto; gap: 8px; padding: 12px; }
 .daily-new-task select, .daily-new-task input { min-width: 0; min-height: var(--control-height); padding: 0 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--raised); color: var(--ink); font-size: var(--type-body); }
 .daily-new-task button { min-height: var(--control-height); padding: 0 14px; border: 0; border-radius: var(--radius-control); background: var(--button-primary-bg); color: var(--button-primary-fg); font-size: var(--type-label); font-weight: 700; cursor: pointer; }
-.daily-rollup { min-width: 0; padding: 22px 16px; }
+.daily-rollup { min-width: 0; padding: var(--space-6) var(--space-4); }
 .daily-rollup > header { display: block; }
 .daily-rollup > div { display: grid; gap: 10px; }
 .daily-member-card { border: 1px solid var(--line); border-radius: var(--radius-container); background: var(--raised); overflow: hidden; }
@@ -3085,15 +3086,15 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
   .marketing-consent-nudge > div:last-child { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .marketing-consent-nudge button { min-height: 44px; }
   .daily-layout { grid-template-columns: minmax(0, 1fr); }
-  .daily-editor { padding: 14px 12px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .daily-rollup { padding: 16px 12px; }
+  .daily-editor { padding: var(--space-4); border-right: 0; border-bottom: 1px solid var(--line); }
+  .daily-rollup { padding: var(--space-4); }
   .daily-notes { grid-template-columns: 1fr; }
-  .daily-skip-panel > div { grid-template-columns: 1fr; }
+  .daily-skip-fields { grid-template-columns: 1fr; }
   .daily-skip-panel select, .daily-skip-panel input:not([type="checkbox"]) { min-height: 44px; }
   .daily-notes textarea { min-height: 84px; }
   .daily-new-task > div { grid-template-columns: 1fr; }
   .daily-new-task select, .daily-new-task input, .daily-new-task button { min-height: 44px; }
-  .scrum-toolbar { min-height: 58px; gap: 8px; }
+  .scrum-toolbar { min-height: 58px; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2) var(--space-3); }
   .scrum-toolbar > div { gap: 5px; }
   .scrum-toolbar > div > button { min-height: var(--row-height); padding: 0 9px; }
   .scrum-toolbar input { min-height: var(--row-height); max-width: 142px; }
