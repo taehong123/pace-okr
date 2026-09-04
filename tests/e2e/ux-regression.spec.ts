@@ -148,7 +148,7 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
     await expect(management).toHaveAttribute("aria-expanded", "false");
   });
 
-  test("관리 요약은 봇 설정과 분리해 다섯 관리 그룹만 표시한다", async ({ page }) => {
+  test("관리 요약은 다섯 관리 그룹과 Project별 하위 Task 지연을 표시한다", async ({ page }) => {
     const summaryRequests: string[] = [];
     await installApiMocks(page, { teamWorkspace: true, slackState: "connected" });
     page.on("request", (request) => {
@@ -163,8 +163,20 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
       await expect(settingsDialog.getByText(signal, { exact: true })).toBeVisible();
     }
     await expect.poll(() => summaryRequests.length).toBe(1);
-    await settingsDialog.getByText("기한 없음", { exact: true }).click();
-    await expect(settingsDialog.getByText("모바일 사용성 개선", { exact: true })).toBeVisible();
+    const managementGroups = settingsDialog.locator(".management-summary-groups details");
+    const missingDueGroup = managementGroups.nth(0);
+    await missingDueGroup.locator("summary").click();
+    await expect(missingDueGroup.getByText("모바일 사용성 개선", { exact: true })).toBeVisible();
+    const overdueGroup = managementGroups.nth(2);
+    await overdueGroup.locator("summary").click();
+    const overdueProject = overdueGroup.locator(".management-summary-project", { hasText: "출시 준비" });
+    await expect(overdueProject.getByText("Project 기한 초과", { exact: true })).toBeVisible();
+    await expect(overdueProject.getByText("기한 초과 Task 1개", { exact: true })).toBeVisible();
+    await expect(overdueProject.getByText("지난 기한 Task", { exact: true })).toBeVisible();
+    await expect(overdueProject.getByText("Task 기한 초과", { exact: true })).toBeVisible();
+    await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+    await expect(overdueProject.getByText("Project 기한 초과", { exact: true })).toBeVisible();
+    expect(await settingsDialog.evaluate((dialog) => dialog.scrollWidth <= dialog.clientWidth + 1)).toBe(true);
   });
 
   test("추천 자동화는 채널만 선택해 만들고 같은 규칙의 중복을 막는다", async ({ page }) => {

@@ -1023,11 +1023,16 @@ test("implements a workspace management bot for data quality and urgency reporti
   assert.match(styles, /\.workspace-bot-header > button \{[^}]*min-height: var\(--control-height\);[^}]*background: var\(--raised\)/s);
   assert.match(styles, /\.bot-accordion/);
   assert.match(styles, /\.management-summary-groups/);
+  assert.match(styles, /\.management-summary-project\.overdue/);
+  assert.match(styles, /\.management-summary-delay-status/);
   assert.match(route, /mode === "settings"/);
   assert.match(route, /mode === "summary"/);
   assert.match(route, /canManageTeam/);
   assert.match(route, /testWorkspaceManagementBot/);
   assert.match(domain, /activity_log/);
+  assert.match(domain, /parent_project/);
+  assert.match(domain, /renderSlackReportGroup/);
+  assert.match(domain, /Project 기한 초과/);
   assert.match(domain, /listSlackChannels/);
   assert.match(domain, /last_sent_date/);
   assert.match(domain, /`\[\$\{t\("관리 봇"\)\}\]/);

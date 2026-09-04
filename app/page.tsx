@@ -631,9 +631,11 @@ function writeCachedIntegrationStatuses(workspaceId: string, google: GoogleConne
   }
 }
 type ManagementBotSignal = "missing_due_date" | "missing_owner" | "overdue" | "completed_yesterday" | "due_today";
-type ManagementBotItem = { id: string; kind: "project" | "task"; title: string; status: string; dueDate: string | null };
+type ManagementBotProject = { id: string; title: string; status: string; dueDate: string | null; isOverdue: boolean };
+type ManagementBotItem = { id: string; kind: "project" | "task"; title: string; status: string; dueDate: string | null; isOverdue: boolean; parentProject: ManagementBotProject | null };
+type ManagementBotProjectGroup = { project: ManagementBotProject | null; projectMatchesSignal: boolean; tasks: ManagementBotItem[] };
 type ManagementBotSettings = { enabled: boolean; weekdays: number[]; reportTime: string; timezone: string; channelId: string; channelName: string; signals: ManagementBotSignal[]; lastSentDate: string | null; lastSentAt: string | null; lastError: string; updatedAt: string | null };
-type ManagementBotSnapshot = { date: string; groups: Array<{ signal: ManagementBotSignal; count: number; items: ManagementBotItem[] }>; totalCount: number };
+type ManagementBotSnapshot = { date: string; groups: Array<{ signal: ManagementBotSignal; count: number; items: ManagementBotItem[]; projects: ManagementBotProjectGroup[] }>; totalCount: number };
 type SlackChannelOption = { id: string; name: string; isPrivate: boolean; isMember: boolean; isShared: boolean; isExternal: boolean };
 const SLACK_CHANNEL_REFRESH_MS = 15_000;
 
@@ -6274,6 +6276,31 @@ function managementScheduleSummary(settings: Pick<ManagementBotSettings, "weekda
   return t("{value1} {value2} · {value3} · {value4}개 점검", { value1: messageValue(weekdays), value2: messageValue(settings.reportTime), value3: messageValue(channel), value4: messageValue(settings.signals.length) });
 }
 
+function ManagementSummaryProjectGroup({ group }: { group: ManagementBotProjectGroup }) {
+  const overdueTasks = group.tasks.filter((task) => task.isOverdue).length;
+  const project = group.project;
+  return <section className={`management-summary-project${project?.isOverdue ? " overdue" : ""}${group.projectMatchesSignal ? " matches-signal" : ""}`}>
+    <div className="management-summary-project-header">
+      {project ? <a href={`/?project=${encodeURIComponent(project.id)}`}>
+        <Briefcase size={16} />
+        <span><b>{project.title}</b><small>{t("Project")}{project.dueDate ? ` · ${project.dueDate}` : ""}</small></span>
+        <ChevronRight size={14} />
+      </a> : <div className="management-summary-unassigned"><Briefcase size={16} /><span><b>{t("연결된 Project 없음")}</b><small>{t("{count}개 Task", { count: group.tasks.length })}</small></span></div>}
+      <div className="management-summary-delay-status">
+        {project?.isOverdue && <strong><AlertTriangle size={14} />{t("Project 기한 초과")}</strong>}
+        {overdueTasks > 0 && <strong><AlertTriangle size={14} />{t("기한 초과 Task {count}개", { count: overdueTasks })}</strong>}
+      </div>
+    </div>
+    {group.tasks.length > 0 && <ul className="management-summary-task-list">{group.tasks.map((task) => <li className={task.isOverdue ? "overdue" : ""} key={task.id}>
+      <a href={`/?task=${encodeURIComponent(task.id)}`}>
+        <span><b>{task.title}</b><small>{t("Task")}{task.dueDate ? ` · ${task.dueDate}` : ""}</small></span>
+        {task.isOverdue && <strong><AlertTriangle size={13} />{t("Task 기한 초과")}</strong>}
+        <ChevronRight size={14} />
+      </a>
+    </li>)}</ul>}
+  </section>;
+}
+
 function WorkspaceManagementSummary() {
   const [date, setDate] = useState(() => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date()));
   const [snapshot, setSnapshot] = useState<ManagementBotSnapshot | null>(null);
@@ -6311,7 +6338,7 @@ function WorkspaceManagementSummary() {
     {loading && !snapshot ? <div className="workspace-management-loading"><LoaderCircle className="spin" size={16} />{t("관리 항목을 정리하고 있습니다.")}</div> : error && !snapshot ? <div className="workspace-management-error" role="alert"><AlertTriangle size={17} /><div><b>{t("관리 요약을 불러오지 못했습니다")}</b><p>{error}</p><button type="button" onClick={() => reload()}>{t("다시 시도")}</button></div></div> : snapshot && <div className="management-summary-content">
       <div className="management-summary-total"><span>{snapshot.date} {t("기준")}</span><b>{t("{count}개", { count: snapshot.totalCount })}</b><small>{t("중복 항목은 각 관리 기준에 각각 집계됩니다.")}</small></div>
       {error && <p className="management-summary-refresh-error">{t("최신 정보를 갱신하지 못해 이전 결과를 표시합니다.")}</p>}
-      <div className="management-summary-groups">{snapshot.groups.map((group) => { const meta = managementBotSignalMeta[group.signal]; return <details className={meta.tone} key={group.signal}><summary><span><b>{t(meta.label)}</b><small>{t(meta.detail)}</small></span><em>{group.count}</em><ChevronDown size={15} /></summary><div>{group.items.length ? <ul>{group.items.map((item) => <li key={item.id}><a href={item.kind === "project" ? `/?project=${encodeURIComponent(item.id)}` : `/?task=${encodeURIComponent(item.id)}`}><span>{item.title}</span><small>{item.kind === "project" ? t("Project") : t("Task")}{item.dueDate ? ` · ${item.dueDate}` : ""}</small><ChevronRight size={14} /></a></li>)}</ul> : <p>{t("해당 항목이 없습니다.")}</p>}</div></details>; })}</div>
+      <div className="management-summary-groups">{snapshot.groups.map((group) => { const meta = managementBotSignalMeta[group.signal]; return <details className={meta.tone} key={group.signal}><summary><span><b>{t(meta.label)}</b><small>{t(meta.detail)}</small></span><em>{group.count}</em><ChevronDown size={15} /></summary><div>{group.projects.length ? <div className="management-summary-projects">{group.projects.map((projectGroup) => <ManagementSummaryProjectGroup key={projectGroup.project?.id ?? "unassigned"} group={projectGroup} />)}</div> : <p>{t("해당 항목이 없습니다.")}</p>}</div></details>; })}</div>
     </div>}
   </section>;
 }

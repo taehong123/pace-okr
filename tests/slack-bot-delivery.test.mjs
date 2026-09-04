@@ -33,7 +33,7 @@ function harness(t) {
     CREATE TABLE slack_connections(id TEXT PRIMARY KEY, owner_id TEXT, team_id TEXT, connected_at TEXT, encrypted_bot_token TEXT);
     CREATE TABLE workspace_management_bot_settings(owner_id TEXT PRIMARY KEY, enabled INTEGER, weekdays TEXT, report_time TEXT, timezone TEXT,
       channel_id TEXT, channel_name TEXT, signals TEXT, last_sent_date TEXT, last_sent_at TEXT, last_error TEXT DEFAULT '', updated_at TEXT);
-    CREATE TABLE items(id TEXT PRIMARY KEY, owner_id TEXT, kind TEXT, title TEXT, status TEXT, due_date TEXT, archived_at TEXT);
+    CREATE TABLE items(id TEXT PRIMARY KEY, owner_id TEXT, parent_id TEXT, kind TEXT, title TEXT, status TEXT, due_date TEXT, archived_at TEXT);
     CREATE TABLE item_assignments(owner_id TEXT, item_id TEXT, role TEXT);
     CREATE TABLE activity_log(owner_id TEXT, item_id TEXT, action TEXT, payload TEXT, created_at TEXT);
     CREATE TABLE slack_automations(id TEXT PRIMARY KEY, owner_id TEXT, active INTEGER, channel_id TEXT, trigger_type TEXT, trigger_status TEXT,
@@ -53,7 +53,7 @@ function harness(t) {
     db.prepare("INSERT INTO slack_connections VALUES(?,?,?,?,?)").run(`con-${team}`, team, `T-${team}`, "2026-09-02T00:00:00Z", `token-${team}`);
     db.prepare(`INSERT INTO workspace_management_bot_settings VALUES(?,1,'[1,2,3,4,5]','09:00','Asia/Seoul',?,?,'["missing_owner"]',NULL,NULL,'',?)`)
       .run(team, `C-${team}`, `channel-${team}`, NOW.toISOString());
-    db.prepare("INSERT INTO items VALUES(?,?,'task',?,'blocked',NULL,NULL)").run(`item-${team}`, team, `업무 ${team}`);
+    db.prepare("INSERT INTO items(id,owner_id,kind,title,status,due_date,archived_at) VALUES(?,?,'task',?,'blocked',NULL,NULL)").run(`item-${team}`, team, `업무 ${team}`);
     db.prepare("INSERT INTO slack_automations VALUES(?,?,1,?,'task_status_changed','blocked','template',NULL,'never','')").run(`rule-${team}`, team, `C-${team}`);
     db.prepare("INSERT INTO slack_automation_deliveries VALUES(?,?,?,?,'pending','',NULL)").run(`delivery-${team}`, team, `rule-${team}`, `item-${team}`);
     db.prepare("INSERT INTO workspace_members VALUES(?,?,'active',?)").run(`member-${team}`, team, `멤버 ${team}`);
@@ -249,6 +249,33 @@ test("management obeys local weekday/time, stopped bots, deletion and current wo
   db.exec("UPDATE workspace_management_bot_settings SET enabled=0 WHERE owner_id='a'; UPDATE workspaces SET scheduled_deletion_at='tomorrow' WHERE id='b'");
   await management.runDueWorkspaceManagementBots(raw);
   assert.equal(calls.length, 0);
+});
+
+test("management groups tasks under projects and emphasizes project and task overdue states", async (t) => {
+  const { management, raw, db, calls } = harness(t);
+  db.exec("UPDATE workspace_management_bot_settings SET signals='[\"overdue\"]' WHERE owner_id='a'");
+  db.prepare("INSERT INTO items VALUES(?,? ,NULL,'project',?,'in_progress',?,NULL)").run("project-overdue", "a", "출시 준비", "2026-09-01");
+  db.prepare("INSERT INTO items VALUES(?,? ,?,'task',?,'in_progress',?,NULL)").run("task-overdue", "a", "project-overdue", "배포 점검", "2026-09-02");
+  db.prepare("INSERT INTO items VALUES(?,? ,NULL,'project',?,'in_progress',?,NULL)").run("project-on-time", "a", "다음 분기 준비", "2026-09-10");
+  db.prepare("INSERT INTO items VALUES(?,? ,?,'task',?,'todo',?,NULL)").run("task-delayed", "a", "project-on-time", "자료 정리", "2026-08-30");
+
+  const snapshot = await management.collectWorkspaceManagementSnapshot("a", "2026-09-03", "Asia/Seoul", ["overdue"]);
+  assert.equal(snapshot.groups[0].count, 3);
+  assert.deepEqual(snapshot.groups[0].projects.map((group) => ({
+    project: group.project?.title,
+    projectOverdue: group.project?.isOverdue,
+    matches: group.projectMatchesSignal,
+    tasks: group.tasks.map((task) => task.title),
+  })), [
+    { project: "출시 준비", projectOverdue: true, matches: true, tasks: ["배포 점검"] },
+    { project: "다음 분기 준비", projectOverdue: false, matches: false, tasks: ["자료 정리"] },
+  ]);
+
+  await management.runDueWorkspaceManagementBots(raw, NOW, "a");
+  const report = calls[0].payload.blocks.find((block) => block.type === "section").text.text;
+  assert.match(report, /\*출시 준비\* _\(Project\)_ · \*Project 기한 초과 · 2026-09-01\*/);
+  assert.match(report, / {3}- 배포 점검 _\(Task\)_ · \*Task 기한 초과 · 2026-09-02\*/);
+  assert.ok(report.indexOf("출시 준비") < report.indexOf("배포 점검"));
 });
 
 test("management rejects invalid dates and report blocks remain within Slack limits", async (t) => {

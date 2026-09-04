@@ -18,8 +18,27 @@ export type ManagementBotItem = {
   title: string;
   status: string;
   dueDate: string | null;
+  isOverdue: boolean;
+  parentProject: ManagementBotProject | null;
 };
-export type ManagementBotGroup = { signal: ManagementBotSignal; count: number; items: ManagementBotItem[] };
+export type ManagementBotProject = {
+  id: string;
+  title: string;
+  status: string;
+  dueDate: string | null;
+  isOverdue: boolean;
+};
+export type ManagementBotProjectGroup = {
+  project: ManagementBotProject | null;
+  projectMatchesSignal: boolean;
+  tasks: ManagementBotItem[];
+};
+export type ManagementBotGroup = {
+  signal: ManagementBotSignal;
+  count: number;
+  items: ManagementBotItem[];
+  projects: ManagementBotProjectGroup[];
+};
 export type ManagementBotSettings = {
   enabled: boolean;
   weekdays: number[];
@@ -104,15 +123,20 @@ export async function collectWorkspaceManagementSnapshot(ownerId: string, reques
   const date = requestedDate ? normalizeDate(requestedDate) : todayInTimezone(timezone);
   const previousDate = addDays(date, -1);
   const db = (env as RuntimeEnv).DB;
-  const rows = await db.prepare(`SELECT item.id, item.kind, item.title, item.status, item.due_date,
+  const rows = await db.prepare(`SELECT item.id, item.kind, item.title, item.status, item.due_date, item.parent_id,
+      parent_project.id AS parent_project_id, parent_project.title AS parent_project_title,
+      parent_project.status AS parent_project_status, parent_project.due_date AS parent_project_due_date,
       MAX(CASE WHEN assignment.role = 'project_dri' THEN 1 ELSE 0 END) AS has_project_dri,
       MAX(CASE WHEN assignment.role = 'task_assignee' THEN 1 ELSE 0 END) AS has_task_assignee
     FROM items AS item
+    LEFT JOIN items AS parent_project ON parent_project.owner_id = item.owner_id
+      AND parent_project.id = item.parent_id AND parent_project.kind = 'project' AND parent_project.archived_at IS NULL
     LEFT JOIN item_assignments AS assignment ON assignment.owner_id = item.owner_id AND assignment.item_id = item.id
     WHERE item.owner_id = ? AND item.kind IN ('project', 'task') AND item.archived_at IS NULL
-    GROUP BY item.id, item.kind, item.title, item.status, item.due_date`)
+    GROUP BY item.id, item.kind, item.title, item.status, item.due_date, item.parent_id,
+      parent_project.id, parent_project.title, parent_project.status, parent_project.due_date`)
     .bind(ownerId).all<ItemRow>();
-  const allItems = rows.results.map(serializeItemRow);
+  const allItems = rows.results.map((row) => serializeItemRow(row, date));
   const openRows = rows.results.filter((row) => !inactiveStatuses.has(String(row.status)));
   const [previousStart, previousEnd] = zonedDayRange(previousDate, timezone);
   const activity = await db.prepare(`SELECT item_id, payload FROM activity_log
@@ -128,16 +152,19 @@ export async function collectWorkspaceManagementSnapshot(ownerId: string, reques
     } catch { return []; }
   }));
   const bySignal: Record<ManagementBotSignal, ManagementBotItem[]> = {
-    missing_due_date: openRows.filter((row) => !row.due_date).map(serializeItemRow),
-    missing_owner: openRows.filter((row) => row.kind === "project" ? !row.has_project_dri : !row.has_task_assignee).map(serializeItemRow),
-    overdue: openRows.filter((row) => Boolean(row.due_date && String(row.due_date) < date)).map(serializeItemRow),
+    missing_due_date: openRows.filter((row) => !row.due_date).map((row) => serializeItemRow(row, date)),
+    missing_owner: openRows.filter((row) => row.kind === "project" ? !row.has_project_dri : !row.has_task_assignee).map((row) => serializeItemRow(row, date)),
+    overdue: openRows.filter((row) => Boolean(row.due_date && String(row.due_date) < date)).map((row) => serializeItemRow(row, date)),
     completed_yesterday: allItems.filter((item) => completedStatuses.has(item.status) && completedYesterdayIds.has(item.id)),
-    due_today: openRows.filter((row) => row.due_date === date).map(serializeItemRow),
+    due_today: openRows.filter((row) => row.due_date === date).map((row) => serializeItemRow(row, date)),
   };
   for (const values of Object.values(bySignal)) values.sort(compareManagementItems);
   return {
     date,
-    groups: signals.map((signal) => ({ signal, count: bySignal[signal].length, items: bySignal[signal].slice(0, 20) })),
+    groups: signals.map((signal) => {
+      const items = bySignal[signal].slice(0, 20);
+      return { signal, count: bySignal[signal].length, items, projects: groupManagementItems(items) };
+    }),
     totalCount: signals.reduce((total, signal) => total + bySignal[signal].length, 0),
   };
 }
@@ -210,7 +237,7 @@ async function sendReport(ownerId: string, settings: ManagementBotSettings, snap
   const workspace = await (env as RuntimeEnv).DB.prepare("SELECT name FROM workspaces WHERE id = ? LIMIT 1").bind(ownerId).first<{ name: string }>();
   const selected = snapshot.groups.filter((group) => group.count > 0);
   const body = selected.length
-    ? selected.map((group) => `*${t(signalLabel(group.signal))} · ${t("{count}개", { count: group.count })}*\n${group.items.slice(0, 5).map((item) => `• ${escapeSlack(item.title)} _(${t(item.kind === "project" ? "Project" : "Task")})_`).join("\n")}${group.count > 5 ? `\n_${t("외 {count}개", { count: group.count - 5 })}_` : ""}`).join("\n\n")
+    ? selected.map((group) => renderSlackReportGroup(group, t)).join("\n\n")
     : t("현재 선택한 관리 항목은 모두 정리되어 있습니다. ✅");
   const appUrl = `${String((env as RuntimeEnv).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?settings=workspace&tab=summary`;
   return deliverSlackBotMessage((env as RuntimeEnv).DB, {
@@ -245,8 +272,77 @@ function serializeSettings(row: Record<string, string | number | null>): Managem
   };
 }
 
-function serializeItemRow(row: ItemRow): ManagementBotItem {
-  return { id: String(row.id), kind: row.kind === "project" ? "project" : "task", title: String(row.title), status: String(row.status), dueDate: row.due_date ? String(row.due_date) : null };
+function serializeItemRow(row: ItemRow, date: string): ManagementBotItem {
+  const status = String(row.status);
+  const dueDate = row.due_date ? String(row.due_date) : null;
+  const parentStatus = row.parent_project_status ? String(row.parent_project_status) : "";
+  const parentDueDate = row.parent_project_due_date ? String(row.parent_project_due_date) : null;
+  return {
+    id: String(row.id),
+    kind: row.kind === "project" ? "project" : "task",
+    title: String(row.title),
+    status,
+    dueDate,
+    isOverdue: Boolean(dueDate && dueDate < date && !inactiveStatuses.has(status)),
+    parentProject: row.parent_project_id ? {
+      id: String(row.parent_project_id),
+      title: String(row.parent_project_title),
+      status: parentStatus,
+      dueDate: parentDueDate,
+      isOverdue: Boolean(parentDueDate && parentDueDate < date && !inactiveStatuses.has(parentStatus)),
+    } : null,
+  };
+}
+
+function groupManagementItems(items: ManagementBotItem[]): ManagementBotProjectGroup[] {
+  const groups = new Map<string, ManagementBotProjectGroup>();
+  for (const item of items) {
+    const project = item.kind === "project"
+      ? { id: item.id, title: item.title, status: item.status, dueDate: item.dueDate, isOverdue: item.isOverdue }
+      : item.parentProject;
+    const key = project?.id ?? "__unassigned__";
+    const group = groups.get(key) ?? { project, projectMatchesSignal: false, tasks: [] };
+    if (item.kind === "project") group.projectMatchesSignal = true;
+    else group.tasks.push(item);
+    groups.set(key, group);
+  }
+  return [...groups.values()].sort((left, right) => {
+    if (left.project?.isOverdue !== right.project?.isOverdue) return left.project?.isOverdue ? -1 : 1;
+    const leftDueDate = left.project?.dueDate ?? left.tasks[0]?.dueDate;
+    const rightDueDate = right.project?.dueDate ?? right.tasks[0]?.dueDate;
+    if (leftDueDate && rightDueDate && leftDueDate !== rightDueDate) return leftDueDate.localeCompare(rightDueDate);
+    if (leftDueDate) return -1;
+    if (rightDueDate) return 1;
+    return (left.project?.title ?? "").localeCompare(right.project?.title ?? "", "ko");
+  });
+}
+
+function renderSlackReportGroup(group: ManagementBotGroup, t: import("./server-language").Translator) {
+  const lines = [`*${t(signalLabel(group.signal))} · ${t("{count}개", { count: group.count })}*`];
+  let shown = 0;
+  for (const projectGroup of group.projects) {
+    if (shown >= 5) break;
+    if (projectGroup.project) {
+      const project = projectGroup.project;
+      const due = project.isOverdue
+        ? ` · *${t("Project 기한 초과")} · ${project.dueDate}*`
+        : project.dueDate ? ` · ${project.dueDate}` : "";
+      lines.push(`*${escapeSlack(project.title)}* _(${t("Project")})_${due}`);
+    } else {
+      lines.push(`*${t("연결된 Project 없음")}*`);
+    }
+    if (projectGroup.projectMatchesSignal) shown += 1;
+    for (const task of projectGroup.tasks) {
+      if (shown >= 5) break;
+      const due = task.isOverdue
+        ? ` · *${t("Task 기한 초과")} · ${task.dueDate}*`
+        : task.dueDate ? ` · ${task.dueDate}` : "";
+      lines.push(`   - ${escapeSlack(task.title)} _(${t("Task")})_${due}`);
+      shown += 1;
+    }
+  }
+  if (group.count > shown) lines.push(`_${t("외 {count}개", { count: group.count - shown })}_`);
+  return lines.join("\n");
 }
 
 function compareManagementItems(left: ManagementBotItem, right: ManagementBotItem) {

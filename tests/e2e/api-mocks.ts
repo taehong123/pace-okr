@@ -251,11 +251,11 @@ export async function installApiMocks(page: Page, options: { withRoutine?: boole
     if (url.pathname === "/api/groups" && request.method() === "GET") return json(route, { groups: [] });
     if (url.pathname === "/api/workspace-management-bot") {
       const snapshot = { date: "2026-09-01", totalCount: 8, groups: [
-        { signal: "missing_due_date", count: 2, items: [{ id: "project-1", kind: "project", title: "모바일 사용성 개선", status: "in_progress", dueDate: null }] },
-        { signal: "missing_owner", count: 1, items: [{ id: "task-1", kind: "task", title: "오버레이 동작 점검", status: "todo", dueDate: null }] },
-        { signal: "overdue", count: 2, items: [{ id: "task-overdue", kind: "task", title: "지난 기한 Task", status: "in_progress", dueDate: "2026-08-31" }] },
-        { signal: "completed_yesterday", count: 1, items: [{ id: "task-done", kind: "task", title: "어제 완료 Task", status: "done", dueDate: "2026-08-31" }] },
-        { signal: "due_today", count: 2, items: [{ id: "task-today", kind: "task", title: "오늘 마감 Task", status: "todo", dueDate: "2026-09-01" }] },
+        { signal: "missing_due_date", count: 2, items: [], projects: [{ project: { id: "project-1", title: "모바일 사용성 개선", status: "in_progress", dueDate: null, isOverdue: false }, projectMatchesSignal: true, tasks: [] }] },
+        { signal: "missing_owner", count: 1, items: [], projects: [{ project: { id: "project-1", title: "모바일 사용성 개선", status: "in_progress", dueDate: null, isOverdue: false }, projectMatchesSignal: false, tasks: [{ id: "task-1", kind: "task", title: "오버레이 동작 점검", status: "todo", dueDate: null, isOverdue: false, parentProject: null }] }] },
+        { signal: "overdue", count: 2, items: [], projects: [{ project: { id: "project-overdue", title: "출시 준비", status: "in_progress", dueDate: "2026-08-30", isOverdue: true }, projectMatchesSignal: true, tasks: [{ id: "task-overdue", kind: "task", title: "지난 기한 Task", status: "in_progress", dueDate: "2026-08-31", isOverdue: true, parentProject: null }] }] },
+        { signal: "completed_yesterday", count: 1, items: [], projects: [{ project: { id: "project-1", title: "모바일 사용성 개선", status: "in_progress", dueDate: null, isOverdue: false }, projectMatchesSignal: false, tasks: [{ id: "task-done", kind: "task", title: "어제 완료 Task", status: "done", dueDate: "2026-08-31", isOverdue: false, parentProject: null }] }] },
+        { signal: "due_today", count: 2, items: [], projects: [{ project: { id: "project-1", title: "모바일 사용성 개선", status: "in_progress", dueDate: null, isOverdue: false }, projectMatchesSignal: false, tasks: [{ id: "task-today", kind: "task", title: "오늘 마감 Task", status: "todo", dueDate: "2026-09-01", isOverdue: false, parentProject: null }] }] },
       ] };
       if (request.method() === "GET") return json(route, { settings: managementBotSettings, snapshot, slackConnected: options.slackState === "connected", channels: [{ id: "C123", name: "daily", isPrivate: false, isMember: true }] });
       const payload = request.postDataJSON() as Record<string, unknown>;

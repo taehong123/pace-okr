@@ -97,6 +97,11 @@ test("Slack bot types, settings, states and safe errors are localized in every s
     "새 Task가 만들어지면 담당 채널에 알립니다.",
     "업무 생성",
     "모든 상태 변경",
+    "Project 기한 초과",
+    "Task 기한 초과",
+    "기한 초과 Task {count}개",
+    "연결된 Project 없음",
+    "{count}개 Task",
     "발송 여부를 확인하지 못했습니다. 중복 발송을 막기 위해 재발송을 보류했습니다.",
     "Slack 연결 권한을 갱신해 주세요. 워크스페이스 관리자가 Slack 연결 관리에서 갱신할 수 있습니다.",
   ];
