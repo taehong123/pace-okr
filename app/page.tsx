@@ -638,16 +638,16 @@ type SlackChannelOption = { id: string; name: string; isPrivate: boolean; isMemb
 const SLACK_CHANNEL_REFRESH_MS = 15_000;
 
 function slackChannelKindLabel(channel: SlackChannelOption) {
-  if (channel.isExternal) return "Slack Connect · 봇 참여 중";
-  if (channel.isShared) return "조직 공유 · 봇 참여 중";
-  if (channel.isPrivate) return "비공개 · 봇 참여 중";
-  return channel.isMember ? "공개 · 봇 참여 중" : "공개 · 선택 시 참여";
+  if (channel.isExternal) return t("Slack Connect · 봇 참여 중");
+  if (channel.isShared) return t("조직 공유 · 봇 참여 중");
+  if (channel.isPrivate) return t("비공개 · 봇 참여 중");
+  return channel.isMember ? t("공개 · 봇 참여 중") : t("공개 · 선택 시 참여");
 }
 
 function slackChannelOptionLabel(channel: SlackChannelOption) {
-  if (channel.isExternal) return `#${channel.name} · Slack Connect`;
-  if (channel.isShared) return `#${channel.name} · 조직 공유`;
-  if (channel.isPrivate) return `#${channel.name} · 비공개`;
+  if (channel.isExternal) return t("#{value1} · Slack Connect", { value1: messageValue(channel.name) });
+  if (channel.isShared) return t("#{value1} · 조직 공유", { value1: messageValue(channel.name) });
+  if (channel.isPrivate) return t("#{value1} · 비공개", { value1: messageValue(channel.name) });
   return `#${channel.name}`;
 }
 
@@ -712,8 +712,8 @@ function useLiveSlackChannels(enabled: boolean) {
 
 function SlackChannelSyncStatus({ loading, error, onRefresh }: { loading: boolean; error: boolean; onRefresh: () => void }) {
   return <div className={`slack-channel-sync ${error ? "error" : ""}`} aria-live="polite">
-    <span>{error ? "Slack 채널 변경사항을 확인하지 못했습니다." : "Slack 변경사항을 15초마다 자동 반영합니다."}</span>
-    <button type="button" disabled={loading} onClick={onRefresh}>{loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{loading ? "확인 중" : "지금 새로고침"}</button>
+    <span>{error ? t("Slack 채널 변경사항을 확인하지 못했습니다.") : t("Slack 변경사항을 15초마다 자동 반영합니다.")}</span>
+    <button type="button" disabled={loading} onClick={onRefresh}>{loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{loading ? t("확인 중") : t("지금 새로고침")}</button>
   </div>;
 }
 
@@ -6789,7 +6789,7 @@ function SlackDailyAdvancedSettings({ connected, canManage, mode = "workspace", 
       <div className="integration-step-body">{canManage && admin ? <div className="slack-daily-admin">
         <div className="slack-admin-grid"><label><span>{t("기본 시간")}</span><input aria-label={t("Slack 데일리 기본 시간")} type="time" value={admin.settings.reminderTime} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, reminderTime: event.target.value } })} /></label><label><span>{t("기본 시간대")}</span><select aria-label={t("Slack 데일리 기본 시간대")} value={admin.settings.timezone} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, timezone: event.target.value } })}><option>Asia/Seoul</option><option>America/Los_Angeles</option><option>America/New_York</option><option>Europe/London</option><option>Asia/Tokyo</option></select></label></div>
         <div className="slack-weekdays" aria-label={t("Slack 데일리 기본 요일")}>{[t("일"), t("월"), t("화"), t("수"), t("목"), t("금"), t("토")].map((label, day) => <label key={label}><input type="checkbox" checked={admin.settings.weekdays.includes(day)} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, weekdays: event.target.checked ? [...admin.settings.weekdays, day].sort() : admin.settings.weekdays.filter((entry) => entry !== day) } })} />{label}</label>)}</div>
-        <fieldset><legend>{t("개인 카드 공유 채널")}</legend><SlackChannelSyncStatus loading={channelsLoading} error={channelLoadError} onRefresh={() => void refreshChannels(false)} />{availableChannels.length ? availableChannels.map((channel) => <label key={channel.id}><input type="checkbox" checked={admin.channels.some((entry) => entry.id === channel.id)} onChange={(event) => setAdmin({ ...admin, channels: event.target.checked ? [...admin.channels, channel] : admin.channels.filter((entry) => entry.id !== channel.id) })} /><span>{slackChannelOptionLabel(channel)}</span></label>) : <p>선택 가능한 채널이 없습니다. 비공개·Slack Connect 채널은 Slack에서 OKRPTR 봇을 먼저 초대해 주세요.</p>}</fieldset>
+        <fieldset><legend>{t("개인 카드 공유 채널")}</legend><SlackChannelSyncStatus loading={channelsLoading} error={channelLoadError} onRefresh={() => void refreshChannels(false)} />{availableChannels.length ? availableChannels.map((channel) => <label key={channel.id}><input type="checkbox" checked={admin.channels.some((entry) => entry.id === channel.id)} onChange={(event) => setAdmin({ ...admin, channels: event.target.checked ? [...admin.channels, channel] : admin.channels.filter((entry) => entry.id !== channel.id) })} /><span>{slackChannelOptionLabel(channel)}</span></label>) : <p>{t("선택 가능한 채널이 없습니다. 비공개·Slack Connect 채널은 Slack에서 OKRPTR 봇을 먼저 초대해 주세요.")}</p>}</fieldset>
         <div className="slack-admin-actions"><button disabled={busy} onClick={() => void patchAdmin({ reminderTime: admin.settings.reminderTime, timezone: admin.settings.timezone, weekdays: admin.settings.weekdays, channelIds: admin.channels.map((channel) => channel.id) }, "Slack 데일리 기본 설정을 저장했습니다.")}>{busy ? t("저장 중") : t("팀 공유 설정 저장")}</button></div>
       </div> : <div className="integration-role-note">{t("팀 기본 시간과 공유 채널은 Owner 또는 Admin이 관리합니다.")}</div>}</div>
     </section>
@@ -7049,7 +7049,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       <label className="slack-message-field"><span>{t("보낼 메시지")}</span><textarea value={draft.messageTemplateKind && draft.messageTemplateKind !== "custom" ? translateForLanguage(messageLanguage, draft.messageTemplate) : draft.messageTemplate} onChange={(event) => setDraft({ ...draft, messageTemplate: event.target.value, messageTemplateKind: "custom" })} maxLength={3000} rows={4} /></label>
       <p>{t(draft.messageTemplateKind && draft.messageTemplateKind !== "custom" ? "기본 문구는 워크스페이스 공용 언어로 발송됩니다." : "사용자 문구는 번역하지 않고 그대로 발송합니다.")} <button type="button" onClick={() => setDraft({ ...draft, messageTemplate: slackAutomationDefaults[draft.triggerType], messageTemplateKind: "default" })}>{t("기본 문구 사용")}</button></p>
       <div className="slack-variable-row"><span>{t("변수")}</span>{["{{title}}", "{{status}}", "{{from_status}}", "{{priority}}", "{{workspace}}"].map((variable) => <button type="button" key={variable} onClick={() => { const message = draft.messageTemplateKind && draft.messageTemplateKind !== "custom" ? translateForLanguage(messageLanguage, draft.messageTemplate) : draft.messageTemplate; setDraft({ ...draft, messageTemplate: `${message}${message.endsWith(" ") || message.endsWith("\n") ? "" : " "}${variable}`, messageTemplateKind: "custom" }); }}>{variable}</button>)}</div>
-      <p className="slack-channel-help">공개 채널은 선택할 때 봇이 참여합니다. 비공개·Slack Connect 채널은 봇이 이미 참여한 경우만 표시됩니다.</p>
+      <p className="slack-channel-help">{t("공개 채널은 선택할 때 봇이 참여합니다. 비공개·Slack Connect 채널은 봇이 이미 참여한 경우만 표시됩니다.")}</p>
       <div className="slack-form-actions"><label><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /><span>{t("저장 즉시 활성화")}</span></label><div><button type="button" onClick={() => setFormOpen(false)}>{t("취소")}</button><button type="submit" disabled={saving}>{saving ? <LoaderCircle className="spin" size={13} /> : <Check size={13} />}{saving ? t("저장 중") : t("저장")}</button></div></div>
     </form>}
     {loading ? <div className="slack-automation-loading"><LoaderCircle className="spin" size={16} />{t("자동화를 불러오는 중")}</div> : automations.length === 0 ? <div className="slack-automation-empty"><Zap size={18} /><b>{t("아직 자동화가 없습니다.")}</b><p>{canManage ? t("새 자동화를 만들어 첫 Slack 알림을 보내보세요.") : t("워크스페이스 관리자가 자동화를 만들 수 있습니다.")}</p></div> : <div className="slack-automation-list">{automations.map((automation) => <article key={automation.id} className={automation.active ? "" : "inactive"}>
