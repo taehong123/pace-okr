@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { languageForBootstrap } from "@/lib/language-preferences";
 import { authorizeRequest } from "@/lib/pace-data";
 import { readGoogleSession } from "@/lib/google-session";
 import type { GoogleRuntimeEnv } from "@/lib/google-oauth";
@@ -13,6 +14,7 @@ export async function GET(request: Request) {
       id: authorization.userId,
       email: authorization.email,
       displayName: authorization.displayName,
+      preferences: await languageForBootstrap(env.DB, authorization.userId, request),
       provider: googleSession ? "google" : hostname === "localhost" || hostname === "127.0.0.1" ? "local" : "google",
     },
   }, { headers: { "Cache-Control": "no-store" } });

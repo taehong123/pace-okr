@@ -123,7 +123,7 @@ export async function installApiMocks(page: Page, options: { failItemCreate?: bo
   };
   await page.addInitScript(() => {
     localStorage.clear();
-    localStorage.setItem("okri.intro-language", "ko");
+    localStorage.setItem("okrptr.intro-language", "ko");
   });
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -208,10 +208,10 @@ export async function installApiMocks(page: Page, options: { failItemCreate?: bo
       const connected = state === "setup_required" || state === "connected" || state === "reauthorization_required";
       return json(route, { slack: {
         connected, state,
-        statusMessage: state === "service_unavailable" ? "Slack 연결을 잠시 사용할 수 없습니다. 서비스가 준비되면 이 화면에서 바로 연결할 수 있습니다." : state === "workspace_disconnected" ? "Owner 또는 Admin이 이 OKRI 워크스페이스에 사용할 Slack을 직접 선택하고 승인할 수 있습니다." : state === "reauthorization_required" ? "새 데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요." : state === "setup_required" ? "고객 Slack A 연결을 마쳤습니다. 데일리 발송 설정을 완료해 주세요." : "고객 Slack A와 연결되어 데일리 알림을 설정할 수 있습니다.",
+        statusMessage: state === "service_unavailable" ? "Slack 연결을 잠시 사용할 수 없습니다. 서비스가 준비되면 이 화면에서 바로 연결할 수 있습니다." : state === "workspace_disconnected" ? "Owner 또는 Admin이 이 OKRPTR 워크스페이스에 사용할 Slack을 직접 선택하고 승인할 수 있습니다." : state === "reauthorization_required" ? "새 데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요." : state === "setup_required" ? "고객 Slack A 연결을 마쳤습니다. 데일리 발송 설정을 완료해 주세요." : "고객 Slack A와 연결되어 데일리 알림을 설정할 수 있습니다.",
         missingScopes: state === "reauthorization_required" ? ["im:write"] : [], teamName: connected ? "테스트 Slack" : null, teamId: connected ? "T123" : null, botUserId: connected ? "U-BOT" : null, scope: connected ? "commands,chat:write,im:write,im:history,users:read,users:read.email,channels:read,groups:read" : "", connectedAt: connected ? now : null, updatedAt: connected ? now : null,
         connectionScope: "workspace", distributionMode: "direct_oauth", connectedTeam: connected ? { id: "T123", name: "고객 Slack A" } : null,
-        redirectUrl: "https://okri.ai/api/slack/callback", commandUrl: "https://okri.ai/api/slack/commands", interactionUrl: "https://okri.ai/api/slack/interactions", eventsUrl: "https://okri.ai/api/slack/events",
+        redirectUrl: "https://okrptr.com/api/slack/callback", commandUrl: "https://okrptr.com/api/slack/commands", interactionUrl: "https://okrptr.com/api/slack/interactions", eventsUrl: "https://okrptr.com/api/slack/events",
       } });
     }
     if (url.pathname === "/api/slack/daily/preferences") return json(route, { linked: true, enabled: true, reminderTime: "09:00", timezone: "Asia/Seoul", usesWorkspaceTime: true, usesWorkspaceTimezone: true });
@@ -240,11 +240,11 @@ export async function installApiMocks(page: Page, options: { failItemCreate?: bo
     if (url.pathname === "/api/groups" && request.method() === "GET") return json(route, { groups: [] });
     if (url.pathname === "/api/workspace-management-bot") {
       const snapshot = { date: "2026-09-01", totalCount: 8, groups: [
-        { signal: "missing_due_date", count: 2, items: [{ id: "project-1", kind: "project", title: "모바일 사용성 개선", status: "in_progress", dueDate: null }] },
-        { signal: "missing_owner", count: 1, items: [{ id: "task-1", kind: "task", title: "오버레이 동작 점검", status: "todo", dueDate: null }] },
-        { signal: "overdue", count: 2, items: [{ id: "task-overdue", kind: "task", title: "지난 기한 Task", status: "in_progress", dueDate: "2026-08-31" }] },
-        { signal: "completed_yesterday", count: 1, items: [{ id: "task-done", kind: "task", title: "어제 완료 Task", status: "done", dueDate: "2026-08-31" }] },
-        { signal: "due_today", count: 2, items: [{ id: "task-today", kind: "task", title: "오늘 마감 Task", status: "todo", dueDate: "2026-09-01" }] },
+        { signal: "missing_due_date", count: 2, items: [], projects: [{ project: { id: "project-1", title: "모바일 사용성 개선", status: "in_progress", dueDate: null, isOverdue: false }, projectMatchesSignal: true, tasks: [] }] },
+        { signal: "missing_owner", count: 1, items: [], projects: [{ project: { id: "project-1", title: "모바일 사용성 개선", status: "in_progress", dueDate: null, isOverdue: false }, projectMatchesSignal: false, tasks: [{ id: "task-1", kind: "task", title: "오버레이 동작 점검", status: "todo", dueDate: null, isOverdue: false, parentProject: null }] }] },
+        { signal: "overdue", count: 2, items: [], projects: [{ project: { id: "project-overdue", title: "출시 준비", status: "in_progress", dueDate: "2026-08-30", isOverdue: true }, projectMatchesSignal: true, tasks: [{ id: "task-overdue", kind: "task", title: "지난 기한 Task", status: "in_progress", dueDate: "2026-08-31", isOverdue: true, parentProject: null }] }] },
+        { signal: "completed_yesterday", count: 1, items: [], projects: [{ project: { id: "project-1", title: "모바일 사용성 개선", status: "in_progress", dueDate: null, isOverdue: false }, projectMatchesSignal: false, tasks: [{ id: "task-done", kind: "task", title: "어제 완료 Task", status: "done", dueDate: "2026-08-31", isOverdue: false, parentProject: null }] }] },
+        { signal: "due_today", count: 2, items: [], projects: [{ project: { id: "project-1", title: "모바일 사용성 개선", status: "in_progress", dueDate: null, isOverdue: false }, projectMatchesSignal: false, tasks: [{ id: "task-today", kind: "task", title: "오늘 마감 Task", status: "todo", dueDate: "2026-09-01", isOverdue: false, parentProject: null }] }] },
       ] };
       if (request.method() === "GET") return json(route, { settings: managementBotSettings, snapshot, slackConnected: options.slackState === "connected", channels: [{ id: "C123", name: "daily", isPrivate: false, isMember: true }] });
       const payload = request.postDataJSON() as Record<string, unknown>;

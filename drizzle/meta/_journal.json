@@ -250,8 +250,57 @@
     {
       "idx": 35,
       "version": "6",
-      "when": 1788337916214,
-      "tag": "0038_slack_summon_drafts",
+      "when": 1788355294873,
+      "tag": "0039_marketing_prompt_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1788402347415,
+      "tag": "0040_slack_bot_deliveries",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1788409482224,
+      "tag": "0041_workspace_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1788421279694,
+      "tag": "0042_routine_properties",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1788452400000,
+      "tag": "0045_daily_work_selection",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1788455068537,
+      "tag": "0046_global_language",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1788487658580,
+      "tag": "0047_daily_yesterday_selection",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1788505200000,
+      "tag": "0048_slack_work_commands",
       "breakpoints": true
     }
   ]

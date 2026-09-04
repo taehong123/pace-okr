@@ -48,7 +48,7 @@ export function isAllowedChatGptRedirectUri(value: string) {
 
 // Never expand a previously approved scope when a member's role changes.
 export function limitOAuthScopeForRole(scope: string, role: RequestAuthorization["role"]) {
-  return scope.split(/\s+/).filter((entry) => entry && (role !== "viewer" || !["okri:write", "okrptr:write"].includes(entry))).join(" ");
+  return scope.split(/\s+/).filter((entry) => entry && (role !== "viewer" || entry !== "okrptr:write")).join(" ");
 }
 
 export async function registerMcpOAuthClient(input: {
@@ -58,7 +58,7 @@ export async function registerMcpOAuthClient(input: {
   await ensureMcpOAuthSchema();
   const provider = registeredOAuthProvider(input.redirectUris);
   if (!provider) throw new Error("invalid_redirect_uri");
-  const clientId = `okri_${provider}_${randomHex(24)}`;
+  const clientId = `okrptr_${provider}_${randomHex(24)}`;
   const createdAt = new Date().toISOString();
   await database().prepare(`
     INSERT INTO mcp_oauth_clients (client_id, redirect_uris, client_name, created_at)
@@ -97,7 +97,7 @@ export async function createMcpOAuthAuthorizationCode(
   await ensureMcpOAuthSchema();
   const scope = limitOAuthScopeForRole(input.scope, authorization.role);
   if (!scope) throw new Error("invalid_scope");
-  const code = `okri_oauth_code_${randomHex(32)}`;
+  const code = `okrptr_oauth_code_${randomHex(32)}`;
   const now = new Date();
   await database().prepare(`
     INSERT INTO mcp_oauth_codes (

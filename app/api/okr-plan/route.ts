@@ -15,6 +15,11 @@ export async function POST(request: Request) {
   try {
     await ensureWorkspace(authorization.ownerId);
     const payload = (await request.json()) as Record<string, unknown>;
+    if (authorization.apiToken && asString(payload.project)) {
+      return Response.json({ code: "project_confirmation_required", created: false,
+        error: "Project는 일괄 OKR 생성으로 우회할 수 없습니다. propose_project 또는 /api/items의 Project 확인 요청을 사용해 사용자가 연결과 최종 내용을 확인하도록 해 주세요." },
+      { status: 409, headers: { "Cache-Control": "no-store" } });
+    }
     const cycleId = asString(payload.cycleId);
     if (!cycleId) return Response.json({ error: "cycleId is required" }, { status: 400 });
     const targetKind = asString(payload.targetKind);

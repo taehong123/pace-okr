@@ -1,4 +1,7 @@
 import { env } from "cloudflare:workers";
+import { newAccountLanguage, readLanguagePreferences, workspaceMessageLanguage } from "./language-preferences";
+import { serverTranslator } from "./server-language";
+import { parseRoutineProperties, prepareRoutineProperties } from "./routine-properties";
 import { effectiveIntegrationProvider, type IntegrationProvider } from "@/lib/integration-providers";
 import { and, asc, desc, eq, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -55,14 +58,14 @@ import {
   type SlackAutomationDelivery,
   type TrashRecord,
 } from "@/db/schema";
-import { decryptSlackSecret } from "@/lib/slack-oauth";
 import { syncDueKrDataConnectionsWithDb, syncKrDataConnectionWithDb } from "@/lib/kr-data-sync";
 import {
-  defaultSlackAutomationTemplate,
   isSlackAutomationTrigger,
+  isSupportedTaskAutomation,
   normalizeSlackChannelId,
-  postSlackMessage,
   renderSlackAutomationMessage,
+  systemAutomationTemplate,
+  type AutomationMessageKind,
   slackAutomationMatches,
   type SlackAutomationContext,
   type SlackAutomationTrigger,
@@ -180,13 +183,10 @@ const DEFAULT_PROJECT_EXECUTION_PROPERTIES: { name: string; type: PropertyType; 
   { name: "상위 Initiative", type: "text", systemKey: "parent_id" },
   { name: "상태", type: "select", systemKey: "status", options: [...ITEM_STATUSES.filter((status) => status !== "archived")] },
   { name: "우선순위", type: "select", systemKey: "priority", options: [...ITEM_PRIORITIES] },
-  { name: "주기", type: "select", systemKey: "cadence", options: [...ITEM_CADENCES] },
   { name: "기한", type: "date", systemKey: "due_date" },
-  { name: "DRI", type: "member", systemKey: "project_dri" },
+  { name: "책임자", type: "member", systemKey: "project_dri" },
   { name: "하위 업무자", type: "members", systemKey: "project_workers" },
-  { name: "시기", type: "select", options: ["이번 주", "이번 달", "이번 분기", "다음 분기", "미정"] },
   { name: "KR 기여 예상치", type: "number" },
-  { name: "예상 기간", type: "number" },
 ];
 
 type RuntimeEnv = typeof env & {
@@ -221,7 +221,11 @@ const parentKind: Record<ItemKind, ItemKind | null> = {
 };
 const completedStatuses = new Set<ItemStatus>(["done", "development_done"]);
 const okrKinds = new Set<ItemKind>(["objective", "key_result", "initiative"]);
-const reservedAssignmentPropertyNames = new Set(["dri", "owner", "assignee", "담당", "담당자", "worker", "workers", "하위 업무자", "업무자", "작업자", "참여자"]);
+const reservedAssignmentPropertyNames = new Set(["dri", "owner", "assignee", "담당", "담당자", "책임자", "worker", "workers", "하위 업무자", "업무자", "작업자", "참여자"]);
+
+export function normalizeTaskStatus(status?: ItemStatus) {
+  return status && completedStatuses.has(status) ? "done" as const : "todo" as const;
+}
 
 async function ensureSchema() {
   if (!schemaReady) {
@@ -861,6 +865,16 @@ async function ensureSchema() {
           received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_event_receipts_received ON slack_event_receipts(received_at)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_work_command_operations (
+          request_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          team_id TEXT NOT NULL, slack_user_id TEXT NOT NULL, command TEXT NOT NULL, target_id TEXT,
+          status TEXT NOT NULL DEFAULT 'processing', result_json TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_work_commands_owner_created ON slack_work_command_operations(owner_id, created_at)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_work_commands_actor ON slack_work_command_operations(team_id, slack_user_id, created_at)"),
+        d1.prepare(`UPDATE slack_automations SET active = 0, updated_at = CURRENT_TIMESTAMP
+          WHERE trigger_type = 'task_status_changed' AND trigger_status NOT IN ('todo', 'done') AND active = 1`),
         d1.prepare(`CREATE TABLE IF NOT EXISTS slack_link_tokens (
           token_hash TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
           team_id TEXT NOT NULL, slack_user_id TEXT NOT NULL, slack_email TEXT NOT NULL DEFAULT '',
@@ -2001,10 +2015,18 @@ export async function saveSlackConnection(input: {
   return { connection, previousConnection };
 }
 
-export async function deleteSlackConnection(ownerId: string) {
+export async function deleteSlackConnection(ownerId: string, expectedConnectionId?: string) {
   await ensureSchema();
   const current = await getSlackConnection(ownerId);
-  await getDb().delete(slackConnections).where(eq(slackConnections.ownerId, ownerId));
+  if (!current) return null;
+  if (expectedConnectionId && current.id !== expectedConnectionId) throw new Error("Slack 연결이 변경되었습니다. 현재 연결을 확인해 주세요.");
+  const result = expectedConnectionId
+    ? await env.DB.prepare(`DELETE FROM slack_connections WHERE owner_id = ? AND id = ?
+        AND NOT EXISTS (SELECT 1 FROM slack_daily_reminders WHERE owner_id = ?)
+        AND NOT EXISTS (SELECT 1 FROM slack_daily_settings WHERE owner_id = ? AND enabled = 1)`)
+        .bind(ownerId, current.id, ownerId, ownerId).run()
+    : await env.DB.prepare("DELETE FROM slack_connections WHERE owner_id = ? AND id = ?").bind(ownerId, current.id).run();
+  if (!result.meta.changes) throw new Error("Slack 연결이 변경되었습니다. 현재 연결을 확인해 주세요.");
   return current;
 }
 
@@ -2030,6 +2052,7 @@ export type SlackAutomationInput = {
   triggerStatus?: string;
   channelId?: string;
   messageTemplate?: string;
+  messageTemplateKind?: AutomationMessageKind;
   active?: boolean;
 };
 
@@ -2058,10 +2081,14 @@ export async function createSlackAutomation(ownerId: string, userId: string, inp
   await ensureSchema();
   if (!await getSlackConnection(ownerId)) throw new Error("Slack을 먼저 연결해 주세요");
   const requestedTrigger = input.triggerType?.trim();
+  const messageTemplateKind = input.messageTemplateKind ?? (input.messageTemplate?.trim() ? "custom" : "default");
+  if (!["custom", "default", "blocked"].includes(messageTemplateKind)) throw new Error("지원하지 않는 메시지 종류입니다.");
   const values = validateSlackAutomationInput({
     ...input,
-    messageTemplate: input.messageTemplate?.trim() || (requestedTrigger && isSlackAutomationTrigger(requestedTrigger) ? defaultSlackAutomationTemplate(requestedTrigger) : undefined),
+    messageTemplate: messageTemplateKind !== "custom" && requestedTrigger && isSlackAutomationTrigger(requestedTrigger)
+      ? systemAutomationTemplate(messageTemplateKind, requestedTrigger) : input.messageTemplate,
   }, false);
+  await validateSlackAutomationChannel(ownerId, values.channelId!);
   const now = new Date().toISOString();
   const [created] = await getDb().insert(slackAutomations).values({
     id: crypto.randomUUID(),
@@ -2072,6 +2099,7 @@ export async function createSlackAutomation(ownerId: string, userId: string, inp
     triggerStatus: values.triggerStatus!,
     channelId: values.channelId!,
     messageTemplate: values.messageTemplate!,
+    messageTemplateKind,
     active: values.active ?? true,
     createdAt: now,
     updatedAt: now,
@@ -2083,20 +2111,26 @@ export async function updateSlackAutomation(ownerId: string, id: string, input: 
   await ensureSchema();
   const current = await getSlackAutomation(ownerId, id);
   if (!current) throw new Error("Slack 자동화를 찾을 수 없습니다");
+  const messageTemplateKind = input.messageTemplateKind ?? (input.messageTemplate !== undefined && input.messageTemplate !== current.messageTemplate ? "custom" : current.messageTemplateKind) as AutomationMessageKind;
+  if (!["custom", "default", "blocked"].includes(messageTemplateKind)) throw new Error("지원하지 않는 메시지 종류입니다.");
+  const trigger = input.triggerType ?? current.triggerType;
   const next = validateSlackAutomationInput({
     name: input.name ?? current.name,
     triggerType: input.triggerType ?? current.triggerType,
     triggerStatus: input.triggerStatus ?? current.triggerStatus,
     channelId: input.channelId ?? current.channelId,
-    messageTemplate: input.messageTemplate ?? current.messageTemplate,
+    messageTemplate: messageTemplateKind !== "custom" && isSlackAutomationTrigger(trigger)
+      ? systemAutomationTemplate(messageTemplateKind, trigger) : input.messageTemplate ?? current.messageTemplate,
     active: input.active ?? current.active,
   }, false);
+  if (next.channelId !== current.channelId || (next.active && !current.active)) await validateSlackAutomationChannel(ownerId, next.channelId!);
   const [updated] = await getDb().update(slackAutomations).set({
     name: next.name,
     triggerType: next.triggerType,
     triggerStatus: next.triggerStatus,
     channelId: next.channelId,
     messageTemplate: next.messageTemplate,
+    messageTemplateKind,
     active: next.active,
     updatedAt: new Date().toISOString(),
   }).where(and(eq(slackAutomations.ownerId, ownerId), eq(slackAutomations.id, id))).returning();
@@ -2116,6 +2150,7 @@ export async function testSlackAutomation(ownerId: string, id: string) {
   await ensureSchema();
   const automation = await getSlackAutomation(ownerId, id);
   if (!automation) throw new Error("Slack 자동화를 찾을 수 없습니다");
+  if (!isSupportedTaskAutomation(automation.triggerType, automation.triggerStatus)) throw new Error("현재 Task 상태 모델에서는 사용할 수 없는 규칙입니다");
   const workspace = await getWorkspaceName(ownerId);
   const context: SlackAutomationContext = {
     title: "Slack 자동화 테스트 업무",
@@ -2127,7 +2162,7 @@ export async function testSlackAutomation(ownerId: string, id: string) {
   };
   const delivery = await deliverSlackAutomation(automation, context, null, `test:${ownerId}:${automation.id}:${crypto.randomUUID()}`, "test");
   if (!delivery) throw new Error("테스트 전송을 시작하지 못했습니다");
-  if (delivery.status === "failed") throw new Error(delivery.error);
+  if (delivery.status !== "sent") throw new Error(delivery.error || "테스트 발송 결과를 확인하지 못했습니다.");
   return serializeSlackAutomationDelivery(delivery);
 }
 
@@ -2136,7 +2171,7 @@ export async function dispatchSlackAutomationEvent(ownerId: string, event: {
   item: PaceItem;
   fromStatus?: string | null;
 }) {
-  if (event.item.kind !== "task") return;
+  if (event.item.kind !== "task" || event.item.ownerId !== ownerId) return;
   try {
     await ensureSchema();
     const automations = await getDb().select().from(slackAutomations).where(and(
@@ -2155,9 +2190,11 @@ export async function dispatchSlackAutomationEvent(ownerId: string, event: {
       workspace,
     };
     for (const automation of automations) {
+      if (!isSupportedTaskAutomation(automation.triggerType, automation.triggerStatus)) continue;
       if (!slackAutomationMatches(automation, { triggerType: event.triggerType, status: event.item.status })) continue;
       const eventKey = `${ownerId}:${event.triggerType}:${automation.id}:${event.item.id}:${event.fromStatus ?? ""}:${event.item.status}:${event.item.updatedAt}`;
-      await deliverSlackAutomation(automation, context, event.item.id, eventKey, event.triggerType);
+      try { await deliverSlackAutomation(automation, context, event.item.id, eventKey, event.triggerType); }
+      catch (error) { console.error("Slack automation delivery failed", automation.id, error instanceof Error ? error.message : "Unknown failure"); }
     }
   } catch (error) {
     console.error("Slack automation dispatch failed", error);
@@ -2173,6 +2210,7 @@ function validateSlackAutomationInput(input: SlackAutomationInput, partial: bool
   if (triggerType && !isSlackAutomationTrigger(triggerType)) throw new Error("지원하지 않는 트리거입니다");
   const triggerStatus = triggerType === "task_status_changed" ? input.triggerStatus?.trim() ?? "" : "";
   if (triggerStatus && !ITEM_STATUSES.includes(triggerStatus as ItemStatus)) throw new Error("지원하지 않는 업무 상태입니다");
+  if (triggerType && !isSupportedTaskAutomation(triggerType, triggerStatus)) throw new Error("현재 Task 상태 모델에서는 사용할 수 없는 규칙입니다");
   const channelId = input.channelId === undefined && partial ? undefined : normalizeSlackChannelId(input.channelId ?? "");
   const messageTemplate = input.messageTemplate?.trim();
   if (!partial && !messageTemplate) throw new Error("Slack 메시지를 입력해 주세요");
@@ -2184,6 +2222,18 @@ async function getSlackAutomation(ownerId: string, id: string) {
   const [automation] = await getDb().select().from(slackAutomations)
     .where(and(eq(slackAutomations.ownerId, ownerId), eq(slackAutomations.id, id))).limit(1);
   return automation ?? null;
+}
+
+async function validateSlackAutomationChannel(ownerId: string, channelId: string) {
+  const { canAutoJoinSlackChannel, listSlackChannels, slackApi, slackTokenForConnection } = await import("@/lib/slack-daily");
+  const channels = await listSlackChannels(ownerId, { includeJoinablePublic: true });
+  const channel = channels.find((value) => value.id === channelId);
+  if (!channel) throw new Error("현재 워크스페이스의 공개 채널 또는 봇이 참여한 비공개·공유 채널을 선택해 주세요.");
+  if (canAutoJoinSlackChannel(channel)) {
+    const connection = await getSlackConnection(ownerId);
+    if (!connection) throw new Error("Slack을 먼저 연결해 주세요.");
+    await slackApi(await slackTokenForConnection(connection), "conversations.join", { channel: channelId });
+  }
 }
 
 async function getWorkspaceName(ownerId: string) {
@@ -2199,8 +2249,13 @@ async function deliverSlackAutomation(
   triggerType: string,
 ) {
   const now = new Date().toISOString();
-  const message = renderSlackAutomationMessage(automation.messageTemplate, context);
-  const [delivery] = await getDb().insert(slackAutomationDeliveries).values({
+  const t = await serverTranslator(await workspaceMessageLanguage(env.DB, automation.ownerId));
+  const systemKind = automation.messageTemplateKind === "default" || automation.messageTemplateKind === "blocked" ? automation.messageTemplateKind : null;
+  // Historical and custom templates have no reliable provenance. Never translate them.
+  const template = systemKind && isSlackAutomationTrigger(automation.triggerType)
+    ? systemAutomationTemplate(systemKind, automation.triggerType, t) : automation.messageTemplate;
+  const message = renderSlackAutomationMessage(template, context, t);
+  const [created] = await getDb().insert(slackAutomationDeliveries).values({
     id: crypto.randomUUID(),
     ownerId: automation.ownerId,
     automationId: automation.id,
@@ -2212,28 +2267,31 @@ async function deliverSlackAutomation(
     status: "pending",
     createdAt: now,
   }).onConflictDoNothing({ target: slackAutomationDeliveries.eventKey }).returning();
+  const delivery = created ?? (await getDb().select().from(slackAutomationDeliveries).where(and(eq(slackAutomationDeliveries.ownerId, automation.ownerId), eq(slackAutomationDeliveries.eventKey, eventKey))).limit(1))[0];
   if (!delivery) return null;
+  // Historical attempts have no receipt and must not be replayed blindly.
+  if (!created) {
+    if (delivery.status !== "pending") return delivery;
+    const receipt = await env.DB.prepare("SELECT id FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = 'automation' AND event_key = ?")
+      .bind(automation.ownerId, eventKey).first();
+    if (!receipt) return delivery;
+  }
 
   try {
-    const runtime = env as RuntimeEnv;
-    const connection = await getSlackConnection(automation.ownerId);
-    if (!connection) throw new Error("Slack 연결이 끊어졌습니다. 다시 연결해 주세요.");
-    if (!runtime.SLACK_TOKEN_ENCRYPTION_KEY) throw new Error("Slack 암호화 설정이 없습니다");
-    const token = await decryptSlackSecret(connection.encryptedBotToken, runtime.SLACK_TOKEN_ENCRYPTION_KEY);
-    await postSlackMessage(token, automation.channelId, message);
-    const sentAt = new Date().toISOString();
-    const [sent] = await getDb().update(slackAutomationDeliveries).set({ status: "sent", sentAt, error: "" })
-      .where(eq(slackAutomationDeliveries.id, delivery.id)).returning();
-    await getDb().update(slackAutomations).set({ lastTriggeredAt: sentAt, lastDeliveryStatus: "sent", lastError: "", updatedAt: sentAt })
-      .where(eq(slackAutomations.id, automation.id));
-    return sent;
+    const { deliverSlackBotMessage } = await import("@/lib/slack-bot-delivery");
+    await deliverSlackBotMessage(env.DB, {
+      ownerId: automation.ownerId, botKind: "automation", subjectId: delivery.id, eventKey,
+      payload: { channel: delivery.channelId, text: delivery.message, test: triggerType === "test" },
+      expiresAt: new Date(new Date(delivery.createdAt).getTime() + 24 * 60 * 60_000).toISOString(),
+    });
+    return (await getDb().select().from(slackAutomationDeliveries).where(and(eq(slackAutomationDeliveries.ownerId, automation.ownerId), eq(slackAutomationDeliveries.id, delivery.id))).limit(1))[0];
   } catch (error) {
     const message = (error instanceof Error ? error.message : String(error)).slice(0, 500);
     const failedAt = new Date().toISOString();
     const [failed] = await getDb().update(slackAutomationDeliveries).set({ status: "failed", error: message })
-      .where(eq(slackAutomationDeliveries.id, delivery.id)).returning();
+      .where(and(eq(slackAutomationDeliveries.ownerId, automation.ownerId), eq(slackAutomationDeliveries.id, delivery.id))).returning();
     await getDb().update(slackAutomations).set({ lastTriggeredAt: failedAt, lastDeliveryStatus: "failed", lastError: message, updatedAt: failedAt })
-      .where(eq(slackAutomations.id, automation.id));
+      .where(and(eq(slackAutomations.ownerId, automation.ownerId), eq(slackAutomations.id, automation.id)));
     return failed;
   }
 }
@@ -2246,6 +2304,8 @@ function serializeSlackAutomation(automation: SlackAutomation) {
     triggerStatus: automation.triggerStatus,
     channelId: automation.channelId,
     messageTemplate: automation.messageTemplate,
+    messageTemplateKind: automation.messageTemplateKind,
+    supported: isSupportedTaskAutomation(automation.triggerType, automation.triggerStatus),
     active: automation.active,
     lastTriggeredAt: automation.lastTriggeredAt,
     lastDeliveryStatus: automation.lastDeliveryStatus,
@@ -2274,7 +2334,7 @@ export async function createIntegrationToken(
   authorization: RequestAuthorization,
   name = "Codex",
   provider: IntegrationProvider = "other",
-  scopes = "okri:read okri:write",
+  scopes = "okrptr:read okrptr:write",
 ) {
   await ensureSchema();
   const token = `okri_${randomTokenPart(32)}`;
@@ -2391,8 +2451,7 @@ export async function authorizeRequest(
         return Response.json({ error: "This OKRI connection no longer has workspace access." }, { status: 403 });
       }
       const role = membership.role as TeamRole;
-      if (!options.allowViewerWrite && !["GET", "HEAD", "OPTIONS"].includes(request.method) && token.scopes
-        && !token.scopes.split(" ").some((scope) => scope === "okri:write" || scope === "okrptr:write")) {
+      if (!options.allowViewerWrite && !["GET", "HEAD", "OPTIONS"].includes(request.method) && token.scopes && !token.scopes.split(" ").includes("okrptr:write")) {
         return Response.json({ error: "This connection only permits read access." }, { status: 403 });
       }
       if (!options.allowViewerWrite && role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
@@ -2409,7 +2468,7 @@ export async function authorizeRequest(
         displayName: membership.displayName,
         role,
         apiToken: true,
-        oauthScopes: token.scopes ?? "okri:read okri:write",
+        oauthScopes: token.scopes ?? "okrptr:read okrptr:write",
       };
     }
   }
@@ -2433,7 +2492,7 @@ export async function authorizeRequest(
   const googleSession = await readGoogleSession(request, (env as RuntimeEnv).GOOGLE_TOKEN_ENCRYPTION_KEY);
   if (googleSession) {
     try {
-      const canonicalUserId = await canonicalUserIdForGoogle(googleSession.sub, googleSession.email, googleSession.name);
+      const canonicalUserId = await canonicalUserIdForGoogle(googleSession.sub, googleSession.email, googleSession.name, request);
       const membership = await resolveWorkspaceMembership(canonicalUserId, googleSession.email, googleSession.name, requestedWorkspaceId(request));
       if (!membership || membership.status !== "active") {
         return Response.json({ error: "This Google account is not an active workspace member." }, { status: 403 });
@@ -2458,7 +2517,7 @@ export async function authorizeRequest(
   );
 }
 
-async function canonicalUserIdForGoogle(subject: string, emailInput: string, displayNameInput: string) {
+async function canonicalUserIdForGoogle(subject: string, emailInput: string, displayNameInput: string, request: Request) {
   const email = normalizeEmail(emailInput);
   if (!email) throw new Error("A verified Google email is required");
   const now = new Date().toISOString();
@@ -2487,7 +2546,7 @@ async function canonicalUserIdForGoogle(subject: string, emailInput: string, dis
   const [emailUser] = await getDb().select().from(users).where(eq(users.emailNormalized, email)).limit(1);
   const userId = emailUser?.id ?? crypto.randomUUID();
   if (!emailUser) {
-    await getDb().insert(users).values({ id: userId, emailNormalized: email, displayName, createdAt: now, updatedAt: now }).onConflictDoNothing();
+    await getDb().insert(users).values({ id: userId, emailNormalized: email, displayName, ...newAccountLanguage(request), createdAt: now, updatedAt: now }).onConflictDoNothing();
   }
   await getDb().insert(authIdentities).values({
     id: crypto.randomUUID(),
@@ -2508,12 +2567,10 @@ async function canonicalUserIdForGoogle(subject: string, emailInput: string, dis
 
 async function ensureWorkspaceShell(ownerId: string, email: string | null = null, displayName = "Workspace Owner") {
   const now = new Date().toISOString();
-  const workspaceName = displayName && displayName !== "Workspace Owner" ? `${displayName}의 개인 워크스페이스` : "개인 워크스페이스";
-  await getDb().insert(workspaces).values({ id: ownerId, name: workspaceName, ownerUserId: ownerId, kind: "personal", createdAt: now, updatedAt: now }).onConflictDoNothing();
-  const [personalWorkspace] = await getDb().select().from(workspaces).where(and(eq(workspaces.id, ownerId), eq(workspaces.ownerUserId, ownerId))).limit(1);
-  if (personalWorkspace && (personalWorkspace.name === "OKRI Workspace" || personalWorkspace.name.endsWith(" Workspace"))) {
-    await getDb().update(workspaces).set({ name: workspaceName, updatedAt: now }).where(eq(workspaces.id, ownerId));
-  }
+  const { resolvedLanguage } = await readLanguagePreferences(env.DB, ownerId);
+  const t = await serverTranslator(resolvedLanguage);
+  const workspaceName = displayName && displayName !== "Workspace Owner" ? t("{name}의 개인 워크스페이스", { name: displayName }) : t("개인 워크스페이스");
+  await getDb().insert(workspaces).values({ id: ownerId, name: workspaceName, ownerUserId: ownerId, kind: "personal", messageLanguage: resolvedLanguage, createdAt: now, updatedAt: now }).onConflictDoNothing();
   await getDb().insert(workspaceMembers).values({
     id: crypto.randomUUID(),
     workspaceId: ownerId,
@@ -2622,7 +2679,8 @@ export async function createWorkspaceForUser(userId: string, email: string | nul
   if (name.length > 80) throw new Error("Workspace name must be 80 characters or fewer");
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  await getDb().insert(workspaces).values({ id, name, ownerUserId: userId, kind: "team", createdAt: now, updatedAt: now });
+  const { resolvedLanguage } = await readLanguagePreferences(env.DB, userId);
+  await getDb().insert(workspaces).values({ id, name, ownerUserId: userId, kind: "team", messageLanguage: resolvedLanguage, createdAt: now, updatedAt: now });
   await getDb().insert(workspaceMembers).values({ id: crypto.randomUUID(), workspaceId: id, userId, email, displayName, role: "owner", status: "active", createdAt: now, updatedAt: now });
   await setActiveWorkspace(userId, id);
   return {
@@ -2794,6 +2852,7 @@ async function permanentlyDeleteWorkspace(id: string) {
   await getDb().delete(activityLog).where(eq(activityLog.ownerId, id));
   await getDb().delete(routineCompletions).where(eq(routineCompletions.ownerId, id));
   await getDb().delete(routines).where(eq(routines.ownerId, id));
+  await (env as RuntimeEnv).DB.prepare("DELETE FROM routine_property_definitions WHERE owner_id = ?").bind(id).run();
   await getDb().delete(checklistItems).where(eq(checklistItems.ownerId, id));
   await getDb().delete(itemPropertyValues).where(eq(itemPropertyValues.ownerId, id));
   await getDb().delete(itemAssignments).where(eq(itemAssignments.ownerId, id));
@@ -3991,7 +4050,9 @@ export async function createItem(
     if (!routine || !routine.active) throw new Error("Web Tasks must use an active Routine");
   }
   const defaultStatus = systemDefault("status");
-  const status = input.status ?? (typeof defaultStatus === "string" && ITEM_STATUSES.includes(defaultStatus as ItemStatus) ? defaultStatus as ItemStatus : "todo");
+  const status = kind === "task"
+    ? normalizeTaskStatus(input.status)
+    : input.status ?? (typeof defaultStatus === "string" && ITEM_STATUSES.includes(defaultStatus as ItemStatus) ? defaultStatus as ItemStatus : "todo");
   const cycleId = input.cycleId === undefined ? await defaultCycleIdForKind(ownerId, kind) : input.cycleId;
   await validateParent(ownerId, kind, parentId, routineId, cycleId);
   const rules = await getWorkspaceRules(ownerId);
@@ -4004,6 +4065,9 @@ export async function createItem(
     if (kind !== "project") throw new Error("Templates can only be applied to Projects");
   }
 
+  const initialProgress = kind === "task"
+    ? status === "done" ? 100 : 0
+    : kind === "objective" || kind === "initiative" ? 0 : clampProgress(input.progress ?? 0);
   const id = crypto.randomUUID();
   const quotaReservation = kind === "project" ? await reserveProjectCreation(ownerId) : null;
   let created: PaceItem;
@@ -4022,7 +4086,7 @@ export async function createItem(
       status,
       priority: input.priority ?? (typeof defaultPriority === "string" && ITEM_PRIORITIES.includes(defaultPriority as ItemPriority) ? defaultPriority as ItemPriority : rules.defaultPriority),
       cadence: input.cadence ?? (typeof defaultCadence === "string" && ITEM_CADENCES.includes(defaultCadence as ItemCadence) ? defaultCadence as ItemCadence : rules.defaultCadence),
-      progress: kind === "objective" || kind === "initiative" ? 0 : clampProgress(input.progress ?? 0),
+      progress: initialProgress,
       dueDate: input.dueDate ?? (typeof defaultDueDate === "string" ? defaultDueDate : null),
       source,
       sourceRef: input.sourceRef ?? null,
@@ -4077,6 +4141,8 @@ export async function updateItem(
 
   const normalizedPatch = { ...patch };
   if (current.kind === "task") {
+    if (normalizedPatch.status !== undefined) normalizedPatch.status = normalizeTaskStatus(normalizedPatch.status);
+    delete normalizedPatch.progress;
     if (normalizedPatch.parentId) normalizedPatch.routineId = null;
     if (normalizedPatch.routineId) normalizedPatch.parentId = null;
     const nextParentId = normalizedPatch.parentId === undefined ? current.parentId : normalizedPatch.parentId;
@@ -4098,15 +4164,18 @@ export async function updateItem(
   }
 
   const nextStatus = normalizedPatch.status ?? (current.status as ItemStatus);
-  const supportsProgress = current.kind === "key_result" || current.kind === "project" || current.kind === "task";
+  const supportsProgress = current.kind === "key_result" || current.kind === "project";
   if (!supportsProgress) delete normalizedPatch.progress;
+  const taskProgress = current.kind === "task" && normalizedPatch.status !== undefined
+    ? normalizedPatch.status === "done" ? 100 : 0
+    : undefined;
   const values = {
     ...normalizedPatch,
     title: normalizedPatch.title?.trim(),
     description: normalizedPatch.description?.trim(),
-    progress: supportsProgress
+    progress: taskProgress ?? (supportsProgress
       ? completedStatuses.has(nextStatus) ? 100 : normalizedPatch.progress === undefined ? undefined : clampProgress(normalizedPatch.progress)
-      : undefined,
+      : undefined),
     updatedAt: new Date().toISOString(),
   };
 
@@ -4137,7 +4206,7 @@ export type ItemAssignmentSummary = {
 
 export class ItemDeletePermissionError extends Error {
   constructor() {
-    super("Project는 생성자 또는 주 DRI만, Task는 생성자 또는 담당자만 삭제할 수 있습니다.");
+    super("Project는 생성자 또는 책임자만, Task는 생성자 또는 담당자만 삭제할 수 있습니다.");
     this.name = "ItemDeletePermissionError";
   }
 }
@@ -4896,11 +4965,13 @@ export async function validateItemPropertiesByName(ownerId: string, values: Reco
   const definitions = await listProjectPropertyDefinitions(ownerId);
   const byName = new Map(definitions.map((property) => [property.name.toLocaleLowerCase(), property]));
   const memberIds = new Set<string>();
+  const prepared: { property: PropertyDefinition; value: PropertyValue }[] = [];
   for (const [name, value] of Object.entries(values)) {
     const property = byName.get(name.toLocaleLowerCase());
     if (!property) throw new Error(`Property not found: ${name}`);
     if (property.systemKey) throw new Error("System properties must be changed through the Project fields");
     const normalized = normalizePropertyValue(property, value);
+    prepared.push({ property, value: normalized });
     if ((property.type === "member" || property.type === "members") && normalized !== null) {
       for (const memberId of Array.isArray(normalized) ? normalized : [normalized]) {
         if (typeof memberId === "string") memberIds.add(memberId);
@@ -4909,10 +4980,11 @@ export async function validateItemPropertiesByName(ownerId: string, values: Reco
   }
   if (memberIds.size) {
     const found = await getDb().select({ id: workspaceMembers.id }).from(workspaceMembers).where(and(
-      eq(workspaceMembers.workspaceId, ownerId), eq(workspaceMembers.status, "active"), inArray(workspaceMembers.id, [...memberIds]),
+      eq(workspaceMembers.workspaceId, ownerId), eq(workspaceMembers.status, "active"), sql`${workspaceMembers.id} IN (SELECT value FROM json_each(${JSON.stringify([...memberIds])}))`,
     ));
     if (found.length !== memberIds.size) throw new Error("Property members must be active workspace members");
   }
+  return prepared;
 }
 
 function isReservedAssignmentPropertyName(name: string) {
@@ -5079,6 +5151,19 @@ export async function applyProjectTemplate(ownerId: string, projectId: string, t
     expectedVersion: document.version,
     userId,
   });
+}
+
+/** Preserve template-prepend semantics for a new Project without writing before approval. */
+export function prepareProjectTemplateDocument(template: { content: string; plainText: string }, description: string) {
+  const freshBlock = (block: Record<string, unknown>): Record<string, unknown> => ({
+    ...block, id: crypto.randomUUID(),
+    ...(Array.isArray(block.children) ? { children: block.children.map((child) => freshBlock(child as Record<string, unknown>)) } : {}),
+  });
+  const content = normalizeBlockContent(JSON.stringify([
+    ...parseBlockArray(template.content).map(freshBlock), ...blocksFromPlainText(description).map(freshBlock),
+  ]));
+  const plainText = normalizeDocumentText([template.plainText.trim(), description.trim()].filter(Boolean).join("\n\n"));
+  return { content, plainText };
 }
 
 function serializeProjectDocument(document: ProjectDocument) {
@@ -5291,6 +5376,7 @@ export async function createRoutine(
     cadence?: RoutineCadence;
     active?: boolean;
     assigneeMemberId?: string | null;
+    properties?: unknown;
   },
 ) {
   const title = input.title.trim();
@@ -5298,6 +5384,7 @@ export async function createRoutine(
   const cadence = input.cadence ?? "daily";
   if (!ROUTINE_CADENCES.includes(cadence)) throw new Error("Unsupported routine cadence");
   await validateRoutineAssignee(ownerId, input.assigneeMemberId ?? null);
+  const properties = await prepareRoutineProperties((env as RuntimeEnv).DB, ownerId, input.properties, true);
   const [last] = await getDb()
     .select({ sortOrder: routines.sortOrder })
     .from(routines)
@@ -5316,6 +5403,7 @@ export async function createRoutine(
       triggerPoint: input.triggerPoint?.trim() ?? "",
       actionPlace: input.actionPlace?.trim() ?? "",
       actionSteps: input.actionSteps?.trim() ?? "",
+      propertiesJson: JSON.stringify(properties),
       cadence,
       active: input.active ?? true,
       sortOrder: (last?.sortOrder ?? 0) + 10,
@@ -5336,6 +5424,7 @@ export async function updateRoutine(
     cadence: RoutineCadence;
     active: boolean;
     assigneeMemberId: string | null;
+    properties: unknown;
   }>,
 ) {
   const current = await getRoutine(ownerId, id);
@@ -5346,6 +5435,7 @@ export async function updateRoutine(
     throw new Error("Unsupported routine cadence");
   }
   if (patch.assigneeMemberId !== undefined) await validateRoutineAssignee(ownerId, patch.assigneeMemberId);
+  const propertyPatch = patch.properties === undefined ? undefined : await prepareRoutineProperties((env as RuntimeEnv).DB, ownerId, patch.properties);
   const [updated] = await getDb()
     .update(routines)
     .set({
@@ -5354,6 +5444,7 @@ export async function updateRoutine(
       triggerPoint: patch.triggerPoint?.trim(),
       actionPlace: patch.actionPlace?.trim(),
       actionSteps: patch.actionSteps?.trim(),
+      propertiesJson: propertyPatch === undefined ? undefined : sql`json_patch(${routines.propertiesJson}, ${JSON.stringify(propertyPatch)})`,
       cadence: patch.cadence,
       active: patch.active,
       assigneeMemberId: patch.assigneeMemberId,
@@ -5449,6 +5540,7 @@ export function serializeRoutine(
     triggerPoint: routine.triggerPoint,
     actionPlace: routine.actionPlace,
     actionSteps: routine.actionSteps,
+    properties: parseRoutineProperties(routine.propertiesJson),
     cadence: routine.cadence,
     active: routine.active,
     sortOrder: routine.sortOrder,
@@ -5962,17 +6054,25 @@ async function removeLegacySeedWorkspaceData(ownerId: string) {
 
 async function seedProjectExecutionProperties(ownerId: string) {
   let existing = await listPropertyDefinitions(ownerId);
+  // Rename only the old built-in label; keep assignments, values, visibility and custom names.
+  const oldDri = existing.find((property) => property.systemKey === "project_dri" && property.name === "DRI");
+  if (oldDri && !existing.some((property) => property.name === "책임자")) {
+    await getDb().update(propertyDefinitions).set({ name: "책임자", updatedAt: new Date().toISOString() })
+      .where(and(eq(propertyDefinitions.ownerId, ownerId), eq(propertyDefinitions.id, oldDri.id), eq(propertyDefinitions.name, "DRI")));
+  }
   for (const definition of DEFAULT_PROJECT_EXECUTION_PROPERTIES.filter((entry) => entry.systemKey)) {
     if (existing.some((property) => property.systemKey === definition.systemKey)) continue;
-    const legacy = existing.find((property) => !property.systemKey && property.name.toLocaleLowerCase() === definition.name.toLocaleLowerCase());
+    const legacy = existing.find((property) => !property.systemKey && property.name.toLocaleLowerCase() === definition.name.toLocaleLowerCase())
+      ?? (definition.systemKey === "project_dri" ? existing.find((property) => !property.systemKey && property.name.toLocaleLowerCase() === "dri") : undefined);
     if (!legacy) continue;
     await getDb().update(propertyDefinitions).set({
+      name: definition.name,
       systemKey: definition.systemKey,
       type: definition.type,
       options: JSON.stringify(normalizeOptions(definition.options ?? [])),
-      active: true,
+      active: legacy.active,
       updatedAt: new Date().toISOString(),
-    }).where(eq(propertyDefinitions.id, legacy.id));
+    }).where(and(eq(propertyDefinitions.ownerId, ownerId), eq(propertyDefinitions.id, legacy.id)));
   }
   existing = await listPropertyDefinitions(ownerId);
   const existingNames = new Set(existing.map((property) => property.name.toLocaleLowerCase()));
@@ -6019,7 +6119,7 @@ async function migrateLegacyItemAssignments(ownerId: string) {
       AND LOWER(TRIM(member.display_name)) = LOWER(TRIM(ipv.value, '"@ '))
     WHERE ipv.owner_id = ?
       AND item.kind IN ('project', 'task')
-      AND LOWER(TRIM(property.name)) IN ('dri', 'owner', 'assignee', '담당', '담당자')
+      AND LOWER(TRIM(property.name)) IN ('dri', 'owner', 'assignee', '담당', '담당자', '책임자')
       AND INSTR(TRIM(ipv.value, '"'), ',') = 0
       AND (
         SELECT COUNT(*) FROM workspace_members AS candidate
@@ -6110,6 +6210,9 @@ export function serializeItem(
   properties: Record<string, PropertyValue> = {},
   assignments: ItemAssignmentSummary[] = [],
 ) {
+  const status = item.kind === "task" && item.status !== "archived"
+    ? normalizeTaskStatus(item.status as ItemStatus)
+    : item.status;
   return {
     id: item.id,
     cycleId: item.cycleId,
@@ -6118,10 +6221,10 @@ export function serializeItem(
     kind: item.kind,
     title: item.title,
     description: item.description,
-    status: item.status,
+    status,
     priority: item.priority,
     cadence: item.cadence,
-    progress: item.progress,
+    progress: item.kind === "task" && status !== "archived" ? status === "done" ? 100 : 0 : item.progress,
     dueDate: item.dueDate,
     source: item.source,
     createdByUserId: item.createdByUserId,

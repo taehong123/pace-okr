@@ -2,7 +2,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import { env } from "cloudflare:workers";
+import { listRoutineProperties } from "@/lib/routine-properties";
 import { isReadOnlyMcpRequest, readWorkContext, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
+import { ProjectReviewError } from "@/lib/project-review";
+import { cancelMcpProjectReview, confirmMcpProjectReview, confirmMcpProjectReviewFromCreateItem,
+  MCP_CREATE_ITEM_CONFIRM_PREFIX, mcpProjectConfirmationSchema,
+  readMcpProjectReview, stageMcpProjectReview } from "@/lib/project-review-mcp";
 import {
   ITEM_CADENCES,
   ITEM_KINDS,
@@ -171,6 +176,7 @@ const routineOutput = z.object({
   triggerPoint: z.string(),
   actionPlace: z.string(),
   actionSteps: z.string(),
+  properties: z.record(z.string(), propertyValueSchema),
   cadence: z.string(),
   active: z.boolean(),
   sortOrder: z.number(),
@@ -256,7 +262,9 @@ const workContextOutput = z.object({
   rules: workspaceRulesOutput,
   classification: z.record(z.string(), z.string()),
   fields: z.record(z.string(), workFieldOutput),
-  parents: z.array(z.object({ id: z.string(), kind: z.string(), title: z.string(), cycleId: z.string().nullable(), path: z.array(z.string()) })),
+  parents: z.array(z.object({ id: z.string(), kind: z.string(), title: z.string(), cycleId: z.string().nullable(), path: z.array(z.string()),
+    evidence: z.object({ initiative: z.string(), keyResult: z.string(), objective: z.string() }).optional(),
+  })),
   routines: z.array(z.object({ id: z.string(), title: z.string(), systemKey: z.string().nullable() })),
   fallback: z.object({ id: z.string(), title: z.string() }).nullable(),
   members: z.array(z.object({ id: z.string(), displayName: z.string(), role: z.string(), isCurrent: z.boolean() })),
@@ -269,20 +277,191 @@ const workContextOutput = z.object({
 const memberIdInput = z.string().trim().min(1);
 const dueDateInput = z.iso.date().describe("User-stated due date in YYYY-MM-DD; omit when unknown");
 
-async function createOkriServer(authorization: RequestAuthorization) {
+const projectProposalFields = {
+  title: z.string().trim().min(1).max(500).optional(),
+  description: z.string().max(20000).optional(),
+  recommended_initiatives: z.array(z.object({
+    initiative_id: memberIdInput,
+    reason: z.string().trim().min(1).max(1000),
+  })).max(3).default([]),
+  due_date: dueDateInput.optional(),
+  dri_member_id: memberIdInput.optional(),
+  worker_member_ids: z.array(memberIdInput).max(100).optional(),
+  cycle_id: memberIdInput.optional(),
+  properties: z.record(z.string(), propertyValueSchema).optional(),
+  template_id: memberIdInput.optional(),
+  status: z.enum(ITEM_STATUSES).optional(),
+  priority: z.enum(ITEM_PRIORITIES).optional(),
+  cadence: z.enum(ITEM_CADENCES).optional(),
+  progress: z.number().min(0).max(100).optional(),
+};
+
+const projectConversationInputSchema = z.object({
+  action: z.enum(["propose", "confirm", "cancel", "update", "archive", "restore"]).default("propose"),
+  ...projectProposalFields,
+  confirmation: mcpProjectConfirmationSchema.optional().describe(
+    "For action=confirm, pass the exact approved review snapshot. The user never needs to copy a review ID or open another conversation.",
+  ),
+  review_id: z.string().uuid().optional(),
+  version: z.string().uuid().optional(),
+  project_id: memberIdInput.optional(),
+  changes: z.object({
+    title: z.string().trim().min(1).max(500).optional(),
+    description: z.string().max(20000).optional(),
+    status: z.enum(ITEM_STATUSES).optional(),
+    priority: z.enum(ITEM_PRIORITIES).optional(),
+    cadence: z.enum(ITEM_CADENCES).optional(),
+    progress: z.number().min(0).max(100).optional(),
+    due_date: dueDateInput.nullable().optional(),
+    properties: z.record(z.string(), propertyValueSchema).optional(),
+    dri_member_id: memberIdInput.nullable().optional(),
+    worker_member_ids: z.array(memberIdInput).max(100).optional(),
+  }).optional(),
+  confirmed: z.literal(true).optional().describe(
+    "Required for action=archive after the user explicitly asks to delete or move this Project to trash in the current conversation.",
+  ),
+});
+
+const projectConversationOutputSchema = {
+  action: z.enum(["propose", "confirm", "cancel", "update", "archive", "restore"]),
+  review: z.record(z.string(), z.unknown()).optional(),
+  item: itemOutput.optional(),
+  affectedTaskCount: z.number().optional(),
+};
+
+type ProjectConversationInput = z.infer<typeof projectConversationInputSchema>;
+
+async function createOkrptrServer(authorization: RequestAuthorization, origin = "https://okrptr.com") {
   const { ownerId } = authorization;
   const rules = await getWorkspaceRules(ownerId);
   const server = new McpServer(
-    { name: "okri", version: "0.8.0" },
+    { name: "okrptr", version: "0.9.0" },
     {
       instructions:
         [
           WORKFLOW_INSTRUCTIONS,
+          "Use manage_project as the primary Project tool. Keep proposal, explicit approval, creation, edits, recoverable deletion, and restoration in the same conversation. Never ask the user to open a new chat, reactivate or mention OKRPTR, copy a review ID, or visit a browser approval page. Internal IDs stay internal. After the user approves the exact proposal, call manage_project again with action=confirm immediately.",
+          "Task lifecycle is binary. Use set_task_completed to complete or reopen a Task; never apply Project workflow states or manual progress percentages to a Task.",
           `Workspace capture rule: ${rules.captureInstruction}`,
           `Workspace structure rule: ${rules.structureInstruction}`,
           `Workspace routine rule: ${rules.routineInstruction}`,
-          `Default Task priority: ${rules.defaultPriority}. Default cadence: ${rules.defaultCadence}. ${rules.reviewBeforeCreate ? "Ask before creating structured items when the hierarchy is uncertain." : "Create structured items directly when the hierarchy is clear."}`,
+          `Default Task priority: ${rules.defaultPriority}. Default cadence: ${rules.defaultCadence}. Project creation always requires the user's final review and Initiative selection, regardless of reviewBeforeCreate or any legacy workspace rule.`,
         ].join("\n"),
+    },
+  );
+
+  const runProjectConversation = async (input: ProjectConversationInput) => {
+    if (input.action === "confirm") {
+      if (!input.confirmation) throw new Error("Pass confirmation after the user approves the final Project proposal in this conversation.");
+      const review = await confirmMcpProjectReview(authorization, input.confirmation);
+      return {
+        structuredContent: { action: input.action, review },
+        content: [{ type: "text" as const, text: "Project created. Continue editing it in this conversation; no new chat, mention, review ID, or browser visit is needed." }],
+      };
+    }
+    if (input.action === "cancel") {
+      if (!input.review_id || !input.version) throw new Error("review_id and version are required to cancel a pending proposal.");
+      const review = await cancelMcpProjectReview(authorization, input.review_id, input.version);
+      return {
+        structuredContent: { action: input.action, review },
+        content: [{ type: "text" as const, text: "Project proposal cancelled. Nothing was created." }],
+      };
+    }
+    if (input.action === "update") {
+      if (!input.project_id || !input.changes || !Object.keys(input.changes).length) {
+        throw new Error("project_id and at least one changed field are required.");
+      }
+      const current = await getItem(ownerId, input.project_id);
+      if (!current || current.kind !== "project" || current.archivedAt) throw new Error("Active Project not found.");
+      await Promise.all([
+        validateMcpMembers(ownerId, [input.changes.dri_member_id, ...(input.changes.worker_member_ids ?? [])]),
+        input.changes.properties ? validateItemPropertiesByName(ownerId, input.changes.properties) : Promise.resolve(),
+      ]);
+      const item = await updateItem(ownerId, input.project_id, {
+        title: input.changes.title,
+        description: input.changes.description,
+        status: input.changes.status as ItemStatus | undefined,
+        priority: input.changes.priority as ItemPriority | undefined,
+        cadence: input.changes.cadence as ItemCadence | undefined,
+        progress: input.changes.progress,
+        dueDate: input.changes.due_date,
+        source: "mcp",
+      });
+      if (input.changes.properties) await setItemPropertiesByName(ownerId, item.id, input.changes.properties as Record<string, PropertyValue>);
+      if (input.changes.dri_member_id !== undefined) await replaceItemAssignmentRole(ownerId, item.id, "project_dri", input.changes.dri_member_id ? [input.changes.dri_member_id] : []);
+      if (input.changes.worker_member_ids !== undefined) await replaceItemAssignmentRole(ownerId, item.id, "project_worker", input.changes.worker_member_ids);
+      const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
+      return {
+        structuredContent: { action: input.action, item: serialized },
+        content: [{ type: "text" as const, text: `Updated Project "${item.title}". Continue with any other changes in this conversation.` }],
+      };
+    }
+    if (input.action === "archive") {
+      if (!input.project_id || input.confirmed !== true) throw new Error("project_id and the user's immediate confirmation are required to move a Project to trash.");
+      const result = await archiveProject(ownerId, authorization.userId, input.project_id);
+      const item = (await serializeItemsForMcp(ownerId, [result.project]))[0];
+      return {
+        structuredContent: { action: input.action, item, affectedTaskCount: Math.max(0, result.affectedCount - 1) },
+        content: [{ type: "text" as const, text: `Moved Project "${result.project.title}" and its direct Tasks to trash. It can be restored in this conversation.` }],
+      };
+    }
+    if (input.action === "restore") {
+      if (!input.project_id) throw new Error("project_id is required to restore a Project.");
+      const result = await restoreProject(ownerId, input.project_id);
+      const item = (await serializeItemsForMcp(ownerId, [result.project]))[0];
+      return {
+        structuredContent: { action: input.action, item, affectedTaskCount: Math.max(0, result.restoredCount - 1) },
+        content: [{ type: "text" as const, text: `Restored Project "${result.project.title}" and its recoverable Tasks.` }],
+      };
+    }
+    if (!input.title) throw new Error("title is required to propose a Project.");
+    const review = await stageMcpProjectReview(authorization, {
+      title: input.title, description: input.description, status: input.status, priority: input.priority,
+      cadence: input.cadence, progress: input.progress, dueDate: input.due_date,
+      driMemberId: input.dri_member_id, workerMemberIds: input.worker_member_ids,
+      properties: input.properties, templateId: input.template_id, requestedCycleId: input.cycle_id,
+    }, input.recommended_initiatives.map((entry) => ({ initiativeId: entry.initiative_id, reason: entry.reason })), origin);
+    return {
+      structuredContent: { action: input.action, review },
+      content: [{ type: "text" as const, text: `${review.nextStep}\nKeep the review data internal. Ask naturally in this conversation and call this same tool with action=confirm after approval; never ask the user to copy an ID, open a new chat, or mention OKRPTR again.` }],
+    };
+  };
+
+  server.registerTool(
+    "manage_project",
+    {
+      title: "Create, confirm, edit, delete, or restore a Project in one conversation",
+      description: "Primary Project tool. Keep the entire flow in the current conversation: propose with Initiative evidence, accept edits, then call this same tool with action=confirm after explicit approval. It also updates existing Projects, moves them to recoverable trash after immediate confirmation, and restores them. Never expose internal review IDs or tell the user to start a new chat, activate @OKRPTR again, or visit a browser approval page.",
+      inputSchema: projectConversationInputSchema.shape,
+      outputSchema: projectConversationOutputSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    runProjectConversation,
+  );
+
+  server.registerTool(
+    "prepare_work",
+    {
+      title: "Prepare work with classification and connection choices",
+      description: "Use when the user wants to organize/save work ('이거 해야 해') and needs Task/Project/Routine guidance or missing parent/member IDs. One read returns classification criteria, required vs optional fields, workspace rules, parent paths, member IDs and Project property definitions. No records are saved. Skip when all necessary IDs are already known; do not follow with redundant list calls.",
+      inputSchema: {
+        kind: z.enum(WORK_KINDS).default("unsure").describe("Your semantic hypothesis or the user's chosen type; unsure does not silently classify or save"),
+        query: z.string().max(120).optional().describe("Short existing parent title/topic to filter candidates, not the full work request. Omit to browse recent parents."),
+        member_query: z.string().max(120).optional().describe("Named person's name/email to narrow members; never guess IDs"),
+        include_members: z.boolean().default(true),
+        limit: z.number().int().min(1).max(20).default(6),
+      },
+      outputSchema: { context: workContextOutput },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ kind, query, member_query, include_members, limit }) => {
+      const context = await readWorkContext(env.DB, ownerId, authorization.userId, {
+        kind, query, memberQuery: member_query, includeMembers: include_members, limit,
+      });
+      return {
+        structuredContent: { context: { ...context, rules } },
+        content: [{ type: "text", text: "Nothing has been saved. Candidate order is NOT a relevance ranking. For Projects, explain recommendations using Initiative/KR/Objective evidence, offer other choices or defer, then use manage_project for mandatory final user approval in this conversation. Never pick a parent and create directly." }],
+      };
     },
   );
 
@@ -315,7 +494,7 @@ async function createOkriServer(authorization: RequestAuthorization) {
   server.registerTool(
     "get_workspace_rules",
     {
-      title: "Get OKRI workspace rules",
+      title: "Get OKRPTR workspace rules",
       description: "Read shared workspace rules when explicitly requested or changed. For new-work classification and connection choices use prepare_work instead; do not fetch rules twice.",
       inputSchema: {},
       outputSchema: { rules: workspaceRulesOutput },
@@ -323,7 +502,7 @@ async function createOkriServer(authorization: RequestAuthorization) {
     },
     async () => ({
       structuredContent: { rules },
-      content: [{ type: "text", text: "Returned the active OKRI workspace rules." }],
+      content: [{ type: "text", text: "Returned the active OKRPTR workspace rules." }],
     }),
   );
 
@@ -363,7 +542,7 @@ async function createOkriServer(authorization: RequestAuthorization) {
   server.registerTool(
     "capture_item",
     {
-      title: "Capture unclassified work to OKRI",
+      title: "Capture unclassified work to OKRPTR",
       description: "Save one explicitly requested, clear Task to General when no Project/Routine is known. Do not use for mere discussion, a Project/Routine idea, or unresolved Task-vs-Project classification; use prepare_work for those. If a container is known use create_item with its ID.",
       inputSchema: {
         title: z.string().trim().min(1).max(500).describe("Short actionable title in the user's language"),
@@ -401,7 +580,7 @@ async function createOkriServer(authorization: RequestAuthorization) {
     "create_item",
     {
       title: "Create a structured OKR item",
-      description: "Save one correctly classified item with all known fields, assignments and Project properties in one call. Reuse IDs from prepare_work. Task: one action under Project or Routine (General if omitted). Project: finite multi-Task deliverable under an existing Initiative. Do not invent ancestors/owners/dates; do not re-list after success.",
+      description: "Save a correctly classified Task or OKR item. Project calls first return an unsaved review and an internal same_tool_confirmation value. After the user explicitly approves the exact proposal and Initiative in this conversation, call create_item again with the same Project title and parent_id plus that internal template_id; this completes creation even when confirm_project is absent from an older client tool list. Keep the internal value private. Never ask the user to copy a review ID, open a new chat, mention @OKRPTR, or visit a browser approval page.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS),
         title: z.string().trim().min(1).max(500),
@@ -409,21 +588,65 @@ async function createOkriServer(authorization: RequestAuthorization) {
         routine_id: memberIdInput.optional().describe("Task-only alternative to parent_id for an independent Routine"),
         cycle_id: memberIdInput.optional().describe("Objective's selected OKR file; children inherit their parent's cycle when omitted"),
         description: z.string().optional(),
-        status: z.enum(ITEM_STATUSES).optional(),
+        status: z.enum(ITEM_STATUSES).optional().describe("Workflow status for OKR items and Projects. Tasks are binary: completed statuses become done and every other status becomes todo."),
         priority: z.enum(ITEM_PRIORITIES).optional(),
         cadence: z.enum(ITEM_CADENCES).optional(),
-        progress: z.number().min(0).max(100).optional(),
+        progress: z.number().min(0).max(100).optional().describe("Progress for Key Results and Projects. Task progress is derived from completion and is not edited directly."),
         due_date: dueDateInput.optional(),
-        template_id: z.string().optional().describe("Optional Project body template ID; ignored for non-Project items"),
+        template_id: z.string().optional().describe("Optional Project body template ID. A Project review result may provide an internal same-tool confirmation value for this existing field; reuse it only after explicit approval."),
         properties: z.record(z.string(), propertyValueSchema).optional().describe("Project-only custom values keyed by property name"),
         dri_member_id: z.string().optional().describe("Active workspace member ID for a Project DRI"),
         worker_member_ids: z.array(z.string()).optional().describe("Active workspace member IDs for Project workers"),
         assignee_member_id: z.string().optional().describe("Active workspace member ID for a Task assignee"),
       },
-      outputSchema: { item: itemOutput },
+      outputSchema: { item: itemOutput.optional(), review: z.record(z.string(), z.unknown()).optional() },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     async (input) => {
+      if (input.kind === "project") {
+        assertMcpAssignmentFields(input);
+        if (input.routine_id) throw new Error("Projects cannot belong to a Routine");
+        if (input.template_id?.startsWith(MCP_CREATE_ITEM_CONFIRM_PREFIX)) {
+          const reviewId = input.template_id.slice(MCP_CREATE_ITEM_CONFIRM_PREFIX.length);
+          if (!z.string().uuid().safeParse(reviewId).success || !input.parent_id) {
+            throw new Error("The internal Project confirmation reference or selected Initiative is invalid.");
+          }
+          const review = await confirmMcpProjectReviewFromCreateItem(authorization, reviewId, input.parent_id, {
+            title: input.title,
+            description: input.description,
+            status: input.status,
+            priority: input.priority,
+            cadence: input.cadence,
+            progress: input.progress,
+            dueDate: input.due_date,
+            driMemberId: input.dri_member_id,
+            workerMemberIds: input.worker_member_ids,
+            properties: input.properties,
+          });
+          if (!review.projectId) throw new Error("Project creation did not return a saved Project.");
+          const item = await getItem(ownerId, review.projectId);
+          if (!item) throw new Error("The saved Project could not be read.");
+          const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
+          return {
+            structuredContent: { item: serialized },
+            content: [{ type: "text" as const, text: `Created Project "${item.title}". Continue editing or moving it to trash in this conversation.` }],
+          };
+        }
+        const review = await stageMcpProjectReview(authorization, {
+          title: input.title, description: input.description, status: input.status, priority: input.priority,
+          cadence: input.cadence, progress: input.progress, dueDate: input.due_date,
+          driMemberId: input.dri_member_id, workerMemberIds: input.worker_member_ids,
+          properties: input.properties, templateId: input.template_id, requestedCycleId: input.cycle_id,
+        }, input.parent_id ? [{ initiativeId: input.parent_id, reason: "AI가 제안한 연결 후보입니다. 관련성과 상위 KR·Objective를 직접 확인해 주세요. 아직 확정되지 않았습니다." }] : [], origin);
+        const compatibleReview = {
+          ...review,
+          same_tool_confirmation: { template_id: `${MCP_CREATE_ITEM_CONFIRM_PREFIX}${review.id}` },
+        };
+        return {
+          structuredContent: { review: compatibleReview },
+          content: [{ type: "text" as const, text: "Project NOT created yet. Present the proposal naturally and ask for the user's final approval in this conversation. Keep same_tool_confirmation internal. After approval, call this same create_item tool again with the selected Initiative as parent_id and the provided internal template_id. Do not expose an ID or send the user elsewhere." }],
+        };
+      }
       assertMcpItemFields(input);
       await Promise.all([
         validateMcpMembers(ownerId, [input.dri_member_id, ...(input.worker_member_ids ?? []), input.assignee_member_id]),
@@ -457,6 +680,73 @@ async function createOkriServer(authorization: RequestAuthorization) {
         structuredContent: { item: serialized },
         content: [{ type: "text", text: `Created ${item.kind} "${item.title}".` }],
       };
+    },
+  );
+
+  server.registerTool(
+    "propose_project",
+    {
+      title: "Manage a Project proposal without leaving this conversation",
+      description: "Compatibility Project tool. action=propose stages a draft; after the user approves, call this same tool again with action=confirm and the exact confirmation snapshot. action=update/archive/restore continues managing the saved Project here. Never send the user to a new conversation, ask for an @OKRPTR mention, expose a review ID, or require a browser approval page.",
+      inputSchema: projectConversationInputSchema.shape,
+      outputSchema: projectConversationOutputSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    runProjectConversation,
+  );
+
+  server.registerTool(
+    "get_project_review",
+    {
+      title: "Check the outcome of a user's Project review",
+      description: "Compatibility reader for a Project proposal or saved receipt. Set include_context=true to get the complete editable proposal, catalog revision and candidate fingerprints. query narrows Initiative evidence; cycle_id changes the file filter, null searches all files. Searches do not discard draft edits. Pending means NOT created; prefer manage_project action=confirm after explicit approval in the same conversation. Do not expose the review ID, repeatedly poll, or create a second proposal after an uncertain save.",
+      inputSchema: { review_id: z.string().uuid(), include_context: z.boolean().default(false), query: z.string().max(120).optional(), cycle_id: memberIdInput.nullable().optional() },
+      outputSchema: { review: z.record(z.string(), z.unknown()) },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ review_id, include_context, query, cycle_id }) => {
+      const review = await readMcpProjectReview(authorization, review_id, { includeContext: include_context || query !== undefined || cycle_id !== undefined, query, cycleId: cycle_id });
+      const message = review.state === "created" ? "Project가 생성됐습니다."
+        : review.state === "pending" ? "아직 생성되지 않은 요청입니다. 대화에서 확인 후 confirm_project를 사용하세요."
+          : review.state === "creating" ? "저장 결과를 아직 확정할 수 없습니다. 새 초안을 만들지 말고 이 요청의 결과를 확인하세요."
+            : "이 요청은 종료됐으며 Project가 생성되지 않았습니다.";
+      return { structuredContent: { review }, content: [{ type: "text", text: message }] };
+    },
+  );
+
+  server.registerTool(
+    "confirm_project",
+    {
+      title: "Create the Project approved in this conversation",
+      description: "Finish Project creation inside MCP, with no browser redirect. Call only after the user explicitly approves the final summary and selected Initiative in this conversation. Pass the complete reviewed proposal, original review version, current editor revision and the selected candidate fingerprint. Never fabricate approval or add unseen values. Returns the saved Project receipt; repeat the same request after a lost response, never create a new proposal. On validation/conflict errors keep edits, refresh get_project_review(include_context=true), and ask the user to confirm changed details again.",
+      inputSchema: mcpProjectConfirmationSchema.shape,
+      outputSchema: { review: z.record(z.string(), z.unknown()) },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async (input) => {
+      try {
+        const review = await confirmMcpProjectReview(authorization, input);
+        return { structuredContent: { review }, content: [{ type: "text", text: "Project 생성 완료. 같은 대화에서 계속 수정하거나 휴지통으로 옮길 수 있습니다." }] };
+      } catch (error) {
+        if (!(error instanceof ProjectReviewError)) throw error;
+        return { isError: true, content: [{ type: "text", text: JSON.stringify({ error: error.message, code: error.code,
+          fieldErrors: error.fieldErrors, nextStep: "입력값을 유지하고 get_project_review(include_context=true)로 현재 상태를 확인하세요. 생성 완료라고 안내하거나 새 요청으로 중복 생성하지 마세요." }) }] };
+      }
+    },
+  );
+
+  server.registerTool(
+    "cancel_project_review",
+    {
+      title: "Cancel a pending Project proposal in this conversation",
+      description: "Cancel the user's pending Project proposal without opening a browser. This does not delete an existing Project or create any work.",
+      inputSchema: { review_id: z.string().uuid(), version: z.string().uuid() },
+      outputSchema: { review: z.record(z.string(), z.unknown()) },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ review_id, version }) => {
+      const review = await cancelMcpProjectReview(authorization, review_id, version);
+      return { structuredContent: { review }, content: [{ type: "text", text: "생성 요청을 취소했습니다. Project는 생성되지 않았습니다." }] };
     },
   );
 
@@ -526,16 +816,16 @@ async function createOkriServer(authorization: RequestAuthorization) {
   server.registerTool(
     "update_item",
     {
-      title: "Update an OKRI item",
-      description: "Change the title, status, progress, priority, cadence, or due date of an existing item. Use list_items first when the ID is unknown.",
+      title: "Update an OKRPTR item",
+      description: "Change an existing item. Projects and OKR items can use workflow status and progress. Tasks use only incomplete/complete; prefer set_task_completed for that change. Use list_items first when the ID is unknown.",
       inputSchema: {
         id: z.string(),
         title: z.string().trim().min(1).max(500).optional(),
         description: z.string().optional(),
-        status: z.enum(ITEM_STATUSES).optional(),
+        status: z.enum(ITEM_STATUSES).optional().describe("For Tasks, done marks complete and every other value is normalized to todo."),
         priority: z.enum(ITEM_PRIORITIES).optional(),
         cadence: z.enum(ITEM_CADENCES).optional(),
-        progress: z.number().min(0).max(100).optional(),
+        progress: z.number().min(0).max(100).optional().describe("Ignored for Tasks; Task progress is derived from completion."),
         due_date: dueDateInput.nullable().optional(),
         properties: z.record(z.string(), propertyValueSchema).optional().describe("Project-only custom values keyed by property name"),
         dri_member_id: z.string().nullable().optional(),
@@ -573,6 +863,30 @@ async function createOkriServer(authorization: RequestAuthorization) {
       return {
         structuredContent: { item: serialized },
         content: [{ type: "text", text: `Updated "${item.title}".` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "set_task_completed",
+    {
+      title: "Complete or reopen a Task",
+      description: "Set one Task to complete or incomplete. This is the only Task lifecycle change; Project workflow statuses remain separate.",
+      inputSchema: {
+        id: z.string().describe("Existing Task ID. Use list_items when the ID is unknown."),
+        completed: z.boolean(),
+      },
+      outputSchema: { item: itemOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ id, completed }) => {
+      const current = await getItem(ownerId, id);
+      if (!current || current.kind !== "task") throw new Error("Task not found");
+      const item = await updateItem(ownerId, id, { status: completed ? "done" : "todo", source: "mcp" });
+      const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
+      return {
+        structuredContent: { item: serialized },
+        content: [{ type: "text", text: completed ? `Completed Task "${item.title}".` : `Reopened Task "${item.title}".` }],
       };
     },
   );
@@ -1080,6 +1394,17 @@ async function createOkriServer(authorization: RequestAuthorization) {
     },
   );
 
+  server.registerTool("list_routine_properties", {
+    title: "List routine properties",
+    description: "Read the independent Routine property catalog before setting routine values. Never use Project property IDs for routines.",
+    inputSchema: { include_inactive: z.boolean().optional() },
+    outputSchema: { properties: z.array(propertyDefinitionOutput), count: z.number() },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  }, async ({ include_inactive }) => {
+    const properties = await listRoutineProperties(env.DB, ownerId, include_inactive ?? false);
+    return { structuredContent: { properties, count: properties.length }, content: [{ type: "text", text: `Found ${properties.length} Routine properties.` }] };
+  });
+
   server.registerTool(
     "create_routine",
     {
@@ -1093,14 +1418,16 @@ async function createOkriServer(authorization: RequestAuthorization) {
         actionSteps: z.string().optional().describe("Concrete steps for how to perform the routine."),
         cadence: z.enum(ROUTINE_CADENCES).optional(),
         active: z.boolean().optional(),
+        properties: z.record(z.string(), propertyValueSchema).optional().describe("Routine custom values keyed by IDs from list_routine_properties, not Project properties."),
         date: z.string().optional().describe("Date used for the returned completion state"),
       },
       outputSchema: { routine: routineOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ title, description, triggerPoint, actionPlace, actionSteps, cadence, active, date }) => {
+    async ({ title, description, triggerPoint, actionPlace, actionSteps, cadence, active, date, properties }) => {
       const selectedDate = date ?? new Date().toISOString().slice(0, 10);
       const created = await createRoutine(ownerId, {
+        properties,
         title,
         description,
         triggerPoint,
@@ -1131,14 +1458,16 @@ async function createOkriServer(authorization: RequestAuthorization) {
         actionSteps: z.string().optional(),
         cadence: z.enum(ROUTINE_CADENCES).optional(),
         active: z.boolean().optional(),
+        properties: z.record(z.string(), propertyValueSchema).optional().describe("Only changed Routine values keyed by IDs from list_routine_properties; null clears a value."),
         date: z.string().optional(),
       },
       outputSchema: { routine: routineOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ id, title, description, triggerPoint, actionPlace, actionSteps, cadence, active, date }) => {
+    async ({ id, title, description, triggerPoint, actionPlace, actionSteps, cadence, active, date, properties }) => {
       const selectedDate = date ?? new Date().toISOString().slice(0, 10);
       const updated = await updateRoutine(ownerId, id, {
+        properties,
         title,
         description,
         triggerPoint,
@@ -1512,7 +1841,7 @@ async function handleMcp(request: Request) {
     await ensureWorkspace(authorization.ownerId);
     const workspaceAt = performance.now();
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
-    const server = await createOkriServer(authorization);
+    const server = await createOkrptrServer(authorization, new URL(request.url).origin);
     await server.connect(transport);
     const preparedAt = performance.now();
     const response = withCors(await transport.handleRequest(request));
@@ -1536,7 +1865,7 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, X-Okri-Workspace-Id, X-Okri-User-Id, X-Okrptr-Workspace-Id, X-Okrptr-User-Id, X-Okita-User-Id, X-Pace-User-Id",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, X-Okrptr-Workspace-Id, X-Okrptr-User-Id, X-Okita-User-Id, X-Pace-User-Id",
     "Access-Control-Expose-Headers": "MCP-Protocol-Version, MCP-Session-Id, Server-Timing",
   };
 }

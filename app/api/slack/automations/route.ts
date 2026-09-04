@@ -1,3 +1,5 @@
+import { env } from "cloudflare:workers";
+import { workspaceMessageLanguage } from "@/lib/language-preferences";
 import {
   authorizeRequest,
   canManageTeam,
@@ -7,6 +9,7 @@ import {
   listSlackAutomationDeliveries,
   listSlackAutomations,
   updateSlackAutomation,
+  type SlackAutomationInput,
 } from "@/lib/pace-data";
 
 export async function GET(request: Request) {
@@ -14,11 +17,12 @@ export async function GET(request: Request) {
   if (authorization instanceof Response) return authorization;
   try {
     await ensureWorkspace(authorization.ownerId);
-    const [automations, deliveries] = await Promise.all([
+    const [automations, deliveries, messageLanguage] = await Promise.all([
       listSlackAutomations(authorization.ownerId),
       listSlackAutomationDeliveries(authorization.ownerId),
+      workspaceMessageLanguage(env.DB, authorization.ownerId),
     ]);
-    return Response.json({ automations, deliveries, canManage: canManageTeam(authorization) });
+    return Response.json({ automations, deliveries, messageLanguage, canManage: canManageTeam(authorization) }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return routeError(error);
   }
@@ -68,13 +72,14 @@ export async function DELETE(request: Request) {
   }
 }
 
-function automationInput(payload: Record<string, unknown>) {
+function automationInput(payload: Record<string, unknown>): SlackAutomationInput {
   return {
     name: optionalText(payload.name),
     triggerType: optionalText(payload.triggerType),
     triggerStatus: optionalText(payload.triggerStatus),
     channelId: optionalText(payload.channelId),
     messageTemplate: optionalText(payload.messageTemplate),
+    messageTemplateKind: payload.messageTemplateKind === "default" || payload.messageTemplateKind === "blocked" || payload.messageTemplateKind === "custom" ? payload.messageTemplateKind : undefined,
     active: typeof payload.active === "boolean" ? payload.active : undefined,
   };
 }
@@ -93,6 +98,6 @@ function forbidden() {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
-  const status = /required|입력|지원하지|찾을 수|먼저 연결|이하여야/i.test(message) ? 400 : 500;
+  const status = /required|입력|지원하지|찾을 수|먼저 연결|이하여야|선택|채널/i.test(message) ? 400 : 500;
   return Response.json({ error: message }, { status });
 }

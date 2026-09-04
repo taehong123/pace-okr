@@ -34,7 +34,7 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
     await workspaceSettings.click();
     const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
     await expect(settingsDialog).toBeVisible();
-    for (const tab of ["일반", "멤버", "그룹", "Project 설정", "관리 요약", "봇 연동", "위험 구역"]) {
+    for (const tab of ["일반", "멤버", "그룹", "Project 설정", "관리 요약", "자동화 봇", "위험 구역"]) {
       await expect(settingsDialog.getByRole("button", { name: new RegExp(`^${tab}`) })).toBeVisible();
     }
     await expect(settingsDialog.getByRole("button", { name: /^관리 봇/ })).toHaveCount(0);
@@ -82,7 +82,7 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
 
     await settingsDialog.getByRole("button", { name: /^멤버/ }).click();
     await expect(settingsDialog.getByRole("button", { name: "멤버 초대" })).toHaveCount(0);
-    await settingsDialog.getByRole("button", { name: /^봇 연동/ }).click();
+    await settingsDialog.getByRole("button", { name: /^자동화 봇/ }).click();
     await expect(settingsDialog.getByRole("button", { name: "Slack 연결 해제" })).toHaveCount(0);
     await settingsDialog.getByRole("button", { name: /^관리 봇/ }).click();
     await expect(settingsDialog.getByText(/관리 봇 설정은 읽기 전용/)).toBeVisible();
@@ -102,10 +102,10 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
 
     const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
     await expect(settingsDialog).toBeVisible();
-    await expect(settingsDialog.getByRole("heading", { name: "Slack과 봇" })).toBeVisible();
+    await expect(settingsDialog.getByRole("heading", { name: "자동화 봇" })).toBeVisible();
     await expect(settingsDialog.getByRole("button", { name: /^관리 봇/ })).toHaveAttribute("aria-expanded", "true");
     await settingsDialog.getByText("고급 설정", { exact: true }).click();
-    for (const signal of ["기한 없음", "DRI·담당자 없음", "기한 초과", "어제 완료", "오늘 마감"]) {
+    for (const signal of ["기한 없음", "책임자·담당자 없음", "기한 초과", "어제 완료", "오늘 마감"]) {
       await expect(settingsDialog.getByText(signal, { exact: true }).first()).toBeVisible();
     }
     await settingsDialog.getByLabel("Slack 발송 채널").selectOption("C123");
@@ -124,15 +124,17 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   });
 
-  test("봇 연동은 한 번에 하나만 펼치고 뒤로가기로 펼침 상태를 복원한다", async ({ page }) => {
+  test("자동화 봇은 한 번에 하나만 펼치고 뒤로가기로 펼침 상태를 복원한다", async ({ page }) => {
     await installApiMocks(page, { teamWorkspace: true, slackState: "connected" });
     await page.goto("/?settings=workspace&tab=integrations");
     const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
     const daily = settingsDialog.getByRole("button", { name: /^데일리 봇/ });
     const management = settingsDialog.getByRole("button", { name: /^관리 봇/ });
-    const automation = settingsDialog.getByRole("button", { name: /^업무 자동화/ });
+    const work = settingsDialog.getByRole("button", { name: /^업무 관리 봇/ });
+    const automation = settingsDialog.getByRole("button", { name: /^Task 변동 알림 봇/ });
     await expect(daily).toHaveAttribute("aria-expanded", "false");
     await expect(management).toHaveAttribute("aria-expanded", "false");
+    await expect(work).toHaveAttribute("aria-expanded", "false");
     await expect(automation).toHaveAttribute("aria-expanded", "false");
     await daily.click();
     await expect(daily).toHaveAttribute("aria-expanded", "true");
@@ -148,7 +150,7 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
     await expect(management).toHaveAttribute("aria-expanded", "false");
   });
 
-  test("관리 요약은 봇 설정과 분리해 다섯 관리 그룹만 표시한다", async ({ page }) => {
+  test("관리 요약은 다섯 관리 그룹과 Project별 하위 Task 지연을 표시한다", async ({ page }) => {
     const summaryRequests: string[] = [];
     await installApiMocks(page, { teamWorkspace: true, slackState: "connected" });
     page.on("request", (request) => {
@@ -158,13 +160,25 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
     await page.goto("/?settings=workspace&tab=management");
     const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
     await expect(settingsDialog.getByRole("heading", { name: "관리 요약" })).toBeVisible();
-    await expect(settingsDialog.getByRole("heading", { name: "봇 연동" })).toHaveCount(0);
-    for (const signal of ["기한 없음", "DRI·담당자 없음", "기한 초과", "어제 완료", "오늘 마감"]) {
+    await expect(settingsDialog.getByRole("heading", { name: "자동화 봇" })).toHaveCount(0);
+    for (const signal of ["기한 없음", "책임자·담당자 없음", "기한 초과", "어제 완료", "오늘 마감"]) {
       await expect(settingsDialog.getByText(signal, { exact: true })).toBeVisible();
     }
     await expect.poll(() => summaryRequests.length).toBe(1);
-    await settingsDialog.getByText("기한 없음", { exact: true }).click();
-    await expect(settingsDialog.getByText("모바일 사용성 개선", { exact: true })).toBeVisible();
+    const managementGroups = settingsDialog.locator(".management-summary-groups details");
+    const missingDueGroup = managementGroups.nth(0);
+    await missingDueGroup.locator("summary").click();
+    await expect(missingDueGroup.getByText("모바일 사용성 개선", { exact: true })).toBeVisible();
+    const overdueGroup = managementGroups.nth(2);
+    await overdueGroup.locator("summary").click();
+    const overdueProject = overdueGroup.locator(".management-summary-project", { hasText: "출시 준비" });
+    await expect(overdueProject.getByText("Project 기한 초과", { exact: true })).toBeVisible();
+    await expect(overdueProject.getByText("기한 초과 Task 1개", { exact: true })).toBeVisible();
+    await expect(overdueProject.getByText("지난 기한 Task", { exact: true })).toBeVisible();
+    await expect(overdueProject.getByText("Task 기한 초과", { exact: true })).toBeVisible();
+    await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+    await expect(overdueProject.getByText("Project 기한 초과", { exact: true })).toBeVisible();
+    expect(await settingsDialog.evaluate((dialog) => dialog.scrollWidth <= dialog.clientWidth + 1)).toBe(true);
   });
 
   test("추천 자동화는 채널만 선택해 만들고 같은 규칙의 중복을 막는다", async ({ page }) => {
@@ -175,8 +189,8 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
     });
     await page.goto("/?settings=workspace&tab=integrations&bot=automation");
     const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
-    await settingsDialog.getByLabel("막힘 상태 알림 Slack 채널").selectOption("C123");
-    const recommendation = settingsDialog.locator(".automation-recommendations article", { hasText: "막힘 상태 알림" });
+    await settingsDialog.getByLabel("Task 완료 알림 Slack 채널").selectOption("C123");
+    const recommendation = settingsDialog.locator(".automation-recommendations article", { hasText: "Task 완료 알림" });
     await recommendation.getByRole("button", { name: "추가" }).click();
     await expect.poll(() => createCount).toBe(1);
     await recommendation.getByRole("button", { name: "추가" }).click();
@@ -189,7 +203,7 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
     await page.goto("/?settings=workspace&tab=general");
     const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
     await expect(settingsDialog.getByRole("button", { name: /^관리 봇/ })).toHaveCount(0);
-    await expect(settingsDialog.getByRole("button", { name: /^봇 연동/ })).toHaveCount(0);
+    await expect(settingsDialog.getByRole("button", { name: /^자동화 봇/ })).toHaveCount(0);
   });
 });
 
@@ -198,6 +212,7 @@ test.describe("개인 데일리와 팀 롤업", () => {
     await installApiMocks(page);
     await page.goto("/?view=scrum");
     await expect(page.locator(".daily-workspace")).toBeVisible({ timeout: 20_000 });
+    await page.getByRole("group", { name: "오늘 할 일" }).getByText("오늘 할 일", { exact: true }).click();
   });
 
   test("할당 Task 선택과 초안 저장은 Item API를 호출하지 않는다", async ({ page }) => {
@@ -222,7 +237,11 @@ test.describe("개인 데일리와 팀 롤업", () => {
   });
 
   test("데일리 스킵 사유를 저장하고 공유 확정할 수 있다", async ({ page }) => {
+    await expect(page.getByLabel("데일리 스킵 사유")).toHaveCount(0);
+    await expect(page.getByLabel("데일리 스킵 상세 사유")).toHaveCount(0);
     await page.getByRole("checkbox", { name: "오늘은 데일리를 스킵합니다" }).check();
+    await expect(page.getByLabel("데일리 스킵 사유")).toBeVisible();
+    await expect(page.getByLabel("데일리 스킵 상세 사유")).toBeVisible();
     await page.getByLabel("데일리 스킵 사유").selectOption("other");
     await expect(page.getByLabel("데일리 스킵 상세 사유")).toHaveAttribute("required", "");
     await page.getByLabel("데일리 스킵 사유").selectOption("vacation");
@@ -248,7 +267,7 @@ test.describe("개인 데일리와 팀 롤업", () => {
   });
 
   test("DRI 무Task Project에서 명시적 Task 생성으로 진입한다", async ({ page }) => {
-    await page.getByRole("button", { name: /실행 항목 없는 Project/ }).click();
+    await page.getByText("새 Task 추가", { exact: true }).click();
     await expect(page.getByLabel("새 Task 상위 항목")).toHaveValue("project:project-empty");
     await page.getByLabel("새 Task 제목").fill("새 실행 Task");
     const createRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/daily-scrum/tasks");
@@ -264,7 +283,7 @@ test.describe("개인 데일리와 팀 롤업", () => {
   });
 });
 
-test.describe("개인 앱 연동과 워크스페이스 봇 연동", () => {
+test.describe("개인 앱 연동과 워크스페이스 자동화 봇", () => {
   test("개인 앱 연동에는 개인 Slack 설정만 표시한다", async ({ page }) => {
     await installApiMocks(page, { slackState: "workspace_disconnected", teamWorkspace: true });
     await page.goto("/?view=integrations");
@@ -272,7 +291,7 @@ test.describe("개인 앱 연동과 워크스페이스 봇 연동", () => {
     await expect(page.getByRole("heading", { name: "개인 앱 연동" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Slack 개인 DM" })).toBeVisible();
     await expect(page.getByText("팀 연결 필요", { exact: true })).toBeVisible();
-    await expect(page.getByText(/워크스페이스 설정의 봇 연동/)).toBeVisible();
+    await expect(page.getByText(/워크스페이스 설정의 자동화 봇/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Slack 연결" })).toHaveCount(0);
     await expect(page.getByRole("dialog", { name: "개인 앱 연동" })).toHaveCount(0);
   });
@@ -310,14 +329,14 @@ test.describe("개인 앱 연동과 워크스페이스 봇 연동", () => {
     await installApiMocks(page, { slackState: "connected", teamWorkspace: true });
     await page.goto("/?settings=workspace&tab=integrations");
     await expect(page.getByRole("dialog", { name: "워크스페이스 설정" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Slack과 봇" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "자동화 봇" })).toBeVisible();
     await expect(page.locator(".slack-service-card > header")).toContainText("고객 Slack A");
     await expect(page.locator(".slack-service-card .integration-status-badge")).toHaveText("연결 완료");
     await page.getByRole("button", { name: /^데일리 봇/ }).click();
     await expect(page.getByText("1명", { exact: true })).toBeVisible();
     await expect(page.locator(".slack-connected-summary dd", { hasText: "#daily" })).toBeVisible();
     await expect(page.locator(".slack-connected-title").getByRole("button", { name: "설정", exact: true })).toBeVisible();
-    await expect(page.getByText("멤버 연결·실패 기록")).toBeVisible();
+    await expect(page.getByText("멤버 연결·발송 관리")).toBeVisible();
     await expect(page.getByRole("heading", { name: "팀 공유 채널" })).toHaveCount(0);
   });
 
@@ -384,7 +403,7 @@ test.describe("공통 오버레이", () => {
 test("상세 URL과 뒤로가기가 UI 상태를 복원한다", async ({ page }) => {
   await installApiMocks(page);
   await page.goto("/?view=work");
-  await page.getByRole("button", { name: /^모바일 사용성 개선/ }).click();
+  await page.getByRole("button", { name: "모바일 사용성 개선", exact: true }).or(page.locator(".project-card-open").filter({ hasText: "모바일 사용성 개선" })).click();
   await expect(page).toHaveURL(/view=work.*project=project-1/);
   await expect(page.getByRole("dialog", { name: /모바일 사용성 개선 Project 상세/ })).toBeVisible();
   await page.goBack();
@@ -407,7 +426,7 @@ test("저장 실패 시 가짜 Task나 허위 성공 메시지를 만들지 않�
   await expect(container.locator("option:checked")).toHaveText("선택 안 함 — General에 저장");
   await title.fill("서버에 저장되지 않은 Task");
   await dialog.getByRole("button", { name: "만들기" }).click();
-  await expect(dialog.getByRole("alert")).toContainText("서버 저장 실패");
+  await expect(dialog.getByRole("alert")).toContainText("항목을 만들지 못했습니다.");
   await expect(title).toHaveValue("서버에 저장되지 않은 Task");
   await expect(page.getByRole("status")).toHaveCount(0);
 });
@@ -475,6 +494,30 @@ test("Project·Task·Routine 추가 진입과 AI 도우미를 같은 구조로 �
   await expect(routineDialog.getByText("Initiative", { exact: true })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(routineDialog).toBeHidden();
+});
+
+test("AI 참고 항목 선택은 요청할 때만 열리고 검색과 Escape를 지원한다", async ({ page }) => {
+  await installApiMocks(page, { teamWorkspace: true });
+  await page.goto("/?view=okr");
+  await page.getByRole("button", { name: "AI 대화", exact: true }).first().click();
+  const assistant = page.getByRole("region", { name: "AI 대화", exact: true });
+  const picker = assistant.locator(".assistant-target-picker");
+  const trigger = assistant.getByRole("button", { name: "참고 항목 선택", exact: true });
+  const message = assistant.getByRole("textbox", { name: "메시지", exact: true });
+  await expect(picker).toHaveCount(0);
+  await message.fill("진행 상황을 같이 검토해 주세요");
+  await trigger.click();
+  await expect(picker).toBeVisible();
+  await picker.getByRole("textbox").fill("고객 경험");
+  await expect(picker.locator(".assistant-target-options button")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(picker).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await expect(message).toHaveValue("진행 상황을 같이 검토해 주세요");
+  await trigger.click();
+  await picker.locator(".assistant-target-options button").click();
+  await expect(picker).toHaveCount(0);
+  await expect(assistant.locator(".assistant-message").last()).toContainText("고객 경험 개선");
 });
 
 test("Project 생성창 닫기는 현재 화면을 유지하고 AI 대화 초안은 다시 열린다", async ({ page }) => {
@@ -563,7 +606,11 @@ test("모바일 Task 완료 체크는 작게 보이고 삭제 선택은 선택 �
   await expect(completion).toBeVisible();
   await expect(page.getByRole("checkbox", { name: /Task .* 삭제 선택/ })).toHaveCount(0);
   const visualSize = await completion.evaluate((element) => getComputedStyle(element, "::before").width);
-  expect(visualSize).toBe("17px");
+  expect(visualSize).toBe("18px");
+  const completionTarget = await completion.boundingBox();
+  expect(completionTarget!.width).toBeGreaterThanOrEqual(44);
+  expect(completionTarget!.height).toBeGreaterThanOrEqual(44);
+  expect(await completion.evaluate((element) => getComputedStyle(element, "::before").borderRadius)).toBe("50%");
   await page.getByRole("button", { name: "선택", exact: true }).click();
   await expect(page.getByRole("checkbox", { name: /Task .* 삭제 선택/ })).toHaveCount(1);
 });
@@ -648,7 +695,7 @@ test("KR과 Project 데이터는 각 대상 진행률만 갱신한다", async ({
   await expect(page.locator(".okr-file-read-initiative")).toHaveCount(2);
   await page.getByRole("button", { name: /핵심 흐름 개편/ }).click();
   await expect(page.getByText("모바일 사용성 개선", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /모바일 사용성 개선.*Task 1개/ }).click();
+  await page.getByRole("button", { name: /모바일 사용성 개선.*Task.*1/ }).click();
   const taskDisclosure = page.getByRole("button", { name: /오버레이 동작 점검/ });
   await expect(taskDisclosure).toBeVisible();
   expect(await taskDisclosure.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
@@ -687,7 +734,7 @@ test("KR과 Project 데이터는 각 대상 진행률만 갱신한다", async ({
   await expect(krCard).toContainText("60%");
 
   await page.goto("/?view=work");
-  await page.getByRole("button", { name: /^모바일 사용성 개선/ }).click();
+  await page.getByRole("button", { name: "모바일 사용성 개선", exact: true }).or(page.locator(".project-card-open").filter({ hasText: "모바일 사용성 개선" })).click();
   await expect(page.locator(".project-linked-data")).toContainText("Project 품질 API");
 });
 

@@ -1,4 +1,4 @@
-# OKRI development contract
+# OKRPTR development contract
 
 Before changing UI, read `docs/THEMES.md` and the relevant component styles.
 The document is an implementation contract, not optional inspiration.
@@ -14,5 +14,5 @@ The document is an implementation contract, not optional inspiration.
   narrow/mobile and wide layouts, long titles, keyboard access and user text zoom.
 - Run browser checks with one worker and mocked writes. Do not create test
   records or send integration messages in production.
-- Coordinate with other OKRI tasks before changing shared files or deploying.
+- Coordinate with other OKRPTR tasks before changing shared files or deploying.
 - Keep migration SQL as LF. Never weaken database guards to fix packaging.

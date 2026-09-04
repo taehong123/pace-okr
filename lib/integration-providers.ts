@@ -3,8 +3,8 @@ export type IntegrationProvider = (typeof INTEGRATION_PROVIDERS)[number];
 export const providerLabels: Record<IntegrationProvider, string> = {
   chatgpt: "ChatGPT", claude: "Claude", claude_code: "Claude Code", other: "기타",
 };
-export const PUBLIC_MCP_URL = "https://okri.ai/api/mcp";
-export const CLAUDE_CODE_COMMAND = `claude mcp add --transport http --scope user okri ${PUBLIC_MCP_URL}`;
+export const PUBLIC_MCP_URL = "https://okrptr.com/api/mcp";
+export const CLAUDE_CODE_COMMAND = `claude mcp add --transport http --scope user okrptr ${PUBLIC_MCP_URL}`;
 
 export function isIntegrationProvider(value: unknown): value is IntegrationProvider {
   return typeof value === "string" && INTEGRATION_PROVIDERS.some((provider) => provider === value);
@@ -19,7 +19,7 @@ export function effectiveIntegrationProvider(record: { provider?: string | null;
 export function claudeInstallUrl(organization = false) {
   const url = new URL(organization ? "https://claude.ai/admin-settings/connectors" : "https://claude.ai/customize/connectors");
   url.searchParams.set("modal", "add-custom-connector");
-  url.searchParams.set("connectorName", "OKRI");
+  url.searchParams.set("connectorName", "OKRPTR");
   url.searchParams.set("connectorUrl", PUBLIC_MCP_URL);
   return url.toString();
 }

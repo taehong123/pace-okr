@@ -8,8 +8,12 @@ const source = await readFile(new URL("../lib/workspace-backups.ts", import.meta
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 const backups = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 const schema = JSON.parse(await readFile(new URL("../drizzle/meta/0034_snapshot.json", import.meta.url), "utf8"));
+const currentSchema = JSON.parse(await readFile(new URL("../drizzle/meta/0039_snapshot.json", import.meta.url), "utf8"));
 const migration = await readFile(new URL("../drizzle/0036_workspace_backups.sql", import.meta.url), "utf8");
 const linksMigration = await readFile(new URL("../drizzle/0037_restore_links.sql", import.meta.url), "utf8");
+const routineMigration = await readFile(new URL("../drizzle/0042_routine_properties.sql", import.meta.url), "utf8");
+const dailyWorkMigration = await readFile(new URL("../drizzle/0045_daily_work_selection.sql", import.meta.url), "utf8");
+const dailyYesterdayMigration = await readFile(new URL("../drizzle/0047_daily_yesterday_selection.sql", import.meta.url), "utf8");
 
 function fixture() {
   const sqlite = new DatabaseSync(":memory:");
@@ -23,6 +27,9 @@ function fixture() {
   }
   for (const sql of migration.split("--> statement-breakpoint")) if (sql.trim()) sqlite.exec(sql);
   for (const sql of linksMigration.split("--> statement-breakpoint")) if (sql.trim()) sqlite.exec(sql);
+  sqlite.exec(routineMigration);
+  sqlite.exec(dailyWorkMigration.replaceAll("--> statement-breakpoint", ""));
+  sqlite.exec(dailyYesterdayMigration.replaceAll("--> statement-breakpoint", ""));
   const d1 = {
     prepare(sql) {
       return { sql, params: [], bind(...params) { return { ...this, params }; },
@@ -51,6 +58,8 @@ function fixture() {
     INSERT INTO workspace_members (id,workspace_id,user_id,display_name,role,status) VALUES ('member','w','u','Owner','owner','active'), ('former','w','old-user','Former','member','active');
     INSERT INTO okr_cycles (id,owner_id,name,start_date,end_date) VALUES ('cycle','w','Quarter','2026-07-01','2026-09-30');
     INSERT INTO routines (id,owner_id,title,assignee_member_id) VALUES ('routine','w','Daily','member');
+    INSERT INTO routine_property_definitions (id,owner_id,name,type,created_at,updated_at) VALUES ('routine-property','w','점검 수','number','now','now');
+    UPDATE routines SET properties_json='{"routine-property":3}' WHERE id='routine';
     INSERT INTO items (id,owner_id,kind,title,cycle_id,parent_id,routine_id) VALUES
       ('objective','w','objective','Objective','cycle',NULL,NULL), ('kr','w','key_result','KR','cycle','objective',NULL),
       ('initiative','w','initiative','Initiative','cycle','kr',NULL), ('project','w','project','Project','cycle','initiative',NULL),
@@ -95,6 +104,22 @@ test("snapshot uses separate storage, includes complete business hierarchy, and 
   assert.equal((await backups.listWorkspaceBackups(f.ctx, "other")).backups.length, 0);
   await assert.rejects(backups.previewWorkspaceBackup(f.ctx, "other", entry.id), { code: "backup_not_found" });
   await assert.rejects(backups.createWorkspaceBackup(f.ctx, "w", "manual", "u"), { code: "rate_limited" });
+  f.sqlite.close();
+});
+
+test("backups predating personal work selection restore with empty work arrays without losing routine properties", async () => {
+  const f = fixture();
+  await backups.createWorkspaceBackup(f.ctx, "w", "daily");
+  const old = JSON.parse([...f.objects.values()][0]);
+  for (const row of old.tables.daily_scrums) { delete row.work_selection_json; delete row.yesterday_work_selection_json; }
+  for (const row of old.tables.daily_submissions) { delete row.work_snapshot_json; delete row.yesterday_work_snapshot_json; delete row.request_id; }
+  const validated = backups.validateSnapshot(old, "w");
+  assert.equal(validated.tables.daily_scrums[0].work_selection_json, "[]");
+  assert.equal(validated.tables.daily_scrums[0].yesterday_work_selection_json, "[]");
+  assert.equal(validated.tables.daily_submissions[0].work_snapshot_json, "[]");
+  assert.equal(validated.tables.daily_submissions[0].yesterday_work_snapshot_json, "[]");
+  assert.equal(validated.tables.daily_submissions[0].request_id, null);
+  assert.equal(validated.tables.routine_property_definitions.length, 1);
   f.sqlite.close();
 });
 
@@ -241,7 +266,10 @@ test("revision triggers cover all restored tables and business changes do not al
   const f = fixture();
   for (const name of backups.BACKUP_TABLES) {
     assert.equal(f.sqlite.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND tbl_name=?").get(name).n, 3, name);
-    assert.deepEqual(backups.BACKUP_COLUMNS[name], Object.keys(schema.tables[name].columns));
+    const expectedColumns = Object.keys(currentSchema.tables[name].columns);
+    if (name === "daily_scrums") expectedColumns.push("yesterday_work_selection_json");
+    if (name === "daily_submissions") expectedColumns.push("yesterday_work_snapshot_json", "request_id");
+    assert.deepEqual(backups.BACKUP_COLUMNS[name], expectedColumns);
   }
   const before = f.sqlite.prepare("SELECT revision FROM workspace_backup_state WHERE owner_id='other'").get().revision;
   f.sqlite.exec("UPDATE items SET title='Changed' WHERE id='task'");
@@ -257,7 +285,7 @@ test("backup API enforces active admin access, explicit workspace scope, same-or
   const noImports = routeSource.replace(/^import[\s\S]*?from ["'][^"']+["'];\r?\n/gm, "");
   const routeJs = ts.transpileModule(`const { env, authorizeRequest, BackupError, createWorkspaceBackup, listWorkspaceBackups, previewWorkspaceBackup, restoreWorkspaceBackup } = globalThis.__backupRouteTest;\n${noImports}`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
   const routes = await import(`data:text/javascript;base64,${Buffer.from(routeJs).toString("base64")}`);
-  const request = (method, body, extra = {}) => new Request("https://okri.ai/api/workspace-backups", { method, headers: { "Content-Type": "application/json", "x-okri-workspace-id": "w", ...extra }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const request = (method, body, extra = {}) => new Request("https://okrptr.com/api/workspace-backups", { method, headers: { "Content-Type": "application/json", "x-okrptr-workspace-id": "w", ...extra }, ...(body ? { body: JSON.stringify(body) } : {}) });
   auth = new Response("unauthorized", { status: 401 });
   assert.equal((await routes.GET(request("GET"))).status, 401);
   for (const role of ["member", "viewer"]) {
@@ -266,7 +294,7 @@ test("backup API enforces active admin access, explicit workspace scope, same-or
     assert.equal((await routes.POST(request("POST", { action: "create" }))).status, 403);
   }
   auth = { ownerId: "w", userId: "u", role: "owner" };
-  assert.equal((await routes.GET(request("GET", null, { "x-okri-workspace-id": "other" }))).status, 403);
+  assert.equal((await routes.GET(request("GET", null, { "x-okrptr-workspace-id": "other" }))).status, 403);
   assert.equal((await routes.POST(request("POST", { action: "create" }, { origin: "https://evil.example" }))).status, 403);
   assert.equal((await routes.PATCH(request("PATCH", { action: "restore", id: "anything" }))).status, 400);
   const create = await routes.POST(request("POST", { action: "create" }));

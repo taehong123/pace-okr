@@ -1,15 +1,13 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import "./fonts.css";
 import "./globals.css";
+import "./workspace-design.css";
+import "./item-editor.css";
+import "./pwa.css";
 import { themeBootstrapScript, themeCss } from "@/lib/themes";
-import { PRODUCT_NAME, PUBLIC_APP_URL } from "@/lib/brand";
+import { appInstallBootstrapScript } from "@/lib/app-install";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const bootstrapScript = themeBootstrapScript + `(() => {
+const bootstrapScript = themeBootstrapScript + appInstallBootstrapScript + `(() => {
   const now = new Date();
   const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
   const path = "/api/bootstrap?date=" + encodeURIComponent(date);
@@ -33,7 +31,8 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: base,
-    title: `${PRODUCT_NAME} - 목표를 오늘의 실행으로`,
+    applicationName: "OKRPTR",
+    title: "OKRPTR - 목표를 오늘의 실행으로",
     description: "Objective부터 Task까지 연결하고 MCP, 데일리 실행과 Routine을 관리하는 워크스페이스",
     icons: {
       icon: "/favicon.svg",
@@ -59,10 +58,12 @@ export default function RootLayout({
   return (
     <html lang="ko" suppressHydrationWarning>
       <head>
-        <style id="okri-theme-colors" dangerouslySetInnerHTML={{ __html: themeCss }} />
+        {/* Keep the manifest in the real head after hydration, not a streamed metadata container. */}
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <style id="okrptr-theme-colors" dangerouslySetInnerHTML={{ __html: themeCss }} />
         <script dangerouslySetInnerHTML={{ __html: bootstrapScript }} />
       </head>
-      <body className={`${geistSans.variable} antialiased`}>
+      <body>
         {children}
       </body>
     </html>

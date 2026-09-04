@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex">
+    <title>연결 확인 · OKRPTR</title>
+    <link rel="icon" href="/favicon.svg">
+    <style>/* build:theme */
+      /* build:tokens */
+    </style>
+    <script>/* build:preference */</script>
+    <style>/* build:fonts */
+      * { box-sizing: border-box; }
+      html { font-size: 100%; letter-spacing: 0; }
+      body { margin: 0; background: var(--bg-page); color: var(--text-primary); font-family: var(--font-ui); font-size: var(--type-body); line-height: 1.6; }
+      main { width: min(100%, 38rem); margin-inline: auto; padding: var(--space-8) var(--space-4); }
+      header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-8); }
+      img { width: 2.5rem; height: 2.5rem; }
+      header strong { font-size: var(--type-section); }
+      h1 { margin: 0 0 var(--space-4); font-size: var(--type-page); line-height: 1.25; overflow-wrap: anywhere; }
+      p { margin: 0 0 var(--space-6); color: var(--text-secondary); overflow-wrap: anywhere; }
+      button { min-height: 2.75rem; max-width: 100%; padding: var(--space-2) var(--space-4); border: 1px solid var(--button-primary-bg); border-radius: var(--radius-control); background: var(--button-primary-bg); color: var(--button-primary-fg); font: inherit; cursor: pointer; }
+      button:hover { background: var(--button-primary-hover-bg); color: var(--button-primary-hover-fg); }
+      button:active { background: var(--button-primary-active-bg); color: var(--button-primary-active-fg); }
+      button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header><img src="/favicon.svg" alt="" width="40" height="40"><strong>OKRPTR</strong></header>
+      <h1>인터넷 연결을 확인해 주세요</h1>
+      <p>현재 서버에 연결할 수 없습니다. 연결 후 최신 업무를 불러올 수 있습니다.</p>
+      <button type="button" id="retry">다시 시도</button>
+    </main>
+    <script>
+      document.getElementById("retry").addEventListener("click", () => {
+        if (location.pathname === "/offline.html" || location.pathname === "/offline") location.replace("/");
+        else location.reload();
+      });
+    </script>
+  </body>
+</html>

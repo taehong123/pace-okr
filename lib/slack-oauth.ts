@@ -49,6 +49,8 @@ export const slackDailyScopes = [
   "channels:read",
   "channels:join",
   "groups:read",
+  "channels:history",
+  "groups:history",
 ];
 
 export const slackScopes = [...slackDailyScopes, ...slackSummonScopes];
@@ -96,6 +98,7 @@ export async function exchangeSlackCode(runtime: SlackRuntimeEnv, request: Reque
       redirect_uri: slackRedirectUri(runtime, request),
       code,
     }),
+    signal: AbortSignal.timeout(15_000),
   });
   const data = await response.json() as SlackOAuthResponse;
   if (!response.ok || !data.ok) throw new SlackOAuthExchangeError(data.error || "oauth_exchange_failed");
@@ -124,6 +127,7 @@ export async function revokeSlackToken(token: string) {
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: new URLSearchParams({ token }),
+    signal: AbortSignal.timeout(15_000),
   });
 }
 

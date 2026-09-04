@@ -66,22 +66,6 @@ test("preferences are scoped to workspace and member and reject unknown saved mo
   }
 });
 
-test("the OKRI preference key migrates from the legacy OKRPTR key", () => {
-  const data = new Map([["okrptr.my-work-sort:w1:m1", "priority"]]);
-  const original = globalThis.window;
-  globalThis.window = { localStorage: { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) } };
-  try {
-    assert.equal(myWorkSortStorageKey("w1", "m1"), "okri.my-work-sort:w1:m1");
-    assert.equal(readMyWorkSort("w1", "m1"), "priority");
-    saveMyWorkSort("w1", "m1", "due");
-    assert.equal(data.get("okri.my-work-sort:w1:m1"), "due");
-    assert.equal(readMyWorkSort("w1", "m1"), "due");
-  } finally {
-    if (original === undefined) delete globalThis.window;
-    else globalThis.window = original;
-  }
-});
-
 test("server rendering and blocked storage fall back without throwing", () => {
   assert.equal(readMyWorkSort("w", "m"), "due");
   assert.doesNotThrow(() => saveMyWorkSort("w", "m", "priority"));

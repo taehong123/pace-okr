@@ -51,7 +51,7 @@ for (const theme of THEMES) {
     page.on("pageerror", (error) => errors.push(error.message));
     await installApiMocks(page, { teamWorkspace: true, slackState: "connected" });
     await page.addInitScript(({ key, mode }) => localStorage.setItem(key, mode), { key: THEME_STORAGE_KEY, mode: theme.mode });
-    for (const view of ["okr", "work", "inbox", "routines", "my_work", "scrum", "integrations", "billing"]) {
+    for (const view of ["okr", "work", "inbox", "routines", "my_work", "scrum", "integrations", "billing", "data", "recommendations"]) {
       await page.goto(`/?view=${view}`);
       await expect(page.locator(".workspace")).toBeVisible();
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme.mode);
@@ -106,13 +106,14 @@ for (const theme of THEMES) {
     await expect(page.getByRole("dialog", { name: "내 설정" })).toHaveCount(0);
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme.mode);
-    await page.goto(`/#invite=${"a".repeat(64)}`);
+    // A distinct document URL models arrival from an external invitation link.
+    await page.goto(`/?theme-qa=invitation#invite=${"a".repeat(64)}`);
     await expect(page.getByRole("dialog", { name: "워크스페이스 초대" })).toBeVisible();
     await readable(page, `${theme.mode}/invitation`);
     await page.route("**/api/auth/session", (route) => json(route, { user: null }, 401));
     await page.route("**/api/bootstrap?**", (route) => json(route, { error: "unauthenticated" }, 401));
     await page.goto("/");
-    await expect(page.locator(".auth-panel")).toBeVisible();
+    await expect(page.locator(".landing-shell")).toBeVisible();
     await readable(page, `${theme.mode}/login`);
     expect(errors, "No runtime errors across theme screens").toEqual([]);
   });
@@ -194,5 +195,26 @@ for (const theme of THEMES) {
     await page.keyboard.press("Escape");
     await page.keyboard.press("Backspace");
     expect(errors, "No editor runtime errors").toEqual([]);
+  });
+
+  test(`theme administration ${theme.mode}: expanded setup, disabled members and danger zone`, async ({ page }) => {
+    test.setTimeout(90_000);
+    await installApiMocks(page, { teamWorkspace: true, slackState: "setup_required", slackSetupComplete: false });
+    await page.addInitScript(({ key, mode }) => localStorage.setItem(key, mode), { key: THEME_STORAGE_KEY, mode: theme.mode });
+    await page.goto("/?settings=workspace&tab=integrations&bot=daily");
+    await expect(page.getByRole("heading", { name: "데일리 설정" })).toBeVisible();
+    // Unmatched member labels must stay readable as well as the disabled input.
+    await page.locator(".slack-onboarding-members label").first().evaluate((element) => {
+      element.classList.add("disabled");
+      element.querySelector("input")!.disabled = true;
+    });
+    await readable(page, `${theme.mode}/daily onboarding`);
+    await page.getByRole("button", { name: /^관리 봇/ }).click();
+    await expect(page.locator(".management-bot-config")).toBeVisible();
+    await page.locator(".management-bot-config summary").click();
+    await readable(page, `${theme.mode}/management settings`);
+    await page.getByRole("button", { name: "위험 구역", exact: true }).click();
+    await readable(page, `${theme.mode}/danger settings`);
+    await noOverflow(page);
   });
 }

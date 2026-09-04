@@ -19,10 +19,12 @@ const providers = load("lib/integration-providers.ts");
 const schema = load("db/schema.ts");
 const authorization = { ownerId: "workspace-a", userId: "user-a", displayName: "<Owner>", email: "owner@example.com", role: "owner", apiToken: false };
 
-test("AI dialog uses defined theme colors and paired primary button state colors", () => {
+test("AI dialog uses defined shared layout tokens, theme colors and paired primary button state colors", () => {
   const css = source("app/ai-connections.css");
   const theme = load("lib/themes.ts");
-  const defined = new Set([...theme.themeCss.matchAll(/--([a-z-]+):/g)].map((match) => match[1]));
+  const layoutTokens = source("app/globals.css").match(/:root\s*\{([^}]*)\}/)?.[1] ?? "";
+  assert.ok(layoutTokens, "Shared layout tokens must exist");
+  const defined = new Set([...`${theme.themeCss}\n${layoutTokens}`.matchAll(/--([a-z-]+):/g)].map((match) => match[1]));
   for (const match of css.matchAll(/var\(--([a-z-]+)/g)) assert.ok(defined.has(match[1]), `Undefined AI color token: ${match[1]}`);
   for (const state of ["primary", "primary-hover", "primary-active", "disabled"]) {
     assert.ok(css.includes(`--button-${state}-bg`));
@@ -91,10 +93,10 @@ function fixture() {
 }
 const verifier = "a".repeat(64);
 const challenge = createHash("sha256").update(verifier).digest("base64url");
-const resource = "https://okri.ai/api/mcp";
+const resource = "https://okrptr.com/api/mcp";
 async function consent(f, redirectUri = "https://claude.ai/api/mcp/auth_callback", headers = {}) {
   const client = await f.oauth.registerMcpOAuthClient({ redirectUris: [redirectUri], clientName: "Untrusted name" });
-  const url = new URL("https://okri.ai/oauth/authorize");
+  const url = new URL("https://okrptr.com/oauth/authorize");
   const params = { client_id: client.clientId, redirect_uri: redirectUri, response_type: "code", resource, code_challenge: challenge, code_challenge_method: "S256", state: "original-state" };
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   const response = await f.authorize.GET(new Request(url, { headers }));
@@ -105,15 +107,15 @@ async function consent(f, redirectUri = "https://claude.ai/api/mcp/auth_callback
   return { client, url, html, id, csrf, cookie: response.headers.get("set-cookie").split(";")[0], response, redirectUri };
 }
 function submit(f, c, { fields = {}, headers = {} } = {}) {
-  return f.authorize.POST(new Request("https://okri.ai/oauth/authorize", { method: "POST", headers: {
-    origin: "https://okri.ai", "content-type": "application/x-www-form-urlencoded", cookie: c.cookie, ...headers,
+  return f.authorize.POST(new Request("https://okrptr.com/oauth/authorize", { method: "POST", headers: {
+    origin: "https://okrptr.com", "content-type": "application/x-www-form-urlencoded", cookie: c.cookie, ...headers,
   }, body: new URLSearchParams({ request_id: c.id, csrf: c.csrf, decision: "approve", ...fields }) }));
 }
 
-test("official links prefill OKRI; strict redirect policy supports only native port variation", () => {
+test("official links prefill OKRPTR; strict redirect policy supports only native port variation", () => {
   for (const organization of [false, true]) {
     const url = new URL(providers.claudeInstallUrl(organization));
-    assert.equal(url.searchParams.get("connectorName"), "OKRI"); assert.equal(url.searchParams.get("connectorUrl"), resource);
+    assert.equal(url.searchParams.get("connectorName"), "OKRPTR"); assert.equal(url.searchParams.get("connectorUrl"), resource);
     assert.equal(url.pathname, organization ? "/admin-settings/connectors" : "/customize/connectors");
   }
   assert.equal(providers.oauthProviderForRedirect("https://claude.ai/api/mcp/auth_callback"), "claude");
@@ -140,7 +142,7 @@ test("migration preserves historical tokens and provider filters/caps/revocation
     assert.equal((await f.tokens.listIntegrationTokens({ ...authorization, ownerId: "workspace-b" }, "claude")).length, 1);
     assert.equal((await f.tokens.listIntegrationTokens({ ...authorization, userId: "other-user" }, "claude")).length, 1);
     assert.equal(providers.effectiveIntegrationProvider({ name: "ChatGPT OAuth", provider: "other" }), "other");
-    assert.equal((await f.api.GET(new Request("https://okri.ai/api/integration-tokens?provider=invalid"))).status, 400);
+    assert.equal((await f.api.GET(new Request("https://okrptr.com/api/integration-tokens?provider=invalid"))).status, 400);
   } finally { f.sql.close(); }
 });
 
@@ -163,7 +165,7 @@ test("Claude approval is escaped, user/workspace/CSRF/origin bound and consumed 
     const grant = { code: callback.searchParams.get("code"), clientId: c.client.clientId, redirectUri: c.redirectUri, codeVerifier: verifier, resource };
     for (const tamper of [{ codeVerifier: "b".repeat(64) }, { resource: "https://evil.test/api/mcp" }, { clientId: "forged" }, { redirectUri: "http://localhost:3000/callback" }]) await assert.rejects(f.oauth.exchangeMcpOAuthAuthorizationCode({ ...grant, ...tamper }), /invalid_grant/);
     const token = await f.oauth.exchangeMcpOAuthAuthorizationCode(grant);
-    assert.match(token.accessToken, /^okri_/);
+    assert.match(token.accessToken, /^okrptr_/);
     await assert.rejects(f.oauth.exchangeMcpOAuthAuthorizationCode(grant), /invalid_grant/);
     const [record] = await f.tokens.listIntegrationTokens(authorization, "claude");
     assert.equal(record.name, "Claude OAuth"); assert.equal(record.lastUsedAt, null);
@@ -187,7 +189,7 @@ test("cancel, expired approval, expired code, forged callback and direct Code po
     await assert.rejects(f.oauth.exchangeMcpOAuthAuthorizationCode({ ...grant, redirectUri: "http://127.0.0.1:43112/callback" }), /invalid_grant/);
     await f.oauth.exchangeMcpOAuthAuthorizationCode(grant);
     assert.equal((await f.tokens.listIntegrationTokens(authorization, "claude_code")).length, 1);
-    const oldCode = await f.oauth.createMcpOAuthAuthorizationCode(authorization, { clientId: code.client.clientId, redirectUri: code.redirectUri, codeChallenge: challenge, resource, scope: "okri:read" });
+    const oldCode = await f.oauth.createMcpOAuthAuthorizationCode(authorization, { clientId: code.client.clientId, redirectUri: code.redirectUri, codeChallenge: challenge, resource, scope: "okrptr:read" });
     f.sql.exec("UPDATE mcp_oauth_codes SET expires_at='2000-01-01'");
     await assert.rejects(f.oauth.exchangeMcpOAuthAuthorizationCode({ ...grant, code: oldCode }), /invalid_grant/);
     code.url.searchParams.set("redirect_uri", "https://evil.test/callback");
@@ -199,11 +201,11 @@ test("DCR rejects spoofed/mixed metadata; existing ChatGPT callback still issues
   const f = fixture();
   try {
     for (const redirect_uris of [["https://evil.test/callback"], ["https://claude.ai/api/mcp/auth_callback", 42]]) {
-      const response = await f.register.POST(new Request("https://okri.ai/oauth/register", { method: "POST", body: JSON.stringify({ redirect_uris }) }));
+      const response = await f.register.POST(new Request("https://okrptr.com/oauth/register", { method: "POST", body: JSON.stringify({ redirect_uris }) }));
       assert.equal(response.status, 400);
     }
     const client = await f.oauth.registerMcpOAuthClient({ redirectUris: ["https://chatgpt.com/connector_platform_oauth_redirect"] });
-    const url = new URL("https://okri.ai/oauth/authorize");
+    const url = new URL("https://okrptr.com/oauth/authorize");
     Object.entries({ client_id: client.clientId, redirect_uri: client.redirectUris[0], response_type: "code", code_challenge: challenge, code_challenge_method: "S256", resource }).forEach(([k, v]) => url.searchParams.set(k, v));
     const response = await f.authorize.GET(new Request(url));
     assert.equal(response.status, 303); assert.ok(new URL(response.headers.get("location")).searchParams.has("code"));
@@ -214,8 +216,8 @@ test("OAuth bearer access stays workspace-bound, revocable, and limited by scope
   const f = fixture();
   const policy = load("lib/work-intake.ts");
   try {
-    const { token } = await f.tokens.createIntegrationToken(authorization, "Claude OAuth", "claude", "okri:read");
-    const request = (method = "POST") => new Request("https://okri.ai/api/mcp?workspaceId=workspace-b", { method, headers: { authorization: `Bearer ${token}`, "x-okri-workspace-id": "workspace-b" } });
+    const { token } = await f.tokens.createIntegrationToken(authorization, "Claude OAuth", "claude", "okrptr:read");
+    const request = (method = "POST") => new Request("https://okrptr.com/api/mcp?workspaceId=workspace-b", { method, headers: { authorization: `Bearer ${token}`, "x-okrptr-workspace-id": "workspace-b" } });
     assert.equal((await f.realAuth.authorizeRequest(request())).status, 403);
     const read = await f.realAuth.authorizeRequest(request(), { allowViewerWrite: policy.isReadOnlyMcpRequest({ method: "tools/call", params: { name: "list_items" } }) });
     assert.equal(read.ownerId, "workspace-a"); assert.equal(read.userId, "user-a");
@@ -234,13 +236,13 @@ test("OAuth bearer access stays workspace-bound, revocable, and limited by scope
   } finally { f.sql.close(); }
 });
 
-test("connection management rejects current and legacy bearer scopes across providers", async () => {
+test("connection management rejects read and write bearer tokens across providers", async () => {
   const f = fixture();
   try {
-    for (const scope of ["okri:read", "okri:read okri:write", "okrptr:read", "okrptr:read okrptr:write"]) {
+    for (const scope of ["okrptr:read", "okrptr:read okrptr:write"]) {
       const { token } = await f.tokens.createIntegrationToken(authorization, "Claude OAuth", "claude", scope);
       for (const method of ["POST", "DELETE"]) {
-        const response = await f.bearerApi[method](new Request("https://okri.ai/api/integration-tokens?provider=chatgpt", {
+        const response = await f.bearerApi[method](new Request("https://okrptr.com/api/integration-tokens?provider=chatgpt", {
           method, headers: { authorization: `Bearer ${token}` },
         }));
         assert.equal(response.status, 403);
@@ -248,10 +250,10 @@ test("connection management rejects current and legacy bearer scopes across prov
       }
     }
     assert.equal((await f.tokens.listIntegrationTokens(authorization, "chatgpt")).length, 1);
-    const response = await f.api.DELETE(new Request("https://okri.ai/api/integration-tokens?provider=chatgpt", { method: "DELETE" }));
+    const response = await f.api.DELETE(new Request("https://okrptr.com/api/integration-tokens?provider=chatgpt", { method: "DELETE" }));
     assert.equal(response.status, 200);
     assert.equal((await f.tokens.listIntegrationTokens(authorization, "chatgpt")).length, 0);
-    assert.equal((await f.tokens.listIntegrationTokens(authorization, "claude")).length, 4);
+    assert.equal((await f.tokens.listIntegrationTokens(authorization, "claude")).length, 2);
   } finally { f.sql.close(); }
 });
 
@@ -262,20 +264,20 @@ test("viewer consent permanently bounds scope even after promotion; demotion at 
       const c = await consent(f, undefined, { "x-test-role": roles[0] });
       const stored = JSON.parse(f.sql.prepare("SELECT request_json FROM mcp_oauth_approvals WHERE id=?").get(c.id).request_json);
       if (roles[0] === "viewer") {
-        assert.equal(stored.scope, "okri:read");
+        assert.equal(stored.scope, "okrptr:read");
         assert.match(c.html, /읽기 전용/);
         assert.doesNotMatch(c.html, /업무 생성·수정·삭제/);
       }
       const response = await submit(f, c, { headers: { "x-test-role": roles[1] } });
       const code = new URL(response.headers.get("location")).searchParams.get("code");
       const issued = await f.oauth.exchangeMcpOAuthAuthorizationCode({ code, clientId: c.client.clientId, redirectUri: c.redirectUri, codeVerifier: verifier, resource });
-      assert.equal(issued.scope, "okri:read");
+      assert.equal(issued.scope, "okrptr:read");
       f.sql.exec("UPDATE workspace_members SET role='member'");
       const headers = { authorization: `Bearer ${issued.accessToken}` };
       assert.equal((await f.realAuth.authorizeRequest(new Request(resource, { method: "POST", headers }))).status, 403);
       const read = await f.realAuth.authorizeRequest(new Request(resource, { method: "POST", headers }), { allowViewerWrite: true });
       assert.equal(read.role, "member");
-      assert.equal(read.oauthScopes, "okri:read");
+      assert.equal(read.oauthScopes, "okrptr:read");
     }
   } finally { f.sql.close(); }
 });

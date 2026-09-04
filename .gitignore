@@ -35,6 +35,9 @@ yarn-error.log*
 .vercel
 
 /dist/
+# Deterministic install assets generated from the shared theme and offline source.
+/public/manifest.webmanifest
+/public/offline.html
 /.wrangler/
 /outputs/
 /work/

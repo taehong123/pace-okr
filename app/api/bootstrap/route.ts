@@ -1,3 +1,5 @@
+import { env, waitUntil } from "cloudflare:workers";
+import { languageForBootstrap } from "@/lib/language-preferences";
 import {
   authorizeRequest,
   canManageTeam,
@@ -33,11 +35,12 @@ export async function GET(request: Request) {
     const provider = hostname === "localhost" || hostname === "127.0.0.1" ? "local" : "google";
 
     const loadShell = async () => {
-      const [workspaces, rules, cycles, team] = await Promise.all([
+      const [workspaces, rules, cycles, team, preferences] = await Promise.all([
         listUserWorkspaces(authorization.userId, authorization.ownerId),
         getWorkspaceRules(authorization.ownerId),
         listOkrCycles(authorization.ownerId),
         getTeam(authorization.ownerId, authorization.userId),
+        languageForBootstrap(env.DB, authorization.userId, request),
       ]);
       return {
         user: {
@@ -45,6 +48,7 @@ export async function GET(request: Request) {
         email: authorization.email,
         displayName: authorization.displayName,
         provider,
+        preferences,
         },
         workspaces,
         rules,
@@ -86,6 +90,13 @@ export async function GET(request: Request) {
 
     const payload = Object.assign({}, ...await Promise.all([loadShell(), loadData()]));
     const payloadReadyAt = Date.now();
+    // Recovery stays off the critical loading path and never sends an immediate DM.
+    waitUntil(import("@/lib/slack-daily").then(({ repairSlackDailyReminders }) => repairSlackDailyReminders(authorization.ownerId))
+      .catch((error) => console.error("slack_daily_repair_failed", error instanceof Error ? error.message : "Unknown failure")));
+    waitUntil(import("@/lib/slack-bot-delivery").then(({ runDueSlackBotDeliveries }) => runDueSlackBotDeliveries(env.DB, new Date(), authorization.ownerId))
+      .catch((error) => console.error("slack_bot_repair_failed", error instanceof Error ? error.message : "Unknown failure")));
+    waitUntil(import("@/lib/workspace-management-bot").then(({ runDueWorkspaceManagementBots }) => runDueWorkspaceManagementBots(env.DB, new Date(), authorization.ownerId))
+      .catch((error) => console.error("management_bot_repair_failed", error instanceof Error ? error.message : "Unknown failure")));
 
     const headers = new Headers({ "Cache-Control": "no-store" });
     headers.set("Server-Timing", [

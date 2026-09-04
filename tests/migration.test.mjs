@@ -3,6 +3,60 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
+test("backup trigger migrations use LF and uppercase BEGIN for remote D1", async () => {
+  const migration = await readFile(new URL("../drizzle/0036_workspace_backups.sql", import.meta.url), "utf8");
+  const attributes = await readFile(new URL("../.gitattributes", import.meta.url), "utf8");
+  assert.match(attributes, /^drizzle\/\*\.sql text eol=lf$/m);
+  assert.ok(!migration.includes("\r"), "D1's remote splitter rejects CRLF trigger bodies");
+  const triggers = migration.split("--> statement-breakpoint").filter((statement) => /CREATE TRIGGER/i.test(statement));
+  assert.ok(triggers.length > 0);
+  for (const trigger of triggers) assert.match(trigger, /\nBEGIN\n[\s\S]+;\nEND;/);
+});
+
+test("daily yesterday selection migration keeps JSON valid and submission requests idempotent", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`CREATE TABLE daily_scrums (id TEXT PRIMARY KEY);
+    CREATE TABLE daily_submissions (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, member_id TEXT);`);
+  const migration = await readFile(new URL("../drizzle/0047_daily_yesterday_selection.sql", import.meta.url), "utf8");
+  assert.ok(!migration.includes("\r"));
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  db.exec("INSERT INTO daily_scrums (id) VALUES ('draft'); INSERT INTO daily_submissions (id,owner_id,member_id,request_id) VALUES ('one','w','m','request')");
+  assert.equal(db.prepare("SELECT yesterday_work_selection_json value FROM daily_scrums").get().value, "[]");
+  assert.equal(db.prepare("SELECT yesterday_work_snapshot_json value FROM daily_submissions").get().value, "[]");
+  assert.throws(() => db.exec("UPDATE daily_scrums SET yesterday_work_selection_json='{}'"), /CHECK constraint failed/);
+  assert.throws(() => db.exec("INSERT INTO daily_submissions (id,owner_id,member_id,request_id) VALUES ('two','w','m','request')"), /UNIQUE constraint failed/);
+  db.close();
+});
+
+test("Slack work command migration is LF-only, idempotent by request, and disables legacy Task status rules", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+    CREATE TABLE slack_automations (
+      id TEXT PRIMARY KEY, trigger_type TEXT NOT NULL, trigger_status TEXT NOT NULL DEFAULT '',
+      active INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO workspaces (id) VALUES ('workspace');
+    INSERT INTO slack_automations (id, trigger_type, trigger_status) VALUES
+      ('legacy', 'task_status_changed', 'blocked'),
+      ('legacy-all', 'task_status_changed', ''),
+      ('complete', 'task_status_changed', 'done'),
+      ('created', 'task_created', '');
+  `);
+  const migration = await readFile(new URL("../drizzle/0048_slack_work_commands.sql", import.meta.url), "utf8");
+  assert.ok(!migration.includes("\r"));
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`INSERT INTO slack_work_command_operations
+    (request_id, owner_id, team_id, slack_user_id, command) VALUES ('request', 'workspace', 'team', 'user', 'task_complete')`);
+  assert.throws(() => db.exec(`INSERT INTO slack_work_command_operations
+    (request_id, owner_id, team_id, slack_user_id, command) VALUES ('request', 'workspace', 'team', 'user', 'task_complete')`), /UNIQUE constraint failed/);
+  assert.deepEqual(db.prepare("SELECT id, active FROM slack_automations ORDER BY id").all().map((row) => ({ ...row })), [
+    { id: "complete", active: 1 }, { id: "created", active: 1 }, { id: "legacy", active: 0 }, { id: "legacy-all", active: 0 },
+  ]);
+  db.close();
+});
+
 test("preserves the historical registration migration for legacy database compatibility", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`

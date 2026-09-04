@@ -16,15 +16,15 @@ export const WORK_FIELDS = {
     required: ["title"],
     recommended: ["parent_id 또는 routine_id", "assignee_member_id", "due_date"],
     optional: ["description(완료 기준)", "priority", "cadence"],
-    placement: "Project 또는 Routine 중 하나. 연결을 모르면 General에 보관 가능. Task에 Project 전용 속성을 붙이지 않는다.",
+    placement: "Project 또는 Routine 중 하나. 연결을 모르면 General에 보관 가능. Task는 미완료/완료만 관리하며 Project 전용 상태·진행률 속성을 붙이지 않는다.",
     tool: "create_item; 미분류 단건은 capture_item; 동일 컨테이너의 여러 Task는 create_tasks",
   },
   project: {
-    required: ["title", "parent_id(기존 Initiative)"],
+    required: ["title", "parent_id(사용자가 선택한 기존 Initiative)", "최종 생성 내용·연결에 대한 사용자 승인"],
     recommended: ["description(결과물·범위·완료 기준)", "dri_member_id", "due_date"],
-    optional: ["worker_member_ids", "properties", "template_id", "priority", "cadence"],
-    placement: "Initiative 아래. 부모가 없으면 기존 후보를 고르게 하거나 초안을 대화에 유지한다. 가짜 OKR/Task로 우회 저장하지 않는다.",
-    tool: "create_item",
+    optional: ["worker_member_ids", "properties", "template_id", "priority"],
+    placement: "추천 이유와 Objective→KR→Initiative 전체 경로를 먼저 제시한다. 대화에서 사용자가 연결과 최종 내용을 확인·승인하면 생성한다. 웹 이동은 필수가 아니다. 적합한 후보가 없으면 다른 후보 검색 또는 생성 보류. 가짜 OKR/Task로 우회하지 않는다.",
+    tool: "manage_project로 제안 → 같은 대화에서 최종 내용·연결 승인 → action=confirm; 구형 연결은 create_item의 same_tool_confirmation을 내부적으로 재사용",
   },
   routine: {
     required: ["title"],
@@ -62,19 +62,20 @@ export const CONVERSATION_POLICY = [
   "Classify work by its meaning and completion boundary, respecting an explicit user choice. Objective > Key Result > Initiative > Project > Task; independent Routine > Task. Do not manufacture ancestors, duplicate Initiative as Project, or convert a Project into a Task to bypass a missing parent.",
   "Ask only the essential missing question, at most one compact question round. Reuse facts already supplied. Optional fields and workspace defaults must not become a questionnaire. Never invent metrics, commitments, owners, dates or extra Tasks.",
   "Keep discussion, suggestions, drafts and saved records distinct. Discussion alone never authorizes creation. Before applying a proposed structure, follow the workspace reviewBeforeCreate rule; only an explicit scoped save request or confirmation authorizes the write. Deletion, membership and external actions still require their own checks. Never claim persistence until the write succeeds.",
-  "Projects always require the user's final approval of the proposed contents and selected Initiative, even when reviewBeforeCreate is false or all IDs are known. Explain the relevant Objective/KR/Initiative path and contribution before approval; offer other candidates or defer when the fit is unclear. Do not auto-select a parent or approve on the user's behalf.",
+  "Projects always require the user's final approval of the proposed contents and selected Initiative, even when reviewBeforeCreate is false or all IDs are known. Explain the relevant Objective/KR/Initiative path and contribution before approval; offer other candidates or defer when the fit is unclear. Confirmation may happen in the current conversation; a separate web screen is not mandatory. Do not auto-select a parent or fabricate approval. Use the channel's supported save action after the user confirms.",
 ].join("\n");
 
 export const WORKFLOW_INSTRUCTIONS = [
-  "OKRI fast intake: understand and classify in the current conversation; do not call another LLM or create placeholder records to classify work.",
+  "OKRPTR fast intake: understand and classify in the current conversation; do not call another LLM or create placeholder records to classify work.",
   CONVERSATION_POLICY,
   "Task = one independently completable action/result (small internal steps are a checklist). Project = a finite deliverable with scope/completion criteria and multiple independently managed Tasks. Routine = repeated work triggered by time/event/state, independent of OKR. Classify by completion boundary, not duration, keywords, or number of verbs. Respect a user's explicit type; explain a structural conflict instead of silently changing it.",
-  "Objective = qualitative desired change; Key Result = measurable evidence; Initiative = strategic approach; Project = bounded delivery. The hierarchy is Objective > Key Result > Initiative > Project > Task, or independent Routine > Task. Tasks use one assignee; Project DRI/workers, managed properties and block documents are Project-only.",
-  "When the user asks to organize/save work and relationship IDs or required context are missing, use prepare_work once with the likely kind (unsure if ambiguous). It returns rules, parent paths, member IDs, and type-specific fields together. Query is a short parent/topic phrase, not the entire user sentence. Reuse current-conversation context; do not follow it with redundant rule/team/property/list calls. If required IDs and fields are already known, go straight to the relevant write tool.",
+  "Objective = qualitative desired change; Key Result = measurable evidence; Initiative = strategic approach; Project = bounded delivery. The hierarchy is Objective > Key Result > Initiative > Project > Task, or independent Routine > Task. Tasks use one assignee and only incomplete/complete lifecycle states; Project DRI/workers, workflow statuses, progress, managed properties and block documents are Project-only.",
+  "When the user asks to organize/save work and relationship IDs or required context are missing, use prepare_work once with the likely kind (unsure if ambiguous). It returns rules, parent paths/evidence, member IDs, and fields together. Query is a short parent/topic phrase. Reuse conversation context without redundant reads. For Tasks/Routines, known IDs permit the requested save; Projects ALWAYS require manage_project and final user approval, even if every ID is known.",
   "Give the likely type and a one-sentence reason immediately. Ask only what blocks a correct next action: at most one compact question round containing up to three missing details. If Task vs Project is ambiguous, ask whether this is one completion or a deliverable containing independently managed tasks; offer your recommendation and let the user choose. Do not recite the whole hierarchy or ask for already supplied facts.",
+  "Project scheduling uses due_date only. Do not ask for cadence, sprint, estimated hours, duration, or a separate timeframe. Call the Project DRI 책임자 in Korean; keep dri_member_id as the API field. Routine recurrence is unchanged.",
   "Distinguish required fields from helpful optional fields. Carry stated dates, owners, scope, and priority into the same write. Apply workspace defaults for omitted priority/cadence; leave unknown owners/dates unset. Resolve people and parents to returned IDs; never choose the first candidate merely because it is first. For truncated parents/members, narrow query/member_query; for truncated properties use list_properties only if the needed field is absent. Do not claim absence from a partial list. Do not auto-invite people or create property definitions/templates. Fetch list_project_templates only when applying a user-requested template.",
-  "A clear save request authorizes that scoped save, not invented work. For an ambiguous structure follow reviewBeforeCreate and ask once. A clear single Task can be captured to General without demanding an OKR. Legacy 'inbox/unclassified' rules mean this same General fallback, not an obsolete status. A Project missing its Initiative stays a conversation draft; ask for the parent, do not manufacture ancestors or downgrade it into a Task.",
-  "Use create_tasks once for explicitly supplied Tasks sharing a container and common fields. Otherwise use create_item with all known fields together. Never generate extra Tasks from a Project idea unless asked. Routine children use routine_id, not parent_id. Children inherit the selected parent's cycle_id; do not guess the active cycle. Link changes preserve status unless the user changes it.",
+  "PROJECT APPROVAL IS MANDATORY and overrides reviewBeforeCreate and conflicting workspace defaults: a generic creation request does not authorize picking an Initiative. Read Initiative descriptions and their KR/Objective context. Recommend at most 3 only with concrete contribution reasons, not recency or vague keywords. Present title/scope, owners, deadline, every defaulted/provided property and recommended paths using manage_project. The user chooses and confirms in this conversation; accept edits here and call manage_project again with action=confirm. If the client exposes only legacy create_item, keep its returned same_tool_confirmation value internal and reuse it after approval. Do not require a browser visit, a separate chat, an @OKRPTR mention, or an ID pasted by the user. Never fabricate consent, select the first/only parent automatically, add unseen fields at save time, or bypass review. If the user already explicitly approved this exact proposal and connection, do not ask the same confirmation again. A clear Task may still use General.",
+  "Use create_tasks once for explicitly supplied Tasks sharing a container and common fields. Use create_item for non-Project items and manage_project for the full Project lifecycle. Never generate extra Tasks. Routine children use routine_id. Children inherit the selected parent's cycle_id. A pending/failed review is NOT a created Project. If compatibility tools are available, get_project_review can refresh candidates and confirm_project can repeat an identical lost confirmation; otherwise keep using manage_project or the legacy create_item same-tool flow. Never make another proposal after an uncertain save. cancel_project_review cancels a pending draft in this conversation.",
   "After a successful write, use the returned record as confirmation: do not list everything again. Reply briefly with saved type/title, actual container, owner/date when present, and important unset fields. Never claim a draft was saved or a notification delivered. On an uncertain write failure, look for the saved record before retrying. Read-only planning must not create data. Deletions, invitations and external actions retain their own permission/confirmation rules.",
 ].join("\n");
 
@@ -88,9 +89,9 @@ export type WorkContextInput = {
 
 // MCP uses POST even for reads. Unknown tools and JSON-RPC batches stay write-gated.
 export const READ_ONLY_MCP_TOOLS = new Set([
-  "prepare_work", "get_workspace_rules", "list_items", "review_period", "list_properties",
+  "prepare_work", "get_project_review", "get_workspace_rules", "list_items", "review_period", "list_properties",
   "get_project_document", "list_project_templates", "list_checklist_items", "get_daily_scrum",
-  "get_recommendations", "list_routines", "list_team_members", "list_groups", "list_group_members",
+  "get_recommendations", "list_routines", "list_routine_properties", "list_team_members", "list_groups", "list_group_members",
 ]);
 
 export function isReadOnlyMcpRequest(payload: unknown) {
@@ -103,6 +104,7 @@ export function isReadOnlyMcpRequest(payload: unknown) {
 type ContextRow = {
   id: string; kind: string; title: string; cycleId: string | null;
   parentTitle: string | null; grandparentTitle: string | null; ancestorTitle: string | null;
+  description: string; parentDescription: string; grandparentDescription: string;
 };
 
 function likePattern(value: string) {
@@ -124,7 +126,10 @@ export async function readWorkContext(db: D1Database, ownerId: string, userId: s
   add("workspace", db.prepare("SELECT id, name, kind FROM workspaces WHERE id = ?").bind(ownerId));
   for (const parentKind of parentKinds) {
     add(parentKind, db.prepare(`SELECT i.id, i.kind, i.title, i.cycle_id AS cycleId,
-      p.title AS parentTitle, g.title AS grandparentTitle, a.title AS ancestorTitle
+      p.title AS parentTitle, g.title AS grandparentTitle, a.title AS ancestorTitle,
+      CASE WHEN i.kind = 'initiative' THEN substr(i.description, 1, 500) ELSE '' END AS description,
+      CASE WHEN i.kind = 'initiative' THEN substr(COALESCE(p.description, ''), 1, 350) ELSE '' END AS parentDescription,
+      CASE WHEN i.kind = 'initiative' THEN substr(COALESCE(g.description, ''), 1, 350) ELSE '' END AS grandparentDescription
       FROM items i
       LEFT JOIN items p ON p.id = i.parent_id AND p.owner_id = i.owner_id
       LEFT JOIN items g ON g.id = p.parent_id AND g.owner_id = i.owner_id
@@ -135,9 +140,14 @@ export async function readWorkContext(db: D1Database, ownerId: string, userId: s
         AND (p.id IS NULL OR (p.archived_at IS NULL AND p.status != 'archived'))
         AND (g.id IS NULL OR (g.archived_at IS NULL AND g.status != 'archived'))
         AND (a.id IS NULL OR (a.archived_at IS NULL AND a.status != 'archived'))
-        AND (? = '' OR i.title LIKE ? ESCAPE '\\')
+        AND (i.kind != 'initiative' OR (p.kind = 'key_result' AND g.kind = 'objective'
+          AND p.cycle_id IS i.cycle_id AND g.cycle_id IS i.cycle_id))
+        AND (? = '' OR i.title LIKE ? ESCAPE '\\'
+          OR (i.kind = 'initiative' AND (i.description LIKE ? ESCAPE '\\'
+            OR p.title LIKE ? ESCAPE '\\' OR p.description LIKE ? ESCAPE '\\'
+            OR g.title LIKE ? ESCAPE '\\' OR g.description LIKE ? ESCAPE '\\')))
       ORDER BY CASE WHEN c.status = 'active' THEN 0 ELSE 1 END, i.updated_at DESC, i.id
-      LIMIT ?`).bind(ownerId, parentKind, query, likePattern(query), limit + 1));
+      LIMIT ?`).bind(ownerId, parentKind, query, ...Array(6).fill(likePattern(query)), limit + 1));
   }
   if (kind === "task" || kind === "unsure") {
     add("routines", db.prepare(`SELECT id, title, system_key AS systemKey FROM routines
@@ -162,7 +172,7 @@ export async function readWorkContext(db: D1Database, ownerId: string, userId: s
     add("properties", db.prepare(`SELECT id, name, type, options, default_value AS defaultValue, system_key AS systemKey
       FROM property_definitions WHERE owner_id = ? AND active = 1
         AND (system_key IS NOT NULL OR LOWER(TRIM(name)) NOT IN
-          ('dri','owner','assignee','담당','담당자','worker','workers','하위 업무자','업무자','작업자','참여자'))
+          ('dri','owner','assignee','담당','담당자','책임자','worker','workers','하위 업무자','업무자','작업자','참여자'))
       ORDER BY sort_order, id LIMIT 41`).bind(ownerId));
   }
   const results = await db.batch(statements);
@@ -173,6 +183,9 @@ export async function readWorkContext(db: D1Database, ownerId: string, userId: s
   const parents = parentKinds.flatMap((parentKind) => (rows[parentKind].slice(0, limit) as unknown as ContextRow[]).map((row) => ({
     id: row.id, kind: row.kind, title: row.title, cycleId: row.cycleId,
     path: [row.ancestorTitle, row.grandparentTitle, row.parentTitle, row.title].filter((title): title is string => Boolean(title)),
+    ...(row.kind === 'initiative' ? { evidence: {
+      initiative: row.description, keyResult: row.parentDescription, objective: row.grandparentDescription,
+    } } : {}),
   })));
   return {
     kind,
@@ -188,6 +201,6 @@ export async function readWorkContext(db: D1Database, ownerId: string, userId: s
       options: JSON.parse(String(row.options)), defaultValue: JSON.parse(String(row.defaultValue)),
     })),
     truncated,
-    nextStep: "후보를 사용자 의도와 대조하고 필수 누락만 한 번에 묻는다. systemKey가 있는 속성은 create/update_item의 전용 필드로 적용한다. 잘린 부모/담당자는 query/member_query로 좁히고, 필요한 속성이 잘렸을 때만 list_properties를 사용한다. 저장 성공 응답을 재조회하지 않는다.",
+    nextStep: "목록 순서는 관련도 추천이 아니다. Initiative의 설명과 상위 KR·Objective를 요청한 결과물과 대조하고, 직접 기여하는 근거가 있는 후보만 추천 이유와 전체 경로를 보여준다. 근거가 없으면 추천 없음이라고 밝히고 다른 후보 검색 또는 생성 보류를 제공한다. Project는 사용자가 최종 내용을 검토하고 연결을 선택·승인하기 전에는 생성하지 않는다. systemKey 속성은 전용 필드를 사용하고 잘린 목록은 검색을 좁힌다.",
   };
 }

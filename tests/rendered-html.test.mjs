@@ -5,7 +5,17 @@ import ts from "typescript";
 
 const projectRoot = new URL("../", import.meta.url);
 
-test("brands connection completion as OKRI while preserving workspace names", async () => {
+test("project quota stays in billing without badges on work and creation surfaces", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const billing = await readFile(new URL("../app/billing-view.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.doesNotMatch(page, /ProjectQuotaBadge/);
+  assert.doesNotMatch(billing, /ProjectQuotaBadge|이번 달 Project|현재 미적용/);
+  assert.doesNotMatch(styles, /project-quota-badge/);
+  assert.match(billing, /<Usage label=\{t\("Project 생성"\)\} used=\{billing\.usage\.projects\.used\}/);
+});
+
+test("brands connection completion as OKRPTR while preserving workspace names", async () => {
   const [promptRoute, slackStatus, page] = await Promise.all([
     readFile(new URL("../app/api/integration-tokens/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/status/route.ts", import.meta.url), "utf8"),
@@ -19,8 +29,8 @@ test("brands connection completion as OKRI while preserving workspace names", as
   assert.match(slackStatus, /OKRI 연결이 완료되었습니다\./);
   assert.doesNotMatch(slackStatus, /\$\{connection\?\.teamName[^\n]*연결/);
   assert.match(slackStatus, /connectedTeam: connection \? \{ id: connection\.teamId, name: connection\.teamName \}/);
-  assert.match(page, /<b>OKRI 연결 완료<\/b>/);
-  assert.match(page, /연결된 Slack 워크스페이스: \{teamName\}/);
+  assert.match(page, /<b>\{t\("OKRPTR 연결 완료"\)\}<\/b>/);
+  assert.match(page, /\{t\("연결된 Slack 워크스페이스:"\)\}\{teamName\}/);
   assert.doesNotMatch(page, /\{teamName\} 연결 완료/);
 });
 
@@ -158,20 +168,20 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /mobile-navigation/);
   assert.match(page, /workspace-mobile-home/);
   assert.match(page, /goToMobileHome/);
-  assert.match(page, /aria-label="홈으로 이동"/);
-  assert.match(page, /home: "AI 대화"/);
+  assert.match(page, /aria-label=\{t\("홈으로 이동"\)\}/);
+  assert.match(page, /get home\(\) \{ return t\("AI 대화"\); \}/);
   assert.doesNotMatch(page, /assistant-sidebar-tab/);
-  assert.match(page, /\{ id: "home", label: "AI 대화", icon: Bot \}/);
-  assert.ok(page.indexOf('{ id: "my_work", label: "내 업무"') < page.indexOf('{ id: "okr", label: "OKR"'), "내 업무가 OKR보다 먼저 표시되어야 합니다");
+  assert.match(page, /\{ id: "home", get label\(\) \{ return t\("AI 대화"\); \}, icon: Bot \}/);
+  assert.ok(page.indexOf('{ id: "my_work", get label() { return t("내 업무"); }') < page.indexOf('{ id: "okr", label: "OKR"'), "내 업무가 OKR보다 먼저 표시되어야 합니다");
   assert.match(page, /const mobileNavItems = \(\["home", "okr", "my_work", "work", "inbox"\]/);
   assert.match(page, /id="home-okr-chat-title".*AI 대화/);
   assert.match(page, /assistant-target-picker/);
   assert.match(page, /Objective, KR, Initiative, Project 검색/);
   assert.match(page, /Project를 기준으로 이야기하겠습니다/);
-  assert.match(page, /aria-label="AI 대화 열기"/);
+  assert.match(page, /aria-label=\{t\("AI 대화 열기"\)\}/);
   assert.match(page, /currentWorkspace\.role !== "owner"/);
   assert.match(page, /freshWorkspaceDataReady/);
-  assert.match(page, /Project DRI/);
+  assert.match(page, /Project 책임자/);
   assert.match(page, /지금은 건너뛰기/);
   assert.match(page, /더보기/);
   assert.match(page, /개인 연결/);
@@ -182,11 +192,11 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /workspace-settings-trigger/);
   assert.match(page, /Slack 연결 후 데일리 봇을 설정할 수 있습니다/);
   assert.match(page, /bot-accordion-trigger/);
-  assert.match(page, /워크스페이스 설정.*일반.*멤버.*그룹.*Project 설정.*관리 요약.*봇 연동.*위험 구역/s);
+  assert.match(page, /워크스페이스 설정.*일반.*멤버.*그룹.*Project 설정.*관리 요약.*자동화 봇.*위험 구역/s);
   assert.match(page, /settings=workspace&tab=integrations/);
   assert.match(page, /자동화 봇/);
-  assert.match(page, /업무가 생성될 때/);
-  assert.match(page, /업무 상태가 바뀔 때/);
+  assert.match(page, /Task 완료 또는 다시 열림/);
+  assert.match(page, /Task 다시 열림/);
   assert.match(page, /테스트 전송/);
   assert.match(paceData, /ALTER TABLE slack_daily_settings ADD COLUMN onboarding_completed_at TEXT/);
   assert.match(page, /최근 전송 기록/);
@@ -248,7 +258,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /mode === "project" && visibleFields\.has\("project"\)/);
   assert.doesNotMatch(page, /첫 Project를 만들어볼까요\?/);
   assert.match(page, /mode === "project"/);
-  assert.match(page, /my_work: "내 업무"/);
+  assert.match(page, /get my_work\(\) \{ return t\("내 업무"\); \}/);
   assert.match(layout, /themeBootstrapScript/);
   assert.match(page, /type ThemeMode.*from "@\/lib\/themes"/);
   assert.match(page, /ThemePicker value=\{themeMode\}/);
@@ -258,8 +268,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(globals, /var\(--button-primary-fg\)/);
   const myWorkView = page.match(/function MyWorkView[\s\S]*?function MyWorkSection/)?.[0] ?? "";
   assert.ok(
-    myWorkView.indexOf('title="Task"') < myWorkView.indexOf('title="Project"')
-      && myWorkView.indexOf('title="Project"') < myWorkView.indexOf('title="Routine"'),
+    myWorkView.indexOf('title={t("Task")}') < myWorkView.indexOf('title={t("Project")}')
+      && myWorkView.indexOf('title={t("Project")}') < myWorkView.indexOf('title={t("Routine")}'),
     "My Work sections must be ordered Task, Project, Routine",
   );
   assert.match(page, /systemKey === "general"/);
@@ -274,11 +284,13 @@ test("ships product metadata and removes starter assets", async () => {
   assert.doesNotMatch(page, /루틴부터/);
   assert.match(page, /언제 무엇을 반복할지 설명해 주세요/);
   assert.match(aiConnections, /브라우저 제어가 가능한 대화/);
-  assert.match(integrationRoute, /현재 로그인된 내 ChatGPT 계정에 아래 OKRI MCP를 개인 연결로 지금 추가해 주세요/);
+  assert.match(integrationRoute, /현재 로그인된 내 ChatGPT 계정에 아래 OKRPTR MCP를 개인 연결로 지금 추가해 주세요/);
   assert.match(integrationRoute, /최종 실행 지시이자 명시적 사전 승인/);
   assert.match(integrationRoute, /'진행할까요\?' 같은 재확인 질문도 하지 마세요/);
   assert.match(integrationRoute, /OAuth 2\.1 메타데이터와 DCR, S256 PKCE 흐름/);
-  assert.doesNotMatch(integrationRoute, /OKRI_ACCESS_TOKEN|Authorization: Bearer <OKRI_ACCESS_TOKEN>/);
+  assert.match(integrationRoute, /same_tool_confirmation/);
+  assert.match(integrationRoute, /Project 승인 후 새 대화, @OKRPTR 재활성화, 검토 ID 복사/);
+  assert.doesNotMatch(integrationRoute, /OKRPTR_ACCESS_TOKEN|Authorization: Bearer <OKRPTR_ACCESS_TOKEN>/);
   assert.match(integrationRoute, /같은 내용을 대화로 다시 묻지 않습니다/);
   assert.doesNotMatch(integrationRoute, /OKRI 연결을 계속할까요\?/);
   assert.match(integrationRoute, /로그인, 계정 선택, 2단계 인증 또는 CAPTCHA/);
@@ -293,6 +305,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(mcpOAuth, /mcp_oauth_codes/);
   assert.match(mcpOAuth, /sha256Base64Url/);
   assert.match(mcpRoute, /resource_metadata/);
+  assert.match(mcpRoute, /"manage_project"/);
+  assert.match(mcpRoute, /MCP_CREATE_ITEM_CONFIRM_PREFIX/);
   assert.match(googleSession, /slice\(0, 4000\)/);
   assert.match(slackAuthRoute, /canManageTeam/);
   assert.match(slackDisconnectRoute, /canManageTeam/);
@@ -310,7 +324,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /트리거 포인트/);
   assert.match(page, /무엇을 어떻게/);
   assert.match(page, /연결 해제/);
-  assert.match(aiConnections, /ChatGPT \/ Claude \/ Claude Code|"chatgpt", "claude", "claude_code"/);
+  assert.match(aiConnections, /"chatgpt", "claude", "claude_code"/);
   assert.match(page, /taskParent/);
   assert.match(page, /parentId: projectItem\.id/);
   assert.match(page, /routineId: routine\.id/);
@@ -328,12 +342,12 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(okrPlanRoute, /authorization\.userId/);
   assert.doesNotMatch(paceData, /validateRoutineInitiative|idx_routines_owner_initiative/);
   assert.match(page, /OKR이 오늘의 일로 이어지도록/);
-  assert.match(page, /Connect your OKRs to today's work/);
-  assert.match(page, /目標を実行に変えるワークスペース/);
-  assert.match(page, /把目标变成行动的工作空间/);
-  assert.match(page, /convertir objetivos en acción/);
-  assert.match(page, /Google 계정으로 계속/);
-  assert.match(page, /Google로 이동 중/);
+  assert.match(await readFile(new URL("../lib/locales/en.ts", import.meta.url), "utf8"), /Connect your OKRs to today's work/);
+  assert.match(await readFile(new URL("../lib/locales/ja.ts", import.meta.url), "utf8"), /目標を実行に変えるワークスペース/);
+  assert.match(await readFile(new URL("../lib/locales/zh.ts", import.meta.url), "utf8"), /把目标变成行动的工作空间/);
+  assert.match(await readFile(new URL("../lib/locales/es.ts", import.meta.url), "utf8"), /convertir objetivos en acción/);
+  assert.match(page, /LandingScreen reason=\{authState.reason\} onSignIn=\{startGoogleSignIn\}/);
+  assert.match(await readFile(new URL("../lib/landing-copy.ts", import.meta.url), "utf8"), /Google로 이동 중/);
   assert.match(page, /AppLoadingScreen/);
   assert.doesNotMatch(page, /GOOGLE_BROWSER_SIGN_IN_STATE_PREFIX/);
   assert.doesNotMatch(page, /accounts\.google\.com\/o\/oauth2\/v2\/auth/);
@@ -346,12 +360,12 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /워크스페이스 데이터를 불러오지 못했습니다/);
   assert.doesNotMatch(page, /visibleCount.*20/);
   assert.doesNotMatch(page, /더 보기/);
-  assert.match(page, /aria-label="Project 필터"/);
-  assert.match(page, /aria-label="Project 정렬"/);
-  assert.match(page, /aria-label="Project 속성 관리" title="Project 속성 관리"/);
-  assert.match(page, /aria-label="내 설정 닫기" title="내 설정 닫기"/);
+  assert.match(page, /aria-label=\{t\("Project 필터"\)\}/);
+  assert.match(page, /aria-label=\{t\("Project 정렬"\)\}/);
+  assert.match(page, /aria-label=\{t\("Project 속성 관리"\)\} title=\{t\("Project 속성 관리"\)\}/);
+  assert.match(page, /aria-label=\{t\("내 설정 닫기"\)\} title=\{t\("내 설정 닫기"\)\}/);
   assert.match(page, /workspaceNameCounts/);
-  assert.match(page, /생성 \$\{formatDateTime\(workspace\.createdAt\)\}/);
+  assert.match(page, /t\(" · 생성 \{value1\}", \{ value1: messageValue\(formatDateTime\(workspace\.createdAt\)\) \}\)/);
   assert.match(page, /Routine을 불러오지 못했습니다/);
   assert.match(page, /데일리 스크럼을 불러오지 못했습니다/);
   assert.match(page, /추천을 계산하지 못했습니다/);
@@ -440,9 +454,9 @@ test("prerenders the startup shell and caches hashed assets", async () => {
   assert.match(layout, /__OKRI_BOOTSTRAP_REQUEST__/);
   assert.match(layout, /serviceWorker\.register\("\/sw\.js"/);
   assert.match(viteConfig, /prerender:\s*\{\s*routes:\s*"\*"\s*\}/);
-  assert.match(viteConfig, /idle Worker does not add a cold start before the first paint/);
-  assert.match(viteConfig, /run_worker_first:\s*\["\/_vinext\/image"\]/);
-  assert.doesNotMatch(viteConfig, /run_worker_first:\s*\["\/"/);
+  assert.match(viteConfig, /Resolve workspace entry hosts before serving the shared prerendered shell/);
+  assert.match(viteConfig, /run_worker_first:\s*\["\/",\s*"\/_vinext\/image"\]/);
+  assert.ok(worker.indexOf("workspaceSubdomainRedirect(request") < worker.indexOf("env.ASSETS.fetch(request)"));
   assert.match(assetHeaders, /max-age=31536000, immutable/);
   assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: public, max-age=31536000, immutable/);
   assert.match(assetHeaders, /Cloudflare-CDN-Cache-Control: no-cache, must-revalidate/);
@@ -530,12 +544,14 @@ test("uses Google verified email and separates optional email marketing consent"
     readFile(new URL("../app/terms/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0034_billing_email.sql", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /Google이 확인한 이메일로 바로 시작하세요/);
+  assert.match(page, /api\/auth\/google\?returnTo=/);
   assert.doesNotMatch(page, /function RegistrationScreen|\/api\/account\/phone\/send|휴대전화 소유 확인/);
   assert.doesNotMatch(paceData, /registration_required|allowIncompleteRegistration/);
-  assert.match(page, /\/api\/account\/marketing-consent/);
-  assert.match(page, /마케팅 목적 개인정보 이용 설정/);
-  assert.match(page, /광고성 이메일 수신 설정/);
+  const consentUi = await readFile(new URL("../app/marketing-consent.tsx", import.meta.url), "utf8");
+  assert.match(page, /MarketingConsentPrompt/);
+  assert.match(consentUi, /\/api\/account\/marketing-consent/);
+  assert.match(consentUi, /마케팅 목적 개인정보 이용 설정/);
+  assert.match(consentUi, /광고성 이메일 수신 설정/);
   assert.match(marketing, /marketingEligible: marketingDataConsent && advertisingEmailConsent && !needsReaffirmation/);
   assert.match(marketing, /2 \* 365 \* 24 \* 60 \* 60_000/);
   assert.match(marketingRoute, /typeof payload\.marketingDataConsent !== "boolean"/);
@@ -626,7 +642,7 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.match(page, /DeleteSelectCheckbox/);
   assert.match(page, /삭제한 Project·Task와 전체 데이터 정리 기록/);
   assert.match(page, /전체 OKR 클린업 기록/);
-  assert.match(page, /confirmationText: "영구 삭제"/);
+  assert.match(page, /confirmationText: t\("영구 삭제"\)/);
   assert.match(page, /연결된 Task/);
   assert.match(page, /템플릿 불러오기/);
   assert.doesNotMatch(page, /window\.(prompt|confirm)/);
@@ -667,21 +683,40 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.match(paceData, /Workspace name confirmation does not match/);
 });
 
-test("keeps the Task page as stable one-line rows with details in the side panel", async () => {
-  const [page, styles] = await Promise.all([
+test("keeps Task row structure and the side panel while allowing long titles to wrap", async () => {
+  const [page, styles, paceData, mcpRoute] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/mcp/route.ts", import.meta.url), "utf8"),
   ]);
+  const taskList = page.match(/function TaskListView[\s\S]*?function AsyncState/)?.[0] ?? "";
+  const taskDetail = page.match(/function TaskDetailPanel[\s\S]*?function LineageRow/)?.[0] ?? "";
+  const projectDetail = page.match(/function ProjectPageView[\s\S]*?function ProjectDataSection/)?.[0] ?? "";
 
-  assert.match(page, /aria-label="Task 목록"/);
+  assert.match(page, /aria-label=\{t\("Task 목록"\)\}/);
   assert.match(page, /task-list-inline-meta/);
   assert.doesNotMatch(page, /task-list-status/);
-  assert.match(page, /aria-label="Task 정보"/);
-  assert.match(page, /onPatch\(\{ status:/);
-  assert.match(page, /onPatch\(\{ priority:/);
+  assert.match(page, /aria-label=\{t\("Task 정보"\)\}/);
+  assert.match(taskList, /taskCompletionPatch\(entry\.status\)/);
+  assert.doesNotMatch(taskList, /statusLabel\(entry\.status\)/);
+  assert.match(taskDetail, /task-completion-toggle/);
+  assert.match(taskDetail, /onPatch\(\{ priority:/);
+  assert.doesNotMatch(taskDetail, /statusLabels|task-progress-field|type="range"/);
+  assert.match(projectDetail, /project-task-completion/);
+  assert.doesNotMatch(projectDetail, /project-task-progress|task\.progress/);
+  assert.match(paceData, /export function normalizeTaskStatus/);
+  assert.match(paceData, /kind === "task"[\s\S]*?normalizeTaskStatus\(input\.status\)/);
+  assert.match(paceData, /current\.kind === "task"[\s\S]*?delete normalizedPatch\.progress/);
+  assert.match(paceData, /const status = item\.kind === "task"[\s\S]*?normalizeTaskStatus/);
+  assert.match(paceData, /item\.kind === "task" && status !== "archived" \? status === "done" \? 100 : 0/);
+  assert.match(mcpRoute, /"set_task_completed"/);
+  assert.match(mcpRoute, /Tasks use only incomplete\/complete/);
   assert.match(styles, /\.task-list-open[^}]*grid-template-columns:[^}]*minmax\(260px, \.85fr\)/s);
-  assert.match(styles, /\.task-list-open b, \.task-list-inline-meta[^}]*white-space: nowrap/s);
-  assert.match(styles, /\.task-detail-panel \{ width: min\(520px, 100vw\); \}/);
+  assert.match(styles, /\.task-list-open b, \.task-list-inline-meta[^}]*white-space: normal/s);
+  assert.match(styles, /\.task-detail-panel \{ width: min\(36rem, 100vw\); \}/);
+  assert.match(styles, /\.task-completion-toggle/);
+  assert.match(styles, /\.project-task-row[^}]*grid-template-columns:[^}]*76px/s);
 });
 
 test("defaults unlinked web Tasks to General and exposes direct bulk deletion", async () => {
@@ -703,7 +738,7 @@ test("defaults unlinked web Tasks to General and exposes direct bulk deletion", 
   assert.match(page, /dailyScrumMemoryCache/);
   assert.match(page, /recommendationMemoryCache/);
   assert.match(page, /trashMemoryCache/);
-  assert.match(page, /연결 끊긴 Task \{orphanedIds\.length\}개 선택/);
+  assert.match(page, /t\("연결 끊긴 Task"\)\}\{t\("\{count\}개 선택", \{ count: orphanedIds\.length \}\)/);
   assert.match(page, /task-selection-delete/);
   assert.doesNotMatch(page, /할 일을 입력하면 미분류 Task에 저장됩니다/);
   assert.match(styles, /\.task-selection-bar/);
@@ -730,7 +765,7 @@ test("uses distinct Project and Routine AI creation flows", async () => {
   assert.match(page, /상위 Initiative/);
   assert.match(page, /참고 항목 선택/);
   assert.match(page, /createOpen=\{routineCreateOpen\}/);
-  assert.match(styles, /\.page-create-actions > button[^}]*min-height: 36px/);
+  assert.match(styles, /\.page-create-actions > button[^}]*min-height: var\(--control-height\)/);
   assert.match(styles, /\.page-create-actions > button \{ min-height: 44px/);
   assert.match(organizeRoute, /"okr" \| "project" \| "routine" \| "task"/);
   assert.match(organizeRoute, /if \(mode === "routine"\)/);
@@ -779,7 +814,7 @@ test("connects API data independently to Key Results and Projects", async () => 
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0025_kr_data_connections.sql", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /id: "data", label: "데이터"/);
+  assert.match(page, /id: "data", get label\(\) \{ return t\("데이터"\); \}/);
   assert.match(page, /rawView === "kr_data" \? "data"/);
   assert.match(page, /function ProjectDataSection/);
   assert.match(page, /tracksProgress = entry\.kind !== "objective" && entry\.kind !== "initiative"/);
@@ -787,8 +822,8 @@ test("connects API data independently to Key Results and Projects", async () => 
   assert.match(view, /item\.kind === "key_result" \|\| item\.kind === "project"/);
   assert.match(view, /API URL/);
   assert.match(view, /connectionMemoryCache\.get\(cacheKey\)/);
-  assert.match(view, /\["project", "Project"\]/);
-  assert.match(view, /이 \{targetLabels\[item\.kind\]\}에 API 연결/);
+  assert.match(view, /\["project", t\("Project"\)\]/);
+  assert.match(view, /t\("이 \{kind\}에 API 연결", \{ kind: targetLabels\[item\.kind\] \}\)/);
   assert.match(view, /숫자 값 경로/);
   assert.match(view, /자동 갱신 주기/);
   assert.match(route, /createDataConnection/);
@@ -835,7 +870,8 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(page, /내 데일리/);
   assert.match(page, /확정 및 공유/);
   assert.match(page, /작성 중인 초안은 상태만 표시/);
-  assert.match(page, /DRI이지만 미완료 Task가 없는 Project/);
+  assert.match(page, /<DailyWorkPicker/);
+  assert.doesNotMatch(page, /책임자이지만 미완료 Task가 없는 Project/);
   assert.match(page, /오늘은 데일리를 스킵합니다/);
   assert.match(page, /본업 과중/);
   assert.match(page, /확정된 스킵 사유만 공개/);
@@ -843,18 +879,22 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(page, /데일리 설정/);
   assert.match(page, /공유 안 함/);
   assert.match(page, /설정 완료/);
-  assert.match(page, /멤버 연결·실패 기록/);
+  assert.match(page, /멤버 연결·발송 관리/);
   assert.match(page, /즉시 발송/);
   assert.match(page, /지금 보내기/);
   assert.match(styles, /\.daily-layout/);
   assert.match(styles, /\.integrations-page/);
   assert.match(styles, /\.integration-step/);
   assert.match(styles, /\.slack-manual-send/);
+  assert.match(styles, /\.slack-channel-sync/);
   assert.ok(styles.includes(".workspace-integration-section .integration-service-card"));
   assert.match(page, /INTEGRATION_STATUS_CACHE_KEY/);
   assert.ok(page.includes("Promise.allSettled([googleRequest, slackRequest])"));
-  assert.match(page, /channelsLoadedRef/);
-  assert.ok(page.includes('member.linked ? "Slack 연결됨" : "Slack 계정 미연결"'));
+  assert.ok(page.includes('member.linked ? t("Slack 연결됨") : t("Slack 계정 미연결")'));
+  assert.match(page, /SLACK_CHANNEL_REFRESH_MS = 15_000/);
+  assert.match(page, /useLiveSlackChannels/);
+  assert.match(page, /visibilitychange/);
+  assert.match(page, /Slack Connect · 봇 참여 중/);
   assert.ok(!page.includes("member.slackDisplayName"));
   assert.match(slackDaily, /member.display_name/);
   assert.ok(slackDaily.includes("COALESCE(member.display_name, submission.member_name) AS member_name"));
@@ -897,13 +937,16 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.doesNotMatch(paceData, /serializeSlackConnection\(connection: SlackConnection \| null, configured/);
   assert.match(onboardingRoute, /configureSlackDailyOnboarding/);
   assert.match(slackDaily, /conversations\.join/);
+  assert.match(slackDaily, /is_ext_shared/);
+  assert.match(slackDaily, /canAutoJoinSlackChannel/);
   assert.match(slackDaily, /chat\.scheduleMessage/);
   assert.match(slackDaily, /testDailyChannel/);
   assert.match(slackDaily, /sendDailyReminderNow/);
   assert.match(slackDaily, /\[데일리 봇\]/);
   assert.match(settingsRoute, /payload\.action === "send_now"/);
-  assert.match(slackAutomation, /업무 자동화 봇/);
+  assert.match(slackAutomation, /Task 변동 알림 봇/);
   assert.match(channelRoute, /includeJoinablePublic/);
+  assert.match(channelRoute, /private, no-store, max-age=0/);
   assert.match(operationsGuide, /apps\.manifest\.create/);
   assert.match(operationsGuide, /일반 고객은 이 절차를 수행하지 않으며/);
   assert.doesNotMatch(operationsGuide, /AllVibe/i);
@@ -912,36 +955,36 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(customerGuide, /다른 고객의 Slack이나 운영자의 테스트 Slack과 연결되지 않는다/);
 });
 
-test("uses warm-neutral KR and Initiative hierarchy surfaces", async () => {
+test("uses theme-specific KR and Initiative hierarchy surfaces", async () => {
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   const themes = await readFile(new URL("../lib/themes.ts", import.meta.url), "utf8");
   assert.match(themes, /"okr-card-bg": "bg-raised"/);
-  assert.match(themes, /"kr-badge-bg": dark \? "#43302B" : "#F6EDEA"/);
-  assert.match(themes, /"kr-badge-text": dark \? "#D4B3A5" : "#7D5E54"/);
-  assert.match(themes, /"kr-rail": "#A18072"/);
-  assert.match(themes, /"initiative-badge-bg": dark \? "#30322E" : "#EFF1EF"/);
-  assert.match(themes, /"initiative-badge-text": dark \? "#AFB5AD" : "#60655F"/);
+  assert.match(themes, /"kr-badge-bg": seed\.accentSoft/);
+  assert.match(themes, /"kr-badge-text": seed\.accent, "kr-rail": seed\.accent/);
+  assert.match(themes, /"initiative-badge-bg": seed\.secondarySoft/);
+  assert.match(themes, /"initiative-badge-text": seed\.secondaryAccent, "initiative-rail": seed\.secondaryAccent/);
+  assert.match(themes, /"progress-fill": seed\.accent/);
   assert.match(styles, /\.hierarchy-kind-key_result \{[^}]*border-left: 2px solid var\(--kr-rail\)[^}]*box-shadow: none/);
   assert.match(styles, /\.hierarchy-kind-initiative \{[^}]*border-left: 2px solid var\(--initiative-rail\)[^}]*box-shadow: none/);
   assert.match(styles, /\.hierarchy-kind-initiative \.initiative-execution-summary \{ color: var\(--muted\); \}/);
   assert.doesNotMatch(styles, /--kr-soft|--initiative-soft|#42627a|#426653|#e8eff4|#e8f0eb/);
 });
 
-test("uses a restrained large-desktop density without scaling smaller viewports", async () => {
+test("keeps desktop density stable at wide widths and enlarges only touch controls", async () => {
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-  const largeDesktop = styles.match(/@media \(min-width: 1800px\) \{([\s\S]*)\}\s*$/)?.[1] ?? "";
-
-  assert.ok(largeDesktop);
-  assert.match(largeDesktop, /grid-template-columns: 246px minmax\(0, 1fr\)/);
-  assert.match(largeDesktop, /width: min\(1600px, 100%\)/);
-  assert.match(largeDesktop, /workspace-topbar, \.app-loading-topbar \{ height: 46px/);
-  assert.match(largeDesktop, /page-header h1, \.app-loading-copy h1 \{ font-size: 28px/);
-  assert.match(largeDesktop, /hierarchy-row \{ min-height: 56px/);
-  assert.match(largeDesktop, /task-table-row \{ min-height: 42px/);
-  assert.match(largeDesktop, /task-list-row \{ min-height: 54px/);
-  assert.match(largeDesktop, /routine-card b \{ font-size: 13px/);
-  assert.match(largeDesktop, /my-work-item \{ min-height: 56px/);
-  assert.doesNotMatch(largeDesktop, /\bzoom\s*:|transform\s*:\s*scale/);
+  assert.match(styles, /html \{ font-size: 100%; \}/);
+  assert.doesNotMatch(styles, /@media[^{}]+\{\s*html\s*\{\s*font-size:/);
+  assert.doesNotMatch(styles, /@media \(min-width: 1800px\)/);
+  assert.match(styles, /grid-template-columns: 16rem minmax\(0, 1fr\)/);
+  assert.match(styles, /width: min\(100rem, 100%\)/);
+  assert.match(styles, /workspace-topbar, \.app-loading-topbar \{ min-height: var\(--row-height\)/);
+  assert.match(styles, /page-header h1[^}]*font-size: var\(--type-page\)/);
+  assert.match(styles, /task-table-row \{ min-height: var\(--row-height\)/);
+  assert.match(styles, /task-list-row \{[^}]*min-height: var\(--row-height\)/);
+  assert.match(styles, /routine-card b \{[^}]*font-size: var\(--type-body\)/);
+  assert.match(styles, /my-work-item \{[^}]*min-height: var\(--row-height\)/);
+  assert.doesNotMatch(styles, /\bzoom\s*:|transform\s*:\s*scale/);
+  assert.match(styles, /@media \(max-width: 980px\), \(pointer: coarse\)/);
   assert.match(styles, /@media \(max-width: 700px\)/);
   assert.match(styles, /@media \(max-width: 980px\)/);
 });
@@ -997,30 +1040,38 @@ test("implements a workspace management bot for data quality and urgency reporti
     assert.match(domain, new RegExp(signal));
   }
   assert.match(page, /id: "summary", label: "관리 요약"/);
-  assert.match(page, /id: "integrations", label: "봇 연동"/);
+  assert.match(page, /id: "integrations", label: "자동화 봇"/);
   assert.match(page, /rawTab === "management" \? "summary"/);
   assert.match(page, /function WorkspaceManagementSummary/);
   assert.match(page, /function WorkspaceManagementBot/);
   assert.match(page, /<WorkspaceManagementBot\b[^>]*active=\{openBot === "management"\}/);
-  assert.match(page, /title="업무 자동화"/);
+  assert.match(page, /title=\{t\("업무 관리 봇"\)\}/);
+  assert.match(page, /title=\{t\("Task 변동 알림 봇"\)\}/);
   assert.match(page, /워크스페이스 관리 봇 사용/);
   assert.doesNotMatch(page, /LIVE PREVIEW/);
-  assert.match(page, /막힘 상태 알림/);
+  assert.doesNotMatch(page, /id: "blocked", name: "막힘 상태 알림"/);
+  assert.match(page, /Task 완료 알림/);
+  assert.match(page, /Task 다시 열림 알림/);
   assert.match(page, /새 Task 알림/);
   assert.doesNotMatch(page, /BOT CONNECTIONS|WORKSPACE HEALTH|RECOMMENDED|CURRENT RULES/);
   assert.match(page, /workspace-settings-section-header workspace-bot-header/);
   assert.doesNotMatch(page, /integration-intro compact/);
-  assert.match(styles, /\.workspace-bot-header > button \{[^}]*min-height: 34px;[^}]*background: var\(--raised\)/s);
+  assert.match(styles, /\.workspace-bot-header > button \{[^}]*min-height: var\(--control-height\);[^}]*background: var\(--raised\)/s);
   assert.match(styles, /\.bot-accordion/);
   assert.match(styles, /\.management-summary-groups/);
+  assert.match(styles, /\.management-summary-project\.overdue/);
+  assert.match(styles, /\.management-summary-delay-status/);
   assert.match(route, /mode === "settings"/);
   assert.match(route, /mode === "summary"/);
   assert.match(route, /canManageTeam/);
   assert.match(route, /testWorkspaceManagementBot/);
   assert.match(domain, /activity_log/);
+  assert.match(domain, /parent_project/);
+  assert.match(domain, /renderSlackReportGroup/);
+  assert.match(domain, /Project 기한 초과/);
   assert.match(domain, /listSlackChannels/);
   assert.match(domain, /last_sent_date/);
-  assert.match(domain, /\[관리 봇\]/);
+  assert.match(domain, /`\[\$\{t\("관리 봇"\)\}\]/);
   assert.match(schema, /workspace_management_bot_settings/);
   assert.match(runtimeSchema, /workspace_management_bot_settings/);
   assert.match(migration, /idx_workspace_management_bot_due/);
@@ -1035,9 +1086,10 @@ test("keeps completion checkboxes visually compact while preserving mobile touch
   ]);
 
   assert.match(page, /aria-pressed=\{isCompletedStatus\(entry\.status\)\}/);
-  assert.match(styles, /\.task-check \{[^}]*width: 26px;[^}]*height: 26px;[^}]*border: 0;[^}]*background: transparent/s);
-  assert.match(styles, /\.task-check::before \{[^}]*width: 17px;[^}]*height: 17px/s);
-  assert.match(styles, /\.workspace-topbar button, \.icon-button, \.task-check,[^}]*min-width: 44px; min-height: 44px/s);
+  assert.match(styles, /--control-height: 2\.75rem/);
+  assert.match(styles, /\.task-check \{[^}]*width: var\(--control-height\);[^}]*min-height: var\(--control-height\);[^}]*border: 0;[^}]*background: transparent/s);
+  assert.match(styles, /\.task-check::before \{[^}]*width: 18px;[^}]*height: 18px;[^}]*border-radius: 50%/s);
+  assert.match(styles, /\.workspace-topbar button, \.icon-button, \.task-check,[^}]*min-width: 44px; min-height: var\(--row-height\)/s);
 });
 
 test("keeps workspace controls visible above project checkboxes", async () => {
@@ -1048,6 +1100,6 @@ test("keeps workspace controls visible above project checkboxes", async () => {
 
   assert.match(page, /workspace-settings-trigger[\s\S]*?<Settings size=\{17\}/);
   assert.match(styles, /\.sidebar \{[^}]*position: sticky;[^}]*z-index: 20;/s);
-  assert.match(styles, /\.workspace-settings-trigger \{[^}]*width: 34px;[^}]*height: 34px;[^}]*border: 1px solid var\(--line\)/s);
+  assert.match(styles, /\.workspace-settings-trigger \{[^}]*width: var\(--control-height\);[^}]*min-height: var\(--control-height\);[^}]*border: 1px solid var\(--line\)/s);
   assert.match(styles, /\.workspace-menu \{[^}]*z-index: 50;/s);
 });

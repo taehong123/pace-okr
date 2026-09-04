@@ -35,7 +35,7 @@ const generalRoutine = {
   updatedAt: now,
 };
 
-const bootstrap = {
+export const bootstrap = {
   user: { id: "user-1", email: "owner@example.com", displayName: "테스트 사용자", provider: "local" },
   workspaces: [{
     id: "workspace-1",
@@ -105,7 +105,7 @@ export async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-export async function installApiMocks(page: Page, options: { preserveStorage?: boolean; failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "member" | "viewer"; teamWorkspace?: boolean } = {}) {
+export async function installApiMocks(page: Page, options: { withRoutine?: boolean; preserveStorage?: boolean; failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "admin" | "member" | "viewer"; teamWorkspace?: boolean; projectProperties?: { id: string; name: string; type: string; systemKey: string | null; active: boolean; options: string[]; defaultValue: null; sortOrder: number }[] } = {}) {
   let krDataConnections: Array<Record<string, unknown>> = [];
   let slackSetupComplete = options.slackSetupComplete ?? true;
   let slackAutomations: Array<Record<string, unknown>> = [];
@@ -118,21 +118,28 @@ export async function installApiMocks(page: Page, options: { preserveStorage?: b
   const workspaceKind = options.teamWorkspace ? "team" : "personal";
   const bootstrapResponse = {
     ...baseBootstrapResponse,
+    properties: options.projectProperties ?? baseBootstrapResponse.properties,
+    routines: options.withRoutine ? [...baseBootstrapResponse.routines, { ...generalRoutine, id: "routine-1", title: "매주 고객 피드백을 모아 다음 실행을 정리하는 반복 업무", systemKey: "", assigneeMemberId: "member-1", triggerPoint: "금요일 오후", actionSteps: "고객 피드백 확인 · 다음 주 실행 항목 정리" }] : baseBootstrapResponse.routines,
     workspaces: baseBootstrapResponse.workspaces.map((workspace) => ({ ...workspace, kind: workspaceKind, personal: workspaceKind === "personal", role: workspaceRole })),
-    team: { ...baseBootstrapResponse.team, workspace: { ...baseBootstrapResponse.team.workspace, kind: workspaceKind }, currentRole: workspaceRole, canManage: workspaceRole === "owner", members: baseBootstrapResponse.team.members.map((member) => ({ ...member, role: workspaceRole })) },
+    team: { ...baseBootstrapResponse.team, workspace: { ...baseBootstrapResponse.team.workspace, kind: workspaceKind }, currentRole: workspaceRole, canManage: workspaceRole === "owner" || workspaceRole === "admin", members: baseBootstrapResponse.team.members.map((member) => ({ ...member, role: workspaceRole })) },
   };
   await page.addInitScript((preserveStorage) => {
     if (!preserveStorage) localStorage.clear();
-    localStorage.setItem("okri.intro-language", "ko");
+    localStorage.setItem("okrptr.intro-language", "ko");
   }, options.preserveStorage ?? false);
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (url.pathname === "/api/bootstrap") return json(route, bootstrapResponse);
+    if (url.pathname === "/api/workspaces/profile") return json(route, { profile: {
+      id: bootstrapResponse.workspaces[0].id, name: bootstrapResponse.workspaces[0].name,
+      address: null, revision: 0, canManage: workspaceRole === "owner" || workspaceRole === "admin", subdomainsEnabled: false, url: null,
+    } });
     if (url.pathname === "/api/account/marketing-consent") return json(route, { consent: {
       marketingDataConsent: true, advertisingEmailConsent: true,
       marketingEligible: true, needsReaffirmation: false, reaffirmAfter: null,
     } });
+    if (url.pathname === "/api/billing/ai-usage") return json(route, { workspaceId: "workspace-1", userId: "user-1", ai: { usedPercent: 24, remainingPercent: 76, resetsAt: "2026-09-30T15:00:00.000Z" } });
     if (url.pathname === "/api/billing/status") return json(route, {
       plan: "free", planLabel: "Free", status: "free", nextPlan: null,
       trialEndsAt: null, currentPeriodEndsAt: null, nextBillingAt: null,
@@ -212,10 +219,10 @@ export async function installApiMocks(page: Page, options: { preserveStorage?: b
       const connected = state === "setup_required" || state === "connected" || state === "reauthorization_required";
       return json(route, { slack: {
         connected, state,
-        statusMessage: state === "service_unavailable" ? "Slack 연결을 잠시 사용할 수 없습니다. 서비스가 준비되면 이 화면에서 바로 연결할 수 있습니다." : state === "workspace_disconnected" ? "Owner 또는 Admin이 이 OKRI 워크스페이스에 사용할 Slack을 직접 선택하고 승인할 수 있습니다." : state === "reauthorization_required" ? "새 데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요." : state === "setup_required" ? "고객 Slack A 연결을 마쳤습니다. 데일리 발송 설정을 완료해 주세요." : "고객 Slack A와 연결되어 데일리 알림을 설정할 수 있습니다.",
+        statusMessage: state === "service_unavailable" ? "Slack 연결을 잠시 사용할 수 없습니다. 서비스가 준비되면 이 화면에서 바로 연결할 수 있습니다." : state === "workspace_disconnected" ? "Owner 또는 Admin이 이 OKRPTR 워크스페이스에 사용할 Slack을 직접 선택하고 승인할 수 있습니다." : state === "reauthorization_required" ? "새 데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요." : state === "setup_required" ? "고객 Slack A 연결을 마쳤습니다. 데일리 발송 설정을 완료해 주세요." : "고객 Slack A와 연결되어 데일리 알림을 설정할 수 있습니다.",
         missingScopes: state === "reauthorization_required" ? ["im:write"] : [], teamName: connected ? "테스트 Slack" : null, teamId: connected ? "T123" : null, botUserId: connected ? "U-BOT" : null, scope: connected ? "commands,chat:write,im:write,im:history,users:read,users:read.email,channels:read,groups:read" : "", connectedAt: connected ? now : null, updatedAt: connected ? now : null,
         connectionScope: "workspace", distributionMode: "direct_oauth", connectedTeam: connected ? { id: "T123", name: "고객 Slack A" } : null,
-        redirectUrl: "https://okri.ai/api/slack/callback", commandUrl: "https://okri.ai/api/slack/commands", interactionUrl: "https://okri.ai/api/slack/interactions", eventsUrl: "https://okri.ai/api/slack/events",
+        redirectUrl: "https://okrptr.com/api/slack/callback", commandUrl: "https://okrptr.com/api/slack/commands", interactionUrl: "https://okrptr.com/api/slack/interactions", eventsUrl: "https://okrptr.com/api/slack/events",
       } });
     }
     if (url.pathname === "/api/slack/daily/preferences") return json(route, { linked: true, enabled: true, reminderTime: "09:00", timezone: "Asia/Seoul", usesWorkspaceTime: true, usesWorkspaceTimezone: true });
@@ -244,11 +251,11 @@ export async function installApiMocks(page: Page, options: { preserveStorage?: b
     if (url.pathname === "/api/groups" && request.method() === "GET") return json(route, { groups: [] });
     if (url.pathname === "/api/workspace-management-bot") {
       const snapshot = { date: "2026-09-01", totalCount: 8, groups: [
-        { signal: "missing_due_date", count: 2, items: [{ id: "project-1", kind: "project", title: "모바일 사용성 개선", status: "in_progress", dueDate: null }] },
-        { signal: "missing_owner", count: 1, items: [{ id: "task-1", kind: "task", title: "오버레이 동작 점검", status: "todo", dueDate: null }] },
-        { signal: "overdue", count: 2, items: [{ id: "task-overdue", kind: "task", title: "지난 기한 Task", status: "in_progress", dueDate: "2026-08-31" }] },
-        { signal: "completed_yesterday", count: 1, items: [{ id: "task-done", kind: "task", title: "어제 완료 Task", status: "done", dueDate: "2026-08-31" }] },
-        { signal: "due_today", count: 2, items: [{ id: "task-today", kind: "task", title: "오늘 마감 Task", status: "todo", dueDate: "2026-09-01" }] },
+        { signal: "missing_due_date", count: 2, items: [], projects: [{ project: { id: "project-1", title: "모바일 사용성 개선", status: "in_progress", dueDate: null, isOverdue: false }, projectMatchesSignal: true, tasks: [] }] },
+        { signal: "missing_owner", count: 1, items: [], projects: [{ project: { id: "project-1", title: "모바일 사용성 개선", status: "in_progress", dueDate: null, isOverdue: false }, projectMatchesSignal: false, tasks: [{ id: "task-1", kind: "task", title: "오버레이 동작 점검", status: "todo", dueDate: null, isOverdue: false, parentProject: null }] }] },
+        { signal: "overdue", count: 2, items: [], projects: [{ project: { id: "project-overdue", title: "출시 준비", status: "in_progress", dueDate: "2026-08-30", isOverdue: true }, projectMatchesSignal: true, tasks: [{ id: "task-overdue", kind: "task", title: "지난 기한 Task", status: "in_progress", dueDate: "2026-08-31", isOverdue: true, parentProject: null }] }] },
+        { signal: "completed_yesterday", count: 1, items: [], projects: [{ project: { id: "project-1", title: "모바일 사용성 개선", status: "in_progress", dueDate: null, isOverdue: false }, projectMatchesSignal: false, tasks: [{ id: "task-done", kind: "task", title: "어제 완료 Task", status: "done", dueDate: "2026-08-31", isOverdue: false, parentProject: null }] }] },
+        { signal: "due_today", count: 2, items: [], projects: [{ project: { id: "project-1", title: "모바일 사용성 개선", status: "in_progress", dueDate: null, isOverdue: false }, projectMatchesSignal: false, tasks: [{ id: "task-today", kind: "task", title: "오늘 마감 Task", status: "todo", dueDate: "2026-09-01", isOverdue: false, parentProject: null }] }] },
       ] };
       if (request.method() === "GET") return json(route, { settings: managementBotSettings, snapshot, slackConnected: options.slackState === "connected", channels: [{ id: "C123", name: "daily", isPrivate: false, isMember: true }] });
       const payload = request.postDataJSON() as Record<string, unknown>;
@@ -312,6 +319,8 @@ export async function installApiMocks(page: Page, options: { preserveStorage?: b
       return json(route, { document: { id: "document-1", projectId: "project-1", content: "[]", plainText: "", version: 1, updatedAt: now } });
     }
     if (url.pathname === "/api/project-templates") return json(route, { templates: [] });
+    if (url.pathname === "/api/properties") return json(route, { properties: bootstrapResponse.properties });
+    if (url.pathname === "/api/routine-properties") return json(route, { properties: [] });
     if (url.pathname === "/api/checklists") return json(route, { items: [] });
     if (url.pathname === "/api/recommendations") return json(route, { recommendations: [] });
     if (url.pathname === "/api/daily-scrum" && request.method() === "GET") return json(route, {
@@ -344,7 +353,8 @@ export async function installApiMocks(page: Page, options: { preserveStorage?: b
       if (options.slowRoutineRefresh) await new Promise((resolve) => setTimeout(resolve, 800));
       return json(route, { routines: bootstrapResponse.routines });
     }
-    if (url.pathname === "/api/trash") return json(route, { items: [], cleanupRecords: [] });
+    if (url.pathname === "/api/trash") return json(route, { trash: [] });
+    if (url.pathname === "/api/item-trash") return json(route, { items: [], initiativeOptions: [] });
     return json(route, {});
   });
 }

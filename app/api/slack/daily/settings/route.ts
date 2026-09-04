@@ -1,5 +1,5 @@
 import { authorizeRequest, canManageTeam } from "@/lib/pace-data";
-import { getSlackDailySettings, retryDailyPublication, sendDailyReminderNow, syncSlackDailyInstallation, testDailyChannel, testDailyDm, updateSlackDailySettings } from "@/lib/slack-daily";
+import { getSlackDailySettings, reconcileDailyReminders, retryDailyPublication, sendDailyReminderNow, syncSlackDailyInstallation, testDailyChannel, testDailyDm, updateSlackDailySettings } from "@/lib/slack-daily";
 
 export async function GET(request: Request) {
   const authorization = await authorizeRequest(request, { allowViewerWrite: true });
@@ -14,6 +14,10 @@ export async function PATCH(request: Request) {
   if (!canManageTeam(authorization)) return Response.json({ error: "Owner 또는 Admin 권한이 필요합니다." }, { status: 403 });
   try {
     const payload = await request.json() as Record<string, unknown>;
+    if (payload.action === "repair") {
+      await reconcileDailyReminders(authorization.ownerId, { verify: true });
+      return Response.json(await getSlackDailySettings(authorization));
+    }
     if (payload.action === "resync") {
       await syncSlackDailyInstallation(authorization.ownerId);
       return Response.json(await getSlackDailySettings(authorization));

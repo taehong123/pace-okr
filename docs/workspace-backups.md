@@ -34,4 +34,6 @@ The initial safety limits are 8 MiB serialized business data, 50,000 rows per ta
 
 ## Verification
 
+Trigger migrations must retain uppercase `BEGIN` and LF line endings in the packaged archive. `.gitattributes` and the migration tests enforce this because the remote D1 statement splitter can reject CRLF trigger bodies despite SQLite accepting them locally ([Cloudflare report](https://github.com/cloudflare/workers-sdk/issues/15314)). Do not remove revision triggers to work around a deployment parser error.
+
 `node --test tests/workspace-backups.test.mjs` exercises the real backup implementation against SQLite with the generated schema, actual foreign keys/indexes/revision triggers, a transactional D1 adapter, and a fault-injectable in-memory object store. Tests cover isolation, credential exclusion, complete restore/undo, detached external mapping recovery, revoked access, concurrent edits, storage failure, corrupt objects, SQL rollback, leases, daily idempotency, and retention. These are not substitutes for a production scheduled-job check after deployment; do not test restore against customer data.

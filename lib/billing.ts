@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { decryptPrivateValue, encryptPrivateValue } from "@/lib/secret-crypto";
+import { aiUsagePercent } from "@/lib/ai-usage";
 
 export const BILLING_PLANS = {
   free: { label: "Free", priceWon: 0, projectLimit: 10, editorLimit: 3, aiBudgetWon: 500 },
@@ -222,7 +223,7 @@ export async function getBillingStatus(workspaceId: string, userId: string, role
       WHERE member.workspace_id = ? AND member.status = 'active' AND member.role IN ('owner','admin','member')
       ORDER BY explicitly_selected DESC, CASE WHEN member.role = 'owner' THEN 0 ELSE 1 END, member.created_at, member.id`)
       .bind(workspaceId).all<Record<string, string | number | null>>(),
-    getAiMonthlyUsage(workspaceId, subscription.billing_owner_user_id, plan),
+    getAiMonthlyUsage(workspaceId, subscription.billing_owner_user_id, plan, period),
     d1.prepare("SELECT id, card_company, masked_card, created_at FROM billing_payment_methods WHERE workspace_id = ? AND active = 1 LIMIT 1").bind(workspaceId).first<Record<string, string>>(),
     d1.prepare(`SELECT id, kind, plan, price_won, status, receipt_url, created_at
       FROM billing_transactions WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 20`).bind(workspaceId).all<Record<string, string | number | null>>(),
@@ -260,7 +261,7 @@ export async function getBillingStatus(workspaceId: string, userId: string, role
         enforced: editorEnforcement.enforced,
         graceEndsAt: editorEnforcement.graceEndsAt,
       },
-      ai: { usedWon: Math.ceil(aiUsage / 1_000_000), limitWon: limits.aiBudgetWon, remainingWon: Math.max(0, limits.aiBudgetWon - Math.ceil(aiUsage / 1_000_000)), resetsAt: period.resetsAt },
+      ai: { usedWon: Math.ceil(aiUsage / 1_000_000), limitWon: limits.aiBudgetWon, remainingWon: Math.max(0, limits.aiBudgetWon - Math.ceil(aiUsage / 1_000_000)), ...aiUsagePercent(aiUsage, limits.aiBudgetWon * 1_000_000), resetsAt: period.resetsAt },
     },
     editorMembers,
     paymentMethod: method ? { id: method.id, cardCompany: method.card_company, maskedCard: method.masked_card, createdAt: method.created_at } : null,
@@ -325,6 +326,48 @@ export async function reserveProjectCreation(workspaceId: string) {
     });
   }
   return { workspaceId, periodKey: period.key };
+}
+
+/** Joined to a reviewed Project's atomic D1 batch; a quota failure rolls back the entire operation. */
+export async function prepareReviewedProjectQuota(workspaceId: string) {
+  if (!billingEnforcementEnabled()) return null;
+  const subscription = await getWorkspaceSubscription(workspaceId);
+  const plan = validPlan(subscription.plan) ? subscription.plan : "free";
+  const limit = BILLING_PLANS[plan].projectLimit;
+  const period = kstPeriod();
+  const d1 = (env as BillingRuntimeEnv).DB;
+  const statement = limit === null
+    ? d1.prepare(`INSERT INTO project_monthly_usage (workspace_id, period_key, created_count, updated_at)
+      VALUES (?, ?, 1, CURRENT_TIMESTAMP) ON CONFLICT(workspace_id, period_key) DO UPDATE SET
+      created_count = created_count + 1, updated_at = CURRENT_TIMESTAMP`).bind(workspaceId, period.key)
+    : d1.prepare(`INSERT INTO project_monthly_usage (workspace_id, period_key, created_count, updated_at)
+      VALUES (?, ?, CASE WHEN ? > 0 THEN 1 ELSE NULL END, CURRENT_TIMESTAMP)
+      ON CONFLICT(workspace_id, period_key) DO UPDATE SET
+      created_count = CASE WHEN created_count < ? THEN created_count + 1 ELSE NULL END,
+      updated_at = CURRENT_TIMESTAMP`).bind(workspaceId, period.key, limit, limit);
+  return { statement, limit, plan, resetsAt: period.resetsAt };
+}
+
+/** Same editor-selection policy as memberCanWrite, evaluated inside the creation transaction. */
+export function reviewedProjectPermissionGuard(workspaceId: string, userId: string) {
+  const configuredStart = (env as BillingRuntimeEnv).BILLING_ENFORCEMENT_STARTED_AT;
+  const start = configuredStart && Number.isFinite(Date.parse(configuredStart)) ? new Date(configuredStart).toISOString() : null;
+  const limit = `CASE coalesce((SELECT plan FROM workspace_subscriptions WHERE workspace_id = m.workspace_id), 'free')
+    WHEN 'business' THEN -1 WHEN 'team' THEN ${BILLING_PLANS.team.editorLimit} ELSE ${BILLING_PLANS.free.editorLimit} END`;
+  const explicit = `SELECT s.member_id FROM workspace_editor_selections s JOIN workspace_members e ON e.id = s.member_id AND e.workspace_id = s.workspace_id
+    WHERE s.workspace_id = m.workspace_id AND s.selected = 1 AND e.status = 'active' AND e.role IN ('owner','admin','member')`;
+  return {
+    sql: `EXISTS (SELECT 1 FROM workspace_members m JOIN workspaces w ON w.id = m.workspace_id
+      WHERE m.workspace_id = ? AND m.user_id = ? AND m.status = 'active' AND m.role IN ('owner','admin','member')
+        AND w.scheduled_deletion_at IS NULL AND (? = 0
+          OR (julianday(w.created_at) < julianday(?) AND julianday('now') < julianday(?, '+30 days'))
+          OR (${limit}) = -1 OR m.id IN (${explicit})
+          OR (NOT EXISTS (${explicit}) AND (SELECT count(*) FROM workspace_members e
+            WHERE e.workspace_id = m.workspace_id AND e.status = 'active' AND e.role IN ('owner','admin','member')
+              AND (CASE WHEN e.role = 'owner' THEN 0 ELSE 1 END, e.created_at, e.id)
+                <= (CASE WHEN m.role = 'owner' THEN 0 ELSE 1 END, m.created_at, m.id)) <= (${limit}))))`,
+    bindings: [workspaceId, userId, billingEnforcementEnabled() ? 1 : 0, start, start],
+  };
 }
 
 export async function releaseProjectCreation(reservation: { workspaceId: string; periodKey: string } | null) {
@@ -409,6 +452,16 @@ export async function memberCanWrite(workspaceId: string, userId: string, role: 
   return rows.results.slice(0, limit).some((row) => row.user_id === userId);
 }
 
+export async function getAiUsageStatus(workspaceId: string) {
+  const subscription = await getWorkspaceSubscription(workspaceId);
+  const plan = validPlan(subscription.plan) ? subscription.plan : "free";
+  const period = kstPeriod();
+  const used = await getAiMonthlyUsage(workspaceId, subscription.billing_owner_user_id, plan, period);
+  const percent = aiUsagePercent(used, BILLING_PLANS[plan].aiBudgetWon * 1_000_000);
+  if (!percent) throw new Error("AI 사용량을 확인하지 못했습니다.");
+  return { ...percent, resetsAt: period.resetsAt };
+}
+
 export async function assertAiBudget(workspaceId: string, userId: string) {
   if (!billingEnforcementEnabled()) return { limitWon: null, spentWonMicros: 0, resetsAt: kstPeriod().resetsAt };
   const subscription = await getWorkspaceSubscription(workspaceId);
@@ -423,8 +476,7 @@ export async function assertAiBudget(workspaceId: string, userId: string) {
   return { limitWon, spentWonMicros, resetsAt: kstPeriod().resetsAt };
 }
 
-async function getAiMonthlyUsage(workspaceId: string, billingOwnerUserId: string, plan: BillingPlan) {
-  const period = kstPeriod();
+async function getAiMonthlyUsage(workspaceId: string, billingOwnerUserId: string, plan: BillingPlan, period = kstPeriod()) {
   const d1 = (env as BillingRuntimeEnv).DB;
   const row = plan === "free"
     ? await d1.prepare(`SELECT coalesce(sum(usage.estimated_cost_won_micros), 0) AS spent

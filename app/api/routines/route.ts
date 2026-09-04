@@ -1,3 +1,4 @@
+import { RoutinePropertyError } from "@/lib/routine-properties";
 import {
   ROUTINE_CADENCES,
   authorizeRequest,
@@ -40,6 +41,7 @@ export async function POST(request: Request) {
       triggerPoint: asString(payload.triggerPoint),
       actionPlace: asString(payload.actionPlace),
       actionSteps: asString(payload.actionSteps),
+      properties: payload.properties,
       cadence,
       active: typeof payload.active === "boolean" ? payload.active : true,
       assigneeMemberId: asNullableString(payload.assigneeMemberId),
@@ -68,6 +70,7 @@ export async function PATCH(request: Request) {
       triggerPoint: typeof payload.triggerPoint === "string" ? payload.triggerPoint : undefined,
       actionPlace: typeof payload.actionPlace === "string" ? payload.actionPlace : undefined,
       actionSteps: typeof payload.actionSteps === "string" ? payload.actionSteps : undefined,
+      properties: payload.properties,
       cadence,
       active: typeof payload.active === "boolean" ? payload.active : undefined,
       assigneeMemberId: payload.assigneeMemberId === undefined ? undefined : asNullableString(payload.assigneeMemberId),
@@ -116,6 +119,7 @@ function today() {
 }
 
 function routeError(error: unknown) {
+  if (error instanceof RoutinePropertyError) return Response.json({ error: error.message }, { status: error.status });
   const message = error instanceof Error ? error.message : "Unexpected error";
   const status = /required|unsupported|not found|date|invalid|protected|cannot/i.test(message) ? 400 : 500;
   return Response.json({ error: message }, { status });

@@ -1,38 +1,67 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { z } from "zod";
 import { getSlackConnectionByTeam } from "@/lib/pace-data";
-import { handleDeliveredDailyReminder, reconcileDailyReminders } from "@/lib/slack-daily";
+import { handleDeliveredDailyReminder, repairSlackDailyReminders } from "@/lib/slack-daily";
 import { slackConfigured, verifySlackRequest, type SlackRuntimeEnv } from "@/lib/slack-oauth";
-import { isSlackSummonMessage, parseSlackSummonCommand, slackSummonSourceRef } from "@/lib/slack-summon-command";
-import { handleSlackSummon } from "@/lib/slack-summon";
+import { handleSlackWorkCommandEvent, parseSlackWorkCommand } from "@/lib/slack-work-command";
 
-const envelopeSchema = z.object({
-  type: z.string(), challenge: z.string().optional(), team_id: z.string().optional(), event_id: z.string().optional(),
-  event: z.object({
-    type: z.string(), channel_type: z.string().optional(), channel: z.string().optional(),
-    user: z.string().optional(), text: z.string().optional(), ts: z.string().optional(), thread_ts: z.string().optional(),
-    subtype: z.string().optional(), bot_id: z.string().optional(), hidden: z.boolean().optional(),
-    blocks: z.array(z.object({ block_id: z.string().optional() })).optional(),
-  }).optional(),
-});
+type SlackEventEnvelope = {
+  type?: string;
+  challenge?: string;
+  team_id?: string;
+  event_id?: string;
+  event?: {
+    type?: string;
+    channel_type?: string;
+    channel?: string;
+    user?: string;
+    text?: string;
+    bot_id?: string;
+    subtype?: string;
+    thread_ts?: string;
+    blocks?: Array<{ block_id?: string }>;
+  };
+};
 
 export async function POST(request: Request) {
   const runtime = env as SlackRuntimeEnv;
   if (!slackConfigured(runtime)) return new Response("Slack is not configured", { status: 503 });
   const rawBody = await request.text();
   if (!await verifySlackRequest(request, rawBody, runtime.SLACK_SIGNING_SECRET!)) return new Response("invalid Slack signature", { status: 401 });
-  let parsed;
-  try { parsed = envelopeSchema.safeParse(JSON.parse(rawBody)); } catch { return new Response("invalid payload", { status: 400 }); }
-  if (!parsed.success) return new Response("invalid payload", { status: 400 });
-  const payload = parsed.data;
-  if (payload.type === "url_verification") return payload.challenge ? Response.json({ challenge: payload.challenge }) : new Response("missing challenge", { status: 400 });
-  const { event_id: eventId, team_id: teamId, event } = payload;
-  if (payload.type !== "event_callback" || !eventId || !teamId || !event) return new Response(null, { status: 200 });
-  const candidate = isSlackSummonMessage(event) && parseSlackSummonCommand(event.text);
-  const dailyMessage = event.type === "message" && event.channel_type === "im";
-  if (!candidate && !dailyMessage) return new Response(null, { status: 200 });
-  // Acknowledge before database/Slack calls; Slack expects a response within 3 seconds.
-  waitUntil(processEvent(request, eventId, teamId, event).catch(() => { console.error("Slack event processing failed", { eventId, teamId }); }));
+  let payload: SlackEventEnvelope;
+  try { payload = JSON.parse(rawBody) as SlackEventEnvelope; } catch { return new Response("invalid payload", { status: 400 }); }
+  if (payload.type === "url_verification") return Response.json({ challenge: payload.challenge ?? "" });
+  const event = payload.event;
+  const parsedCommand = event?.type === "message" && event.text && !event.subtype && !event.bot_id
+    ? parseSlackWorkCommand(event.text) : null;
+  const eventId = payload.event_id ?? "";
+  const teamId = payload.team_id ?? "";
+  if (!eventId || !teamId) return new Response(null, { status: 200 });
+  const connection = await getSlackConnectionByTeam(teamId);
+  if (!connection) return new Response(null, { status: 200 });
+  if (event?.type === "message" && event.user && !event.bot_id && !event.subtype && !parsedCommand && event.user !== connection.botUserId) {
+    return new Response(null, { status: 200 });
+  }
+  const receipt = await env.DB.prepare(`INSERT OR IGNORE INTO slack_event_receipts (event_id, team_id, event_type, received_at)
+    VALUES (?, ?, ?, ?)`)
+    .bind(eventId, teamId, payload.event?.type ?? "", new Date().toISOString()).run();
+  if (!receipt.meta.changes) return new Response(null, { status: 200 });
+  if (event?.type === "message" && event.channel_type === "im" && event.channel && event.user === connection.botUserId) {
+    const blockIds = (event.blocks ?? []).flatMap((block) => block.block_id ? [block.block_id] : []);
+    waitUntil(handleDeliveredDailyReminder({ teamId, channelId: event.channel, botId: event.user, blockIds }).then(() => undefined));
+  } else if (event?.type === "message" && event.channel && event.user && event.text && !event.subtype && !event.bot_id && event.user !== connection.botUserId) {
+    if (parsedCommand && ["im", "channel", "group"].includes(event.channel_type ?? "")) {
+      waitUntil(handleSlackWorkCommandEvent(request, connection, {
+        channel: event.channel,
+        channelType: event.channel_type ?? "",
+        user: event.user,
+        text: event.text,
+        threadTs: event.thread_ts,
+      }, parsedCommand).catch((error) => console.error("Slack work command failed", error)));
+    }
+  } else if (event?.type !== "message") {
+    waitUntil(repairSlackDailyReminders(connection.ownerId));
+  }
   return new Response(null, { status: 200 });
 }
 

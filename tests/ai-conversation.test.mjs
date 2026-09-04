@@ -5,6 +5,7 @@ import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import { clientLanguage } from "./helpers/client-language-fixture.mjs";
 
 const require = createRequire(import.meta.url);
 function compile(source, dependencies = {}) {
@@ -12,11 +13,12 @@ function compile(source, dependencies = {}) {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
   const loaded = { exports: {} };
-  new Function("require", "module", "exports", compiled)((name) => name in dependencies ? dependencies[name] : require(name), loaded, loaded.exports);
+  new Function("require", "module", "exports", compiled)((name) => name in dependencies ? dependencies[name] : name === "@/lib/client-language" ? clientLanguage : name === "@/lib/language-preferences" ? { readLanguagePreferences: async () => ({ language: "en", resolvedLanguage: "en", revision: 0 }) } : require(name), loaded, loaded.exports);
   return loaded.exports;
 }
 
 const intake = compile(await readFile(new URL("../lib/work-intake.ts", import.meta.url), "utf8"));
+const assistantCommand = compile(await readFile(new URL("../lib/assistant-command.ts", import.meta.url), "utf8"));
 const routeSource = await readFile(new URL("../app/api/okr-organize/route.ts", import.meta.url), "utf8");
 const pageSource = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 const ast = ts.createSourceFile("page.tsx", pageSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -24,10 +26,12 @@ const names = new Set(["HomeOkrChat", "countOkrDraft", "planStringFieldsWithValu
 const components = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && names.has(node.name?.text)).map((node) => node.getText(ast)).join("\n");
 const { HomeOkrChat } = compile(`
 import { useState, useMemo, useRef, useEffect } from "react";
+import { t, messageValue } from "@/lib/client-language";
+import { parseAssistantCommand } from "@/lib/assistant-command";
 import { Bot, Link2, LoaderCircle, CheckCircle2, AlertTriangle, Eye, Send } from "lucide-react";
 ${components}
 export { HomeOkrChat };
-`);
+`, { "@/lib/assistant-command": assistantCommand });
 
 for (const entry of ["coach", "onboarding", "create", "task", "project", "routine"]) {
   test(`${entry} starts with conversation, not examples or an inventory`, () => {
@@ -83,7 +87,7 @@ test("web reads reference context and rules for the authenticated workspace, wit
     sent = JSON.parse(init.body);
     return Response.json({ output_text: JSON.stringify({ assistantMessage: "안녕하세요.", questions: [], plan: {} }), usage: { input_tokens: 10, output_tokens: 10 } });
   });
-  const response = await POST(new Request("https://okri.test/api/okr-organize", {
+  const response = await POST(new Request("https://okrptr.test/api/okr-organize", {
     method: "POST", body: JSON.stringify({ message: "안녕", mode: "coach", ownerId: "workspace-b", workspaceContext: {} }),
   }));
   assert.equal(response.status, 200);
@@ -93,6 +97,9 @@ test("web reads reference context and rules for the authenticated workspace, wit
   assert.equal(body.organized.plan.tasks, "");
   assert.deepEqual(calls, [["ensure", "workspace-a"], ["rules", "workspace-a"], ["context", "workspace-a", "user-a"], ["usage", "workspace-a"]]);
   const context = JSON.parse(sent.input[1].content);
+  assert.match(sent.input[0].content, /explicit response-language request first/);
+  assert.match(sent.input[0].content, /preserve the established conversation language/);
+  assert.match(sent.input[0].content, /current language \(en\)/);
   assert.equal(context.referenceContext.workspace.id, "workspace-a");
   assert.equal(context.workspaceRules.reviewBeforeCreate, true);
   assert.equal(context.referenceContext.truncated.project, true);
@@ -104,5 +111,5 @@ test("unauthenticated conversation never reads workspace or calls the model", as
     "@/lib/pace-data": { authorizeRequest: async () => new Response(null, { status: 401 }) },
     "@/lib/billing": {}, "@/lib/work-intake": intake,
   });
-  assert.equal((await POST(new Request("https://okri.test/api/okr-organize", { method: "POST" }))).status, 401);
+  assert.equal((await POST(new Request("https://okrptr.test/api/okr-organize", { method: "POST" }))).status, 401);
 });

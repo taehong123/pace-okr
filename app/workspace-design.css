@@ -1,0 +1,217 @@
+/* The landing's document rhythm, applied only to working surfaces. */
+.app-shell { background: var(--bg-page); }
+.app-shell .page-body,
+.app-shell .page-body:has(.okr-document) { width: min(100%, 75rem); max-width: 75rem; padding: var(--space-6) var(--space-8) 4rem; }
+.app-shell .page-header { gap: var(--space-6); margin-bottom: var(--space-4); flex-wrap: wrap; }
+.app-shell .page-header h1 { font-weight: 650; line-height: 1.35; }
+.app-shell .page-header p { margin-top: var(--space-2); font-size: var(--type-body); line-height: 1.6; color: var(--text-secondary); }
+.app-shell :is(.page-create-actions, .project-page-actions) { flex-wrap: wrap; gap: var(--space-2); }
+.app-shell .workspace-topbar { padding-inline: var(--space-8); background: var(--bg-page); font-size: var(--type-label); }
+.app-shell .sidebar { padding: var(--space-3) var(--space-2); background: var(--bg-surface); }
+.app-shell .sidebar nav { gap: var(--space-1); margin-top: var(--space-4); }
+.app-shell :is(.workspace-switcher, .nav-item, .profile-row) { gap: var(--space-2); padding-inline: var(--space-3); }
+.app-shell :is(.workspace-switcher:hover, .workspace-switcher[aria-expanded="true"], .profile-row:hover, .nav-item.active) { box-shadow: none; background: var(--bg-hover); }
+.app-shell .nav-item.active { font-weight: 600; }
+.app-shell .workspace-settings-trigger { border-color: transparent; background: transparent; box-shadow: none; }
+.app-shell .workspace-settings-trigger:hover { background: var(--bg-hover); }
+.app-shell .assistant-sidebar-tab { border-color: transparent; background: transparent; font-weight: 600; }
+.app-shell .sidebar-bottom { padding-top: var(--space-3); gap: var(--space-1); }
+
+/* Page sections are documents; cards remain for repeated items and dialogs. */
+.app-shell :is(.project-workspace, .home-okr-chat, .trash-list) { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.app-shell .project-workspace { overflow: visible; }
+.app-shell .project-tabs { padding: 0; gap: var(--space-4); background: transparent; }
+.app-shell .project-tabs button { border-radius: 0; padding: var(--space-2) 0; }
+.app-shell .project-tabs button.active { box-shadow: inset 0 -2px var(--text-primary); background: transparent; }
+.app-shell :is(.database-section, .database-toolbar, .task-table-head) { background: transparent; }
+.app-shell .database-toolbar { flex-wrap: wrap; gap: var(--space-2); padding-block: var(--space-2); }
+.app-shell :is(.project-card-list, .board-column > div) { gap: var(--space-3); padding: var(--space-4) 0; }
+.app-shell :is(.project-card, .board-item, .routine-card) { border-radius: var(--radius-control); box-shadow: none; }
+.app-shell :is(.project-card-open, .routine-card) { padding: var(--space-4); gap: var(--space-4); }
+.app-shell .project-card-properties > span { padding: var(--space-2) 0; border-radius: 0; background: transparent; border-top: 1px solid var(--border-default); }
+.app-shell :is(.project-card-open > header b, .project-card-relation span, .routine-card b, .scrum-task-list b, .trash-record h3) { white-space: normal; overflow-wrap: anywhere; }
+.app-shell .board { background: transparent; }
+.app-shell .board-item:hover { box-shadow: none; }
+.app-shell .project-page-body { padding: var(--space-6) 0; }
+.app-shell .project-page-body span { font-size: var(--type-label); }
+
+/* Regularly scanned labels and values use the same readable scale as landing. */
+.app-shell :is(.task-list-inline-meta, .project-card-meta, .project-card-relation,
+  .routine-card small, .routine-guide-grid span, .routine-assignee,
+  .my-work-toolbar span, .my-work-item small, .my-work-item-meta, .my-work-routine small,
+  .scrum-task-list small, .review-list em, .trash-record p, .trash-section-title p) { font-size: var(--type-label); line-height: 1.6; }
+.app-shell :is(.my-work-view, .routine-cards) { gap: var(--space-6); }
+.app-shell .my-work-toolbar { padding: 0 0 var(--space-4); gap: var(--space-4); flex-wrap: wrap; }
+.app-shell .my-work-toolbar > div { gap: var(--space-2); }
+.app-shell .my-work-section > header { padding: var(--space-2) 0; }
+.app-shell .my-work-section > header b { font-size: var(--type-section); font-weight: 600; }
+.app-shell :is(.my-work-item, .my-work-routine) { padding: var(--space-3) 0; background: transparent; }
+.app-shell .my-work-item:hover { background: var(--bg-hover); }
+.app-shell .my-work-routine p { font-size: var(--type-body); line-height: 1.6; }
+.app-shell .my-work-sort { padding: var(--space-1); border-radius: var(--radius-control); box-shadow: none; background: transparent; }
+.app-shell .my-work-sort button[aria-pressed="true"] { box-shadow: none; }
+.app-shell :is(.routine-toolbar, .scrum-toolbar) { padding-block: var(--space-3); gap: var(--space-4); flex-wrap: wrap; }
+.app-shell .routine-guide-grid { gap: var(--space-4); }
+.app-shell .scrum-column > header { height: auto; min-height: var(--row-height); padding: var(--space-3); }
+.app-shell .scrum-task-list > button { padding: var(--space-3); }
+.app-shell .trash-section-title { padding: var(--space-4) 0; background: transparent; }
+
+.app-shell .daily-workspace { background: transparent; }
+.app-shell .daily-editor { padding: var(--space-6) var(--space-6) var(--space-6) 0; }
+.app-shell .daily-rollup { padding: var(--space-6) 0 var(--space-6) var(--space-6); }
+.app-shell :is(.daily-editor, .daily-rollup) > header { margin-bottom: var(--space-6); }
+.app-shell :is(.daily-editor, .daily-rollup) > header h2 { font-weight: 600; }
+.app-shell :is(.daily-editor > header p, .daily-rollup > header p, .daily-skip-toggle,
+  .daily-skip-toggle small, .daily-task-picker > header span, .daily-new-task > header span,
+  .daily-none, .daily-task-option small, .daily-member-card p, .daily-member-card > header small,
+  .daily-empty, .daily-dri-alert p) { font-size: var(--type-label); line-height: 1.6; }
+.app-shell .daily-skip-panel { gap: var(--space-3); padding: 0 0 var(--space-4); border-width: 0 0 1px; border-radius: 0; }
+.app-shell .daily-skip-panel:not(.active) { background: transparent; }
+.app-shell .daily-skip-panel legend { padding: 0 0 var(--space-2); font-weight: 500; }
+.app-shell .daily-notes { gap: var(--space-4); }
+.app-shell :is(.daily-task-picker, .daily-new-task) { margin-top: var(--space-6); border-width: 0 0 1px; border-radius: 0; background: transparent; }
+.app-shell :is(.daily-task-picker, .daily-new-task) > header { padding: var(--space-4) 0; flex-wrap: wrap; }
+.app-shell .daily-task-groups h3 { padding: var(--space-3) 0; background: transparent; font-weight: 600; }
+.app-shell :is(.daily-task-option b, .daily-member-card > header b) { white-space: normal; overflow-wrap: anywhere; }
+.app-shell .daily-new-task > div { padding: var(--space-4) 0; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); }
+.app-shell .daily-dri-alert { border-radius: var(--radius-control); padding: var(--space-4); }
+.app-shell .daily-member-card { border-radius: var(--radius-control); }
+.app-shell .daily-rollup > div { gap: var(--space-3); }
+
+.app-shell .kr-data-guide { padding: var(--space-4) 0; border-width: 0 0 1px; border-radius: 0; background: transparent; }
+.app-shell .kr-data-list { gap: var(--space-3); }
+.app-shell .kr-data-card { padding: var(--space-4); border-radius: var(--radius-control); box-shadow: none; }
+.app-shell .kr-data-card dl { border-width: 1px 0; border-radius: 0; }
+.app-shell .kr-data-unconnected { padding-inline: 0; border-top: 1px solid var(--border-default); border-radius: 0; background: transparent; }
+.app-shell :is(.kr-data-guide p, .kr-data-card dt, .kr-data-card dd,
+  .kr-data-unconnected p, .recommendation-row p, .recommendation-row small,
+  .review-progress > div, .review-list > span) { font-size: var(--type-label); line-height: 1.6; }
+.app-shell .recommendation-row { gap: var(--space-3); padding: var(--space-4) 0; grid-template-columns: 2rem minmax(0, 1fr) var(--control-height); }
+.app-shell .recommendation-row h3 { overflow-wrap: anywhere; }
+.app-shell .review-progress { padding-block: var(--space-6); }
+.app-shell .review-list > span { height: auto; min-height: var(--row-height); }
+
+/* Conversation content is text, not nested presentation cards. */
+.app-shell .home-okr-chat { max-width: 52rem; margin-inline: auto; padding: 0; gap: var(--space-6); }
+.app-shell .home-okr-chat > header { padding-bottom: var(--space-4); border-bottom: 1px solid var(--border-default); flex-wrap: wrap; }
+.app-shell :is(.home-chat-surface, .chat-thread) { gap: var(--space-4); }
+.app-shell .home-okr-chat p { font-size: var(--type-body); line-height: 1.6; }
+.app-shell .home-okr-chat .assistant-message { padding: var(--space-3) 0; background: transparent; color: var(--text-primary); border-radius: 0; }
+.app-shell .home-okr-chat .user-message { padding: var(--space-3) var(--space-4); background: var(--bg-subtle); color: var(--text-primary); border-radius: var(--radius-control); }
+.app-shell .home-draft-fields { padding-top: var(--space-6); gap: var(--space-4); }
+.app-shell .chat-input label { font-size: var(--type-label); }
+
+/* Settings and drawers share the same rhythm without changing their controls. */
+:is(.property-panel, .workspace-settings-panel, .integration-modal, .ai-connections) { background: var(--bg-page); }
+.property-panel > header,
+.workspace-settings-header,
+.integration-modal > header,
+.ai-connections > header { height: auto; min-height: var(--row-height); padding: var(--space-4) var(--space-6); gap: var(--space-4); align-items: flex-start; }
+:is(.property-panel, .integration-modal, .ai-connections) > header > div { min-width: 0; }
+.workspace-settings-panel { grid-template-rows: auto minmax(0, 1fr); }
+.workspace-settings-layout { grid-template-columns: 12rem minmax(0, 1fr); }
+.workspace-settings-header p { white-space: normal; overflow-wrap: anywhere; }
+.workspace-settings-nav { padding: var(--space-4) var(--space-2); gap: var(--space-1); background: var(--bg-surface); }
+.workspace-settings-nav button.active { background: var(--bg-hover); box-shadow: none; }
+.workspace-settings-content { background: var(--bg-page); }
+.workspace-profile-card { margin: var(--space-6); padding: 0 0 var(--space-6); border-width: 0 0 1px; border-radius: 0; background: transparent; box-shadow: none; }
+.workspace-profile-card :is(span, small) { font-size: var(--type-label); line-height: 1.6; }
+.workspace-profile-card b { white-space: normal; overflow-wrap: anywhere; }
+.workspace-settings-section > header,
+.workspace-settings-section-header,
+.workspace-management-heading { padding: var(--space-6); gap: var(--space-4); flex-wrap: wrap; }
+.workspace-management-heading > div { min-width: 0; flex: 1 1 15rem; }
+.workspace-settings-section > header h3,
+.workspace-settings-section-header h3,
+.workspace-management-heading h3 { font-size: var(--type-section); font-weight: 600; }
+.workspace-settings-section > header p,
+.workspace-settings-section-header p,
+.workspace-management-heading p,
+.property-panel header p,
+.integration-modal > header p,
+.ai-connections > header p,
+.workspace-backups .backup-header p { font-size: var(--type-label); line-height: 1.6; }
+.workspace-settings-section > header > span,
+.workspace-settings-section-header > span,
+.workspace-management-heading > div > span { color: var(--text-secondary); font-weight: 500; }
+.workspace-backups { padding: var(--space-6); }
+.workspace-backups .backup-list :is(span, small) { font-size: var(--type-label); }
+.workspace-settings-note { margin: var(--space-4) var(--space-6); padding: var(--space-3) 0; border-width: 0 0 1px; border-radius: 0; background: transparent; }
+.workspace-settings-note p { font-size: var(--type-label); line-height: 1.6; }
+.task-detail-fields { padding: var(--space-4) var(--space-6); gap: var(--space-4); background: transparent; }
+.project-detail-panel { background: var(--bg-page); }
+.property-panel .settings-section h3 { padding: var(--space-4) var(--space-6) var(--space-2); color: var(--text-primary); font-size: var(--type-section); font-weight: 600; }
+.property-panel :is(.settings-account-card, .marketing-email-summary) { margin: var(--space-3) var(--space-6) var(--space-4); padding: 0; border: 0; border-radius: 0; background: transparent; }
+.property-panel :is(.settings-account-card small, .appearance-settings > p, .marketing-email-summary small) { font-size: var(--type-label); line-height: 1.6; }
+.property-panel .theme-picker { gap: var(--space-3); margin-inline: var(--space-6); }
+.property-panel .appearance-settings > p { margin-inline: var(--space-6); }
+.property-panel .settings-account-actions { padding: var(--space-4) var(--space-6); }
+.project-property-manager > header,
+.project-template-manager > header { flex-wrap: wrap; gap: var(--space-4); align-items: flex-start; padding: var(--space-4) var(--space-6); }
+.project-property-manager > header > div { min-width: 0; flex: 1 1 15rem; }
+.project-property-manager > header > button { flex: 0 0 auto; }
+.project-property-item { grid-template-columns: minmax(0, 1fr) max-content; padding-block: var(--space-2); }
+.project-property-item :is(b, small) { white-space: normal; overflow-wrap: anywhere; }
+.project-property-editor, .project-property-create { background: transparent; }
+.workspace-project-tabs { gap: var(--space-3); flex-wrap: wrap; }
+.workspace-project-tabs button { padding-inline: 0; border-width: 0 0 2px; border-color: transparent; border-radius: 0; background: transparent; }
+.workspace-project-tabs button.active { border-bottom-color: var(--text-primary); background: transparent; box-shadow: none; }
+
+.workspace-integration-section .workspace-integration-pane { padding: var(--space-6); gap: var(--space-6); }
+.workspace-integration-section .integration-service-card { padding: 0 0 var(--space-6); border-width: 0 0 1px; border-radius: 0; background: transparent; box-shadow: none; }
+.workspace-integration-section .integration-service-card > header { gap: var(--space-3); }
+.workspace-integration-section .integration-service-card > header p { font-size: var(--type-label); line-height: 1.6; }
+.workspace-integration-section .bot-accordion-panel { background: transparent; }
+.workspace-integration-section .management-bot-config.compact { border: 0; border-radius: 0; background: transparent; }
+.workspace-integration-section .slack-one-button-connect { background: transparent; border-width: 0 0 1px; border-radius: 0; padding: var(--space-4) 0; }
+.workspace-integration-section .slack-automation-form { background: transparent; border-radius: var(--radius-control); box-shadow: none; }
+.ai-connections .ai-connection-panel { padding: var(--space-6); }
+.ai-connections p { font-size: var(--type-label); line-height: 1.6; }
+.ai-connections .ai-paste-instruction { border-width: 1px; }
+.ai-connections .ai-connection-help { padding-inline: 0; border-width: 1px 0 0; border-radius: 0; }
+
+.app-shell .billing-hero { background: transparent; border: 0; border-radius: 0; box-shadow: none; }
+.app-shell .billing-page > section { border-radius: 0; box-shadow: none; }
+.app-shell .billing-page section > header p { font-size: var(--type-body); line-height: 1.6; }
+.project-review-page .review-intro { font-size: var(--type-body); line-height: 1.6; }
+.project-review-page :is(.review-help, .review-path, dt) { font-size: var(--type-label); line-height: 1.6; }
+
+/* Keep dense work usable when text grows, without shrinking its typography. */
+@media (max-width: 980px) {
+  .app-shell .page-body,
+  .app-shell .page-body:has(.okr-document) { padding: var(--space-6) var(--space-4) calc(5.75rem + env(safe-area-inset-bottom)); }
+  .app-shell .workspace-topbar { padding-inline: var(--space-4); }
+  .app-shell .sidebar { height: auto; padding: var(--space-1) var(--space-1) env(safe-area-inset-bottom); }
+  .app-shell .sidebar .mobile-navigation { height: auto; min-height: 3.25rem; margin: 0; gap: 0; }
+  .app-shell .mobile-navigation .nav-item { height: auto; gap: var(--space-1); padding: var(--space-1); }
+  .workspace-settings-layout { grid-template-columns: minmax(0, 1fr); }
+  .app-shell :is(.page-header, .page-create-actions, .project-page-actions) { gap: var(--space-3); }
+  .app-shell .home-okr-chat { max-width: 100%; }
+  .app-shell .project-tabs { gap: var(--space-3); flex-wrap: wrap; }
+  .app-shell :is(.daily-editor, .daily-rollup) { padding: var(--space-6) 0; }
+}
+@media (max-width: 640px) {
+  .property-panel > header,
+  .workspace-settings-header,
+  .integration-modal > header,
+  .ai-connections > header { padding: var(--space-4); }
+  .workspace-settings-panel { grid-template-rows: auto minmax(0, 1fr); }
+  .workspace-settings-section > header,
+  .workspace-settings-section-header,
+  .workspace-management-heading,
+  .workspace-backups,
+  .project-property-manager > header,
+  .project-template-manager > header,
+  .workspace-integration-section .workspace-integration-pane,
+  .ai-connections .ai-connection-panel { padding: var(--space-4); }
+  .workspace-settings-note { margin-inline: var(--space-4); }
+  .workspace-profile-card { margin: var(--space-4); }
+  .task-detail-fields { padding: var(--space-4); }
+  .property-panel :is(.settings-section h3, .settings-account-actions) { padding-inline: var(--space-4); }
+  .property-panel :is(.settings-account-card, .marketing-email-summary, .theme-picker, .appearance-settings > p) { margin-inline: var(--space-4); }
+  .app-shell .home-okr-chat .user-message { max-width: 100%; }
+  .app-shell .routine-card header { grid-template-columns: var(--control-height) minmax(0, 1fr) var(--control-height); }
+  .app-shell .routine-card header > svg { display: none; }
+  .app-shell .routine-card footer { flex-wrap: wrap; }
+  .app-shell .routine-assignee { min-width: 0; width: 100%; }
+}

@@ -1,0 +1,16 @@
+.daily-task-picker > summary { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) 0; cursor: pointer; list-style: none; }
+.daily-task-picker > summary::-webkit-details-marker { display: none; }
+.daily-task-picker > summary > span { min-width: 0; display: grid; gap: 2px; }
+.daily-task-picker > summary b { font-weight: 600; }
+.daily-task-picker > summary small { color: var(--muted); font-size: var(--type-meta); }
+.daily-task-picker > summary svg { flex: 0 0 auto; transition: transform 160ms ease; }
+.daily-task-picker[open] > summary svg { transform: rotate(180deg); }
+.daily-picker-panel { border-top: 1px solid var(--line); }
+.daily-picker-search { min-height: 44px; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; }
+.daily-picker-search input { width: 100%; min-width: 0; height: 40px; border: 0; background: transparent; color: var(--ink); font-size: var(--type-body); }
+.daily-picker-search input:focus { outline: 0; }
+.daily-task-option[data-kind="project"] b { font-weight: 400; }
+.daily-task-option.conflict { background: var(--danger-bg); }
+.daily-picker-error { margin: 0 0 var(--space-3); color: var(--red); font-size: var(--type-meta); }
+.daily-submission-summary > b { display: block; margin: var(--space-3) 0 var(--space-2); font-size: var(--type-label); font-weight: 600; }
+.daily-submission-summary > b:first-child { margin-top: 0; }

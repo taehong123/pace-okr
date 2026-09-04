@@ -7,7 +7,7 @@ const headers = { "Cache-Control": "private, no-store" };
 async function authorize(request: Request) {
   const auth = await authorizeRequest(request);
   if (auth instanceof Response) return auth;
-  const requested = request.headers.get("x-okri-workspace-id");
+  const requested = request.headers.get("x-okrptr-workspace-id");
   if (requested && requested !== auth.ownerId) return Response.json({ error: "워크스페이스 접근 권한이 없습니다." }, { status: 403, headers });
   if (auth.role !== "owner" && auth.role !== "admin") return Response.json({ error: "백업은 Owner 또는 Admin만 관리할 수 있습니다." }, { status: 403, headers });
   const member = await env.DB.prepare("SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND status = 'active' AND role IN ('owner','admin')")

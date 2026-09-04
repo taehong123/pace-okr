@@ -8,6 +8,7 @@ export const workspaces = sqliteTable(
     name: text("name").notNull(),
     ownerUserId: text("owner_user_id").notNull(),
     kind: text("kind").notNull().default("team"),
+    messageLanguage: text("message_language").notNull().default("ko"),
     deletionRequestedAt: text("deletion_requested_at"),
     scheduledDeletionAt: text("scheduled_deletion_at"),
     deletionRequestedByUserId: text("deletion_requested_by_user_id"),
@@ -24,6 +25,28 @@ export const workspaces = sqliteTable(
     index("idx_workspaces_scheduled_deletion").on(table.scheduledDeletionAt),
   ],
 );
+
+export const workspaceIdentitySettings = sqliteTable("workspace_identity_settings", {
+  workspaceId: text("workspace_id").primaryKey().references(() => workspaces.id, { onDelete: "cascade" }),
+  address: text("address"),
+  revision: integer("revision").notNull().default(0),
+  updatedAt: text("updated_at").notNull(),
+});
+
+// Old addresses remain reserved after deletion, so shared links cannot change owners.
+export const workspaceAddresses = sqliteTable("workspace_addresses", {
+  address: text("address").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  index("idx_workspace_addresses_workspace").on(table.workspaceId),
+  check("workspace_addresses_lowercase", sql`${table.address} = lower(${table.address})`),
+]);
+
+export const workspaceIdentityGuards = sqliteTable("workspace_identity_guards", {
+  id: text("id").primaryKey(),
+  valid: integer("valid").notNull(),
+}, (table) => [check("workspace_identity_guard_valid", sql`${table.valid} = 1`)]);
 
 export const appMigrations = sqliteTable(
   "app_migrations",
@@ -81,6 +104,9 @@ export const users = sqliteTable(
   {
     id: text("id").primaryKey(),
     emailNormalized: text("email_normalized").notNull(),
+    languagePreference: text("language_preference").notNull().default("ko"),
+    resolvedLanguage: text("resolved_language").notNull().default("ko"),
+    languageRevision: integer("language_revision").notNull().default(0),
     displayName: text("display_name").notNull().default(""),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -605,6 +631,8 @@ export const dailyScrums = sqliteTable(
     ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
     memberId: text("member_id").references(() => workspaceMembers.id, { onDelete: "cascade" }),
     scrumDate: text("scrum_date").notNull(),
+    workSelectionJson: text("work_selection_json").notNull().default("[]"),
+    yesterdayWorkSelectionJson: text("yesterday_work_selection_json").notNull().default("[]"),
     yesterdayNote: text("yesterday_note").notNull().default(""),
     todayNote: text("today_note").notNull().default(""),
     blockersNote: text("blockers_note").notNull().default(""),
@@ -652,6 +680,9 @@ export const dailySubmissions = sqliteTable(
     memberEmail: text("member_email").notNull().default(""),
     scrumDate: text("scrum_date").notNull(),
     version: integer("version").notNull(),
+    workSnapshotJson: text("work_snapshot_json").notNull().default("[]"),
+    yesterdayWorkSnapshotJson: text("yesterday_work_snapshot_json").notNull().default("[]"),
+    requestId: text("request_id"),
     yesterdayNote: text("yesterday_note").notNull().default(""),
     todayNote: text("today_note").notNull().default(""),
     blockersNote: text("blockers_note").notNull().default(""),
@@ -663,6 +694,9 @@ export const dailySubmissions = sqliteTable(
   },
   (table) => [
     uniqueIndex("idx_daily_submissions_owner_member_date_version").on(table.ownerId, table.memberId, table.scrumDate, table.version),
+    uniqueIndex("idx_daily_submissions_owner_member_request")
+      .on(table.ownerId, table.memberId, table.requestId)
+      .where(sql`${table.requestId} IS NOT NULL`),
     index("idx_daily_submissions_owner_date").on(table.ownerId, table.scrumDate, table.submittedAt),
   ],
 );
@@ -687,6 +721,19 @@ export const dailyTaskSnapshots = sqliteTable(
   ],
 );
 
+export const routinePropertyDefinitions = sqliteTable("routine_property_definitions", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  name: text("name").notNull(),
+  type: text("type").notNull(),
+  options: text("options").notNull().default("[]"),
+  defaultValue: text("default_value").notNull().default("null"),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [uniqueIndex("idx_routine_properties_owner_name").on(table.ownerId, sql`lower(${table.name})`)]);
+
 export const routines = sqliteTable(
   "routines",
   {
@@ -699,6 +746,7 @@ export const routines = sqliteTable(
     triggerPoint: text("trigger_point").notNull().default(""),
     actionPlace: text("action_place").notNull().default(""),
     actionSteps: text("action_steps").notNull().default(""),
+    propertiesJson: text("properties_json").notNull().default("{}"),
     cadence: text("cadence").notNull().default("daily"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     sortOrder: integer("sort_order").notNull().default(0),
@@ -836,6 +884,7 @@ export const slackAutomations = sqliteTable(
     triggerStatus: text("trigger_status").notNull().default(""),
     channelId: text("channel_id").notNull(),
     messageTemplate: text("message_template").notNull(),
+    messageTemplateKind: text("message_template_kind").notNull().default("custom"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     lastTriggeredAt: text("last_triggered_at"),
     lastDeliveryStatus: text("last_delivery_status").notNull().default("never"),
@@ -869,6 +918,34 @@ export const slackAutomationDeliveries = sqliteTable(
     uniqueIndex("idx_slack_automation_deliveries_event").on(table.eventKey),
     index("idx_slack_automation_deliveries_owner_created").on(table.ownerId, table.createdAt),
     index("idx_slack_automation_deliveries_automation_created").on(table.automationId, table.createdAt),
+  ],
+);
+
+// Durable claims for channel bots. Scheduled daily DMs retain their own receipts.
+export const slackBotDeliveries = sqliteTable(
+  "slack_bot_deliveries",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    botKind: text("bot_kind").notNull(),
+    subjectId: text("subject_id").notNull(),
+    eventKey: text("event_key").notNull(),
+    connectionKey: text("connection_key").notNull(),
+    policy: text("policy").notNull(),
+    payload: text("payload").notNull(),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    retryAt: text("retry_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    messageTs: text("message_ts"),
+    lastError: text("last_error").notNull().default(""),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_slack_bot_deliveries_event").on(table.ownerId, table.botKind, table.eventKey),
+    index("idx_slack_bot_deliveries_due").on(table.status, table.retryAt),
+    index("idx_slack_bot_deliveries_owner").on(table.ownerId, table.createdAt),
   ],
 );
 
@@ -984,6 +1061,8 @@ export const slackDailyReminders = sqliteTable(
     slackUserId: text("slack_user_id").notNull(),
     dmChannelId: text("dm_channel_id").notNull(),
     scheduledMessageId: text("scheduled_message_id").notNull(),
+    messageLanguage: text("message_language").notNull().default("ko"),
+    messageText: text("message_text").notNull().default("[데일리 봇] 오늘의 데일리를 작성해 주세요."),
     postAt: integer("post_at").notNull(),
     blockId: text("block_id").notNull(),
     botUserId: text("bot_user_id").notNull().default(""),
@@ -1030,33 +1109,23 @@ export const slackEventReceipts = sqliteTable(
   (table) => [index("idx_slack_event_receipts_received").on(table.receivedAt)],
 );
 
-export const slackProjectDrafts = sqliteTable(
-  "slack_project_drafts",
+export const slackWorkCommandOperations = sqliteTable(
+  "slack_work_command_operations",
   {
-    id: text("id").primaryKey(),
+    requestId: text("request_id").primaryKey(),
     ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
     teamId: text("team_id").notNull(),
     slackUserId: text("slack_user_id").notNull(),
-    userId: text("user_id").notNull(),
-    channelId: text("channel_id").notNull(),
-    messageTs: text("message_ts").notNull(),
-    threadTs: text("thread_ts"),
-    sourceRef: text("source_ref").notNull(),
-    seedJson: text("seed_json").notNull(),
-    formJson: text("form_json").notNull().default("{}"),
-    inputJson: text("input_json").notNull().default("{}"),
-    status: text("status").notNull().default("draft"),
-    viewId: text("view_id"),
-    operationId: text("operation_id"),
-    itemId: text("item_id"),
-    lastError: text("last_error").notNull().default(""),
-    expiresAt: text("expires_at").notNull(),
-    createdAt: text("created_at").notNull(),
-    updatedAt: text("updated_at").notNull(),
+    command: text("command").notNull(),
+    targetId: text("target_id"),
+    status: text("status").notNull().default("processing"),
+    resultJson: text("result_json").notNull().default("{}"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
-    uniqueIndex("idx_slack_project_drafts_source").on(table.ownerId, table.sourceRef),
-    index("idx_slack_project_drafts_expiry").on(table.expiresAt),
+    index("idx_slack_work_commands_owner_created").on(table.ownerId, table.createdAt),
+    index("idx_slack_work_commands_actor").on(table.teamId, table.slackUserId, table.createdAt),
   ],
 );
 
@@ -1089,6 +1158,12 @@ export const emailMarketingConsents = sqliteTable(
   },
   (table) => [index("idx_email_marketing_consents_eligibility").on(table.marketingDataConsent, table.advertisingEmailConsent, table.reaffirmAfter)],
 );
+
+export const emailMarketingPromptState = sqliteTable("email_marketing_prompt_state", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  shownAt: text("shown_at"),
+  respondedAt: text("responded_at"),
+});
 
 export const emailMarketingConsentEvents = sqliteTable(
   "email_marketing_consent_events",

@@ -3,11 +3,14 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { syncDueKrDataConnectionsWithDb } from "@/lib/kr-data-sync";
 import { runDueWorkspaceBackups } from "@/lib/workspace-backups";
+import { workspaceSubdomainRedirect } from "@/lib/workspace-address";
+import { withPublicErrorDetails } from "@/lib/api-error";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
   WORKSPACE_AVATARS: R2Bucket;
+  WORKSPACE_SUBDOMAINS_ENABLED?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -71,6 +74,8 @@ function withCacheHeaders(request: Request, response: Response, pathname: string
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const workspaceEntry = workspaceSubdomainRedirect(request, env.WORKSPACE_SUBDOMAINS_ENABLED === "true");
+    if (workspaceEntry) return workspaceEntry;
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
@@ -91,6 +96,7 @@ const worker = {
 
     const response = await handler.fetch(request, env, ctx);
     if (cacheableRequest && response.ok) return withCacheHeaders(request, response, url.pathname);
+    if (url.pathname.startsWith("/api/") && !response.ok) return withPublicErrorDetails(response);
     return response;
   },
   scheduled(_controller: ScheduledController, _env: Env, ctx: ExecutionContext) {
@@ -102,6 +108,8 @@ const worker = {
     ]));
     // Keep backups alive even if an unrelated integration job rejects.
     ctx.waitUntil(runDueWorkspaceBackups(_env));
+    ctx.waitUntil(import("@/lib/slack-daily").then(({ runDueSlackDailyReminders }) => runDueSlackDailyReminders()));
+    ctx.waitUntil(import("@/lib/slack-bot-delivery").then(({ runDueSlackBotDeliveries }) => runDueSlackBotDeliveries(_env.DB)));
   },
 };
 
