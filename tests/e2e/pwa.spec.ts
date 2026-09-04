@@ -18,9 +18,13 @@ test.describe("download route and installation controls", () => {
     await installApiMocks(page);
     await page.goto("/?view=my_work");
     await page.evaluate(() => {
-      window.__installPromptCalls = 0;
+      window.sessionStorage.setItem("installPromptCalls", "0");
       const event = Object.assign(new Event("beforeinstallprompt", { cancelable: true }), {
-        prompt: async () => { window.__installPromptCalls += 1; return { outcome: "accepted" }; },
+        prompt: async () => {
+          const calls = Number(window.sessionStorage.getItem("installPromptCalls") ?? "0");
+          window.sessionStorage.setItem("installPromptCalls", String(calls + 1));
+          return { outcome: "accepted" };
+        },
       });
       window.dispatchEvent(event);
     });
@@ -29,7 +33,7 @@ test.describe("download route and installation controls", () => {
     await expect(entry).toHaveAttribute("href", "/download");
     await entry.click();
     await expect(page).toHaveURL(/\/download$/);
-    expect(await page.evaluate(() => window.__installPromptCalls)).toBe(0);
+    expect(await page.evaluate(() => Number(window.sessionStorage.getItem("installPromptCalls")))).toBe(0);
     await expect(page.getByRole("heading", { name: "OKRI 데스크톱 앱" })).toBeVisible();
   });
 

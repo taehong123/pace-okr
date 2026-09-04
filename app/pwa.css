@@ -12,10 +12,15 @@
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border-control);
   border-radius: var(--radius-control);
+  background: var(--button-secondary-bg);
+  color: var(--button-secondary-fg);
   font-size: var(--type-label);
   font-weight: 500;
   cursor: pointer;
 }
+.app-install-login:hover { background: var(--button-secondary-hover-bg); color: var(--button-secondary-hover-fg); }
+.app-install-login:active { background: var(--button-secondary-active-bg); color: var(--button-secondary-active-fg); }
+.app-install-login:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
 .app-install-error {
   margin: var(--space-3);
   color: var(--danger-fg);
@@ -29,3 +34,13 @@
   padding-block: var(--space-2);
 }
 .mobile-menu-list .app-install-button span { white-space: normal; }
+
+@media (max-width: 640px) {
+  .landing-login .app-install-login {
+    display: flex;
+    min-height: 44px;
+    max-width: none;
+    margin: 0 min(var(--space-4), 16px) min(var(--space-3), 12px);
+    padding: min(var(--space-2), 8px) min(var(--space-3), 12px);
+  }
+}

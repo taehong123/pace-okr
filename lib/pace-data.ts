@@ -3334,6 +3334,7 @@ async function verifyInvitationEmailConfigured() {
 function invitationEmailSettings(runtime: RuntimeEnv) {
   const sender = runtime.OKRI_INVITE_FROM || runtime.OKRPTR_INVITE_FROM;
   if (sender === "OKRI <invite@send.okri.ai>") return { sender, domain: "send.okri.ai" };
+  if (sender === "OKRI <invite@send.okrptr.com>") return { sender, domain: "send.okrptr.com" };
   if (sender === "OKRPTR <invite@send.okrptr.com>") return { sender, domain: "send.okrptr.com" };
   return null;
 }

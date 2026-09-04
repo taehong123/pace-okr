@@ -19,7 +19,7 @@ const platformCopy = {
       "브라우저 확인 창에서 설치를 선택합니다.",
     ],
     help: "Chrome 설치 도움말",
-    helpUrl: "https://support.google.com/chrome/answer/9658361?co=GENIE.Platform%3DDesktop&hl=ko",
+    helpUrl: "https://support.google.com/chrome/answer/9658361",
     action: "Windows에 OKRI 설치",
   },
   mac: {
@@ -31,7 +31,7 @@ const platformCopy = {
       "브라우저 확인 창에서 추가 또는 설치를 선택합니다.",
     ],
     help: "Safari 설치 도움말",
-    helpUrl: "https://support.apple.com/ko-kr/104996",
+    helpUrl: "https://support.apple.com/104996",
     action: "Mac에 OKRI 설치",
   },
 } as const;

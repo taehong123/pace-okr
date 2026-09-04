@@ -6,6 +6,7 @@ const sourceRoot = join(process.cwd(), "dist", "server", "prerendered-routes");
 const clientRoot = join(process.cwd(), "dist", "client");
 const routes = [
   ["index.html", "index.html"],
+  ["download.html", join("download", "index.html")],
   ["privacy.html", join("privacy", "index.html")],
   ["terms.html", join("terms", "index.html")],
   ["404.html", "404.html"],
