@@ -670,20 +670,39 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
 });
 
 test("keeps Task row structure and the side panel while allowing long titles to wrap", async () => {
-  const [page, styles] = await Promise.all([
+  const [page, styles, paceData, mcpRoute] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/mcp/route.ts", import.meta.url), "utf8"),
   ]);
+  const taskList = page.match(/function TaskListView[\s\S]*?function AsyncState/)?.[0] ?? "";
+  const taskDetail = page.match(/function TaskDetailPanel[\s\S]*?function LineageRow/)?.[0] ?? "";
+  const projectDetail = page.match(/function ProjectPageView[\s\S]*?function ProjectDataSection/)?.[0] ?? "";
 
   assert.match(page, /aria-label=\{t\("Task 목록"\)\}/);
   assert.match(page, /task-list-inline-meta/);
   assert.doesNotMatch(page, /task-list-status/);
   assert.match(page, /aria-label=\{t\("Task 정보"\)\}/);
-  assert.match(page, /onPatch\(\{ status:/);
-  assert.match(page, /onPatch\(\{ priority:/);
+  assert.match(taskList, /taskCompletionPatch\(entry\.status\)/);
+  assert.doesNotMatch(taskList, /statusLabel\(entry\.status\)/);
+  assert.match(taskDetail, /task-completion-toggle/);
+  assert.match(taskDetail, /onPatch\(\{ priority:/);
+  assert.doesNotMatch(taskDetail, /statusLabels|task-progress-field|type="range"/);
+  assert.match(projectDetail, /project-task-completion/);
+  assert.doesNotMatch(projectDetail, /project-task-progress|task\.progress/);
+  assert.match(paceData, /export function normalizeTaskStatus/);
+  assert.match(paceData, /kind === "task"[\s\S]*?normalizeTaskStatus\(input\.status\)/);
+  assert.match(paceData, /current\.kind === "task"[\s\S]*?delete normalizedPatch\.progress/);
+  assert.match(paceData, /const status = item\.kind === "task"[\s\S]*?normalizeTaskStatus/);
+  assert.match(paceData, /item\.kind === "task" && status !== "archived" \? status === "done" \? 100 : 0/);
+  assert.match(mcpRoute, /"set_task_completed"/);
+  assert.match(mcpRoute, /Tasks use only incomplete\/complete/);
   assert.match(styles, /\.task-list-open[^}]*grid-template-columns:[^}]*minmax\(260px, \.85fr\)/s);
   assert.match(styles, /\.task-list-open b, \.task-list-inline-meta[^}]*white-space: normal/s);
   assert.match(styles, /\.task-detail-panel \{ width: min\(36rem, 100vw\); \}/);
+  assert.match(styles, /\.task-completion-toggle/);
+  assert.match(styles, /\.project-task-row[^}]*grid-template-columns:[^}]*76px/s);
 });
 
 test("defaults unlinked web Tasks to General and exposes direct bulk deletion", async () => {

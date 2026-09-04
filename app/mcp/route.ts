@@ -341,6 +341,7 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
         [
           WORKFLOW_INSTRUCTIONS,
           "Use manage_project as the primary Project tool. Keep proposal, explicit approval, creation, edits, recoverable deletion, and restoration in the same conversation. Never ask the user to open a new chat, reactivate or mention OKRPTR, copy a review ID, or visit a browser approval page. Internal IDs stay internal. After the user approves the exact proposal, call manage_project again with action=confirm immediately.",
+          "Task lifecycle is binary. Use set_task_completed to complete or reopen a Task; never apply Project workflow states or manual progress percentages to a Task.",
           `Workspace capture rule: ${rules.captureInstruction}`,
           `Workspace structure rule: ${rules.structureInstruction}`,
           `Workspace routine rule: ${rules.routineInstruction}`,
@@ -561,10 +562,10 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
         routine_id: memberIdInput.optional().describe("Task-only alternative to parent_id for an independent Routine"),
         cycle_id: memberIdInput.optional().describe("Objective's selected OKR file; children inherit their parent's cycle when omitted"),
         description: z.string().optional(),
-        status: z.enum(ITEM_STATUSES).optional(),
+        status: z.enum(ITEM_STATUSES).optional().describe("Workflow status for OKR items and Projects. Tasks are binary: completed statuses become done and every other status becomes todo."),
         priority: z.enum(ITEM_PRIORITIES).optional(),
         cadence: z.enum(ITEM_CADENCES).optional(),
-        progress: z.number().min(0).max(100).optional(),
+        progress: z.number().min(0).max(100).optional().describe("Progress for Key Results and Projects. Task progress is derived from completion and is not edited directly."),
         due_date: dueDateInput.optional(),
         template_id: z.string().optional().describe("Optional Project body template ID. A Project review result may provide an internal same-tool confirmation value for this existing field; reuse it only after explicit approval."),
         properties: z.record(z.string(), propertyValueSchema).optional().describe("Project-only custom values keyed by property name"),
@@ -790,15 +791,15 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
     "update_item",
     {
       title: "Update an OKRPTR item",
-      description: "Change the title, status, progress, priority, cadence, or due date of an existing item. Use list_items first when the ID is unknown.",
+      description: "Change an existing item. Projects and OKR items can use workflow status and progress. Tasks use only incomplete/complete; prefer set_task_completed for that change. Use list_items first when the ID is unknown.",
       inputSchema: {
         id: z.string(),
         title: z.string().trim().min(1).max(500).optional(),
         description: z.string().optional(),
-        status: z.enum(ITEM_STATUSES).optional(),
+        status: z.enum(ITEM_STATUSES).optional().describe("For Tasks, done marks complete and every other value is normalized to todo."),
         priority: z.enum(ITEM_PRIORITIES).optional(),
         cadence: z.enum(ITEM_CADENCES).optional(),
-        progress: z.number().min(0).max(100).optional(),
+        progress: z.number().min(0).max(100).optional().describe("Ignored for Tasks; Task progress is derived from completion."),
         due_date: dueDateInput.nullable().optional(),
         properties: z.record(z.string(), propertyValueSchema).optional().describe("Project-only custom values keyed by property name"),
         dri_member_id: z.string().nullable().optional(),
@@ -836,6 +837,30 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
       return {
         structuredContent: { item: serialized },
         content: [{ type: "text", text: `Updated "${item.title}".` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "set_task_completed",
+    {
+      title: "Complete or reopen a Task",
+      description: "Set one Task to complete or incomplete. This is the only Task lifecycle change; Project workflow statuses remain separate.",
+      inputSchema: {
+        id: z.string().describe("Existing Task ID. Use list_items when the ID is unknown."),
+        completed: z.boolean(),
+      },
+      outputSchema: { item: itemOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ id, completed }) => {
+      const current = await getItem(ownerId, id);
+      if (!current || current.kind !== "task") throw new Error("Task not found");
+      const item = await updateItem(ownerId, id, { status: completed ? "done" : "todo", source: "mcp" });
+      const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
+      return {
+        structuredContent: { item: serialized },
+        content: [{ type: "text", text: completed ? `Completed Task "${item.title}".` : `Reopened Task "${item.title}".` }],
       };
     },
   );

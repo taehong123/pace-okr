@@ -127,6 +127,34 @@ test('Viewer sees a consistent read-only Project without interactive assignment 
   expect(writes.filter(write => /^\/api\/(items|item-assignments|property-values|project-)/.test(write.path))).toEqual([]);
 });
 
+test('Task uses one completion control instead of Project workflow status and progress', async ({ page }, info) => {
+  await installApiMocks(page, { withRoutine: true });
+  const writes: Record<string, unknown>[] = [];
+  let task = structuredClone(bootstrap.items.find(item => item.id === 'task-1')!);
+  await page.route('**/api/items', async route => {
+    if (route.request().method() !== 'PATCH') return route.fallback();
+    const patch = route.request().postDataJSON() as Record<string, unknown>;
+    writes.push(patch);
+    task = { ...task, ...patch };
+    return json(route, { item: task });
+  });
+
+  await page.goto('/?view=inbox&task=task-1');
+  const panel = page.locator('.task-detail-panel');
+  await expect(panel.getByRole('combobox', { name: '상태', exact: true })).toHaveCount(0);
+  await expect(panel.locator('input[type="range"]')).toHaveCount(0);
+  await panel.getByRole('button', { name: '완료', exact: true }).click();
+  await expect(panel.getByRole('button', { name: '완료 취소', exact: true })).toBeVisible();
+  expect(writes.at(-1)).toEqual({ id: 'task-1', status: 'done' });
+  await panel.getByRole('button', { name: '완료 취소', exact: true }).click();
+  expect(writes.at(-1)).toEqual({ id: 'task-1', status: 'todo' });
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.addStyleTag({ content: 'html { font-size: 200% !important; }' });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  await expect(panel.getByRole('button', { name: '완료', exact: true })).toBeVisible();
+  await page.screenshot({ path: info.outputPath('task-completion-mobile.png') });
+});
+
 test('My Work icon tracks follow enlarged text without colliding with titles', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop-chromium');
   await installApiMocks(page);
@@ -198,7 +226,10 @@ test('Project theme contrast, actual font, keyboard and shared Task/Routine/OKR 
   await page.goto('/?view=inbox&task=task-1');
   const task = page.locator('.task-detail-panel');
   await expect(task).toBeVisible();
-  const taskStyle = await fieldStyle(task.getByRole('combobox', { name: '상태', exact: true }));
+  await expect(task.getByRole('combobox', { name: '상태', exact: true })).toHaveCount(0);
+  await expect(task.locator('input[type="range"]')).toHaveCount(0);
+  const taskStyle = await fieldStyle(task.getByRole('combobox', { name: '우선순위', exact: true }));
+  await expect(task.getByRole('button', { name: '완료', exact: true })).toBeVisible();
   await page.goto('/?view=routines');
   await page.locator('.routine-expand').click();
   await expect(page.locator('.routine-guide-grid')).toBeVisible();

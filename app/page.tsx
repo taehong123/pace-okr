@@ -2520,7 +2520,6 @@ function WorkspaceApp() {
           teamMembers={teamMembers}
           onClose={closeDetail}
           onPatch={(patch) => patchItem(selectedTask.id, patch)}
-          onProgress={(progress) => setItems((current) => current.map((entry) => entry.id === selectedTask.id ? { ...entry, progress } : entry))}
           onAssignmentsChange={(assignments) => updateItemAssignments(selectedTask.id, assignments)}
           onNotice={showNotice}
           canDelete={deletableItemIds.has(selectedTask.id)}
@@ -3105,15 +3104,14 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
             <button disabled={readOnly || creatingTask || !quickTaskTitle.trim()} aria-label={t("Task 추가")} title={t("Task 추가")}><Plus size={15} /></button>
           </form>
           <div className="project-task-table">
-            <div className="project-task-row project-task-head"><span>{t("Task")}</span><span>{t("상태")}</span><span>{t("담당자")}</span><span>{t("마감일")}</span><span>{t("진행률")}</span></div>
+            <div className="project-task-row project-task-head"><span>{t("Task")}</span><span>{t("완료")}</span><span>{t("담당자")}</span><span>{t("마감일")}</span></div>
             {linkedTasks.map((task) => {
               const assignee = task.assignments.find((assignment) => assignment.role === "task_assignee")?.memberId ?? "";
               return <div className="project-task-row" key={task.id}>
                 <div className="project-task-title-cell">{canDeleteItem(task) && <DeleteSelectCheckbox item={task} selected={selectedItemIds.has(task.id)} onToggle={onToggleSelect} />}<button className="project-task-title" onClick={() => onOpenTask(task.id)}>{task.title}</button></div>
-                <select disabled={readOnly} className={`status-${task.status}`} value={task.status} onChange={(event) => void onPatch(task.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
+                <button type="button" disabled={readOnly} className={`project-task-completion ${isCompletedStatus(task.status) ? "completed" : ""}`} aria-pressed={isCompletedStatus(task.status)} aria-label={`${task.title} ${isCompletedStatus(task.status) ? t("완료 취소") : t("완료")}`} onClick={() => void onPatch(task.id, taskCompletionPatch(task.status))}><span><Check size={12} /></span></button>
                 <select disabled={readOnly} value={assignee} onChange={(event) => void saveTaskAssignee(task, event.target.value)}><option value="">{t("미지정")}</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select>
                 <input disabled={readOnly} type="date" value={task.dueDate ?? ""} onChange={(event) => void onPatch(task.id, { dueDate: event.target.value || null })} />
-                <label className="project-task-progress"><input disabled={readOnly} type="range" min="0" max="100" step="5" value={task.progress} onChange={(event) => void onPatch(task.id, { progress: Number(event.target.value) })} /><span>{task.progress}%</span></label>
               </div>;
             })}
             {!linkedTasks.length && <div className="project-task-empty">{t("연결된 Task가 없습니다.")}</div>}
@@ -3305,14 +3303,13 @@ function ProjectPropertyField({ projectId, property, value, members, readOnly, o
   );
 }
 
-function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPatch, onProgress, onAssignmentsChange, onNotice, canDelete, selected, onToggleSelect }: {
+function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPatch, onAssignmentsChange, onNotice, canDelete, selected, onToggleSelect }: {
   task: OkrptrItem;
   allItems: OkrptrItem[];
   routines: Routine[];
   teamMembers: TeamMember[];
   onClose: () => void;
   onPatch: (patch: Partial<OkrptrItem>) => Promise<unknown>;
-  onProgress: (progress: number) => void;
   onAssignmentsChange: (assignments: ItemAssignment[]) => void;
   onNotice: (message: string) => void;
   canDelete: boolean;
@@ -3343,10 +3340,6 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
       .then((data) => { setRows(data.items); setChecklistLoadError(false); })
       .catch(() => { setRows([]); setChecklistLoadError(true); onNotice(t("체크리스트를 불러오지 못했습니다.")); });
   }, [onNotice, task.id]);
-
-  function updateProgress(nextRows: ChecklistItem[]) {
-    onProgress(nextRows.length ? Math.round((nextRows.filter((entry) => entry.completed).length / nextRows.length) * 100) : 0);
-  }
 
   async function saveAssignee(memberIds: string[]) {
     const response = await fetch("/api/item-assignments", {
@@ -3387,7 +3380,6 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
     const data = await response.json() as { item: ChecklistItem };
     setRows((current) => {
       const next = [...current, data.item];
-      updateProgress(next);
       return next;
     });
     setTitle("");
@@ -3397,9 +3389,9 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
     const completed = !row.completed;
     const previous = rows;
     const next = rows.map((entry) => entry.id === row.id ? { ...entry, completed } : entry);
-    setRows(next); updateProgress(next);
+    setRows(next);
     const response = await fetch("/api/checklists", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, completed }) });
-    if (!response.ok) { setRows(previous); updateProgress(previous); onNotice(t("체크리스트 변경을 저장하지 못했습니다.")); }
+    if (!response.ok) { setRows(previous); onNotice(t("체크리스트 변경을 저장하지 못했습니다.")); }
   }
 
   async function deleteRow(id: string) {
@@ -3407,9 +3399,9 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
     if (!row || !await confirmAction({ title: t("체크리스트 삭제"), message: t("'{value1}' 항목을 삭제합니다.", { value1: messageValue(row.title) }), confirmLabel: t("삭제"), danger: true })) return;
     const previous = rows;
     const next = rows.filter((entry) => entry.id !== id);
-    setRows(next); updateProgress(next);
+    setRows(next);
     const response = await fetch(`/api/checklists?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    if (!response.ok) { setRows(previous); updateProgress(previous); onNotice(t("체크리스트를 삭제하지 못했습니다.")); }
+    if (!response.ok) { setRows(previous); onNotice(t("체크리스트를 삭제하지 못했습니다.")); }
   }
 
   async function syncCalendar() {
@@ -3442,11 +3434,10 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
     <OverlayDialog title={t("{value1} Task 상세", { value1: messageValue(task.title) })} variant="drawer" dirty={Boolean(title.trim())} history={false} onRequestClose={() => onClose()}>
       {(requestClose) => <aside className="property-panel task-detail-panel">
         <header><div><p>{lineageTitle}</p><textarea className="task-title-input" defaultValue={task.title} rows={1} aria-label={t("Task 이름")} onBlur={(event) => { const nextTitle = event.currentTarget.value.trim(); if (nextTitle && nextTitle !== task.title) void onPatch({ title: nextTitle }); }} /></div><div className="task-detail-actions">{canDelete && <DeleteSelectCheckbox item={task} selected={selected} onToggle={onToggleSelect} />}<button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("닫기")}><X size={17} /></button></div></header>
+        <button type="button" className={`task-completion-toggle ${isCompletedStatus(task.status) ? "completed" : ""}`} aria-pressed={isCompletedStatus(task.status)} onClick={() => void onPatch(taskCompletionPatch(task.status))}><span><Check size={14} /></span>{isCompletedStatus(task.status) ? t("완료 취소") : t("완료")}</button>
         <section className="task-detail-fields" aria-label={t("Task 정보")}>
-          <label><span>{t("상태")}</span><select className={`status-${task.status}`} value={task.status} onChange={(event) => void onPatch({ status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
           <label><span>{t("우선순위")}</span><select className={`priority-${task.priority}`} value={task.priority} onChange={(event) => void onPatch({ priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
           <label><span>{t("기한")}</span><input type="date" value={task.dueDate ?? ""} onChange={(event) => void onPatch({ dueDate: event.target.value || null })} /></label>
-          <label className="task-progress-field"><span>{t("진행률")}</span><div><input type="range" min="0" max="100" step="5" value={task.progress} onChange={(event) => void onPatch({ progress: Number(event.target.value) })} /><b>{task.progress}%</b></div></label>
           <label className="task-container-field"><span>{t("연결 대상")}</span><select value={taskContainerValue} onChange={(event) => saveContainer(event.target.value)}><option value="">General</option><optgroup label={t("Project")}>{projects.map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label={t("Routine")}>{routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
         </section>
         {teamMembers.length > 0 && <section className="task-assignee-editor"><MemberMentionPicker label={t("담당자")} members={teamMembers} selectedIds={assigneeIds} onChange={(ids) => void saveAssignee(ids)} placeholder={t("@실명으로 찾기")} maxSelected={1} /></section>}
@@ -3709,7 +3700,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
           description: nextDescription,
           parentId: nextParentId,
           routineId,
-          status,
+          status: kind === "task" ? "todo" : status,
           priority,
           cadence: kind === "project" ? undefined : cadence,
           dueDate: dueDate || null,
@@ -4127,7 +4118,7 @@ function MyWorkView({ workspaceId, items, routines, currentMember, onOpenProject
         {tasks.map((task) => {
           const project = task.parentId ? byId.get(task.parentId) : null;
           const routine = task.routineId ? routines.find((entry) => entry.id === task.routineId) : null;
-          return <button className="my-work-item" key={task.id} onClick={() => onOpenTask(task.id)}><span className="type-icon type-task">T</span><span><b>{task.title}</b><span className="my-work-item-meta"><small>{statusLabel(task.status)} · {routine?.systemKey === "general" ? t("미분류 Task") : routine ? routine.title : project?.title ?? t("미분류 Task")}</small><span className={`my-work-priority priority-${task.priority}`}>{priorityLabels[task.priority]}</span><span className="my-work-due">{dueLabel(task.dueDate)}</span></span></span><ChevronRight size={15} /></button>;
+          return <button className="my-work-item" key={task.id} onClick={() => onOpenTask(task.id)}><span className={`type-icon type-task ${isCompletedStatus(task.status) ? "completed" : ""}`}><Check size={12} /></span><span><b>{task.title}</b><span className="my-work-item-meta"><small>{routine?.systemKey === "general" ? t("미분류 Task") : routine ? routine.title : project?.title ?? t("미분류 Task")}</small><span className={`my-work-priority priority-${task.priority}`}>{priorityLabels[task.priority]}</span><span className="my-work-due">{dueLabel(task.dueDate)}</span></span></span><ChevronRight size={15} /></button>;
         })}
       </MyWorkSection>
       <MyWorkSection title={t("Project")} count={projects.length}>
@@ -5177,10 +5168,10 @@ function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDelet
         return (
           <article className={`task-list-row ${selectionMode && canDeleteItem(entry) ? "deletion-selectable" : ""} ${isCompletedStatus(entry.status) ? "completed" : ""}`} key={entry.id}>
             {selectionMode && canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}
-            <button className={`task-list-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} onClick={() => void onPatch(entry.id, { status: isCompletedStatus(entry.status) ? "todo" : "done", progress: isCompletedStatus(entry.status) ? entry.progress : 100 })} aria-label={`${entry.title} ${isCompletedStatus(entry.status) ? t("완료 취소") : t("완료")}`}><Check size={13} /></button>
+            <button className={`task-list-check ${isCompletedStatus(entry.status) ? "checked" : ""}`} aria-pressed={isCompletedStatus(entry.status)} onClick={() => void onPatch(entry.id, taskCompletionPatch(entry.status))} aria-label={`${entry.title} ${isCompletedStatus(entry.status) ? t("완료 취소") : t("완료")}`}><Check size={13} /></button>
             <button className="task-list-open" onClick={() => onOpenTask(entry.id)}>
               <b>{entry.title}</b>
-              <span className="task-list-inline-meta"><i className={`status-dot status-${entry.status}`} />{statusLabel(entry.status)}<em>·</em>{assignee}<em>·</em>{relation}{entry.dueDate && <><em>·</em>{dueLabel(entry.dueDate)}</>}</span>
+              <span className="task-list-inline-meta">{assignee}<em>·</em>{relation}{entry.dueDate && <><em>·</em>{dueLabel(entry.dueDate)}</>}</span>
             </button>
             <button className="task-list-chevron" onClick={() => onOpenTask(entry.id)} aria-label={t("{value1} 상세 열기", { value1: messageValue(entry.title) })}><ChevronRight size={15} /></button>
           </article>
@@ -7109,6 +7100,7 @@ const groupColors: GroupColor[] = ["gray", "blue", "green", "yellow", "orange", 
 function kindLabel(kind: ItemKind) { return t({ objective: "Objective", key_result: "Key Result", initiative: "Initiative", project: "Project", task: "Task" }[kind]); }
 function statusLabel(status: ItemStatus) { return statusLabels[status]; }
 function isCompletedStatus(status: ItemStatus) { return status === "done" || status === "development_done"; }
+function taskCompletionPatch(status: ItemStatus): Partial<OkrptrItem> { return { status: isCompletedStatus(status) ? "todo" : "done" }; }
 function sourceLabel(source: string) { return { mcp: "MCP", codex: "Codex", slack: "Slack", discord: "Discord", telegram: "Telegram", web: "Web" }[source] ?? "Bot"; }
 function propertyTypeLabel(type: PropertyType) { return t({ text: "텍스트", number: "숫자", select: "선택", date: "날짜", checkbox: "체크박스", member: "멤버 1명", members: "멤버 여러 명" }[type]); }
 function propertySystemDefault(properties: PropertyDefinition[], systemKey: string, fallback: string) { const value = properties.find((property) => property.systemKey === systemKey && property.active)?.defaultValue; return typeof value === "string" ? value : fallback; }

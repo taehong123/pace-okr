@@ -219,6 +219,10 @@ const completedStatuses = new Set<ItemStatus>(["done", "development_done"]);
 const okrKinds = new Set<ItemKind>(["objective", "key_result", "initiative"]);
 const reservedAssignmentPropertyNames = new Set(["dri", "owner", "assignee", "담당", "담당자", "책임자", "worker", "workers", "하위 업무자", "업무자", "작업자", "참여자"]);
 
+export function normalizeTaskStatus(status?: ItemStatus) {
+  return status && completedStatuses.has(status) ? "done" as const : "todo" as const;
+}
+
 async function ensureSchema() {
   if (!schemaReady) {
     const d1 = (env as RuntimeEnv).DB;
@@ -4007,7 +4011,9 @@ export async function createItem(
     if (!routine || !routine.active) throw new Error("Web Tasks must use an active Routine");
   }
   const defaultStatus = systemDefault("status");
-  const status = input.status ?? (typeof defaultStatus === "string" && ITEM_STATUSES.includes(defaultStatus as ItemStatus) ? defaultStatus as ItemStatus : "todo");
+  const status = kind === "task"
+    ? normalizeTaskStatus(input.status)
+    : input.status ?? (typeof defaultStatus === "string" && ITEM_STATUSES.includes(defaultStatus as ItemStatus) ? defaultStatus as ItemStatus : "todo");
   const cycleId = input.cycleId === undefined ? await defaultCycleIdForKind(ownerId, kind) : input.cycleId;
   await validateParent(ownerId, kind, parentId, routineId, cycleId);
   const rules = await getWorkspaceRules(ownerId);
@@ -4020,6 +4026,9 @@ export async function createItem(
     if (kind !== "project") throw new Error("Templates can only be applied to Projects");
   }
 
+  const initialProgress = kind === "task"
+    ? status === "done" ? 100 : 0
+    : kind === "objective" || kind === "initiative" ? 0 : clampProgress(input.progress ?? 0);
   const id = crypto.randomUUID();
   const quotaReservation = kind === "project" ? await reserveProjectCreation(ownerId) : null;
   let created: PaceItem;
@@ -4038,7 +4047,7 @@ export async function createItem(
       status,
       priority: input.priority ?? (typeof defaultPriority === "string" && ITEM_PRIORITIES.includes(defaultPriority as ItemPriority) ? defaultPriority as ItemPriority : rules.defaultPriority),
       cadence: input.cadence ?? (typeof defaultCadence === "string" && ITEM_CADENCES.includes(defaultCadence as ItemCadence) ? defaultCadence as ItemCadence : rules.defaultCadence),
-      progress: kind === "objective" || kind === "initiative" ? 0 : clampProgress(input.progress ?? 0),
+      progress: initialProgress,
       dueDate: input.dueDate ?? (typeof defaultDueDate === "string" ? defaultDueDate : null),
       source,
       sourceRef: input.sourceRef ?? null,
@@ -4093,6 +4102,8 @@ export async function updateItem(
 
   const normalizedPatch = { ...patch };
   if (current.kind === "task") {
+    if (normalizedPatch.status !== undefined) normalizedPatch.status = normalizeTaskStatus(normalizedPatch.status);
+    delete normalizedPatch.progress;
     if (normalizedPatch.parentId) normalizedPatch.routineId = null;
     if (normalizedPatch.routineId) normalizedPatch.parentId = null;
     const nextParentId = normalizedPatch.parentId === undefined ? current.parentId : normalizedPatch.parentId;
@@ -4114,15 +4125,18 @@ export async function updateItem(
   }
 
   const nextStatus = normalizedPatch.status ?? (current.status as ItemStatus);
-  const supportsProgress = current.kind === "key_result" || current.kind === "project" || current.kind === "task";
+  const supportsProgress = current.kind === "key_result" || current.kind === "project";
   if (!supportsProgress) delete normalizedPatch.progress;
+  const taskProgress = current.kind === "task" && normalizedPatch.status !== undefined
+    ? normalizedPatch.status === "done" ? 100 : 0
+    : undefined;
   const values = {
     ...normalizedPatch,
     title: normalizedPatch.title?.trim(),
     description: normalizedPatch.description?.trim(),
-    progress: supportsProgress
+    progress: taskProgress ?? (supportsProgress
       ? completedStatuses.has(nextStatus) ? 100 : normalizedPatch.progress === undefined ? undefined : clampProgress(normalizedPatch.progress)
-      : undefined,
+      : undefined),
     updatedAt: new Date().toISOString(),
   };
 
@@ -6157,6 +6171,9 @@ export function serializeItem(
   properties: Record<string, PropertyValue> = {},
   assignments: ItemAssignmentSummary[] = [],
 ) {
+  const status = item.kind === "task" && item.status !== "archived"
+    ? normalizeTaskStatus(item.status as ItemStatus)
+    : item.status;
   return {
     id: item.id,
     cycleId: item.cycleId,
@@ -6165,10 +6182,10 @@ export function serializeItem(
     kind: item.kind,
     title: item.title,
     description: item.description,
-    status: item.status,
+    status,
     priority: item.priority,
     cadence: item.cadence,
-    progress: item.progress,
+    progress: item.kind === "task" && status !== "archived" ? status === "done" ? 100 : 0 : item.progress,
     dueDate: item.dueDate,
     source: item.source,
     createdByUserId: item.createdByUserId,

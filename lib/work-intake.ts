@@ -16,7 +16,7 @@ export const WORK_FIELDS = {
     required: ["title"],
     recommended: ["parent_id 또는 routine_id", "assignee_member_id", "due_date"],
     optional: ["description(완료 기준)", "priority", "cadence"],
-    placement: "Project 또는 Routine 중 하나. 연결을 모르면 General에 보관 가능. Task에 Project 전용 속성을 붙이지 않는다.",
+    placement: "Project 또는 Routine 중 하나. 연결을 모르면 General에 보관 가능. Task는 미완료/완료만 관리하며 Project 전용 상태·진행률 속성을 붙이지 않는다.",
     tool: "create_item; 미분류 단건은 capture_item; 동일 컨테이너의 여러 Task는 create_tasks",
   },
   project: {
@@ -69,7 +69,7 @@ export const WORKFLOW_INSTRUCTIONS = [
   "OKRPTR fast intake: understand and classify in the current conversation; do not call another LLM or create placeholder records to classify work.",
   CONVERSATION_POLICY,
   "Task = one independently completable action/result (small internal steps are a checklist). Project = a finite deliverable with scope/completion criteria and multiple independently managed Tasks. Routine = repeated work triggered by time/event/state, independent of OKR. Classify by completion boundary, not duration, keywords, or number of verbs. Respect a user's explicit type; explain a structural conflict instead of silently changing it.",
-  "Objective = qualitative desired change; Key Result = measurable evidence; Initiative = strategic approach; Project = bounded delivery. The hierarchy is Objective > Key Result > Initiative > Project > Task, or independent Routine > Task. Tasks use one assignee; Project DRI/workers, managed properties and block documents are Project-only.",
+  "Objective = qualitative desired change; Key Result = measurable evidence; Initiative = strategic approach; Project = bounded delivery. The hierarchy is Objective > Key Result > Initiative > Project > Task, or independent Routine > Task. Tasks use one assignee and only incomplete/complete lifecycle states; Project DRI/workers, workflow statuses, progress, managed properties and block documents are Project-only.",
   "When the user asks to organize/save work and relationship IDs or required context are missing, use prepare_work once with the likely kind (unsure if ambiguous). It returns rules, parent paths/evidence, member IDs, and fields together. Query is a short parent/topic phrase. Reuse conversation context without redundant reads. For Tasks/Routines, known IDs permit the requested save; Projects ALWAYS require manage_project and final user approval, even if every ID is known.",
   "Give the likely type and a one-sentence reason immediately. Ask only what blocks a correct next action: at most one compact question round containing up to three missing details. If Task vs Project is ambiguous, ask whether this is one completion or a deliverable containing independently managed tasks; offer your recommendation and let the user choose. Do not recite the whole hierarchy or ask for already supplied facts.",
   "Project scheduling uses due_date only. Do not ask for cadence, sprint, estimated hours, duration, or a separate timeframe. Call the Project DRI 책임자 in Korean; keep dri_member_id as the API field. Routine recurrence is unchanged.",
