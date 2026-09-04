@@ -11,7 +11,11 @@ test("my assigned projects, tasks and routines can be selected and submitted wit
     { id: "task-1", key: "task:task-1", kind: "task", title: "고객 인터뷰 진행", parentTitle: title, dueDate: "2026-09-30" },
     { id: "routine-1", key: "routine:routine-1", kind: "routine", title: "고객 의견 점검", parentTitle: "Routine", dueDate: null },
   ];
-  let draft = { id: null as string | null, date: "2026-09-04", yesterdayNote: "", todayNote: "", blockersNote: "", skipReason: null, skipNote: "", noPlannedTasks: false, selectedTaskIds: [] as string[], selectedWorkIds: [] as string[] };
+  const yesterdayWork = [
+    { id: "done-1", key: "task:done-1", kind: "task", title: "어제 완료한 인터뷰 정리", parentTitle: title, dueDate: "2026-09-03", completedYesterday: true, willCompleteOnSubmit: false },
+    { id: "finish-1", key: "routine:finish-1", kind: "routine", title: "어제 회고 마감", parentTitle: "Routine", dueDate: null, completedYesterday: false, willCompleteOnSubmit: true },
+  ];
+  let draft = { id: null as string | null, date: "2026-09-04", yesterdayNote: "", todayNote: "", blockersNote: "", skipReason: null, skipNote: "", noPlannedTasks: false, selectedTaskIds: [] as string[], selectedWorkIds: [] as string[], selectedYesterdayWorkIds: ["task:done-1"] as string[] };
   await page.route(/\/api\/daily-scrum(?:\/|\?|$)/, async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (route.request().method() !== "GET") {
@@ -20,20 +24,30 @@ test("my assigned projects, tasks and routines can be selected and submitted wit
       if (path.endsWith("/submit")) return route.fulfill({ json: { submission: { id: "submitted" } } });
       expect(path).toBe("/api/daily-scrum"); draft = { ...draft, ...body, id: "draft" };
     }
-    return route.fulfill({ json: { date: draft.date, draft, member: { id: "member-1", displayName: "테스트 사용자", role: "owner" }, candidates: { work, tasks: [], groups: [] }, createTargets: { projects: [], routines: [], allowGeneral: false }, team: [], latestSubmission: null, legacyWorkspaceNote: null } });
+    return route.fulfill({ json: { date: draft.date, draft, member: { id: "member-1", displayName: "테스트 사용자", role: "owner" }, candidates: { work, yesterdayWork, tasks: [], groups: [] }, createTargets: { projects: [], routines: [], allowGeneral: false }, team: [], latestSubmission: null, legacyWorkspaceNote: null } });
   });
   await page.goto("/?view=scrum");
-  const picker = page.getByRole("region", { name: "오늘 할 업무" });
+  const picker = page.getByRole("group", { name: "오늘 할 일" });
   await expect(picker).toBeVisible();
+  await picker.getByText("오늘 할 일", { exact: true }).click();
+  await picker.getByRole("searchbox").fill("고객 의견 점검");
+  await expect(page.getByRole("checkbox", { name: "고객 의견 점검 선택", exact: true })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: title + " 선택", exact: true })).toBeHidden();
+  await picker.getByRole("searchbox").fill("");
   const boxes = picker.locator('input[type="checkbox"]');
   for (const box of await boxes.all()) await expect(box).not.toBeChecked();
   await page.getByRole("checkbox", { name: title + " 선택", exact: true }).focus();
   await page.keyboard.press("Space");
   await page.getByRole("checkbox", { name: "고객 의견 점검 선택", exact: true }).check();
+  const yesterdayPicker = page.getByRole("group", { name: "어제 완료한 일" });
+  await yesterdayPicker.getByText("어제 완료한 일", { exact: true }).click();
+  await page.getByRole("checkbox", { name: "어제 회고 마감 선택", exact: true }).check();
+  await expect(yesterdayPicker).toContainText("제출 시 완료 처리");
   await expect(page.getByRole("textbox", { name: "새 Task 제목" })).toBeHidden();
   await page.getByRole("button", { name: "확정 및 공유", exact: true }).click();
   await expect.poll(() => writes.length).toBe(2);
   expect(writes[0].body.selectedWorkIds).toEqual(["project:project-1", "routine:routine-1"]);
+  expect(writes[0].body.selectedYesterdayWorkIds).toEqual(["task:done-1", "routine:finish-1"]);
   expect(writes[0].body.selectedTaskIds).toEqual([]);
   expect(writes[1].path).toBe("/api/daily-scrum/submit");
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
@@ -89,7 +103,7 @@ test("personal daily light/dark, wide layout and text zoom use rendered Pretenda
     for (const width of [320, 768, 1920, 3840]) {
       await page.setViewportSize({ width, height: 1000 });
       await page.goto("/?view=scrum");
-      await expect(page.getByRole("region", { name: "오늘 할 업무" })).toBeVisible();
+      await expect(page.getByRole("group", { name: "오늘 할 일" })).toBeVisible();
       await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
       await page.evaluate(() => document.fonts.ready);
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);

@@ -42,7 +42,10 @@ export async function POST(request: Request) {
   const t = await serverTranslator(await memberMessageLanguage(env.DB, linked.authorization.ownerId, linked.memberId));
 
   if (payload.type === "block_suggestion") {
-    return Response.json({ options: await externalTaskOptions(linked.authorization, payload.value ?? "", payload.action_id === "selected_more_work", parseMetadata(payload.view?.private_metadata).date) });
+    const mode = payload.action_id === "selected_yesterday_work" ? "yesterday"
+      : payload.action_id === "selected_today_work" ? "today"
+        : payload.action_id === "selected_more_work" ? true : false;
+    return Response.json({ options: await externalTaskOptions(linked.authorization, payload.value ?? "", mode, parseMetadata(payload.view?.private_metadata).date) });
   }
   if (payload.type === "block_actions" && payload.actions?.some((action) => action.action_id === "daily_open")) {
     if (payload.trigger_id) await openDailyModal(payload.trigger_id, linked.authorization);
@@ -58,11 +61,16 @@ async function submitFromModal(payload: SlackInteraction, authorization: Awaited
   const metadata = parseMetadata(payload.view?.private_metadata);
   const state = payload.view?.state?.values ?? {};
   const selectedTaskIds = selectedOptions(state, "daily_tasks", "selected_tasks");
-  const selectedWorkIds = metadata.workVersion === 1 ? [...new Set(Object.keys(state).filter((id) => id.startsWith("daily_work_"))
-    .flatMap((id) => selectedOptions(state, id, id === "daily_work_more" ? "selected_more_work" : "selected_work")))] : undefined;
+  const selectedWorkIds = metadata.workVersion === 2
+    ? selectedOptions(state, "today_work", "selected_today_work")
+    : metadata.workVersion === 1 ? [...new Set(Object.keys(state).filter((id) => id.startsWith("daily_work_"))
+      .flatMap((id) => selectedOptions(state, id, id === "daily_work_more" ? "selected_more_work" : "selected_work")))] : undefined;
+  const selectedYesterdayWorkIds = metadata.workVersion === 2
+    ? selectedOptions(state, "yesterday_work", "selected_yesterday_work") : undefined;
   const workErrorBlock = Object.keys(state).find((id) => id.startsWith("daily_work_")) || "no_planned";
   if (authorization.role === "viewer") return Response.json({ response_action: "errors", errors: { [workErrorBlock]: t("읽기 전용 멤버는 데일리를 제출할 수 없습니다.") } });
   const todayNote = stringValue(state, "today_note", "value");
+  const yesterdayNote = stringValue(state, "yesterday_note", "value");
   const blockersNote = stringValue(state, "blockers_note", "value");
   const noPlannedTasks = selectedOptions(state, "no_planned", "value").includes("yes");
   const rawSkipReason = selectedValue(state, "skip_reason", "value").replace(/^none$/, "");
@@ -87,8 +95,17 @@ async function submitFromModal(payload: SlackInteraction, authorization: Awaited
   if ((selectedWorkIds?.length ?? selectedTaskIds.length) > 50) {
     return Response.json({ response_action: "errors", errors: { [workErrorBlock]: t("오늘 할 업무는 최대 50개까지 선택할 수 있습니다.") } });
   }
+  if ((selectedYesterdayWorkIds?.length ?? 0) > 50) {
+    return Response.json({ response_action: "errors", errors: { yesterday_work: t("어제 완료한 일은 최대 50개까지 선택할 수 있습니다.") } });
+  }
+  if (selectedYesterdayWorkIds?.some((key) => selectedWorkIds?.includes(key))) {
+    return Response.json({ response_action: "errors", errors: {
+      yesterday_work: t("같은 업무를 어제 완료한 일과 오늘 할 일에 동시에 선택할 수 없습니다."),
+      today_work: t("같은 업무가 어제 완료한 일에도 선택되어 있습니다."),
+    } });
+  }
   if (!skipReason && !noPlannedTasks && (selectedWorkIds?.length ?? selectedTaskIds.length) === 0 && !newTaskTitle && !todayNote.trim()) {
-    return Response.json({ response_action: "errors", errors: { [metadata.workVersion === 1 ? workErrorBlock : "daily_tasks"]: t("오늘 할 업무 또는 ‘오늘 예정 없음’을 선택해 주세요.") } });
+    return Response.json({ response_action: "errors", errors: { [metadata.workVersion === 2 ? "today_work" : metadata.workVersion === 1 ? workErrorBlock : "daily_tasks"]: t("오늘 할 업무 또는 ‘오늘 예정 없음’을 선택해 주세요.") } });
   }
   try {
     const member = await currentDailyMember(authorization);
@@ -99,11 +116,12 @@ async function submitFromModal(payload: SlackInteraction, authorization: Awaited
       .bind(authorization.ownerId, member.id, metadata.date).first<{ yesterday_note: string }>();
     await saveDailyDraft(authorization, {
       date: metadata.date,
-      yesterdayNote: draft?.yesterday_note || "",
+      yesterdayNote: metadata.workVersion === 2 ? yesterdayNote : draft?.yesterday_note || "",
       todayNote,
       blockersNote,
       selectedTaskIds,
       selectedWorkIds,
+      selectedYesterdayWorkIds,
       noPlannedTasks,
       skipReason,
       skipNote,
@@ -119,11 +137,12 @@ async function submitFromModal(payload: SlackInteraction, authorization: Awaited
         requestId: metadata.requestId,
       });
     }
-    const submission = await submitDailyDraft(authorization, metadata.date, "slack");
+    const submission = await submitDailyDraft(authorization, metadata.date, "slack", metadata.requestId);
     waitUntil(Promise.all([publishDailySubmission(authorization.ownerId, submission.id), reconcileDailyReminders(authorization.ownerId)]).then(() => undefined));
     return new Response(null, { status: 200 });
-  } catch {
-    return Response.json({ response_action: "errors", errors: { [metadata.workVersion === 1 ? workErrorBlock : "daily_tasks"]: t("데일리를 저장하지 못했습니다.") } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "데일리를 저장하지 못했습니다.";
+    return Response.json({ response_action: "errors", errors: { [metadata.workVersion === 1 ? workErrorBlock : "today_work"]: t(message) } });
   }
 }
 

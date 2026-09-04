@@ -632,6 +632,7 @@ export const dailyScrums = sqliteTable(
     memberId: text("member_id").references(() => workspaceMembers.id, { onDelete: "cascade" }),
     scrumDate: text("scrum_date").notNull(),
     workSelectionJson: text("work_selection_json").notNull().default("[]"),
+    yesterdayWorkSelectionJson: text("yesterday_work_selection_json").notNull().default("[]"),
     yesterdayNote: text("yesterday_note").notNull().default(""),
     todayNote: text("today_note").notNull().default(""),
     blockersNote: text("blockers_note").notNull().default(""),
@@ -680,6 +681,8 @@ export const dailySubmissions = sqliteTable(
     scrumDate: text("scrum_date").notNull(),
     version: integer("version").notNull(),
     workSnapshotJson: text("work_snapshot_json").notNull().default("[]"),
+    yesterdayWorkSnapshotJson: text("yesterday_work_snapshot_json").notNull().default("[]"),
+    requestId: text("request_id"),
     yesterdayNote: text("yesterday_note").notNull().default(""),
     todayNote: text("today_note").notNull().default(""),
     blockersNote: text("blockers_note").notNull().default(""),
@@ -691,6 +694,9 @@ export const dailySubmissions = sqliteTable(
   },
   (table) => [
     uniqueIndex("idx_daily_submissions_owner_member_date_version").on(table.ownerId, table.memberId, table.scrumDate, table.version),
+    uniqueIndex("idx_daily_submissions_owner_member_request")
+      .on(table.ownerId, table.memberId, table.requestId)
+      .where(sql`${table.requestId} IS NOT NULL`),
     index("idx_daily_submissions_owner_date").on(table.ownerId, table.scrumDate, table.submittedAt),
   ],
 );

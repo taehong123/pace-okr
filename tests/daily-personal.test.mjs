@@ -20,6 +20,7 @@ const matching = compile(await read("../lib/slack-member-matching.ts"));
 const dailySource = await read("../lib/daily-bot.ts");
 const schema = JSON.parse(await read("../drizzle/meta/0038_snapshot.json"));
 const migration = await read("../drizzle/0045_daily_work_selection.sql");
+const yesterdayMigration = await read("../drizzle/0047_daily_yesterday_selection.sql");
 const date = "2026-09-04";
 const authorization = { ownerId: "w", userId: "u", role: "owner", apiToken: false };
 function fixture(t) {
@@ -34,6 +35,8 @@ function fixture(t) {
   }
   assert.ok(!migration.includes("\r"));
   db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  assert.ok(!yesterdayMigration.includes("\r"));
+  db.exec(yesterdayMigration.replaceAll("--> statement-breakpoint", ""));
   const raw = { prepare(sql) {
     const statement = db.prepare(sql); let args = [];
     return { bind(...values) { args = values; return this; }, async first() { return statement.get(...args) ?? null; },
@@ -65,7 +68,7 @@ function fixture(t) {
       const rows = db.prepare("SELECT * FROM workspace_members").all().map((row) => Object.fromEntries(Object.entries(row).map(([k, v]) => [k.replace(/_([a-z])/g, (_, x) => x.toUpperCase()), v])));
       return rows.filter((row) => conditions.every(({ key, value }) => row[key] === value)).slice(0, 1);
     } }) }) }) }) },
-    "@/lib/daily-work": work, "@/lib/pace-data": { ensureWorkspace: async () => {}, createItem: () => { throw new Error("Must never invent tasks"); } },
+    "@/lib/daily-work": work, "@/lib/pace-data": { ensureWorkspace: async () => {}, dispatchSlackAutomationEvent: async () => {}, createItem: () => { throw new Error("Must never invent tasks"); } },
   });
   return { db, raw, api };
 }
@@ -132,29 +135,76 @@ test("failed selection writes roll back both notes and previous selections", asy
   assert.equal(original.work_selection_json, '["project:project"]');
 });
 
-test("Slack modal lists checkboxes before notes, never preselects new work or invents tasks", () => {
+test("Slack v2 modal uses searchable yesterday and today multi-selects", () => {
   const entries = Array.from({ length: 75 }, (_, i) => ({ key: `task:${i}`, id: String(i), title: "Long title ".repeat(20), kind: "task", parentTitle: "Project", dueDate: null }));
-  const modal = form.dailyForm({ work: entries, memberName: "Me", date, selected: ["task:72"], todayNote: "", blockersNote: "", skipReason: null, skipNote: "", metadata: "{}", noPlannedTasks: false });
+  const yesterday = entries.map((entry, index) => ({ ...entry, completedYesterday: index === 0, willCompleteOnSubmit: index !== 0 }));
+  const modal = form.dailyForm({ work: entries, yesterdayWork: yesterday, memberName: "Me", date, selected: ["task:72"], selectedYesterday: ["task:0", "task:2"], yesterdayNote: "", todayNote: "", blockersNote: "", skipReason: null, skipNote: "", metadata: "{}", noPlannedTasks: false });
   const inputs = modal.blocks.filter((b) => b.type === "input");
-  assert.equal(inputs[0].element.type, "checkboxes");
-  assert.ok(!inputs[0].element.initial_options);
-  for (const block of inputs.filter((b) => b.block_id.startsWith("daily_work_task"))) {
-    assert.ok(block.element.options.length <= 10);
-    assert.ok(block.element.options.every((o) => o.text.text.length <= 75));
-  }
-  assert.equal(inputs.find((b) => b.block_id === "daily_work_more").element.initial_options[0].value, "task:72");
+  assert.equal(inputs[0].block_id, "yesterday_work");
+  assert.equal(inputs[0].element.type, "multi_external_select");
+  assert.equal(inputs[0].element.initial_options.length, 2);
+  assert.match(inputs[0].element.initial_options[1].description.text, /제출 시 완료 처리/);
+  assert.equal(inputs[2].block_id, "today_work");
+  assert.equal(inputs[2].element.initial_options[0].value, "task:72");
   assert.ok(!JSON.stringify(modal).includes("new_task"));
   assert.ok(modal.blocks.length < 100);
+});
+
+test("yesterday candidates auto-select actual completions and mark incomplete choices only on submit", async (t) => {
+  const { raw, db, api } = fixture(t);
+  db.exec(`INSERT INTO activity_log (id,owner_id,item_id,action,source,payload,created_at)
+    VALUES ('completed-yesterday','w','done','updated','web','{"status":"done"}','2026-09-03T02:00:00.000Z')`);
+  const candidates = await work.listDailyYesterdayWork(raw, "w", "me", date, "Asia/Seoul");
+  assert.equal(candidates.find((entry) => entry.key === "task:done").completedYesterday, true);
+  assert.equal(candidates.find((entry) => entry.key === "task:task").willCompleteOnSubmit, true);
+  const initial = await api.getDailyDashboard(authorization, date);
+  assert.deepEqual(initial.draft.selectedYesterdayWorkIds, ["task:done"]);
+
+  await api.saveDailyDraft(authorization, {
+    date, selectedWorkIds: [], selectedYesterdayWorkIds: ["task:done", "task:task", "routine:routine"], noPlannedTasks: true,
+  }, false);
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM routine_completions").get().count, 0);
+  const submitted = await api.submitDailyDraft(authorization, date, "web", "request-1");
+  assert.equal(submitted.newlyCompletedCount, 2);
+  assert.deepEqual(submitted.yesterdayWork.map((entry) => entry.key), ["task:done", "task:task", "routine:routine"]);
+  assert.deepEqual({ ...db.prepare("SELECT status,progress FROM items WHERE id='task'").get() }, { status: "done", progress: 100 });
+  assert.equal(db.prepare("SELECT completion_date FROM routine_completions WHERE routine_id='routine'").get().completion_date, "2026-09-03");
+  const activity = db.prepare("SELECT source,payload,created_at FROM activity_log WHERE item_id='task'").get();
+  assert.equal(activity.source, "daily");
+  assert.equal(JSON.parse(activity.payload).effectiveDate, "2026-09-03");
+  assert.match(activity.created_at, /^2026-/);
+  assert.equal((await api.submitDailyDraft(authorization, date, "web", "request-1")).id, submitted.id);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM daily_submissions").get().count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM activity_log WHERE item_id='task'").get().count, 1);
+});
+
+test("yesterday draft rejects overlap and failed submit rolls back completions", async (t) => {
+  const { db, api } = fixture(t);
+  await assert.rejects(api.saveDailyDraft(authorization, {
+    date, selectedWorkIds: ["task:task"], selectedYesterdayWorkIds: ["task:task"],
+  }, false), /동시에/);
+  await api.saveDailyDraft(authorization, {
+    date, selectedWorkIds: [], selectedYesterdayWorkIds: ["project:project"], noPlannedTasks: true,
+  }, false);
+  db.exec("UPDATE items SET parent_id='project' WHERE id='task'; CREATE TRIGGER fail_submission BEFORE INSERT ON daily_submissions BEGIN SELECT RAISE(ABORT,'mock failure'); END");
+  await assert.rejects(api.submitDailyDraft(authorization, date, "web", "request-failed"));
+  assert.deepEqual({ ...db.prepare("SELECT status,progress FROM items WHERE id='project'").get() }, { status: "backlog", progress: 0 });
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
+  db.exec("DROP TRIGGER fail_submission");
+  await api.submitDailyDraft(authorization, date, "web", "request-project");
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='project'").get().status, "done");
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
 });
 
 test("Slack modal translates system copy per recipient without translating user-authored work", async () => {
   const translate = await serverLanguage.serverTranslator("en");
   const modal = form.dailyForm({
     work: [{ key: "task:user", id: "user", title: "고객이 작성한 제목", kind: "task", parentTitle: "사용자 Project", dueDate: null }],
-    memberName: "Taeho", date, selected: [], todayNote: "", blockersNote: "", skipReason: null, skipNote: "", metadata: "{}", noPlannedTasks: false,
+    yesterdayWork: [], memberName: "Taeho", date, selected: ["task:user"], selectedYesterday: [], yesterdayNote: "", todayNote: "", blockersNote: "", skipReason: null, skipNote: "", metadata: "{}", noPlannedTasks: false,
   }, translate);
   const rendered = JSON.stringify(modal);
-  assert.equal(modal.title.text, "Today's work");
+  assert.equal(modal.title.text, "Daily");
   assert.equal(modal.close.text, "Cancel");
   assert.match(rendered, /고객이 작성한 제목/);
   assert.match(rendered, /사용자 Project/);
@@ -259,13 +309,28 @@ test("signed Slack submission passes every personal checklist and rejects other-
   assert.equal((await route.POST(request())).status, 200);
   assert.deepEqual(saved[0][1].selectedWorkIds, ["project:p", "task:t", "routine:r"]);
   assert.equal(saved[0][1].yesterdayNote, "Yesterday"); assert.equal(saved[0][2], false);
+  const v2Request = () => new Request("https://example.test/api/slack/interactions", { method: "POST", body: new URLSearchParams({ payload: JSON.stringify({
+    type: "view_submission", team: { id: "T" }, user: { id: "U" }, view: { callback_id: "daily_submit",
+      private_metadata: JSON.stringify({ ownerId: "w", memberId: "me", date, workVersion: 2, requestId: "request-v2" }),
+      state: { values: {
+        yesterday_work: { selected_yesterday_work: { selected_options: [{ value: "task:yesterday" }] } },
+        yesterday_note: { value: { value: "어제 메모" } },
+        today_work: { selected_today_work: { selected_options: [{ value: "project:today" }] } },
+      } },
+    },
+  }) }) });
+  assert.equal((await route.POST(v2Request())).status, 200);
+  assert.deepEqual(saved[1][1].selectedYesterdayWorkIds, ["task:yesterday"]);
+  assert.deepEqual(saved[1][1].selectedWorkIds, ["project:today"]);
+  assert.equal(saved[1][1].yesterdayNote, "어제 메모");
+  assert.equal(submitted[1][3], "request-v2");
   await Promise.all(pending);
   state.memberId = "colleague";
   assert.equal((await (await route.POST(request())).json()).response_action, "errors");
-  assert.equal(submitted.length, 1);
+  assert.equal(submitted.length, 2);
   state.memberId = "me"; state.fail = true;
   assert.equal((await (await route.POST(request())).json()).response_action, "errors");
-  assert.equal(submitted.length, 1);
+  assert.equal(submitted.length, 2);
   state.role = "viewer";
   const viewerError = await (await route.POST(request())).json();
   assert.equal(viewerError.response_action, "errors");

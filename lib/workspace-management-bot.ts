@@ -116,12 +116,15 @@ export async function collectWorkspaceManagementSnapshot(ownerId: string, reques
   const openRows = rows.results.filter((row) => !inactiveStatuses.has(String(row.status)));
   const [previousStart, previousEnd] = zonedDayRange(previousDate, timezone);
   const activity = await db.prepare(`SELECT item_id, payload FROM activity_log
-    WHERE owner_id = ? AND action = 'updated' AND created_at >= ? AND created_at < ?`)
-    .bind(ownerId, previousStart, previousEnd).all<Record<string, string>>();
+    WHERE owner_id = ? AND action = 'updated'
+      AND json_valid(payload)
+      AND ((created_at >= ? AND created_at < ?) OR json_extract(payload, '$.effectiveDate') = ?)`)
+    .bind(ownerId, previousStart, previousEnd, previousDate).all<Record<string, string>>();
   const completedYesterdayIds = new Set(activity.results.flatMap((entry) => {
     try {
-      const payload = JSON.parse(entry.payload) as { status?: string };
-      return payload.status && completedStatuses.has(payload.status) ? [entry.item_id] : [];
+      const payload = JSON.parse(entry.payload) as { status?: string; effectiveDate?: string };
+      return payload.status && completedStatuses.has(payload.status)
+        && (!payload.effectiveDate || payload.effectiveDate === previousDate) ? [entry.item_id] : [];
     } catch { return []; }
   }));
   const bySignal: Record<ManagementBotSignal, ManagementBotItem[]> = {

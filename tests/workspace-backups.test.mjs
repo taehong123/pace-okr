@@ -13,6 +13,7 @@ const migration = await readFile(new URL("../drizzle/0036_workspace_backups.sql"
 const linksMigration = await readFile(new URL("../drizzle/0037_restore_links.sql", import.meta.url), "utf8");
 const routineMigration = await readFile(new URL("../drizzle/0042_routine_properties.sql", import.meta.url), "utf8");
 const dailyWorkMigration = await readFile(new URL("../drizzle/0045_daily_work_selection.sql", import.meta.url), "utf8");
+const dailyYesterdayMigration = await readFile(new URL("../drizzle/0047_daily_yesterday_selection.sql", import.meta.url), "utf8");
 
 function fixture() {
   const sqlite = new DatabaseSync(":memory:");
@@ -28,6 +29,7 @@ function fixture() {
   for (const sql of linksMigration.split("--> statement-breakpoint")) if (sql.trim()) sqlite.exec(sql);
   sqlite.exec(routineMigration);
   sqlite.exec(dailyWorkMigration.replaceAll("--> statement-breakpoint", ""));
+  sqlite.exec(dailyYesterdayMigration.replaceAll("--> statement-breakpoint", ""));
   const d1 = {
     prepare(sql) {
       return { sql, params: [], bind(...params) { return { ...this, params }; },
@@ -109,11 +111,14 @@ test("backups predating personal work selection restore with empty work arrays w
   const f = fixture();
   await backups.createWorkspaceBackup(f.ctx, "w", "daily");
   const old = JSON.parse([...f.objects.values()][0]);
-  for (const row of old.tables.daily_scrums) delete row.work_selection_json;
-  for (const row of old.tables.daily_submissions) delete row.work_snapshot_json;
+  for (const row of old.tables.daily_scrums) { delete row.work_selection_json; delete row.yesterday_work_selection_json; }
+  for (const row of old.tables.daily_submissions) { delete row.work_snapshot_json; delete row.yesterday_work_snapshot_json; delete row.request_id; }
   const validated = backups.validateSnapshot(old, "w");
   assert.equal(validated.tables.daily_scrums[0].work_selection_json, "[]");
+  assert.equal(validated.tables.daily_scrums[0].yesterday_work_selection_json, "[]");
   assert.equal(validated.tables.daily_submissions[0].work_snapshot_json, "[]");
+  assert.equal(validated.tables.daily_submissions[0].yesterday_work_snapshot_json, "[]");
+  assert.equal(validated.tables.daily_submissions[0].request_id, null);
   assert.equal(validated.tables.routine_property_definitions.length, 1);
   f.sqlite.close();
 });
@@ -261,7 +266,10 @@ test("revision triggers cover all restored tables and business changes do not al
   const f = fixture();
   for (const name of backups.BACKUP_TABLES) {
     assert.equal(f.sqlite.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND tbl_name=?").get(name).n, 3, name);
-    assert.deepEqual(backups.BACKUP_COLUMNS[name], Object.keys(currentSchema.tables[name].columns));
+    const expectedColumns = Object.keys(currentSchema.tables[name].columns);
+    if (name === "daily_scrums") expectedColumns.push("yesterday_work_selection_json");
+    if (name === "daily_submissions") expectedColumns.push("yesterday_work_snapshot_json", "request_id");
+    assert.deepEqual(backups.BACKUP_COLUMNS[name], expectedColumns);
   }
   const before = f.sqlite.prepare("SELECT revision FROM workspace_backup_state WHERE owner_id='other'").get().revision;
   f.sqlite.exec("UPDATE items SET title='Changed' WHERE id='task'");

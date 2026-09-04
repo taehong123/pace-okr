@@ -781,9 +781,10 @@ export async function openDailyModal(triggerId: string, authorization: RequestAu
       const preference = await getSlackDailyPreference(authorization);
       const dashboard = await getDailyDashboard(authorization, todayInTimezone(preference.timezone));
       await slackApi(token, "views.update", { view_id: viewId, hash: opened.view?.hash,
-        view: dailyForm({ work: dashboard.candidates.work, memberName: dashboard.member.displayName,
-          selected: dashboard.draft.selectedWorkIds, ...dashboard.draft,
-          metadata: JSON.stringify({ ownerId: authorization.ownerId, memberId: dashboard.member.id, date: dashboard.date, requestId: crypto.randomUUID(), workVersion: 1 }) }, t) });
+        view: dailyForm({ work: dashboard.candidates.work, yesterdayWork: dashboard.candidates.yesterdayWork,
+          memberName: dashboard.member.displayName, selected: dashboard.draft.selectedWorkIds,
+          selectedYesterday: dashboard.draft.selectedYesterdayWorkIds, ...dashboard.draft,
+          metadata: JSON.stringify({ ownerId: authorization.ownerId, memberId: dashboard.member.id, date: dashboard.date, requestId: crypto.randomUUID(), workVersion: 2 }) }, t) });
     } catch {
       await slackApi(token, "views.update", { view_id: viewId, view: { type: "modal",
         title: { type: "plain_text", text: t("오늘 할 업무") }, close: { type: "plain_text", text: t("닫기") },
@@ -792,14 +793,20 @@ export async function openDailyModal(triggerId: string, authorization: RequestAu
   })());
 }
 
-export async function externalTaskOptions(authorization: RequestAuthorization, query: string, workMode = false, date?: string) {
+export async function externalTaskOptions(authorization: RequestAuthorization, query: string, workMode: boolean | "today" | "yesterday" = false, date?: string) {
   const [preference, t] = await Promise.all([
     getSlackDailyPreference(authorization),
     serverTranslator((await readLanguagePreferences(env.DB, authorization.userId)).resolvedLanguage),
   ]);
   const day = date || todayInTimezone(preference.timezone);
   const normalized = query.trim().toLocaleLowerCase();
-  if (workMode) {
+  if (workMode === "today" || workMode === "yesterday") {
+    const dashboard = await getDailyDashboard(authorization, day);
+    const work = workMode === "yesterday" ? dashboard.candidates.yesterdayWork : dashboard.candidates.work;
+    return work.filter((entry) => !normalized || `${entry.title} ${entry.parentTitle}`.toLocaleLowerCase().includes(normalized))
+      .slice(0, 100).map((entry) => dailyWorkOption(entry, t, workMode));
+  }
+  if (workMode === true) {
     const member = await currentDailyMember(authorization);
     const work = await listDailyWork(env.DB, authorization.ownerId, member.id, day);
     return work.slice(60).filter((entry) => !normalized || `${entry.title} ${entry.parentTitle}`.toLocaleLowerCase().includes(normalized)).slice(0, 100).map((entry) => dailyWorkOption(entry, t));
@@ -910,6 +917,7 @@ async function loadSubmission(id: string, ownerId: string) {
     skipReason: normalizeDailySkipReason(row.skip_reason), skipNote: String(row.skip_note || ""),
     source: String(row.source), submittedAt: String(row.submitted_at),
     work: dailyWorkSnapshots(String(row.work_snapshot_json || "[]")),
+    yesterdayWork: dailyWorkSnapshots(String(row.yesterday_work_snapshot_json || "[]")),
     tasks: snapshots.results.map((snapshot) => ({ id: String(snapshot.id), taskId: snapshot.task_id ? String(snapshot.task_id) : null,
       taskTitle: String(snapshot.task_title), parentKind: String(snapshot.parent_kind), parentId: snapshot.parent_id ? String(snapshot.parent_id) : null,
       parentTitle: String(snapshot.parent_title), status: String(snapshot.status), isNew: Boolean(snapshot.is_new), sortOrder: Number(snapshot.sort_order) })),
@@ -927,17 +935,24 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
       { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRPTR에서 보기") }, url: appUrl }] },
     ] };
   }
-  const allWork = [...submission.tasks, ...(submission.work ?? []).map((work) => ({ taskTitle: work.title, parentTitle: `${work.kind === "project" ? t("Project") : t("Routine")} · ${work.parentTitle}`, isNew: false }))];
+  const yesterdayWork = submission.yesterdayWork ?? [];
+  const visibleYesterday = yesterdayWork.slice(0, 20);
+  const yesterdayLines = visibleYesterday.length
+    ? visibleYesterday.map((work) => `• ${escapeSlack(work.title)} _(${t(work.kind === "project" ? "Project" : work.kind === "task" ? "Task" : "Routine")} · ${escapeSlack(work.parentTitle)})_`).join("\n")
+    : `• ${t("선택한 업무 없음")}`;
+  const yesterdayOverflow = yesterdayWork.length > 20 ? `\n_${t("외 {count}개", { count: yesterdayWork.length - 20 })}_` : "";
+  const allWork = [...submission.tasks, ...(submission.work ?? []).map((work) => ({ taskTitle: work.title, parentTitle: `${work.kind === "project" ? t("Project") : work.kind === "task" ? t("Task") : t("Routine")} · ${work.parentTitle}`, isNew: false }))];
   const visible = allWork.slice(0, 20);
   const taskLines = visible.length ? visible.map((task) => `${task.isNew ? "✨ " : "• "}${escapeSlack(task.taskTitle)} _(${escapeSlack(task.parentTitle)})_`).join("\n") : `• ${t("오늘 예정 없음")}`;
   const overflow = allWork.length > 20 ? `\n_${t("외 {count}개", { count: allWork.length - 20 })}_` : "";
   const blocker = submission.blockersNote ? `\n*${t("블로커")}*\n${escapeSlack(submission.blockersNote)}` : "";
   const note = submission.todayNote ? `\n*${t("오늘 메모")}*\n${escapeSlack(submission.todayNote)}` : "";
+  const yesterdayNote = submission.yesterdayNote ? `\n*${t("어제 메모")}*\n${escapeSlack(submission.yesterdayNote)}` : "";
   const appUrl = `${String((env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?view=scrum`;
   const text = `[${t("데일리 봇")}] ${t("{member}님의 {date} 데일리", { member: submission.memberName, date: submission.date })}`;
   return { text, unfurl_links: false, unfurl_media: false, blocks: [
     { type: "header", text: { type: "plain_text", text: `${t("데일리 봇")} · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
-    { type: "section", text: { type: "mrkdwn", text: `*${t("오늘 할 업무")}*\n${taskLines}${overflow}${note}${blocker}`.slice(0, 2900) } },
+    { type: "section", text: { type: "mrkdwn", text: `*${t("어제 완료한 일")}*\n${yesterdayLines}${yesterdayOverflow}${yesterdayNote}\n\n*${t("오늘 할 일")}*\n${taskLines}${overflow}${note}${blocker}`.slice(0, 2900) } },
     { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRPTR에서 보기") }, url: appUrl }] },
   ] };
 }

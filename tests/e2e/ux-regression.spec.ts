@@ -198,6 +198,7 @@ test.describe("개인 데일리와 팀 롤업", () => {
     await installApiMocks(page);
     await page.goto("/?view=scrum");
     await expect(page.locator(".daily-workspace")).toBeVisible({ timeout: 20_000 });
+    await page.getByRole("group", { name: "오늘 할 일" }).getByText("오늘 할 일", { exact: true }).click();
   });
 
   test("할당 Task 선택과 초안 저장은 Item API를 호출하지 않는다", async ({ page }) => {

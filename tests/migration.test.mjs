@@ -13,6 +13,21 @@ test("backup trigger migrations use LF and uppercase BEGIN for remote D1", async
   for (const trigger of triggers) assert.match(trigger, /\nBEGIN\n[\s\S]+;\nEND;/);
 });
 
+test("daily yesterday selection migration keeps JSON valid and submission requests idempotent", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`CREATE TABLE daily_scrums (id TEXT PRIMARY KEY);
+    CREATE TABLE daily_submissions (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, member_id TEXT);`);
+  const migration = await readFile(new URL("../drizzle/0047_daily_yesterday_selection.sql", import.meta.url), "utf8");
+  assert.ok(!migration.includes("\r"));
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  db.exec("INSERT INTO daily_scrums (id) VALUES ('draft'); INSERT INTO daily_submissions (id,owner_id,member_id,request_id) VALUES ('one','w','m','request')");
+  assert.equal(db.prepare("SELECT yesterday_work_selection_json value FROM daily_scrums").get().value, "[]");
+  assert.equal(db.prepare("SELECT yesterday_work_snapshot_json value FROM daily_submissions").get().value, "[]");
+  assert.throws(() => db.exec("UPDATE daily_scrums SET yesterday_work_selection_json='{}'"), /CHECK constraint failed/);
+  assert.throws(() => db.exec("INSERT INTO daily_submissions (id,owner_id,member_id,request_id) VALUES ('two','w','m','request')"), /UNIQUE constraint failed/);
+  db.close();
+});
+
 test("preserves the historical registration migration for legacy database compatibility", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`

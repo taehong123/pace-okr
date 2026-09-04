@@ -4,9 +4,12 @@ import type { Translator } from "@/lib/server-language";
 const names = { project: "Project", task: "Task", routine: "Routine" };
 const identityTranslator: Translator = (key) => key;
 
-export function dailyWorkOption(work: DailyWork, t: Translator = identityTranslator) {
+export function dailyWorkOption(work: DailyWork, t: Translator = identityTranslator, mode: "today" | "yesterday" = "today") {
+  const detail = mode === "yesterday" && work.willCompleteOnSubmit
+    ? `${work.parentTitle} · ${t("제출 시 완료 처리")}`
+    : `${work.parentTitle}${work.dueDate ? ` · ${work.dueDate}` : ""}`;
   return { text: { type: "plain_text", text: `${t(names[work.kind])} · ${work.title}`.slice(0, 75) }, value: work.key,
-    description: { type: "plain_text", text: `${work.parentTitle}${work.dueDate ? ` · ${work.dueDate}` : ""}`.slice(0, 75) } };
+    description: { type: "plain_text", text: detail.slice(0, 75) } };
 }
 
 export function dailyWorkBlocks(work: DailyWork[], selected: string[], t: Translator = identityTranslator) {
@@ -32,14 +35,26 @@ export function dailyWorkBlocks(work: DailyWork[], selected: string[], t: Transl
   return blocks;
 }
 
-export function dailyForm(input: { work: DailyWork[]; memberName: string; date: string; selected: string[]; todayNote: string; blockersNote: string; noPlannedTasks: boolean; skipReason: string | null; skipNote: string; metadata: string }, t: Translator = identityTranslator) {
+function dailyWorkSelect(work: DailyWork[], selected: string[], mode: "today" | "yesterday", t: Translator) {
+  const initial = work.filter((entry) => selected.includes(entry.key)).slice(0, 50).map((entry) => dailyWorkOption(entry, t, mode));
+  return { type: "input", block_id: mode === "yesterday" ? "yesterday_work" : "today_work", optional: true,
+    label: { type: "plain_text", text: t(mode === "yesterday" ? "어제 완료한 일" : "오늘 할 일") },
+    element: { type: "multi_external_select", action_id: mode === "yesterday" ? "selected_yesterday_work" : "selected_today_work",
+      min_query_length: 0, max_selected_items: 50,
+      placeholder: { type: "plain_text", text: t(mode === "yesterday" ? "완료했거나 완료할 업무 검색" : "오늘 할 업무 검색") },
+      ...(initial.length ? { initial_options: initial } : {}) } };
+}
+
+export function dailyForm(input: { work: DailyWork[]; yesterdayWork: DailyWork[]; memberName: string; date: string; selected: string[]; selectedYesterday: string[]; yesterdayNote: string; todayNote: string; blockersNote: string; noPlannedTasks: boolean; skipReason: string | null; skipNote: string; metadata: string }, t: Translator = identityTranslator) {
   const skipOptions = [["none", "스킵하지 않음"], ["workload", "본업 과중"], ["vacation", "휴가"], ["personal", "개인 일정"], ["other", "기타"]]
     .map(([value, text]) => ({ text: { type: "plain_text", text: t(text) }, value }));
   const none = { text: { type: "plain_text", text: t("오늘 예정 없음") }, value: "yes" };
   return { type: "modal", callback_id: "daily_submit", private_metadata: input.metadata,
-    title: { type: "plain_text", text: t("오늘 할 업무") }, submit: { type: "plain_text", text: t("선택한 업무 제출") }, close: { type: "plain_text", text: t("취소") }, blocks: [
-      { type: "section", text: { type: "plain_text", text: t("{member} · {date}\n오늘 진행할 업무를 선택하세요. 선택하지 않은 업무는 그대로 남습니다.", { member: input.memberName, date: input.date }) } },
-      ...dailyWorkBlocks(input.work, input.selected, t),
+    title: { type: "plain_text", text: t("데일리") }, submit: { type: "plain_text", text: t("선택한 업무 제출") }, close: { type: "plain_text", text: t("취소") }, blocks: [
+      { type: "section", text: { type: "plain_text", text: t("{member} · {date}\n어제 완료한 일과 오늘 할 일을 선택하세요.", { member: input.memberName, date: input.date }) } },
+      dailyWorkSelect(input.yesterdayWork, input.selectedYesterday, "yesterday", t),
+      { type: "input", block_id: "yesterday_note", optional: true, label: { type: "plain_text", text: t("어제 메모") }, element: { type: "plain_text_input", action_id: "value", multiline: true, max_length: 3000, ...(input.yesterdayNote ? { initial_value: input.yesterdayNote } : {}) } },
+      dailyWorkSelect(input.work, input.selected, "today", t),
       { type: "input", block_id: "no_planned", optional: true, label: { type: "plain_text", text: t("오늘 예정") }, element: { type: "checkboxes", action_id: "value", options: [none], ...(input.noPlannedTasks ? { initial_options: [none] } : {}) } },
       { type: "input", block_id: "today_note", optional: true, label: { type: "plain_text", text: t("오늘 메모") }, element: { type: "plain_text_input", action_id: "value", multiline: true, max_length: 3000, ...(input.todayNote ? { initial_value: input.todayNote } : {}) } },
       { type: "input", block_id: "blockers_note", optional: true, label: { type: "plain_text", text: t("도움이 필요한 일") }, element: { type: "plain_text_input", action_id: "value", multiline: true, max_length: 3000, ...(input.blockersNote ? { initial_value: input.blockersNote } : {}) } },

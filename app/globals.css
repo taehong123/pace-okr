@@ -1768,7 +1768,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .daily-task-picker > header span, .daily-new-task > header span { color: var(--muted); font-size: var(--type-meta); }
 .daily-task-picker > header strong { color: var(--muted); font-size: var(--type-body); }
 .daily-none { min-height: 44px; display: flex; align-items: center; gap: 9px; padding: 0 14px; border-bottom: 1px solid var(--line); font-size: var(--type-meta); font-weight: 650; }
-.daily-none input, .daily-task-option input { width: var(--control-height); min-height: var(--control-height); }
+.daily-none input, .daily-task-option input { width: 18px; height: 18px; min-height: 18px; flex: 0 0 18px; }
 .daily-task-groups > section + section { border-top: 1px solid var(--line); }
 .daily-task-groups h3 { margin: 0; padding: 9px 14px; background: var(--surface); color: var(--muted); font-size: var(--type-body); }
 .daily-task-option { min-height: 48px; display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; border-top: 1px solid var(--line); }
