@@ -5,7 +5,7 @@ import { readWorkspaceIdentity, updateWorkspaceIdentity, WorkspaceIdentityError 
 export async function GET(request: Request) {
   const auth = await authorizeRequest(request, { allowViewerWrite: true });
   if (auth instanceof Response) return auth;
-  if (request.headers.get("x-okrptr-workspace-id") !== auth.ownerId) return denied();
+  if (request.headers.get("x-okri-workspace-id") !== auth.ownerId) return denied();
   try {
     return result(await readWorkspaceIdentity(env.DB, auth.ownerId, auth.userId, enabled()));
   } catch (error) { return failure(error); }
@@ -18,7 +18,7 @@ export async function PATCH(request: Request) {
   }
   const auth = await authorizeRequest(request, { allowViewerWrite: true });
   if (auth instanceof Response) return auth;
-  if (request.headers.get("x-okrptr-workspace-id") !== auth.ownerId) return denied();
+  if (request.headers.get("x-okri-workspace-id") !== auth.ownerId) return denied();
   if (auth.apiToken) return Response.json({ error: "워크스페이스 설정에서 변경해 주세요." }, { status: 403 });
   try {
     const input = await request.json();

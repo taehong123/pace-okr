@@ -36,7 +36,7 @@ function harness() {
       waitUntil(promise) { pending.push(promise); },
     },
     "@/lib/pace-data": {
-      async authorizeRequest(request) { calls.push(["authorize", request.headers.get("x-okrptr-workspace-id")]); return state.authorization; },
+      async authorizeRequest(request) { calls.push(["authorize", request.headers.get("x-okri-workspace-id")]); return state.authorization; },
       canManageTeam: (auth) => ["owner", "admin"].includes(auth.role),
       async ensureWorkspace(id) { calls.push(["ensure", id]); },
       async getSlackConnection(id) { calls.push(["connection", id]); return state.connection; },

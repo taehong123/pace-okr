@@ -42,7 +42,7 @@ targets, child Tasks or parent OKRs.
 4. Save Tasks/Routines with `create_item`, `create_tasks`, or `create_routine`.
    Every Project uses `propose_project`: show evidence-based recommendations,
    the complete summary and the review link. The user chooses an Initiative and
-   confirms in OKRPTR before creation. No candidate is preselected; search,
+   confirms in OKRI before creation. No candidate is preselected; search,
    defer and cancel are available. A known parent ID does not bypass review.
    General is only a fallback for a clear Task, never a silent Project→Task conversion.
 5. Confirm using the saved record: type, title, actual container, supplied owner

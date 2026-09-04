@@ -44,7 +44,7 @@ user explicitly approves in that same conversation, the assistant reuses the
 value through `create_item`; the server resolves the frozen review, current
 Initiative fingerprint and editor revision and executes the same atomic writer.
 The value and review ID are implementation details and must not be shown to or
-copied by the user. The assistant must not request a new chat, an `@OKRPTR`
+copied by the user. The assistant must not request a new chat, an `@OKRI`
 mention or a browser approval page.
 
 Explicit confirmation is a client assertion made only after the user's actual

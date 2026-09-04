@@ -87,7 +87,7 @@ test("web reads reference context and rules for the authenticated workspace, wit
     sent = JSON.parse(init.body);
     return Response.json({ output_text: JSON.stringify({ assistantMessage: "안녕하세요.", questions: [], plan: {} }), usage: { input_tokens: 10, output_tokens: 10 } });
   });
-  const response = await POST(new Request("https://okrptr.test/api/okr-organize", {
+  const response = await POST(new Request("https://okri.test/api/okr-organize", {
     method: "POST", body: JSON.stringify({ message: "안녕", mode: "coach", ownerId: "workspace-b", workspaceContext: {} }),
   }));
   assert.equal(response.status, 200);
@@ -111,5 +111,5 @@ test("unauthenticated conversation never reads workspace or calls the model", as
     "@/lib/pace-data": { authorizeRequest: async () => new Response(null, { status: 401 }) },
     "@/lib/billing": {}, "@/lib/work-intake": intake,
   });
-  assert.equal((await POST(new Request("https://okrptr.test/api/okr-organize", { method: "POST" }))).status, 401);
+  assert.equal((await POST(new Request("https://okri.test/api/okr-organize", { method: "POST" }))).status, 401);
 });

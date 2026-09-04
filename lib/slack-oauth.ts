@@ -1,5 +1,3 @@
-import { slackSummonScopes } from "@/lib/slack-summon-command";
-
 export type SlackRuntimeEnv = {
   SLACK_CLIENT_ID?: string;
   SLACK_CLIENT_SECRET?: string;
@@ -53,7 +51,7 @@ export const slackDailyScopes = [
   "groups:history",
 ];
 
-export const slackScopes = [...slackDailyScopes, ...slackSummonScopes];
+export const slackScopes = [...slackDailyScopes, "app_mentions:read"];
 
 export function slackConfigured(runtime: SlackRuntimeEnv) {
   return Boolean(runtime.SLACK_CLIENT_ID && runtime.SLACK_CLIENT_SECRET && runtime.SLACK_SIGNING_SECRET && runtime.SLACK_TOKEN_ENCRYPTION_KEY);

@@ -39,7 +39,7 @@ async function mockReview(page: Page, options: { single?: boolean; getStatus?: n
   page.on("pageerror", (error) => state.errors.push(error.message));
   await page.route("**/api/project-reviews**", async (route) => {
     const request = route.request();
-    expect(request.headers()["x-okrptr-workspace-id"]).toBe("review-test");
+    expect(request.headers()["x-okri-workspace-id"]).toBe("review-test");
     if (request.method() === "POST") {
       const body = request.postDataJSON() as Record<string, unknown>;
       state.posts.push(body);
@@ -254,7 +254,7 @@ test("search failure and leaving the page preserve the user's edited draft", asy
   await expect(page.getByRole("alert")).toContainText("후보 검색에 실패했습니다. 수정 내용은 유지됩니다.");
   await expect(page.getByLabel("Project 제목 (필수)")).toHaveValue("떠나기 전 수정");
   const dialog = new Promise<string>((resolve) => page.once("dialog", async (warning) => { const type = warning.type(); await warning.dismiss(); resolve(type); }));
-  await page.getByRole("link", { name: "OKRPTR", exact: true }).click({ noWaitAfter: true });
+  await page.getByRole("link", { name: "OKRI", exact: true }).click({ noWaitAfter: true });
   expect(await dialog).toBe("beforeunload");
   await expect(page.getByLabel("Project 제목 (필수)")).toHaveValue("떠나기 전 수정");
   expect(state.posts).toHaveLength(0);

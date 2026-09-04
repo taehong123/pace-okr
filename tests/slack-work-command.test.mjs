@@ -9,6 +9,11 @@ const { parseSlackWorkCommand } = await import(`data:text/javascript;base64,${Bu
 
 test("Slack work commands accept Task spelling and whitespace variants", () => {
   const cases = [
+    ["!task Customer interview", "task_create", "Customer interview"],
+    ["!project create Onboarding", "project_create", "Onboarding"],
+    ["!project view Mobile", "project_view", "Mobile"],
+    ["!my work", "my_work", ""],
+    ["!okri", "help", ""],
     ["!테스크생성 명함", "task_create", "명함"],
     [" ! 태스크   완료   명함 ", "task_complete", "명함"],
     ["!테스크 재 열기 명함", "task_reopen", "명함"],
@@ -37,8 +42,9 @@ test("Slack channel events, private responses, permissions, and request idempote
     readFile(new URL("../slack-app-manifest.yml", import.meta.url), "utf8"),
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
   ]);
-  assert.match(events, /!parsedCommand && event\.user !== connection\.botUserId/);
-  assert.ok(events.indexOf("!parsedCommand") < events.indexOf("INSERT OR IGNORE INTO slack_event_receipts"));
+  assert.match(events, /event\.user !== connection\.botUserId/);
+  assert.match(events, /const commandMessage = Boolean/);
+  assert.ok(events.indexOf("const commandMessage") < events.indexOf("INSERT OR IGNORE INTO slack_event_receipts"));
   assert.match(domain, /chat\.postEphemeral/);
   assert.match(domain, /authorization\.role === "viewer"/);
   assert.match(domain, /metadata\.teamId !== teamId/);

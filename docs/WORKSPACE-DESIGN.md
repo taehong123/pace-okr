@@ -32,7 +32,7 @@ binds only to localhost, refuses production mode, and is not part of the app bui
 Use one browser worker with local API mocks:
 
 ```powershell
-$env:OKRPTR_E2E_BASE_URL = 'http://localhost:3187'
+$env:OKRI_E2E_BASE_URL = 'http://localhost:3187'
 npx playwright test tests/e2e/workspace-design.spec.ts tests/e2e/design-balance.spec.ts --project=desktop-chromium --workers=1
 npx playwright test tests/e2e/themes.spec.ts --project=desktop-chromium --workers=1
 npx playwright test tests/e2e/landing.spec.ts --project=desktop-chromium --workers=1

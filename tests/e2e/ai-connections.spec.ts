@@ -54,17 +54,17 @@ test("Claude official links, organization guidance, keyboard tabs and manual Cod
   await expect(dialog.getByRole("tab", { name: "Claude", exact: true })).toHaveAttribute("aria-selected", "true");
   const install = new URL((await dialog.getByRole("link", { name: "Claude에 연결", exact: true }).getAttribute("href"))!);
   expect(install.hostname).toBe("claude.ai");
-  expect(install.searchParams.get("connectorName")).toBe("OKRPTR");
-  expect(install.searchParams.get("connectorUrl")).toBe("https://okrptr.com/api/mcp");
+  expect(install.searchParams.get("connectorName")).toBe("OKRI");
+  expect(install.searchParams.get("connectorUrl")).toBe("https://okri.ai/api/mcp");
   await dialog.locator("summary", { hasText: "직접 주소 입력" }).click();
-  await expect(dialog.getByText(/OKRPTR 관리자 권한과는 별개/)).toBeVisible();
+  await expect(dialog.getByText(/OKRI 관리자 권한과는 별개/)).toBeVisible();
   expect(await dialog.getByRole("link", { name: "Claude 조직 관리자용 연결 열기" }).getAttribute("href")).toContain("/admin-settings/connectors?");
   await dialog.getByRole("tab", { name: "Claude", exact: true }).focus();
   await page.keyboard.press("End");
   await expect(dialog.getByRole("tab", { name: "Claude Code", exact: true })).toBeFocused();
   await dialog.locator("summary", { hasText: "터미널에서 직접 연결" }).click();
   await dialog.getByRole("button", { name: "명령 복사" }).click();
-  expect(await page.evaluate(() => (window as unknown as { copiedText: string }).copiedText)).toBe("claude mcp add --transport http --scope user okrptr https://okrptr.com/api/mcp");
+  expect(await page.evaluate(() => (window as unknown as { copiedText: string }).copiedText)).toBe("claude mcp add --transport http --scope user okri https://okri.ai/api/mcp");
   await expect(dialog.getByText(/자동 실행하거나 기존 연결을 삭제하지 않습니다/)).toBeVisible();
   await expect(dialog.locator(".ai-connection-state")).toHaveText("연결 없음");
 });
@@ -140,7 +140,7 @@ test("actual OAuth consent HTML preserves all six themes under nonce CSP at ever
   await page.route("**/oauth/authorize?qa=*", (route) => route.fulfill(approvalFixture()));
   await page.goto("/oauth/authorize?qa=initial");
   for (const theme of ["white", "beige", "gray", "dark", "neon", "cyberpunk"]) {
-    await page.evaluate((mode) => localStorage.setItem("okrptr.theme", mode), theme);
+    await page.evaluate((mode) => localStorage.setItem("okri.theme", mode), theme);
     await page.goto(`/oauth/authorize?qa=${theme}`);
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
     await expect(page.getByRole("heading", { name: "Claude Code에 연결하시겠어요?" })).toBeVisible();

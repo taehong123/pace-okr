@@ -58,7 +58,7 @@ test("the fourth story offers Slack connection and visibility into recorded work
   for (const { id } of landingLanguages) {
     const story = landingCopy[id].slides[3];
     assert.match(story.description, /Slack/);
-    assert.match(story.description, /OKRPTR/);
+    assert.match(story.description, /OKRI/);
     assert.doesNotMatch(`${story.title} ${story.description}`, /Notion|노션|!테스크생성|!프로젝트생성/i);
   }
   assert.match(landingCopy.ko.slides[3].title, /데일리를 따로 모으지 않아도/);

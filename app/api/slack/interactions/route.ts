@@ -31,8 +31,6 @@ export async function POST(request: Request) {
   let payload: SlackInteraction;
   try { payload = JSON.parse(encoded) as SlackInteraction; } catch { return new Response("invalid payload", { status: 400 }); }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return new Response("invalid payload", { status: 400 });
-  const projectResponse = await handleSlackProjectInteraction(payload);
-  if (projectResponse) return projectResponse;
   if (payload?.type === "block_actions" && payload.actions?.length === 1
     && ["okri_summon_link", "okri_summon_open", "okrptr_summon_link", "okrptr_summon_open"].includes(payload.actions[0].action_id ?? "")) {
     return new Response(null, { status: 200 });
@@ -45,7 +43,7 @@ export async function POST(request: Request) {
   const linked = await dailyMemberBySlack(teamId, slackUserId);
   if (!linked) {
     const link = await createSlackMemberLinkUrl(connection.ownerId, teamId, slackUserId, request);
-    return Response.json({ response_type: "ephemeral", text: workspaceT("OKRPTR 계정을 먼저 연결해 주세요: {link}", { link }) });
+    return Response.json({ response_type: "ephemeral", text: workspaceT("OKRI 계정을 먼저 연결해 주세요: {link}", { link }) });
   }
   const t = await serverTranslator(await memberMessageLanguage(env.DB, linked.authorization.ownerId, linked.memberId));
 

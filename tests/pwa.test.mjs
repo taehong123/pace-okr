@@ -14,7 +14,7 @@ function installation(standalone = false) {
   const display = Object.assign(new EventTarget(), { matches: standalone });
   window.matchMedia = () => display;
   vm.runInNewContext(appInstallBootstrapScript, { window, Event });
-  return { window, display, state: window.__OKRPTR_INSTALL__ };
+  return { window, display, state: window.__OKRI_INSTALL__ };
 }
 function offer(window, prompt) {
   const event = new Event("beforeinstallprompt", { cancelable: true });
@@ -72,7 +72,7 @@ test("manifest uses stable same-origin launch paths, real PNG icons, and no acco
   const text = await readFile(new URL("public/manifest.webmanifest", root), "utf8");
   const manifest = JSON.parse(text);
   assert.equal(manifest.id, "/");
-  assert.equal(manifest.name, "OKRPTR");
+  assert.equal(manifest.name, "OKRI");
   assert.equal(manifest.display, "standalone");
   assert.equal(manifest.start_url, "/");
   assert.equal(manifest.scope, "/");
@@ -92,7 +92,7 @@ function worker({ offline = false, storageFails = false } = {}) {
   const handlers = new Map();
   const stores = new Map();
   const requests = [];
-  const key = (request) => new URL(typeof request === "string" ? request : request.url, "https://okrptr.test").href;
+  const key = (request) => new URL(typeof request === "string" ? request : request.url, "https://okri.test").href;
   const caches = {
     keys: async () => [...stores.keys()],
     delete: async (name) => stores.delete(name),
@@ -108,7 +108,7 @@ function worker({ offline = false, storageFails = false } = {}) {
   };
   let claimed = 0;
   const self = {
-    location: { origin: "https://okrptr.test" },
+    location: { origin: "https://okri.test" },
     addEventListener: (name, handler) => handlers.set(name, handler),
     clients: { claim: async () => { claimed += 1; } },
     skipWaiting: () => assert.fail("do not interrupt existing drafts"),
@@ -134,16 +134,16 @@ function worker({ offline = false, storageFails = false } = {}) {
   };
 }
 
-test("installation precaches only public assets and activation removes only OKRPTR caches", async () => {
+test("installation precaches only public assets and activation removes only OKRI caches", async () => {
   const sw = worker();
   await sw.caches.open("other-service-data");
-  await sw.caches.open("okrptr-assets-v4");
+  await sw.caches.open("okri-assets-v4");
   await sw.event("install");
   assert.ok(sw.requests.every((request) => request.options.credentials === "omit"));
   assert.equal(sw.requests.some((request) => new URL(request.url).pathname === "/"), false);
   await sw.event("activate");
   assert.equal(sw.stores.has("other-service-data"), true);
-  assert.equal(sw.stores.has("okrptr-assets-v4"), false);
+  assert.equal(sw.stores.has("okri-assets-v4"), false);
   assert.equal(sw.claimed, 1);
 });
 
@@ -180,7 +180,7 @@ test("built offline page keeps shared themes and fonts, without bootstrap, user 
   const manifestLink = shell.indexOf('rel="manifest"');
   assert.ok(manifestLink >= 0 && manifestLink < shell.indexOf("</head>"));
   const html = await readFile(new URL("dist/client/offline.html", root), "utf8");
-  assert.doesNotMatch(html, /build:theme|build:fonts|build:preference|__OKRPTR_BOOTSTRAP_REQUEST__|fetch\(/);
+  assert.doesNotMatch(html, /build:theme|build:fonts|build:preference|__OKRI_BOOTSTRAP_REQUEST__|fetch\(/);
   for (const theme of ["white", "beige", "gray", "dark", "neon", "cyberpunk"]) assert.ok(html.includes(`html[data-theme="${theme}"]`));
   const fonts = [...html.matchAll(/url\((\/fonts\/[^)]+)\)/g)].map((match) => match[1]);
   assert.ok(fonts.length > 0 && fonts.length < 92);
@@ -188,5 +188,5 @@ test("built offline page keeps shared themes and fonts, without bootstrap, user 
   for (const font of fonts) assert.ok(builtWorker.includes(font));
   assert.doesNotMatch(builtWorker, /skipWaiting\(/);
   assert.doesNotMatch(builtWorker, /PRECACHE_URLS = \["\/"/);
-  assert.match(builtWorker, /CACHE_NAME = "okrptr-assets-[a-f0-9]{16}"/);
+  assert.match(builtWorker, /CACHE_NAME = "okri-assets-[a-f0-9]{16}"/);
 });

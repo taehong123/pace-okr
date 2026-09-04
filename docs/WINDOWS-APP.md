@@ -1,6 +1,6 @@
 # Windows app
 
-OKRPTR uses an installable PWA, not a native EXE or an embedded WebView.
+OKRI uses an installable PWA, not a native EXE or an embedded WebView.
 Edge/Chrome can install it into a standalone window with the existing Google
 browser authentication, cookies and workspace selection. The browser owns the
 Windows shortcut, taskbar integration, installation confirmation and uninstall.
@@ -8,7 +8,7 @@ Do not add a second account store or copy OAuth tokens into desktop storage.
 
 ## Installation
 
-Open OKRPTR in Edge or Chrome. When the browser offers installation, the login
+Open OKRI in Edge or Chrome. When the browser offers installation, the login
 screen and app menu show `앱 설치`. The same one-use browser event serves all
 buttons. Dismissal does not report success. Installed/standalone windows do not
 show the button. Browsers without the install event can use their own site-app

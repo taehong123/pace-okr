@@ -9,7 +9,7 @@ type Diagnostics = { members: Array<{ memberId: string; displayName: string; ema
 
 function connectionMessage(reason: string) {
   if (reason === "connected") return t("연결됨");
-  if (reason === "email_missing") return t("OKRPTR 이메일이 없습니다.");
+  if (reason === "email_missing") return t("OKRI 이메일이 없습니다.");
   if (reason === "email_not_found") return t("같은 이메일의 Slack 계정을 찾지 못했습니다. 이메일이 다르거나 Slack 이메일이 공개되지 않았을 수 있습니다.");
   if (reason === "email_ambiguous") return t("같은 이메일이 여러 계정에 등록돼 자동 연결을 보류했습니다.");
   if (reason === "already_linked") return t("해당 Slack 계정이 다른 멤버에게 연결돼 있습니다.");

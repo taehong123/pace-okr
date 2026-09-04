@@ -31,7 +31,7 @@ export async function GET(request: Request) {
   if (url.searchParams.get("code_challenge_method") !== "S256" || !/^[A-Za-z0-9_-]{43,128}$/.test(codeChallenge)) {
     return oauthRedirectError(redirectUri, state, request, "invalid_request", "A valid S256 PKCE code challenge is required.");
   }
-  const requestedScopes = (url.searchParams.get("scope") ?? "okrptr:read okrptr:write").split(/\s+/).filter(Boolean);
+  const requestedScopes = (url.searchParams.get("scope") ?? "okri:read okri:write").split(/\s+/).filter(Boolean);
   let scope = normalizeOAuthScope(url.searchParams.get("scope"));
   if (!scope || requestedScopes.some((entry) => !scope.split(" ").includes(entry))) {
     return oauthRedirectError(redirectUri, state, request, "invalid_scope", "Requested scopes are not supported.");
@@ -62,7 +62,7 @@ export async function GET(request: Request) {
     } });
   }
 
-  if (authorization.apiToken) return oauthJsonError("access_denied", "Sign in with your OKRPTR account to authorize a connection.");
+  if (authorization.apiToken) return oauthJsonError("access_denied", "Sign in with your OKRI account to authorize a connection.");
   scope = limitOAuthScopeForRole(scope, authorization.role);
   if (!scope) return oauthRedirectError(redirectUri, state, request, "invalid_scope", "This role can only approve read access.");
   if (oauthProviderForRedirect(redirectUri) !== "chatgpt") {

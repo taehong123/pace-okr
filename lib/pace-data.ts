@@ -2334,7 +2334,7 @@ export async function createIntegrationToken(
   authorization: RequestAuthorization,
   name = "Codex",
   provider: IntegrationProvider = "other",
-  scopes = "okrptr:read okrptr:write",
+  scopes = "okri:read okri:write",
 ) {
   await ensureSchema();
   const token = `okri_${randomTokenPart(32)}`;
@@ -2451,7 +2451,8 @@ export async function authorizeRequest(
         return Response.json({ error: "This OKRI connection no longer has workspace access." }, { status: 403 });
       }
       const role = membership.role as TeamRole;
-      if (!options.allowViewerWrite && !["GET", "HEAD", "OPTIONS"].includes(request.method) && token.scopes && !token.scopes.split(" ").includes("okrptr:write")) {
+      if (!options.allowViewerWrite && !["GET", "HEAD", "OPTIONS"].includes(request.method) && token.scopes
+        && !token.scopes.split(" ").some((scope) => scope === "okri:write" || scope === "okrptr:write")) {
         return Response.json({ error: "This connection only permits read access." }, { status: 403 });
       }
       if (!options.allowViewerWrite && role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
@@ -2468,7 +2469,7 @@ export async function authorizeRequest(
         displayName: membership.displayName,
         role,
         apiToken: true,
-        oauthScopes: token.scopes ?? "okrptr:read okrptr:write",
+        oauthScopes: token.scopes ?? "okri:read okri:write",
       };
     }
   }

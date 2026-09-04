@@ -20,7 +20,7 @@ async function setup(page: Page, role: "owner" | "admin" | "member" | "viewer" =
   await page.route("**/api/workspace-backups*", async (route) => {
     const request = route.request();
     const target = new URL(request.url());
-    expect(request.headers()["x-okrptr-workspace-id"]).toBe("workspace-1");
+    expect(request.headers()["x-okri-workspace-id"]).toBe("workspace-1");
     if (request.method() !== "GET") {
       writes.push({ method: request.method(), payload: request.postDataJSON() });
       if (request.method() === "PATCH") return json(route, failRestore ? { error: "다른 사용자가 데이터를 변경했습니다." } : { restored: true, rollbackBackupId: "rollback-1" }, failRestore ? 409 : 200);

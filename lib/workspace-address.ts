@@ -1,5 +1,5 @@
-export const WORKSPACE_DOMAIN = "okrptr.com";
-const RESERVED_ADDRESSES = new Set("www api app admin auth login logout account accounts billing mail email smtp imap pop webmail ftp ns1 ns2 dns cdn static assets files uploads status support help docs blog careers legal privacy terms oauth mcp slack google calendar localhost staging dev test preview production okrptr".split(" "));
+export const WORKSPACE_DOMAIN = "okri.ai";
+const RESERVED_ADDRESSES = new Set("www api app admin auth login logout account accounts billing mail email smtp imap pop webmail ftp ns1 ns2 dns cdn static assets files uploads status support help docs blog careers legal privacy terms oauth mcp slack google calendar localhost staging dev test preview production okri".split(" "));
 
 export function normalizeWorkspaceAddress(value: unknown) {
   if (typeof value !== "string") throw new Error("주소를 입력해 주세요.");
@@ -39,7 +39,7 @@ export function workspaceSubdomainRedirect(request: Request, enabled: boolean): 
   if (!enabled) return new Response("Workspace addresses are not available yet.", { status: 503, headers });
   try { normalizeWorkspaceAddress(address); } catch { return new Response("Workspace not found.", { status: 404, headers }); }
   if (!["GET", "HEAD"].includes(request.method) || url.pathname !== "/") {
-    return new Response("Use okrptr.com for API and account operations.", { status: 405, headers });
+    return new Response("Use okri.ai for API and account operations.", { status: 405, headers });
   }
   const target = new URL(workspaceEntryPath(address, workspaceReturnPath(url.pathname + url.search)), `https://${WORKSPACE_DOMAIN}`);
   return new Response(null, { status: 302, headers: { ...headers, Location: target.toString() } });

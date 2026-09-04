@@ -27,14 +27,14 @@ async function requestConsent<T>(init?: RequestInit): Promise<T> {
 }
 
 function rememberDismissal(userId: string) {
-  try { window.localStorage.setItem(`okrptr:marketing-consent-nudge:${userId}`, new Date().toISOString()); } catch { /* Server state remains authoritative. */ }
+  try { window.localStorage.setItem(`okri:marketing-consent-nudge:${userId}`, new Date().toISOString()); } catch { /* Server state remains authoritative. */ }
 }
 
 function claimPrompt(userId: string) {
   const pending = promptRequests.get(userId);
   if (pending) return pending;
   let dismissedLocally = false;
-  try { dismissedLocally = Boolean(window.localStorage.getItem(`okrptr:marketing-consent-nudge:${userId}`)); } catch { /* Local storage is optional. */ }
+  try { dismissedLocally = Boolean(window.localStorage.getItem(`okri:marketing-consent-nudge:${userId}`)); } catch { /* Local storage is optional. */ }
   const request = requestConsent<PromptResult>({ method: "POST", body: JSON.stringify({ action: dismissedLocally ? "dismiss" : "claim" }) });
   promptRequests.set(userId, request);
   void request.catch(() => { if (promptRequests.get(userId) === request) promptRequests.delete(userId); });

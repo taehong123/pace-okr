@@ -2,7 +2,7 @@ export type AppInstallStatus = "unavailable" | "ready" | "prompting" | "accepted
 
 declare global {
   interface Window {
-    __OKRPTR_INSTALL__?: {
+    __OKRI_INSTALL__?: {
       status: AppInstallStatus;
       prompt: () => Promise<void>;
     };
@@ -11,10 +11,10 @@ declare global {
 
 // Capture the browser's one-use event before React or authentication finishes loading.
 export const appInstallBootstrapScript = `(() => {
-  if (window.__OKRPTR_INSTALL__) return;
+  if (window.__OKRI_INSTALL__) return;
   const display = window.matchMedia("(display-mode: standalone)");
   let pending = null;
-  const state = window.__OKRPTR_INSTALL__ = {
+  const state = window.__OKRI_INSTALL__ = {
     status: display.matches ? "installed" : "unavailable",
     prompt: async () => {
       if (state.status !== "ready" || !pending) return;
@@ -31,7 +31,7 @@ export const appInstallBootstrapScript = `(() => {
   };
   function update(status) {
     state.status = status;
-    window.dispatchEvent(new Event("okrptr:installchange"));
+    window.dispatchEvent(new Event("okri:installchange"));
   }
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();

@@ -54,7 +54,7 @@ export default function ProjectReviewScreen() {
 
   const requestDetails = useCallback(() => {
     const params = new URLSearchParams(window.location.search);
-    return { id: params.get("id") ?? "", headers: { "Content-Type": "application/json", ...displayLanguageHeaders(), "X-Okrptr-Workspace-Id": params.get("workspaceId") ?? "" } };
+    return { id: params.get("id") ?? "", headers: { "Content-Type": "application/json", ...displayLanguageHeaders(), "X-Okri-Workspace-Id": params.get("workspaceId") ?? "" } };
   }, []);
 
   const load = useCallback(async () => {
@@ -156,12 +156,12 @@ export default function ProjectReviewScreen() {
   const visibleRecommendations = (data?.recommendations ?? []).filter((r) => !cycleFilter || r.initiative?.cycleId === cycleFilter);
   const recommendationIds = new Set(visibleRecommendations.map((r) => r.initiativeId));
   return <main className="project-review-page">
-    <header><a href="/">OKRPTR</a><span>{data?.workspaceName || t("Project 생성 확인")}</span></header>
+    <header><a href="/">OKRI</a><span>{data?.workspaceName || t("Project 생성 확인")}</span></header>
     <article>
       <h1>{t("생성 전에 연결과 내용을 확인해 주세요")}</h1>
       <p className="review-intro">{t("AI 초안을 여기서 수정하고 Initiative를 직접 선택하세요. 최종 확인 전에는 Project가 생성되지 않습니다.")}</p>
       {loading && <p role="status">{t("확인 내용을 불러오는 중입니다…")}</p>}
-      {loginUrl && <section className="review-notice"><h2>{t("연결한 계정으로 확인해 주세요")}</h2><p>{t("GPT에 연결한 동일한 OKRPTR 계정으로 로그인해야 합니다.")}</p><a className="review-primary" href={loginUrl}>{t("Google로 로그인하고 계속")}</a></section>}
+      {loginUrl && <section className="review-notice"><h2>{t("연결한 계정으로 확인해 주세요")}</h2><p>{t("GPT에 연결한 동일한 OKRI 계정으로 로그인해야 합니다.")}</p><a className="review-primary" href={loginUrl}>{t("Google로 로그인하고 계속")}</a></section>}
       {error && <p className="review-error" role="alert">{error}</p>}
       {data?.canApprove === false && <p className="review-notice">{t("현재 계정은 읽기 전용입니다. 생성하려면 워크스페이스의 편집 권한이 필요합니다.")}</p>}
       {!loading && !data && !loginUrl && <button type="button" onClick={() => void load()}>{t("다시 불러오기")}</button>}
@@ -183,7 +183,7 @@ export default function ProjectReviewScreen() {
         </section>}
         <ReviewSummary review={review} proposal={pending ? proposal : review.proposal} editor={data?.editor ?? null} selection={pending ? selection : review.selectedParent} />
         {review.state === "created" ? <section className="review-notice" role="status"><h2>{t("확인한 내용으로 생성했습니다")}</h2><a href={`/?project=${encodeURIComponent(review.projectId)}`}>{t("생성한 Project 열기")}</a></section>
-          : review.state === "cancelled" ? <section className="review-notice" role="status"><h2>{t("생성을 취소했습니다")}</h2><p>{t("Project를 만들지 않았습니다.")}</p><a href="/">{t("OKRPTR로 돌아가기")}</a></section>
+          : review.state === "cancelled" ? <section className="review-notice" role="status"><h2>{t("생성을 취소했습니다")}</h2><p>{t("Project를 만들지 않았습니다.")}</p><a href="/">{t("OKRI로 돌아가기")}</a></section>
             : !pending || uncertain ? <section className="review-notice" role="status"><h2>{t("저장 결과 확인이 필요합니다")}</h2><p>{t("중복 생성을 막기 위해 새 요청을 만들지 않습니다. 기존 요청의 처리 결과를 확인해 주세요.")}</p><button type="button" onClick={() => void load()} disabled={busy}>{t("처리 결과 확인")}</button>{data?.existingProjectId && <a href={`/?project=${encodeURIComponent(data.existingProjectId)}`}>{t("저장된 Project 확인")}</a>}</section> : <section className="review-confirm">
               <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} disabled={!selection || disabled || !data?.editor || !proposal.title.trim()} />{t("위 내용과 선택한 Initiative 연결을 확인했습니다.")}</label>
               <div className="review-actions"><button className="review-primary" type="button" disabled={!selection || !confirmed || disabled || !data?.editor || !proposal.title.trim()} onClick={() => void decide("approve")}>{busy ? t("처리 중…") : t("확인한 내용으로 Project 생성")}</button><button type="button" disabled={disabled} onClick={() => { setDeferred(true); setConfirmed(false); }}>{t("맞는 후보 없음 · 생성 보류")}</button><button type="button" disabled={disabled} onClick={() => void decide("cancel")}>{t("요청 취소")}</button></div>

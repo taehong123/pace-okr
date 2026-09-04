@@ -200,7 +200,7 @@ export async function POST(request: Request) {
       truncated: workContext.truncated,
     };
 
-    const model = runtime.OKRPTR_OPENAI_MODEL || runtime.OPENAI_MODEL || "gpt-5.6-luna";
+    const model = runtime.OKRI_OPENAI_MODEL || runtime.OKRPTR_OPENAI_MODEL || runtime.OPENAI_MODEL || "gpt-5.6-luna";
     const inputChars = message.length + JSON.stringify(currentPlan).length + JSON.stringify(history).length + JSON.stringify(workspaceContext).length + JSON.stringify(referenceContext).length + JSON.stringify(workspaceRules).length + systemInstruction(mode).length;
     const limit = await checkAiUsageLimit(runtime, authorization.ownerId, authorization.userId, inputChars);
     if (limit) return limit;
@@ -331,7 +331,7 @@ function sanitizeTargetContext(value: Record<string, unknown>) {
 
 function systemInstruction(mode: ConversationMode) {
   const hierarchy = "Objective > Key Result > Initiative > Project > Task. Routine is independent and may contain Task.";
-  const common = `You are the conversational assistant inside OKRPTR. Always answer in the user's language. Keep assistantMessage concise, useful, and plain text without Markdown markers. Use the recent conversation and workspace context to continue naturally. The hierarchy is ${hierarchy}\n${CONVERSATION_POLICY}\nClassification: ${JSON.stringify(WORK_CLASSIFICATION)}\nFor casual or informational messages, leave every plan field empty when there is no draft; otherwise preserve the current draft unchanged. Usually leave questions empty. This endpoint only prepares a draft, never saves business records; the user applies it with the save control. Do not repeat questions in both assistantMessage and questions. Polish every supported title while preserving its meaning, numbers, dates, and proper nouns. Do not turn an activity into a Key Result. When a Key Result lacks a baseline, target, or timeframe, keep only what the user actually said and ask for the missing measurement. Never concatenate separate Key Results or Initiatives into one title.`;
+  const common = `You are the conversational assistant inside OKRI. Always answer in the user's language. Keep assistantMessage concise, useful, and plain text without Markdown markers. Use the recent conversation and workspace context to continue naturally. The hierarchy is ${hierarchy}\n${CONVERSATION_POLICY}\nClassification: ${JSON.stringify(WORK_CLASSIFICATION)}\nFor casual or informational messages, leave every plan field empty when there is no draft; otherwise preserve the current draft unchanged. Usually leave questions empty. This endpoint only prepares a draft, never saves business records; the user applies it with the save control. Do not repeat questions in both assistantMessage and questions. Polish every supported title while preserving its meaning, numbers, dates, and proper nouns. Do not turn an activity into a Key Result. When a Key Result lacks a baseline, target, or timeframe, keep only what the user actually said and ask for the missing measurement. Never concatenate separate Key Results or Initiatives into one title.`;
   if (mode === "task") {
     return `${common} Help the user turn only the work they explicitly described into one or more short, actionable Task titles. Put one Task per line in plan.tasks. Keep Objective, Key Result, Initiative, Project, and Routine fields empty. Do not invent work, dates, owners, Projects, or Routines. The user may choose an existing Project or Routine before saving; when they do not choose one, the server links the Task to General.`;
   }

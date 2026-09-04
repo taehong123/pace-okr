@@ -5,7 +5,7 @@ import { THEMES } from "../../lib/themes";
 import { installLandingProductFixture } from "./landing-product-fixture";
 
 test("capture real product examples using only fictional local API responses", async ({ page, baseURL }) => {
-  test.skip(process.env.OKRPTR_CAPTURE_LANDING !== "1", "Asset capture is an explicit local authoring step.");
+  test.skip(process.env.OKRI_CAPTURE_LANDING !== "1", "Asset capture is an explicit local authoring step.");
   test.setTimeout(180_000);
   expect(["localhost", "127.0.0.1"]).toContain(new URL(baseURL!).hostname);
   await installLandingProductFixture(page);
@@ -35,7 +35,7 @@ async function capture(page: Page, selector: string, slide: number, mobile: bool
   await page.evaluate(() => document.fonts.ready);
   for (const { mode } of THEMES) {
     await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, mode);
-    const directory = resolve(process.env.OKRPTR_LANDING_ASSET_DIR ?? "test-results/landing-media", mode);
+    const directory = resolve(process.env.OKRI_LANDING_ASSET_DIR ?? "test-results/landing-media", mode);
     await mkdir(directory, { recursive: true });
     await page.locator(selector).screenshot({ path: resolve(directory, `slide-${slide}${mobile ? "-mobile" : ""}.png`), animations: "disabled" });
   }

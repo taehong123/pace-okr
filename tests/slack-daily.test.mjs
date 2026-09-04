@@ -151,7 +151,7 @@ function harness(t) {
 
 test("scheduled, manual and test reminders have unique block IDs and keep the delivery marker", (t) => {
   const { api } = harness(t);
-  for (const marker of ["okrptr_daily_reminder:uuid", "okrptr_daily_reminder:manual:uuid", "okrptr_daily_reminder:test:uuid"]) {
+  for (const marker of ["okri_daily_reminder:uuid", "okri_daily_reminder:manual:uuid", "okri_daily_reminder:test:uuid"]) {
     const blocks = api.dailyReminderBlocks(marker);
     const ids = blocks.flatMap((block) => block.block_id ? [block.block_id] : []);
     assert.equal(new Set(ids).size, ids.length);

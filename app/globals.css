@@ -1,12 +1,12 @@
 /* Supplement only Japanese/CJK glyphs with installed fonts; no location or font CDN requests. */
 @font-face {
-  font-family: "OKRPTR Japanese";
+  font-family: "OKRI Japanese";
   src: local("Yu Gothic"), local("Hiragino Sans"), local("Noto Sans CJK JP"), local("Noto Sans JP"), local("Meiryo");
   font-display: swap;
   unicode-range: U+2E80-2FFF, U+3000-30FF, U+31F0-31FF, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FF00-FFEF;
 }
 @font-face {
-  font-family: "OKRPTR Simplified Chinese";
+  font-family: "OKRI Simplified Chinese";
   src: local("Microsoft YaHei"), local("PingFang SC"), local("Noto Sans CJK SC"), local("Noto Sans SC"), local("SimHei");
   font-display: swap;
   unicode-range: U+2E80-2FFF, U+3000-303F, U+3100-312F, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FF00-FFEF;
@@ -36,8 +36,8 @@
   --motion-default: 180ms;
 }
 
-html:lang(ja) { --font-ui: "OKRPTR Japanese", "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-html:lang(zh) { --font-ui: "OKRPTR Simplified Chinese", "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+html:lang(ja) { --font-ui: "OKRI Japanese", "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+html:lang(zh) { --font-ui: "OKRI Simplified Chinese", "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 * { box-sizing: border-box; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 html, body { margin: 0; min-height: 100%; background: var(--paper); color: var(--ink); }

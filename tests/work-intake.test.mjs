@@ -165,7 +165,7 @@ function mcpFixture() {
     updateItem: async (_owner, id, input) => { calls.push({ method: "update", input }); return fullItem({ id, status: "in_progress", ...input }); },
     createLinkedTasks: async (_owner, input) => { calls.push({ method: "batch", input }); return input.titles.map((title) => fullItem({ title, cycleId: "cycle-a", parentId: input.projectId, dueDate: input.dueDate })); },
     archiveProject: async (_owner, _user, id) => { calls.push({ method: "archive", id }); return { project: fullItem({ id, kind: "project", title: "Archived", archivedAt: "now" }), affectedCount: 3 }; },
-    restoreProject: async (_owner, id) => { calls.push({ method: "restore", id }); return { project: fullItem({ id, kind: "project", title: "Restored" }), restoredCount: 3 }; },
+    restoreProject: async (_owner, id) => { calls.push({ method: "restore", id }); return { project: fullItem({ id, kind: "project", title: "Restored" }), affectedCount: 3 }; },
     getItemPropertiesByName: async (_owner, ids) => { calls.push({ method: "properties", ids }); return {}; },
     getItemAssignmentMap: async () => ({}),
     replaceItemAssignmentRole: async () => {},
@@ -178,7 +178,7 @@ function mcpFixture() {
     constructor(_identity, options) { this.instructions = options.instructions; }
     registerTool(name, definition, callback) { tools.set(name, { definition, callback }); }
   }
-  const serverModule = compile(`${mcpSource}\nexport { createOkrptrServer };`, {
+  const serverModule = compile(`${mcpSource}\nexport { createOkriServer };`, {
     "cloudflare:workers": { env: { DB: fixtureData.d1 } },
     "@/lib/pace-data": data,
     "@/lib/routine-properties": routineProperties,
@@ -203,7 +203,7 @@ function mcpFixture() {
       "@/lib/project-review-service": { stageProjectReview: async (_auth, input, recommendations) => {
       if (input.properties?.invalid) throw new Error("Property not found");
       calls.push({ method: "review", input, recommendations });
-      return { id: "review", state: "awaiting_user_confirmation", url: "https://okrptr.com/project-review?id=review", expiresAt: "", summary: {}, selectedInitiative: null, recommendations, nextStep: "User must select and approve" };
+      return { id: "review", state: "awaiting_user_confirmation", url: "https://okri.ai/project-review?id=review", expiresAt: "", summary: {}, selectedInitiative: null, recommendations, nextStep: "User must select and approve" };
       } },
     }),
     "@modelcontextprotocol/sdk/server/mcp.js": { McpServer: FakeServer },
@@ -217,7 +217,7 @@ function mcpFixture() {
     z.object(definition.outputSchema).parse(output.structuredContent);
     return output.structuredContent;
   }
-  return { ...fixtureData, calls, tools, call, reviewReceipt, async init() { await serverModule.createOkrptrServer({ ownerId: "a", userId: "user", role: "owner" }); } };
+  return { ...fixtureData, calls, tools, call, reviewReceipt, async init() { await serverModule.createOkriServer({ ownerId: "a", userId: "user", role: "owner" }); } };
 }
 
 test("MCP review outcome contains the final edited connection and property summary, never a false pending success", async () => {
@@ -359,7 +359,7 @@ test("Legacy create_item stages once and can complete the approved Project witho
     for (const parent_id of [undefined, "ini", "unrelated-id"]) {
       const result = await f.call("create_item", { kind: "project", title: "결제 개편", parent_id });
       assert.equal(result.review.projectId, null);
-      assert.match(result.review.same_tool_confirmation.template_id, /^okrptr-confirm:/);
+      assert.match(result.review.same_tool_confirmation.template_id, /^okri-confirm:/);
     }
     const pending = await f.call("create_item", { kind: "project", title: "결제 개편", parent_id: "ini" });
     const created = await f.call("create_item", { kind: "project", title: "최종 결제 개편", description: "승인 전에 수정", progress: 25,
@@ -370,11 +370,15 @@ test("Legacy create_item stages once and can complete the approved Project witho
     assert.equal(created.item.progress, 25);
     assert.equal(created.item.parentId, "ini");
     assert.equal(f.calls.filter((call) => call.method === "approved").length, 1);
+    const legacyPending = await f.call("create_item", { kind: "project", title: "Legacy confirmation", parent_id: "ini" });
+    const legacyTemplateId = legacyPending.review.same_tool_confirmation.template_id.replace(/^okri-confirm:/, "okrptr-confirm:");
+    const legacyCreated = await f.call("create_item", { kind: "project", title: "Legacy confirmed", parent_id: "ini", template_id: legacyTemplateId });
+    assert.equal(legacyCreated.item.title, "Legacy confirmed");
     const staged = await f.call("propose_project", { title: "결제 개편", recommended_initiatives: [] });
     assert.equal(staged.review.selectedInitiative, null);
     assert.equal(staged.review.state, "awaiting_user_confirmation");
     assert.equal(f.calls.filter((call) => call.method === "create").length, 0);
-    assert.equal(f.calls.filter((call) => call.method === "review").length, 5);
+    assert.equal(f.calls.filter((call) => call.method === "review").length, 6);
   } finally { f.db.close(); }
 });
 

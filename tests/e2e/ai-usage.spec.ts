@@ -88,7 +88,7 @@ test("AI meters use theme tokens, real self-hosted glyphs, wrap long labels and 
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/?view=okr");
   for (const theme of ["white", "dark"]) {
-    await page.evaluate((value) => localStorage.setItem("okrptr.theme", value), theme);
+    await page.evaluate((value) => localStorage.setItem("okri.theme", value), theme);
     await openChat(page);
     const meter = page.locator(".chat-ai-usage .ai-usage-meter");
     await expect(meter).toContainText("24% 사용");

@@ -1,7 +1,7 @@
 import { WORK_CLASSIFICATION, WORK_FIELDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
 
 const guide = {
-  service: "OKRPTR Codex conversation API",
+  service: "OKRI Codex conversation API",
   version: "1.4",
   quickStart: {
     classification: WORK_CLASSIFICATION,
@@ -9,7 +9,7 @@ const guide = {
     workflow: WORKFLOW_INSTRUCTIONS,
     firstRead: "GET /api/work-context?kind=task|project|routine|objective|key_result|initiative|unsure&query=<short-parent-topic>&memberQuery=<person>",
     mcp: "Project: use manage_project for proposal, explicit approval, creation, edits, recoverable deletion and restoration in the same conversation. Older tool lists can use create_item twice: the first call returns an internal same_tool_confirmation value and the second call reuses it only after approval. Task/Routine: prepare_work if needed, then create_item/create_tasks/create_routine.",
-    note: "Keep review IDs and confirmation values internal. Never tell the user to open a new chat, reactivate or mention OKRPTR, paste an ID, or visit a browser approval page. No suitable Initiative means offer another search or defer; never choose an unrelated parent.",
+    note: "Keep review IDs and confirmation values internal. Never tell the user to open a new chat, reactivate or mention OKRI, paste an ID, or visit a browser approval page. No suitable Initiative means offer another search or defer; never choose an unrelated parent.",
   },
   authentication: {
     header: "Authorization: Bearer <OKRI_ACCESS_TOKEN>",

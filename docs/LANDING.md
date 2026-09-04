@@ -13,7 +13,7 @@ Native scroll snapping supports touch; arrows, dots and keyboard controls suppor
 manual navigation. The login footer is independent of the reading area.
 
 `lib/landing-copy.ts` owns Korean, English, Japanese, Chinese and Spanish copy.
-The saved `okrptr.intro-language` wins, followed by supported browser languages,
+The saved `okri.intro-language` wins, followed by supported browser languages,
 then English. Product captures show the current Korean application; localized
 captions and alternative text describe the examples. They are not a claim that
 the entire signed-in application has five-language localization.
@@ -27,13 +27,13 @@ database capability was added.
 - [Google re:Work team: Let's Make Work Better](https://blog.google/company-news/outreach-and-initiatives/small-business/lets-make-work-better/)
 - [John Doerr: Intel Operation Crush](https://www.whatmatters.com/okrs-explained/john-doerr-operation-crush)
 
-These support OKR adoption, not customer endorsements of OKRPTR. Work progress
+These support OKR adoption, not customer endorsements of OKRI. Work progress
 and Key Result values are displayed independently, without automatic attribution.
 The undeployed Slack summon bot is not advertised.
 
 The fourth slide describes starting Slack OAuth from the connection button,
 not completing consent and bot setup in one click. Work visibility refers to
-records in OKRPTR; it does not claim automatic discovery or external syncing.
+records in OKRI; it does not claim automatic discovery or external syncing.
 Notion integration is not implemented and is not advertised. These boundaries
 apply to all five languages.
 
@@ -47,9 +47,9 @@ No production data or integration messages are used.
 Capture through a local server with a single worker:
 
 ```powershell
-$env:OKRPTR_E2E_BASE_URL = 'http://localhost:3187'
-$env:OKRPTR_CAPTURE_LANDING = '1'
-$env:OKRPTR_LANDING_ASSET_DIR = Join-Path $env:TEMP 'okrptr-landing-media'
+$env:OKRI_E2E_BASE_URL = 'http://localhost:3187'
+$env:OKRI_CAPTURE_LANDING = '1'
+$env:OKRI_LANDING_ASSET_DIR = Join-Path $env:TEMP 'okri-landing-media'
 npx playwright test tests/e2e/landing-assets.spec.ts --project=desktop-chromium --workers=1
 ```
 
@@ -76,7 +76,7 @@ Inspect the generated screenshots as well as the geometry assertions.
 ## Release boundary
 
 This change was prepared separately on `codex/landing`, based on public version
-165 (`c82f438f679ac0aec6cde0cc6f7225d76ff03fb7`). Coordinate with other OKRPTR
+165 (`c82f438f679ac0aec6cde0cc6f7225d76ff03fb7`). Coordinate with other OKRI
 tasks before integration. Do not include the separately prepared version 166 or
 other unapproved work by copying the shared working tree wholesale.
 

@@ -225,8 +225,8 @@ test("all languages keep the wide layout readable with 200 percent user text and
     await expect(page.locator("html")).toHaveAttribute("lang", id === "zh" ? "zh-Hans" : id);
     const family = await page.locator("body").evaluate((element) => getComputedStyle(element).fontFamily);
     expect(family).toContain("Pretendard");
-    if (id === "ja") expect(family).toContain("OKRPTR Japanese");
-    if (id === "zh") expect(family).toContain("OKRPTR Simplified Chinese");
+    if (id === "ja") expect(family).toContain("OKRI Japanese");
+    if (id === "zh") expect(family).toContain("OKRI Simplified Chinese");
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     await expect(page.locator(".my-work-item").first()).toBeVisible();
   }

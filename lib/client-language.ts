@@ -22,7 +22,7 @@ export const isCurrentLanguageAccount = (userId: string) => snapshot.userId === 
 export const getClientLocale = () => formatLocale(getClientLanguage());
 export const displayDate = (value: string, options?: Intl.DateTimeFormatOptions) => formatCalendarDate(value, getClientLanguage(), options);
 export const displayLanguageHeaders = (): Record<string, string> => snapshot.userId && snapshot.preferences?.language === "auto"
-  ? { "x-okrptr-display-language": snapshot.language } : {};
+  ? { "x-okri-display-language": snapshot.language } : {};
 export function useLanguage() { return useSyncExternalStore(subscribe, () => snapshot, () => initial); }
 
 export function t(key: MessageKey | (string & {}), values?: Record<string, string | number>): string {
@@ -119,7 +119,7 @@ export async function saveAccountLanguage(userId: string, preferences: LanguageP
   await applyAccountLanguage(userId, preferences, { commit: true });
   // No personal values in storage or shared caches; other tabs re-read their own session.
   if (typeof BroadcastChannel !== "undefined") {
-    const channel = new BroadcastChannel("okrptr-language");
+    const channel = new BroadcastChannel("okri-language");
     channel.postMessage({ userId }); channel.close();
   }
 }

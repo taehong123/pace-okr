@@ -6,10 +6,10 @@ import type { AppInstallStatus } from "@/lib/app-install";
 import { t } from "@/lib/client-language";
 
 const subscribe = (onChange: () => void) => {
-  window.addEventListener("okrptr:installchange", onChange);
-  return () => window.removeEventListener("okrptr:installchange", onChange);
+  window.addEventListener("okri:installchange", onChange);
+  return () => window.removeEventListener("okri:installchange", onChange);
 };
-const getSnapshot = (): AppInstallStatus => window.__OKRPTR_INSTALL__?.status ?? "unavailable";
+const getSnapshot = (): AppInstallStatus => window.__OKRI_INSTALL__?.status ?? "unavailable";
 const getServerSnapshot = (): AppInstallStatus => "unavailable";
 
 export function AppInstallButton({ placement = "menu" }: { placement?: "menu" | "login" }) {
@@ -21,11 +21,11 @@ export function AppInstallButton({ placement = "menu" }: { placement?: "menu" | 
     <button
       type="button"
       className={`app-install-button ${placement === "login" ? "secondary app-install-login" : "nav-item"}`}
-      onClick={() => { void window.__OKRPTR_INSTALL__?.prompt(); }}
+      onClick={() => { void window.__OKRI_INSTALL__?.prompt(); }}
       disabled={busy}
       aria-busy={busy}
-      aria-label={t("OKRPTR 앱 설치")}
-      title={t("OKRPTR 앱 설치")}
+      aria-label={t("OKRI 앱 설치")}
+      title={t("OKRI 앱 설치")}
     >
       {busy ? <LoaderCircle className="spin" size={16} aria-hidden="true" /> : <MonitorDown size={16} aria-hidden="true" />}
       <span>{busy ? t("설치 확인 중") : t("앱 설치")}</span>

@@ -1,4 +1,4 @@
-const CACHE_NAME = "okrptr-assets-pwa1"; // build:cache
+const CACHE_NAME = "okri-assets-pwa1"; // build:cache
 const PRECACHE_URLS = ["/offline.html", "/favicon.svg"]; // build:precache
 
 async function precache(path) {
@@ -19,7 +19,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter((key) => key.startsWith("okrptr-assets-") && key !== CACHE_NAME).map((key) => caches.delete(key)));
+    await Promise.all(keys.filter((key) => (key.startsWith("okri-assets-") || key.startsWith("okrptr-assets-")) && key !== CACHE_NAME).map((key) => caches.delete(key)));
     await self.clients.claim();
   })());
 });
@@ -41,7 +41,7 @@ async function networkFirst(request) {
     const fallback = await cached("/offline.html");
     // Strip any static host's .html redirect so the original app URL stays intact.
     if (fallback) return new Response(fallback.body, { headers: fallback.headers });
-    return new Response("OKRPTR 서버에 연결할 수 없습니다. 인터넷 연결 후 새로고침해 주세요.", {
+    return new Response("OKRI 서버에 연결할 수 없습니다. 인터넷 연결 후 새로고침해 주세요.", {
       status: 503,
       headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
     });

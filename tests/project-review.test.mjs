@@ -105,7 +105,7 @@ function fixture() {
     } catch (error) { error.cause = stats.lastBatchError; throw error; }
   };
   const propose = async (input = {}) => {
-    const staged = await service.stageProjectReview(identity, { title: "결제 개편", dueDate: "2026-09-15", driMemberId: "me", workerMemberIds: ["peer"], templateId: "template", ...input }, [{ initiativeId: "i", reason: "검토할 AI 후보" }], "https://okrptr.com");
+    const staged = await service.stageProjectReview(identity, { title: "결제 개편", dueDate: "2026-09-15", driMemberId: "me", workerMemberIds: ["peer"], templateId: "template", ...input }, [{ initiativeId: "i", reason: "검토할 AI 후보" }], "https://okri.ai");
     return core.getProjectReview(d1, identity, staged.id);
   };
   const route = (auth = identity) => compile(reviewRouteSource, { ...dependencies,
@@ -116,7 +116,7 @@ function fixture() {
   return { db, d1, stats, writer, service, propose, approve, route, quota, runtime, editor, mcp };
 }
 
-const mcpIdentity = { ...identity, apiToken: true, oauthScopes: "okrptr:read okrptr:write" };
+const mcpIdentity = { ...identity, apiToken: true, oauthScopes: "okri:read okri:write" };
 async function mcpConfirmation(f, review, parentId = "i2", changes = {}) {
   const context = await f.mcp.readMcpProjectReview(mcpIdentity, review.id, { includeContext: true, cycleId: null });
   const parent = context.candidates.choices.find((entry) => entry.id === parentId);
@@ -129,7 +129,7 @@ test("personal MCP proposes, edits, chooses another file and completes without a
   const f = fixture();
   try {
     seedEditableFields(f);
-    const staged = await f.mcp.stageMcpProjectReview(mcpIdentity, { title: "결제 개편" }, [{ initiativeId: "i", reason: "가입 이탈 개선" }], "https://okrptr.com");
+    const staged = await f.mcp.stageMcpProjectReview(mcpIdentity, { title: "결제 개편" }, [{ initiativeId: "i", reason: "가입 이탈 개선" }], "https://okri.ai");
     assert.equal(staged.state, "awaiting_user_confirmation"); assert.equal(staged.projectId, null);
     assert.equal(staged.url, undefined); assert.match(staged.nextStep, /manage_project/);
     assert.equal(staged.recommendations[0].initiative.id, "i");
@@ -162,13 +162,24 @@ test("MCP confirmation enforces personal identity, write scopes, role and review
   const f = fixture();
   try {
     const review = await f.propose(); const input = await mcpConfirmation(f, review);
-    for (const auth of [{ ...mcpIdentity, oauthScopes: "okrptr:read" }, { ...mcpIdentity, oauthScopes: undefined },
+    for (const auth of [{ ...mcpIdentity, oauthScopes: "okri:read" }, { ...mcpIdentity, oauthScopes: undefined },
       { ...mcpIdentity, role: "viewer" }, { ...mcpIdentity, userId: "api-token" },
       { ...mcpIdentity, userId: "peer" }, { ...mcpIdentity, ownerId: "b" }]) {
       await assert.rejects(() => f.mcp.confirmMcpProjectReview(auth, input));
       await assert.rejects(() => f.mcp.cancelMcpProjectReview(auth, review.id, review.version));
     }
     assert.equal(f.stats.batches, 0);
+  } finally { f.db.close(); }
+});
+
+test("legacy MCP write scopes remain writable during the OKRI migration", async () => {
+  const f = fixture();
+  try {
+    const review = await f.propose();
+    const input = await mcpConfirmation(f, review);
+    const result = await f.mcp.confirmMcpProjectReview({ ...mcpIdentity, oauthScopes: "okrptr:read okrptr:write" }, input);
+    assert.equal(result.state, "created");
+    assert.ok(result.projectId);
   } finally { f.db.close(); }
 });
 
@@ -252,7 +263,7 @@ function seedEditableFields(f) {
 }
 async function editedRequest(f, review, proposal, revision, parentId = "in") {
   const parent = await core.getReviewInitiative(f.d1, "a", parentId);
-  return new Request("https://okrptr.com/api/project-reviews", { method: "POST", headers: { Origin: "https://okrptr.com", "Content-Type": "application/json" },
+  return new Request("https://okri.ai/api/project-reviews", { method: "POST", headers: { Origin: "https://okri.ai", "Content-Type": "application/json" },
     body: JSON.stringify({ decision: "approve", id: review.id, version: review.version, confirmed: true,
       initiativeId: parent.id, initiativeFingerprint: parent.fingerprint, proposal, editorRevision: revision }) });
 }
@@ -265,12 +276,12 @@ test("Editable catalog is scoped, ordered and separate from candidate search; un
     assert.equal(review.proposal.properties.검토됨, null);
     assert.equal(review.propertyLabels.검토자, "미지정");
     assert.equal(review.fieldOrigins["properties.예산"], "default");
-    const get = await f.route().GET(new Request(`https://okrptr.com/api/project-reviews?id=${review.id}`));
+    const get = await f.route().GET(new Request(`https://okri.ai/api/project-reviews?id=${review.id}`));
     const result = await get.json();
     assert.deepEqual(result.editor.properties.map((p) => p.type), ["number", "text", "select", "date", "checkbox", "member", "members"]);
     assert.equal(result.editor.members.some((m) => m.id === "other"), false);
     assert.equal(result.editor.revision.length, 64);
-    const search = await f.route().GET(new Request(`https://okrptr.com/api/project-reviews?id=${review.id}&mode=candidates&cycleId=next`));
+    const search = await f.route().GET(new Request(`https://okri.ai/api/project-reviews?id=${review.id}&mode=candidates&cycleId=next`));
     assert.deepEqual(Object.keys(await search.clone().json()), ["candidates"]);
     assert.deepEqual((await search.json()).candidates.choices.map((c) => c.id), ["in"]);
     assert.equal((await core.getProjectReview(f.d1, identity, review.id)).proposal.requestedCycleId, "cycle");
@@ -434,9 +445,9 @@ test("Stale parent, inactive member race, changed template/property, wrong user 
     finally { f.db.close(); }
   }
   for (const [request, token] of [
-    [new Request("https://okrptr.com/api/project-reviews", { method: "POST", headers: { Origin: "https://okrptr.com", Authorization: "Bearer forged" } }), true],
-    [new Request("https://okrptr.com/api/project-reviews", { method: "POST", headers: { Origin: "https://evil.example" } }), false],
-    [new Request("https://okrptr.com/api/project-reviews", { method: "POST" }), false],
+    [new Request("https://okri.ai/api/project-reviews", { method: "POST", headers: { Origin: "https://okri.ai", Authorization: "Bearer forged" } }), true],
+    [new Request("https://okri.ai/api/project-reviews", { method: "POST", headers: { Origin: "https://evil.example" } }), false],
+    [new Request("https://okri.ai/api/project-reviews", { method: "POST" }), false],
   ]) assert.throws(() => core.assertProjectReviewBrowserRequest(request, { apiToken: token }));
 });
 
@@ -463,7 +474,7 @@ test("Approval route requires browser identity, same origin, explicit choice and
     const review = await f.propose();
     const parent = await core.getReviewInitiative(f.d1, "a", "i2");
     const payload = { decision: "approve", id: review.id, version: review.version, initiativeId: parent.id, initiativeFingerprint: parent.fingerprint, confirmed: true };
-    const request = (body = payload, origin = "https://okrptr.com") => new Request("https://okrptr.com/api/project-reviews", { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const request = (body = payload, origin = "https://okri.ai") => new Request("https://okri.ai/api/project-reviews", { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify(body) });
     assert.equal((await f.route({ ...identity, apiToken: true }).POST(request())).status, 403);
     assert.equal((await f.route().POST(request(payload, "https://evil.example"))).status, 403);
     assert.equal((await f.route().POST(request({ ...payload, confirmed: false }))).status, 400);
@@ -579,7 +590,7 @@ test("REST integration token cannot bypass Project review by claiming source=web
     "@/lib/billing": { BillingLimitError: class extends Error {} },
     "@/lib/project-review-service": { stageProjectReview: async () => ({ state: "awaiting_user_confirmation" }) },
   });
-  const response = await route.POST(new Request("https://okrptr.com/api/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "임의 생성 시도", kind: "project", parentId: "i", source: "web" }) }));
+  const response = await route.POST(new Request("https://okri.ai/api/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "임의 생성 시도", kind: "project", parentId: "i", source: "web" }) }));
   assert.equal(response.status, 202); assert.equal((await response.json()).created, false); assert.equal(created, 0);
 });
 
@@ -589,6 +600,6 @@ test("Bulk OKR plan cannot bypass Project review or create ancestors before reje
     "@/lib/pace-data": { authorizeRequest: async () => ({ ...identity, apiToken: true }), ensureWorkspace: async () => {}, createOkrPlan: async () => { creates++; } },
     "@/lib/billing": { BillingLimitError: class extends Error {} },
   });
-  const response = await route.POST(new Request("https://okrptr.com/api/okr-plan", { method: "POST", body: JSON.stringify({ cycleId: "cycle", objective: "임의 목적", keyResult: "임의 KR", initiative: "임의 연결", project: "우회 생성" }) }));
+  const response = await route.POST(new Request("https://okri.ai/api/okr-plan", { method: "POST", body: JSON.stringify({ cycleId: "cycle", objective: "임의 목적", keyResult: "임의 KR", initiative: "임의 연결", project: "우회 생성" }) }));
   assert.equal(response.status, 409); assert.equal((await response.json()).created, false); assert.equal(creates, 0);
 });

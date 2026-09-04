@@ -84,7 +84,7 @@ test("Slack identity diagnostics require explicit account selection and keep fai
   expect(contrast.violations).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath("slack-member-repair.png"), fullPage: true });
   if (testInfo.project.name === "desktop-chromium") {
-    await page.addInitScript(() => localStorage.setItem("okrptr.theme", "dark"));
+    await page.addInitScript(() => localStorage.setItem("okri.theme", "dark"));
     await page.goto("/?settings=workspace&tab=integrations&bot=daily");
     await page.getByRole("button", { name: "Slack 멤버 연결 확인" }).click();
     await expect(select).toBeVisible();
@@ -99,7 +99,7 @@ test("personal daily light/dark, wide layout and text zoom use rendered Pretenda
   test.skip(testInfo.project.name !== "desktop-chromium");
   await installApiMocks(page, { teamWorkspace: true });
   for (const theme of ["white", "dark"]) {
-    await page.addInitScript((value) => localStorage.setItem("okrptr.theme", value), theme);
+    await page.addInitScript((value) => localStorage.setItem("okri.theme", value), theme);
     for (const width of [320, 768, 1920, 3840]) {
       await page.setViewportSize({ width, height: 1000 });
       await page.goto("/?view=scrum");

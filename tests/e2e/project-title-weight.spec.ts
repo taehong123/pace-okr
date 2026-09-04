@@ -35,7 +35,7 @@ test("Project text retains font, contrast and user scaling in light and dark at 
   await installApiMocks(page, { teamWorkspace: true });
   await page.setViewportSize({ width: 3840, height: 2160 });
   for (const theme of ["white", "dark"]) {
-    await page.addInitScript((value) => localStorage.setItem("okrptr.theme", value), theme);
+    await page.addInitScript((value) => localStorage.setItem("okri.theme", value), theme);
     await page.goto("/?view=my_work");
     const title = page.locator(".my-work-item .project-item-title").first();
     await expect(title).toHaveCSS("font-size", "16px");

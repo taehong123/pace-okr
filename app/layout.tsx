@@ -6,6 +6,7 @@ import "./item-editor.css";
 import "./pwa.css";
 import { themeBootstrapScript, themeCss } from "@/lib/themes";
 import { appInstallBootstrapScript } from "@/lib/app-install";
+import { PRODUCT_NAME, PUBLIC_APP_URL } from "@/lib/brand";
 
 const bootstrapScript = themeBootstrapScript + appInstallBootstrapScript + `(() => {
   const now = new Date();
@@ -31,8 +32,8 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: base,
-    applicationName: "OKRPTR",
-    title: "OKRPTR - 목표를 오늘의 실행으로",
+    applicationName: "OKRI",
+    title: "OKRI - 목표를 오늘의 실행으로",
     description: "Objective부터 Task까지 연결하고 MCP, 데일리 실행과 Routine을 관리하는 워크스페이스",
     icons: {
       icon: "/favicon.svg",
@@ -60,7 +61,7 @@ export default function RootLayout({
       <head>
         {/* Keep the manifest in the real head after hydration, not a streamed metadata container. */}
         <link rel="manifest" href="/manifest.webmanifest" />
-        <style id="okrptr-theme-colors" dangerouslySetInnerHTML={{ __html: themeCss }} />
+        <style id="okri-theme-colors" dangerouslySetInnerHTML={{ __html: themeCss }} />
         <script dangerouslySetInnerHTML={{ __html: bootstrapScript }} />
       </head>
       <body>

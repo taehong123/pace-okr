@@ -18,6 +18,10 @@ export function sortMyWorkItems<T extends SortableWork>(items: readonly T[], sor
 }
 
 export function myWorkSortStorageKey(workspaceId: string, memberId: string): string | null {
+  return workspaceId && memberId ? `okri.my-work-sort:${workspaceId}:${memberId}` : null;
+}
+
+function legacyMyWorkSortStorageKey(workspaceId: string, memberId: string): string | null {
   return workspaceId && memberId ? `okrptr.my-work-sort:${workspaceId}:${memberId}` : null;
 }
 
@@ -26,6 +30,11 @@ export function readMyWorkSort(workspaceId: string, memberId: string): MyWorkSor
   if (key && typeof window !== "undefined") {
     try {
       if (window.localStorage.getItem(key) === "priority") return "priority";
+      const legacyKey = legacyMyWorkSortStorageKey(workspaceId, memberId);
+      if (legacyKey && window.localStorage.getItem(legacyKey) === "priority") {
+        window.localStorage.setItem(key, "priority");
+        return "priority";
+      }
     } catch { /* Storage access is optional for this local preference. */ }
   }
   return "due";

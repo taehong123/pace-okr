@@ -1,11 +1,11 @@
-# OKRPTR design and theme contract
+# OKRI design and theme contract
 
 ## Design source and structure preservation
 
 The upstream design source is [ALLVIBE Design v1.0.0](https://github.com/all-vibe/all-vibe-agent-toolkit/blob/4f927714f728abcbe8920a3c39aad49692758c46/plugins/all-vibe-design/skills/all-vibe-design/SKILL.md), shared by 조성배 on 2026-08-24.
 Read its foundations, application-design, interaction-accessibility, content-design
 and service-profiles references before substantial UI work. This document records
-OKRPTR-specific clarifications, not a replacement design system.
+OKRI-specific clarifications, not a replacement design system.
 
 - Preserve navigation order, default destination, URL contracts, tab grouping,
   object hierarchy, view modes and create/edit flows. Styling is not permission
@@ -71,7 +71,7 @@ Upstream licenses are retained with the font assets and in
 [Pretendard variable subsets](https://github.com/orioncactus/pretendard#%EA%B0%80%EB%B3%80-%EB%8B%A4%EC%9D%B4%EB%82%98%EB%AF%B9-%EC%84%9C%EB%B8%8C%EC%85%8B).
 
 `lib/themes.ts` is the single source for theme IDs, labels, brightness, defaults,
-previews and semantic colors. White is the fallback; a valid saved `okrptr.theme`
+previews and semantic colors. White is the fallback; a valid saved `okri.theme`
 always wins. `app/layout.tsx` applies the generated palette and preference before
 the first body paint. The client and BlockNote consume the same registry.
 

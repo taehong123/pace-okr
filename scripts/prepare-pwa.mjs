@@ -9,8 +9,8 @@ const { THEMES, DEFAULT_THEME, themeCss, themeBootstrapScript } = await import(`
 const tokens = THEMES.find((theme) => theme.mode === DEFAULT_THEME).tokens;
 const manifest = {
   id: "/",
-  name: "OKRPTR",
-  short_name: "OKRPTR",
+  name: "OKRI",
+  short_name: "OKRI",
   description: "OKR, Project, Task, Routine을 관리하는 워크스페이스",
   lang: "ko",
   start_url: "/",
@@ -18,7 +18,7 @@ const manifest = {
   display: "standalone",
   background_color: tokens["bg-page"],
   theme_color: tokens["bg-sidebar"],
-  icons: [192, 512].map((size) => ({ src: `/icons/okrptr-${size}.png`, sizes: `${size}x${size}`, type: "image/png", purpose: "any" })),
+  icons: [192, 512].map((size) => ({ src: `/icons/okri-${size}.png`, sizes: `${size}x${size}`, type: "image/png", purpose: "any" })),
   shortcuts: [
     { name: "내 업무", url: "/?view=my_work" },
     { name: "OKR", url: "/?view=okr" },

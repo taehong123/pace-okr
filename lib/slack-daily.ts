@@ -16,7 +16,7 @@ import { dailyWorkSnapshots, listDailyWork } from "@/lib/daily-work";
 import { dailyForm, dailyWorkOption } from "@/lib/slack-daily-form";
 import { attachSlackMember, readSlackMemberMatches, synchronizeSlackMembers } from "@/lib/slack-member-matching";
 import { ensureWorkspace, getSlackConnection, getSlackConnectionByTeam, type RequestAuthorization } from "@/lib/pace-data";
-import { decryptSlackSecret, slackScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
+import { decryptSlackSecret, slackDailyScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { dailyDeliveryHealth } from "@/lib/slack-daily-status";
 
 export { dailyMemberBySlack } from "@/lib/daily-bot";
@@ -38,7 +38,7 @@ export type SlackDailyChannel = {
   isShared: boolean;
   isExternal: boolean;
 };
-export const DAILY_REMINDER_BLOCK_PREFIX = "okrptr_daily_reminder:";
+export const DAILY_REMINDER_BLOCK_PREFIX = "okri_daily_reminder:";
 const DAILY_REMINDER_TEXT = "[데일리 봇] 오늘의 데일리를 작성해 주세요.";
 const REMINDER_LEASE_MS = 120_000;
 const REMINDER_RETRY_MS = 5 * 60_000;
@@ -106,7 +106,7 @@ export async function manageSlackMemberConnections(authorization: RequestAuthori
     await attachSlackMember(env.DB, authorization.ownerId, connection.teamId, action.memberId, user, "admin");
   }
   const plan = await readSlackMemberMatches(env.DB, authorization.ownerId, connection.teamId, users);
-  const labels: Record<string, string> = { connected: "연결됨", email_missing: "OKRPTR 이메일이 없습니다.",
+  const labels: Record<string, string> = { connected: "연결됨", email_missing: "OKRI 이메일이 없습니다.",
     email_not_found: "같은 이메일의 Slack 계정을 찾지 못했습니다. 이메일이 다르거나 Slack 이메일이 공개되지 않았을 수 있습니다.",
     email_ambiguous: "같은 이메일이 여러 계정에 등록돼 자동 연결을 보류했습니다.",
     already_linked: "해당 Slack 계정이 다른 멤버에게 연결돼 있습니다.",
@@ -931,11 +931,11 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
   if (submission.skipReason) {
     const reason = t(dailySkipReasonLabel(submission.skipReason));
     const detail = submission.skipNote ? `\n${escapeSlack(submission.skipNote)}` : "";
-    const appUrl = `${String((env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?view=scrum`;
+    const appUrl = `${String((env as unknown as Record<string, unknown>).OKRI_APP_URL || (env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okri.ai").replace(/\/$/, "")}/?view=scrum`;
     return { text: `[${t("데일리 봇")}] ${t("{member}님의 {date} 데일리 스킵 · {reason}", { member: submission.memberName, date: submission.date, reason })}`, unfurl_links: false, unfurl_media: false, blocks: [
       { type: "header", text: { type: "plain_text", text: `${t("데일리 봇")} · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
       { type: "section", text: { type: "mrkdwn", text: `*⏭️ ${t("오늘 데일리 스킵")}*\n*${t("사유")}:* ${reason}${detail}`.slice(0, 2900) } },
-      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRPTR에서 보기") }, url: appUrl }] },
+      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 보기") }, url: appUrl }] },
     ] };
   }
   const yesterdayWork = submission.yesterdayWork ?? [];
@@ -951,12 +951,12 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
   const blocker = submission.blockersNote ? `\n*${t("블로커")}*\n${escapeSlack(submission.blockersNote)}` : "";
   const note = submission.todayNote ? `\n*${t("오늘 메모")}*\n${escapeSlack(submission.todayNote)}` : "";
   const yesterdayNote = submission.yesterdayNote ? `\n*${t("어제 메모")}*\n${escapeSlack(submission.yesterdayNote)}` : "";
-  const appUrl = `${String((env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?view=scrum`;
+  const appUrl = `${String((env as unknown as Record<string, unknown>).OKRI_APP_URL || (env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okri.ai").replace(/\/$/, "")}/?view=scrum`;
   const text = `[${t("데일리 봇")}] ${t("{member}님의 {date} 데일리", { member: submission.memberName, date: submission.date })}`;
   return { text, unfurl_links: false, unfurl_media: false, blocks: [
     { type: "header", text: { type: "plain_text", text: `${t("데일리 봇")} · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
     { type: "section", text: { type: "mrkdwn", text: `*${t("어제 완료한 일")}*\n${yesterdayLines}${yesterdayOverflow}${yesterdayNote}\n\n*${t("오늘 할 일")}*\n${taskLines}${overflow}${note}${blocker}`.slice(0, 2900) } },
-    { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRPTR에서 보기") }, url: appUrl }] },
+    { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 보기") }, url: appUrl }] },
   ] };
 }
 

@@ -59,7 +59,7 @@ test("long titles, 200 percent user text and local Korean Latin numeral fonts st
   await page.goto("/?view=my_work");
   const title = page.locator(".page-header h1");
   await expect(title).toBeVisible();
-  await title.evaluate((node) => { node.textContent = "이번 주의 목표와 성과 OKRPTR 2026"; });
+  await title.evaluate((node) => { node.textContent = "이번 주의 목표와 성과 OKRI 2026"; });
   await page.evaluate(() => document.fonts.ready);
   const client = await context.newCDPSession(page);
   await client.send("DOM.enable");

@@ -89,7 +89,7 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
   return (
     <main className="landing-shell" lang={language}>
       <header className="landing-header">
-        <h1>OKRPTR<span aria-hidden="true">.</span></h1>
+        <h1>OKRI<span aria-hidden="true">.</span></h1>
         <label className="landing-language">
           <Languages size={18} aria-hidden="true" />
           <span className="sr-only">{copy.language}</span>

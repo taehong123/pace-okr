@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   if (["daily", "데일리", "daily 작성", "데일리 작성"].includes(text.toLocaleLowerCase())) {
     if (!linked) {
       const link = await createSlackMemberLinkUrl(connection.ownerId, teamId, slackUserId, request);
-      return slackMessage(t("OKRPTR 계정 연결이 필요합니다. 15분 안에 로그인해 연결해 주세요.\n{link}", { link }));
+      return slackMessage(t("OKRI 계정 연결이 필요합니다. 15분 안에 로그인해 연결해 주세요.\n{link}", { link }));
     }
     const triggerId = body.get("trigger_id") ?? "";
     if (!triggerId) return slackMessage(t("Slack 데일리 창을 열 수 없습니다. 다시 시도해 주세요."));
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   }
 
   if (!text || text === "help") {
-    return slackMessage(t("사용법\n• `/okrptr daily` — 개인 데일리 작성\n• `/okrptr <문장>` — 문장을 General Task로 수집"));
+    return slackMessage(t("사용법\n• `/okri daily` — 개인 데일리 작성\n• `/okri <문장>` — 문장을 General Task로 수집"));
   }
 
   const userName = body.get("user_name") || slackUserId || "Slack";

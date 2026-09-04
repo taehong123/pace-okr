@@ -20,7 +20,7 @@ for (const [source, destination] of routes) {
 const staticHtml = await readFile(join(clientRoot, "index.html"), "utf8");
 const offlineHtml = await readFile(join(clientRoot, "offline.html"), "utf8");
 const precacheUrls = [
-  "/offline.html", "/favicon.svg", "/icons/okrptr-192.png", "/icons/okrptr-512.png",
+  "/offline.html", "/favicon.svg", "/icons/okri-192.png", "/icons/okri-512.png",
   ...new Set([...offlineHtml.matchAll(/url\((\/fonts\/[^)]+)\)/g)].map((match) => match[1])),
   ...new Set([...staticHtml.matchAll(/(?:src|href)="(\/_next\/static\/[^"]+)"/g)].map((match) => match[1])),
 ];

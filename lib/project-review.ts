@@ -217,8 +217,8 @@ export async function approveProjectReview(db: D1Database, identity: ReviewIdent
 export function assertProjectReviewBrowserRequest(request: Request, authorization: { apiToken: boolean }) {
   if (authorization.apiToken || request.headers.has("authorization")) fail("browser_confirmation_required", "이 경로는 웹 확인 화면 전용입니다. MCP에서는 대화에서 확인한 뒤 confirm_project를 사용해 주세요.", 403);
   if (request.method !== "GET" && request.headers.get("origin") !== new URL(request.url).origin) {
-    fail("invalid_origin", "OKRPTR 확인 화면에서 다시 시도해 주세요.", 403);
+    fail("invalid_origin", "OKRI 확인 화면에서 다시 시도해 주세요.", 403);
   }
   const site = request.headers.get("sec-fetch-site");
-  if (request.method !== "GET" && site && site !== "same-origin") fail("invalid_origin", "동일한 OKRPTR 화면에서만 승인할 수 있습니다.", 403);
+  if (request.method !== "GET" && site && site !== "same-origin") fail("invalid_origin", "동일한 OKRI 화면에서만 승인할 수 있습니다.", 403);
 }

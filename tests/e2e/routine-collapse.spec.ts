@@ -38,7 +38,7 @@ test("Routine long headings stay legible in white/dark, wide layouts and enlarge
   test.skip(info.project.name !== "desktop-chromium", "one sequential wide-screen check");
   await installApiMocks(page, { withRoutine: true, teamWorkspace: true });
   for (const theme of ["white", "dark"]) {
-    await page.addInitScript((value) => localStorage.setItem("okrptr.theme", value), theme);
+    await page.addInitScript((value) => localStorage.setItem("okri.theme", value), theme);
     await page.setViewportSize({ width: 3840, height: 2160 });
     await page.goto("/?view=routines");
     const toggle = page.locator(".routine-expand").first();

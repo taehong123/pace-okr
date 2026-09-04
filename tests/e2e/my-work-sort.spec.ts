@@ -46,7 +46,7 @@ async function setup(page: Page) {
   const requests: string[] = [];
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.addInitScript(() => localStorage.setItem("okrptr.intro-language", "ko"));
+  await page.addInitScript(() => localStorage.setItem("okri.intro-language", "ko"));
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     requests.push(`${route.request().method()} ${path}`);
@@ -138,8 +138,8 @@ test("storage failure does not prevent sorting and narrow screens retain date an
   await page.addInitScript(() => {
     const get = Storage.prototype.getItem;
     const set = Storage.prototype.setItem;
-    Storage.prototype.getItem = function (key) { if (key.startsWith("okrptr.my-work-sort:")) throw new Error("Blocked"); return get.call(this, key); };
-    Storage.prototype.setItem = function (key, value) { if (key.startsWith("okrptr.my-work-sort:")) throw new Error("Blocked"); return set.call(this, key, value); };
+    Storage.prototype.getItem = function (key) { if (key.startsWith("okri.my-work-sort:")) throw new Error("Blocked"); return get.call(this, key); };
+    Storage.prototype.setItem = function (key, value) { if (key.startsWith("okri.my-work-sort:")) throw new Error("Blocked"); return set.call(this, key, value); };
   });
   await page.goto("/?view=my_work");
   await page.getByRole("button", { name: "우선순위순", exact: true }).click();

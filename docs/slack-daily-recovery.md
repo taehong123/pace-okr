@@ -86,7 +86,7 @@ exactly-once delivery across an external API and database.
   workspace and recipient errors are empty. Preferences were not changed and
   no test/immediate messages were sent.
 - The Slack app's existing `message.im` subscription was enabled, but its
-  `https://okrptr.com/api/slack/events` request URL showed a verification failure.
+  `https://okri.ai/api/slack/events` request URL showed a verification failure.
   Re-verification succeeded and the same URL was saved. The signed validation
   POST appears in hosting logs. No scopes or event subscriptions were added.
 - The examined hosting logs contained fetch invocations, not scheduled ones.

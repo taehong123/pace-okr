@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import type { SlackConnection } from "@/db/schema";
 import {
   ITEM_PRIORITIES,
   ITEM_STATUSES,
@@ -15,10 +16,9 @@ import {
   type ItemPriority,
   type ItemStatus,
   type RequestAuthorization,
-  type SlackConnection,
 } from "@/lib/pace-data";
 import { createSlackMemberLinkUrl, dailyMemberBySlack, slackApi, slackTokenForConnection } from "@/lib/slack-daily";
-import { readLanguagePreferences } from "@/lib/language-preferences";
+import { readLanguagePreferences, workspaceMessageLanguage } from "@/lib/language-preferences";
 import { serverTranslator, type Translator } from "@/lib/server-language";
 import {
   SLACK_WORK_COMMANDS,
@@ -57,12 +57,14 @@ type SlackState = Record<string, Record<string, {
 export async function handleSlackWorkCommandEvent(request: Request, connection: SlackConnection, event: WorkMessageEvent, parsed: ParsedSlackWorkCommand) {
   const linked = await dailyMemberBySlack(connection.teamId, event.user);
   const token = await slackTokenForConnection(connection);
+  const t = linked
+    ? await memberTranslator(linked.authorization)
+    : await serverTranslator(await workspaceMessageLanguage(env.DB, connection.ownerId));
   if (!linked) {
     const link = await createSlackMemberLinkUrl(connection.ownerId, connection.teamId, event.user, request);
-    await postPrivate(token, event, `OKRPTR 계정 연결이 필요합니다. 15분 안에 로그인해 연결해 주세요.\n${link}`);
+    await postPrivate(token, event, t("OKRI 계정 연결이 필요합니다. 15분 안에 로그인해 연결해 주세요.\n{link}", { link }));
     return;
   }
-  const t = await memberTranslator(linked.authorization);
   if (isWriteCommand(parsed.command) && linked.authorization.role === "viewer") {
     await postPrivate(token, event, t("Viewer는 조회 명령만 사용할 수 있습니다."));
     return;
@@ -307,8 +309,8 @@ async function assignedWorkSummary(authorization: RequestAuthorization, memberId
 
 function commandHelp(t: Translator) {
   return `*${t("업무 관리 봇 명령")}*\n` + [
-    "!내업무", "!프로젝트생성", "!프로젝트조회", "!프로젝트수정", "!프로젝트상태",
-    "!테스크생성", "!테스크조회", "!테스크수정", "!테스크완료", "!테스크재열기",
+    "!my work", "!project <name>", "!project view <name>", "!project edit <name>", "!project status <name>",
+    "!task <name>", "!task view <name>", "!task edit <name>", "!task complete <name>", "!task reopen <name>",
   ].map((command) => `• \`${command}\``).join("\n");
 }
 
@@ -376,7 +378,7 @@ async function failOperation(requestId: string, error: unknown) {
 }
 
 function resultView(message: string, t: Translator) {
-  return { type: "modal", title: { type: "plain_text", text: "OKRPTR" }, close: { type: "plain_text", text: t("닫기") }, blocks: [{ type: "section", text: { type: "mrkdwn", text: message } }] };
+  return { type: "modal", title: { type: "plain_text", text: "OKRI" }, close: { type: "plain_text", text: t("닫기") }, blocks: [{ type: "section", text: { type: "mrkdwn", text: message } }] };
 }
 function detailMessage(item: Record<string, unknown>, t: Translator) {
   const assignments = Array.isArray(item.assignments) ? item.assignments as Array<{ displayName?: string; role?: string }> : [];

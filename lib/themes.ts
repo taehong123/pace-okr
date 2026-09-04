@@ -1,5 +1,6 @@
 /** Theme identity, preview colors, first paint and editor scheme share one registry. */
-export const THEME_STORAGE_KEY = "okrptr.theme";
+export const THEME_STORAGE_KEY = "okri.theme";
+export const LEGACY_THEME_STORAGE_KEY = "okrptr.theme";
 export const DEFAULT_THEME = "white";
 
 // Radix Colors 3.0.0, unmodified sRGB steps 1-12. See docs/THEMES.md.
@@ -156,13 +157,19 @@ export const themeCss = THEMES.map(({ mode, colorScheme, tokens }) => {
   return `${selectors}{color-scheme:${colorScheme};${entries}${legacy}}`;
 }).join("\n");
 
-// This runs before the body paints. It never changes an existing saved preference.
+// This runs before the body paints and migrates the previous brand's preference.
 export const themeBootstrapScript = `(() => {
   const schemes = ${JSON.stringify(Object.fromEntries(THEMES.map(({ mode, colorScheme }) => [mode, colorScheme])))};
   let theme = ${JSON.stringify(DEFAULT_THEME)};
   try {
-    const saved = window.localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)});
-    if (Object.prototype.hasOwnProperty.call(schemes, saved)) theme = saved;
+    const currentKey = ${JSON.stringify(THEME_STORAGE_KEY)};
+    const saved = window.localStorage.getItem(currentKey);
+    const legacy = window.localStorage.getItem(${JSON.stringify(LEGACY_THEME_STORAGE_KEY)});
+    const preference = saved || legacy;
+    if (Object.prototype.hasOwnProperty.call(schemes, preference)) {
+      theme = preference;
+      if (!saved && legacy) window.localStorage.setItem(currentKey, legacy);
+    }
   } catch {}
   const root = document.documentElement;
   root.dataset.themePreference = theme;

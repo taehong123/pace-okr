@@ -9,7 +9,7 @@ async function guest(page: Page, language = "ko") {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript((locale) => {
-    try { if (!localStorage.getItem("okrptr.intro-language")) localStorage.setItem("okrptr.intro-language", locale); } catch { /* Blocked-storage coverage. */ }
+    try { if (!localStorage.getItem("okri.intro-language")) localStorage.setItem("okri.intro-language", locale); } catch { /* Blocked-storage coverage. */ }
   }, language);
   await page.route("**/api/**", (route) => {
     if (route.request().method() !== "GET") writes.push(route.request().url());
@@ -172,7 +172,7 @@ test("signing out clears the cached session and returns to landing", async ({ pa
   }
   await page.getByRole("button", { name: "Google 계정 로그아웃" }).click();
   await expect(page.locator(".landing-shell")).toBeVisible();
-  expect(await page.evaluate(() => localStorage.getItem("okrptr.bootstrap.v1"))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem("okri.bootstrap.v1"))).toBeNull();
   await expect(page.locator(".landing-login-button")).toBeEnabled();
 });
 
@@ -250,7 +250,7 @@ test("actual Korean, Latin and numeral fonts are local; large text and long titl
   await page.screenshot({ path: info.outputPath("landing-desktop.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: info.outputPath("landing-mobile.png") });
-  await heading.evaluate((node) => { node.textContent = "목표와 성과를 연결하는 OKRPTR 2026"; });
+  await heading.evaluate((node) => { node.textContent = "목표와 성과를 연결하는 OKRI 2026"; });
   await page.evaluate(() => document.fonts.ready);
   const client = await context.newCDPSession(page);
   await client.send("DOM.enable"); await client.send("CSS.enable");

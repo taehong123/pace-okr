@@ -26,7 +26,7 @@ test.describe("installation controls", () => {
     await expect(page.locator(".page-header h1")).toHaveText("내 업무");
     await offerInstall(page, "dismissed");
     if (info.project.name.startsWith("mobile")) await page.getByRole("button", { name: "더보기", exact: true }).click();
-    const install = page.getByRole("button", { name: "OKRPTR 앱 설치", exact: true }).filter({ visible: true });
+    const install = page.getByRole("button", { name: "OKRI 앱 설치", exact: true }).filter({ visible: true });
     await expect(install).toBeVisible();
     await install.focus();
     await page.keyboard.press("Enter");
@@ -35,7 +35,7 @@ test.describe("installation controls", () => {
     await expect(install).toBeVisible();
     await install.click();
     await expect(install).toHaveCount(0);
-    expect(await page.evaluate(() => window.__OKRPTR_INSTALL__?.status)).toBe("accepted");
+    expect(await page.evaluate(() => window.__OKRI_INSTALL__?.status)).toBe("accepted");
     expect(new URL(page.url()).searchParams.get("view")).toBe("my_work");
     await page.evaluate(() => window.dispatchEvent(new Event("appinstalled")));
     await offerInstall(page);
@@ -48,7 +48,7 @@ test.describe("installation controls", () => {
     await page.route("**/api/bootstrap?*", route => json(route, { error: "unauthenticated" }, 401));
     await page.goto("/?signedOut=1");
     await offerInstall(page, "error");
-    const button = page.getByRole("button", { name: "OKRPTR 앱 설치", exact: true });
+    const button = page.getByRole("button", { name: "OKRI 앱 설치", exact: true });
     await button.click();
     await expect(page.getByRole("alert")).toContainText("설치 창을 열지 못했습니다");
     await page.route("**/api/auth/google?*", route => route.fulfill({ status: 200, contentType: "text/html", body: "<p>Mock Google redirect</p>" }));
@@ -66,7 +66,7 @@ test.describe("installation controls", () => {
     await page.goto("/?view=okr");
     await expect(page.locator(".app-shell")).toBeVisible();
     await offerInstall(page);
-    await expect(page.getByRole("button", { name: "OKRPTR 앱 설치", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "OKRI 앱 설치", exact: true })).toHaveCount(0);
   });
 
   test("menu installation fits enlarged text without covering neighboring controls", async ({ page }, info) => {
@@ -79,7 +79,7 @@ test.describe("installation controls", () => {
       await offerInstall(page);
       await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
       if (width === 320) await page.getByRole("button", { name: "더보기", exact: true }).click();
-      const button = page.getByRole("button", { name: "OKRPTR 앱 설치", exact: true }).filter({ visible: true });
+      const button = page.getByRole("button", { name: "OKRI 앱 설치", exact: true }).filter({ visible: true });
       await expect(button).toBeVisible();
       expect(await button.evaluate(el => {
         const bounds = el.getBoundingClientRect();
@@ -107,7 +107,7 @@ test.describe("installation controls", () => {
       await page.setViewportSize({ width, height: 1000 });
       await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
-      const button = page.getByRole("button", { name: "OKRPTR 앱 설치", exact: true });
+      const button = page.getByRole("button", { name: "OKRI 앱 설치", exact: true });
       expect(await button.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
       await expect(button).toBeVisible();
     }
@@ -129,11 +129,11 @@ test.describe("real installed-app resources", () => {
       return manifest.data;
     }).not.toBe("");
     expect(manifest.errors).toEqual([]);
-    expect(JSON.parse(manifest.data!)).toMatchObject({ name: "OKRPTR", display: "standalone", start_url: "/", scope: "/" });
+    expect(JSON.parse(manifest.data!)).toMatchObject({ name: "OKRI", display: "standalone", start_url: "/", scope: "/" });
     await expect.poll(async () => (await session.send("Page.getInstallabilityErrors")).installabilityErrors).toEqual([]);
     const icon = await page.evaluate(async () => {
       const image = new Image();
-      image.src = "/icons/okrptr-512.png";
+      image.src = "/icons/okri-512.png";
       await image.decode();
       const canvas = document.createElement("canvas");
       canvas.width = canvas.height = 512;

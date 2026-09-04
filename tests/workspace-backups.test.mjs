@@ -285,7 +285,7 @@ test("backup API enforces active admin access, explicit workspace scope, same-or
   const noImports = routeSource.replace(/^import[\s\S]*?from ["'][^"']+["'];\r?\n/gm, "");
   const routeJs = ts.transpileModule(`const { env, authorizeRequest, BackupError, createWorkspaceBackup, listWorkspaceBackups, previewWorkspaceBackup, restoreWorkspaceBackup } = globalThis.__backupRouteTest;\n${noImports}`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
   const routes = await import(`data:text/javascript;base64,${Buffer.from(routeJs).toString("base64")}`);
-  const request = (method, body, extra = {}) => new Request("https://okrptr.com/api/workspace-backups", { method, headers: { "Content-Type": "application/json", "x-okrptr-workspace-id": "w", ...extra }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  const request = (method, body, extra = {}) => new Request("https://okri.ai/api/workspace-backups", { method, headers: { "Content-Type": "application/json", "x-okri-workspace-id": "w", ...extra }, ...(body ? { body: JSON.stringify(body) } : {}) });
   auth = new Response("unauthorized", { status: 401 });
   assert.equal((await routes.GET(request("GET"))).status, 401);
   for (const role of ["member", "viewer"]) {
@@ -294,7 +294,7 @@ test("backup API enforces active admin access, explicit workspace scope, same-or
     assert.equal((await routes.POST(request("POST", { action: "create" }))).status, 403);
   }
   auth = { ownerId: "w", userId: "u", role: "owner" };
-  assert.equal((await routes.GET(request("GET", null, { "x-okrptr-workspace-id": "other" }))).status, 403);
+  assert.equal((await routes.GET(request("GET", null, { "x-okri-workspace-id": "other" }))).status, 403);
   assert.equal((await routes.POST(request("POST", { action: "create" }, { origin: "https://evil.example" }))).status, 403);
   assert.equal((await routes.PATCH(request("PATCH", { action: "restore", id: "anything" }))).status, 400);
   const create = await routes.POST(request("POST", { action: "create" }));

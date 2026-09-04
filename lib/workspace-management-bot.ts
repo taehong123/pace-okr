@@ -240,18 +240,18 @@ async function sendReport(ownerId: string, settings: ManagementBotSettings, snap
   const body = selected.length
     ? selected.map((group) => renderSlackReportGroup(group, t)).join("\n\n")
     : t("현재 선택한 관리 항목은 모두 정리되어 있습니다. ✅");
-  const appUrl = `${String((env as RuntimeEnv).OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "")}/?settings=workspace&tab=summary`;
+  const appUrl = `${String((env as RuntimeEnv).OKRI_APP_URL || (env as RuntimeEnv).OKRPTR_APP_URL || "https://okri.ai").replace(/\/$/, "")}/?settings=workspace&tab=summary`;
   return deliverSlackBotMessage((env as RuntimeEnv).DB, {
     ownerId, botKind: "management", subjectId: snapshot.date,
     eventKey: test ? `test:${crypto.randomUUID()}` : snapshot.date,
     expiresAt: new Date(zonedDayRange(snapshot.date, settings.timezone)[1]).toISOString(),
     payload: { channel: settings.channelId, test,
-    text: `[${t("관리 봇")}] ${t("{workspace} 워크스페이스 관리 리포트 · {date}", { workspace: workspace?.name || "OKRPTR", date: snapshot.date })}`,
+    text: `[${t("관리 봇")}] ${t("{workspace} 워크스페이스 관리 리포트 · {date}", { workspace: workspace?.name || "OKRI", date: snapshot.date })}`,
     blocks: [
       { type: "header", text: { type: "plain_text", text: `${test ? `${t("테스트")} · ` : ""}${t("관리 봇")} · ${t("워크스페이스 관리 리포트")}`.slice(0, 150) } },
-      { type: "context", elements: [{ type: "mrkdwn", text: `*${escapeSlack(workspace?.name || "OKRPTR").slice(0, 1800)}* · ${snapshot.date}` }] },
+      { type: "context", elements: [{ type: "mrkdwn", text: `*${escapeSlack(workspace?.name || "OKRI").slice(0, 1800)}* · ${snapshot.date}` }] },
       { type: "section", text: { type: "mrkdwn", text: body.slice(0, 2900) } },
-      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRPTR에서 정리") }, url: appUrl }] },
+      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 정리") }, url: appUrl }] },
     ],
     },
   }, now);

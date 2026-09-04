@@ -2,8 +2,8 @@
 // This measures tools/network, NOT ChatGPT reasoning time or user-perceived end-to-end latency.
 import assert from "node:assert/strict";
 
-const endpoint = process.env.OKRPTR_MCP_URL || "http://localhost:3002/api/mcp";
-const token = process.env.OKRPTR_MCP_TOKEN;
+const endpoint = process.env.OKRI_MCP_URL || "http://localhost:3002/api/mcp";
+const token = process.env.OKRI_MCP_TOKEN;
 let requestId = 0;
 async function call(name, args = {}) {
   const start = performance.now();

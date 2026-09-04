@@ -74,7 +74,7 @@ test("only one concurrent tab displays the account prompt", async ({ page, conte
 
 test("old browser dismissal is transferred without showing or granting consent", async ({ page }) => {
   const state = serverState(); await setup(page, state);
-  await page.addInitScript(() => localStorage.setItem("okrptr:marketing-consent-nudge:user-1", "2026-08-31T00:00:00Z"));
+  await page.addInitScript(() => localStorage.setItem("okri:marketing-consent-nudge:user-1", "2026-08-31T00:00:00Z"));
   await page.goto("/?view=okr");
   await expect.poll(() => state.dismisses).toBe(1);
   await expect(prompt(page)).toHaveCount(0); expect(state.saves).toHaveLength(0); expect(state.data).toBe(false);

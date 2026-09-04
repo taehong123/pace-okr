@@ -164,7 +164,7 @@ test("API uses authenticated account, permits personal Viewer settings, and reje
       return loggedIn ? { userId: "a", ownerId: "workspace", role: "viewer" } : new Response(null, { status: 401 });
     },
   } });
-  const request = (body, method = "POST", origin = "https://okrptr.test") => new Request("https://okrptr.test/api/account/marketing-consent", {
+  const request = (body, method = "POST", origin = "https://okri.test") => new Request("https://okri.test/api/account/marketing-consent", {
     method, headers: { Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
   assert.equal((await route.POST(request({ action: "claim" }, "POST", "https://other.test"))).status, 403);

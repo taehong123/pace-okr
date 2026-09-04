@@ -6,7 +6,7 @@ import { listRoutineProperties } from "@/lib/routine-properties";
 import { isReadOnlyMcpRequest, readWorkContext, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
 import { ProjectReviewError } from "@/lib/project-review";
 import { cancelMcpProjectReview, confirmMcpProjectReview, confirmMcpProjectReviewFromCreateItem,
-  MCP_CREATE_ITEM_CONFIRM_PREFIX, mcpProjectConfirmationSchema,
+  LEGACY_MCP_CREATE_ITEM_CONFIRM_PREFIX, MCP_CREATE_ITEM_CONFIRM_PREFIX, mcpProjectConfirmationSchema,
   readMcpProjectReview, stageMcpProjectReview } from "@/lib/project-review-mcp";
 import {
   ITEM_CADENCES,
@@ -331,16 +331,16 @@ const projectConversationOutputSchema = {
 
 type ProjectConversationInput = z.infer<typeof projectConversationInputSchema>;
 
-async function createOkrptrServer(authorization: RequestAuthorization, origin = "https://okrptr.com") {
+async function createOkriServer(authorization: RequestAuthorization, origin = "https://okri.ai") {
   const { ownerId } = authorization;
   const rules = await getWorkspaceRules(ownerId);
   const server = new McpServer(
-    { name: "okrptr", version: "0.9.0" },
+    { name: "okri", version: "0.9.0" },
     {
       instructions:
         [
           WORKFLOW_INSTRUCTIONS,
-          "Use manage_project as the primary Project tool. Keep proposal, explicit approval, creation, edits, recoverable deletion, and restoration in the same conversation. Never ask the user to open a new chat, reactivate or mention OKRPTR, copy a review ID, or visit a browser approval page. Internal IDs stay internal. After the user approves the exact proposal, call manage_project again with action=confirm immediately.",
+          "Use manage_project as the primary Project tool. Keep proposal, explicit approval, creation, edits, recoverable deletion, and restoration in the same conversation. Never ask the user to open a new chat, reactivate or mention OKRI, copy a review ID, or visit a browser approval page. Internal IDs stay internal. After the user approves the exact proposal, call manage_project again with action=confirm immediately.",
           "Task lifecycle is binary. Use set_task_completed to complete or reopen a Task; never apply Project workflow states or manual progress percentages to a Task.",
           `Workspace capture rule: ${rules.captureInstruction}`,
           `Workspace structure rule: ${rules.structureInstruction}`,
@@ -410,7 +410,7 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
       const result = await restoreProject(ownerId, input.project_id);
       const item = (await serializeItemsForMcp(ownerId, [result.project]))[0];
       return {
-        structuredContent: { action: input.action, item, affectedTaskCount: Math.max(0, result.restoredCount - 1) },
+        structuredContent: { action: input.action, item, affectedTaskCount: Math.max(0, result.affectedCount - 1) },
         content: [{ type: "text" as const, text: `Restored Project "${result.project.title}" and its recoverable Tasks.` }],
       };
     }
@@ -423,7 +423,7 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
     }, input.recommended_initiatives.map((entry) => ({ initiativeId: entry.initiative_id, reason: entry.reason })), origin);
     return {
       structuredContent: { action: input.action, review },
-      content: [{ type: "text" as const, text: `${review.nextStep}\nKeep the review data internal. Ask naturally in this conversation and call this same tool with action=confirm after approval; never ask the user to copy an ID, open a new chat, or mention OKRPTR again.` }],
+      content: [{ type: "text" as const, text: `${review.nextStep}\nKeep the review data internal. Ask naturally in this conversation and call this same tool with action=confirm after approval; never ask the user to copy an ID, open a new chat, or mention OKRI again.` }],
     };
   };
 
@@ -431,7 +431,7 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
     "manage_project",
     {
       title: "Create, confirm, edit, delete, or restore a Project in one conversation",
-      description: "Primary Project tool. Keep the entire flow in the current conversation: propose with Initiative evidence, accept edits, then call this same tool with action=confirm after explicit approval. It also updates existing Projects, moves them to recoverable trash after immediate confirmation, and restores them. Never expose internal review IDs or tell the user to start a new chat, activate @OKRPTR again, or visit a browser approval page.",
+      description: "Primary Project tool. Keep the entire flow in the current conversation: propose with Initiative evidence, accept edits, then call this same tool with action=confirm after explicit approval. It also updates existing Projects, moves them to recoverable trash after immediate confirmation, and restores them. Never expose internal review IDs or tell the user to start a new chat, activate @OKRI again, or visit a browser approval page.",
       inputSchema: projectConversationInputSchema.shape,
       outputSchema: projectConversationOutputSchema,
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -494,7 +494,7 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
   server.registerTool(
     "get_workspace_rules",
     {
-      title: "Get OKRPTR workspace rules",
+      title: "Get OKRI workspace rules",
       description: "Read shared workspace rules when explicitly requested or changed. For new-work classification and connection choices use prepare_work instead; do not fetch rules twice.",
       inputSchema: {},
       outputSchema: { rules: workspaceRulesOutput },
@@ -502,7 +502,7 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
     },
     async () => ({
       structuredContent: { rules },
-      content: [{ type: "text", text: "Returned the active OKRPTR workspace rules." }],
+      content: [{ type: "text", text: "Returned the active OKRI workspace rules." }],
     }),
   );
 
@@ -542,7 +542,7 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
   server.registerTool(
     "capture_item",
     {
-      title: "Capture unclassified work to OKRPTR",
+      title: "Capture unclassified work to OKRI",
       description: "Save one explicitly requested, clear Task to General when no Project/Routine is known. Do not use for mere discussion, a Project/Routine idea, or unresolved Task-vs-Project classification; use prepare_work for those. If a container is known use create_item with its ID.",
       inputSchema: {
         title: z.string().trim().min(1).max(500).describe("Short actionable title in the user's language"),
@@ -580,7 +580,7 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
     "create_item",
     {
       title: "Create a structured OKR item",
-      description: "Save a correctly classified Task or OKR item. Project calls first return an unsaved review and an internal same_tool_confirmation value. After the user explicitly approves the exact proposal and Initiative in this conversation, call create_item again with the same Project title and parent_id plus that internal template_id; this completes creation even when confirm_project is absent from an older client tool list. Keep the internal value private. Never ask the user to copy a review ID, open a new chat, mention @OKRPTR, or visit a browser approval page.",
+      description: "Save a correctly classified Task or OKR item. Project calls first return an unsaved review and an internal same_tool_confirmation value. After the user explicitly approves the exact proposal and Initiative in this conversation, call create_item again with the same Project title and parent_id plus that internal template_id; this completes creation even when confirm_project is absent from an older client tool list. Keep the internal value private. Never ask the user to copy a review ID, open a new chat, mention @OKRI, or visit a browser approval page.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS),
         title: z.string().trim().min(1).max(500),
@@ -606,8 +606,11 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
       if (input.kind === "project") {
         assertMcpAssignmentFields(input);
         if (input.routine_id) throw new Error("Projects cannot belong to a Routine");
-        if (input.template_id?.startsWith(MCP_CREATE_ITEM_CONFIRM_PREFIX)) {
-          const reviewId = input.template_id.slice(MCP_CREATE_ITEM_CONFIRM_PREFIX.length);
+        const confirmationPrefix = [MCP_CREATE_ITEM_CONFIRM_PREFIX, LEGACY_MCP_CREATE_ITEM_CONFIRM_PREFIX]
+          .find((prefix) => input.template_id?.startsWith(prefix));
+        if (confirmationPrefix) {
+          if (input.status === "archived") throw new Error("A new Project cannot be created in the archived state.");
+          const reviewId = input.template_id!.slice(confirmationPrefix.length);
           if (!z.string().uuid().safeParse(reviewId).success || !input.parent_id) {
             throw new Error("The internal Project confirmation reference or selected Initiative is invalid.");
           }
@@ -687,7 +690,7 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
     "propose_project",
     {
       title: "Manage a Project proposal without leaving this conversation",
-      description: "Compatibility Project tool. action=propose stages a draft; after the user approves, call this same tool again with action=confirm and the exact confirmation snapshot. action=update/archive/restore continues managing the saved Project here. Never send the user to a new conversation, ask for an @OKRPTR mention, expose a review ID, or require a browser approval page.",
+      description: "Compatibility Project tool. action=propose stages a draft; after the user approves, call this same tool again with action=confirm and the exact confirmation snapshot. action=update/archive/restore continues managing the saved Project here. Never send the user to a new conversation, ask for an @OKRI mention, expose a review ID, or require a browser approval page.",
       inputSchema: projectConversationInputSchema.shape,
       outputSchema: projectConversationOutputSchema,
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -816,7 +819,7 @@ async function createOkrptrServer(authorization: RequestAuthorization, origin = 
   server.registerTool(
     "update_item",
     {
-      title: "Update an OKRPTR item",
+      title: "Update an OKRI item",
       description: "Change an existing item. Projects and OKR items can use workflow status and progress. Tasks use only incomplete/complete; prefer set_task_completed for that change. Use list_items first when the ID is unknown.",
       inputSchema: {
         id: z.string(),
@@ -1841,7 +1844,7 @@ async function handleMcp(request: Request) {
     await ensureWorkspace(authorization.ownerId);
     const workspaceAt = performance.now();
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
-    const server = await createOkrptrServer(authorization, new URL(request.url).origin);
+    const server = await createOkriServer(authorization, new URL(request.url).origin);
     await server.connect(transport);
     const preparedAt = performance.now();
     const response = withCors(await transport.handleRequest(request));
@@ -1865,7 +1868,7 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, X-Okrptr-Workspace-Id, X-Okrptr-User-Id, X-Okita-User-Id, X-Pace-User-Id",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, MCP-Protocol-Version, MCP-Session-Id, Last-Event-ID, X-Okri-Workspace-Id, X-Okri-User-Id, X-Okita-User-Id, X-Pace-User-Id",
     "Access-Control-Expose-Headers": "MCP-Protocol-Version, MCP-Session-Id, Server-Timing",
   };
 }

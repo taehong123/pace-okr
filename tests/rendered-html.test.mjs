@@ -15,7 +15,7 @@ test("project quota stays in billing without badges on work and creation surface
   assert.match(billing, /<Usage label=\{t\("Project 생성"\)\} used=\{billing\.usage\.projects\.used\}/);
 });
 
-test("brands connection completion as OKRPTR while preserving workspace names", async () => {
+test("brands connection completion as OKRI while preserving workspace names", async () => {
   const [promptRoute, slackStatus, page] = await Promise.all([
     readFile(new URL("../app/api/integration-tokens/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/status/route.ts", import.meta.url), "utf8"),
@@ -29,7 +29,7 @@ test("brands connection completion as OKRPTR while preserving workspace names", 
   assert.match(slackStatus, /OKRI 연결이 완료되었습니다\./);
   assert.doesNotMatch(slackStatus, /\$\{connection\?\.teamName[^\n]*연결/);
   assert.match(slackStatus, /connectedTeam: connection \? \{ id: connection\.teamId, name: connection\.teamName \}/);
-  assert.match(page, /<b>\{t\("OKRPTR 연결 완료"\)\}<\/b>/);
+  assert.match(page, /<b>\{t\("OKRI 연결 완료"\)\}<\/b>/);
   assert.match(page, /\{t\("연결된 Slack 워크스페이스:"\)\}\{teamName\}/);
   assert.doesNotMatch(page, /\{teamName\} 연결 완료/);
 });
@@ -284,13 +284,13 @@ test("ships product metadata and removes starter assets", async () => {
   assert.doesNotMatch(page, /루틴부터/);
   assert.match(page, /언제 무엇을 반복할지 설명해 주세요/);
   assert.match(aiConnections, /브라우저 제어가 가능한 대화/);
-  assert.match(integrationRoute, /현재 로그인된 내 ChatGPT 계정에 아래 OKRPTR MCP를 개인 연결로 지금 추가해 주세요/);
+  assert.match(integrationRoute, /현재 로그인된 내 ChatGPT 계정에 아래 OKRI MCP를 개인 연결로 지금 추가해 주세요/);
   assert.match(integrationRoute, /최종 실행 지시이자 명시적 사전 승인/);
   assert.match(integrationRoute, /'진행할까요\?' 같은 재확인 질문도 하지 마세요/);
   assert.match(integrationRoute, /OAuth 2\.1 메타데이터와 DCR, S256 PKCE 흐름/);
   assert.match(integrationRoute, /same_tool_confirmation/);
-  assert.match(integrationRoute, /Project 승인 후 새 대화, @OKRPTR 재활성화, 검토 ID 복사/);
-  assert.doesNotMatch(integrationRoute, /OKRPTR_ACCESS_TOKEN|Authorization: Bearer <OKRPTR_ACCESS_TOKEN>/);
+  assert.match(integrationRoute, /Project 승인 후 새 대화, @OKRI 재활성화, 검토 ID 복사/);
+  assert.doesNotMatch(integrationRoute, /OKRI_ACCESS_TOKEN|Authorization: Bearer <OKRI_ACCESS_TOKEN>/);
   assert.match(integrationRoute, /같은 내용을 대화로 다시 묻지 않습니다/);
   assert.doesNotMatch(integrationRoute, /OKRI 연결을 계속할까요\?/);
   assert.match(integrationRoute, /로그인, 계정 선택, 2단계 인증 또는 CAPTCHA/);

@@ -23,11 +23,11 @@ export async function GET(request: Request) {
     const nonce = crypto.randomUUID();
     const target = JSON.stringify(returnTo).replaceAll("<", "\\u003c");
     // Clear the old workspace's local snapshot before the new app's preload starts.
-    const html = `<!doctype html><html lang="ko"><meta charset="utf-8"><title>OKRPTR</title><body><p>워크스페이스로 이동 중입니다.</p><script nonce="${nonce}">try{localStorage.removeItem("okrptr.bootstrap.v1")}catch{}location.replace(${target})</script></body></html>`;
+    const html = `<!doctype html><html lang="ko"><meta charset="utf-8"><title>OKRI</title><body><p>워크스페이스로 이동 중입니다.</p><script nonce="${nonce}">try{localStorage.removeItem("okri.bootstrap.v1")}catch{}location.replace(${target})</script></body></html>`;
     return new Response(html, { headers: {
       "Content-Type": "text/html; charset=utf-8", "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer",
       "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; frame-ancestors 'none'; base-uri 'none'`,
-      "Set-Cookie": `okrptr_workspace_id=${encodeURIComponent(workspace.id)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${url.protocol === "https:" ? "; Secure" : ""}`,
+      "Set-Cookie": `okri_workspace_id=${encodeURIComponent(workspace.id)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${url.protocol === "https:" ? "; Secure" : ""}`,
     } });
   } catch {
     return new Response("워크스페이스를 열지 못했습니다. 잠시 후 다시 시도해 주세요.", { status: 503, headers: { "Cache-Control": "no-store" } });

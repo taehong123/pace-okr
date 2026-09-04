@@ -29,7 +29,7 @@ export function newAccountLanguage(request: Request) {
 export async function languageForBootstrap(db: D1Database, userId: string, request: Request): Promise<LanguagePreferences> {
   const current = await readLanguagePreferences(db, userId);
   if (current.language !== "auto") return { ...current, resolvedLanguage: current.language };
-  const displayLanguage = request.headers.get("x-okrptr-display-language");
+  const displayLanguage = request.headers.get("x-okri-display-language");
   const resolvedLanguage = isLanguage(displayLanguage) ? displayLanguage : requestLanguage(request);
   if (resolvedLanguage === current.resolvedLanguage) return current;
   // The automatic result is notification context, not a new explicit preference.

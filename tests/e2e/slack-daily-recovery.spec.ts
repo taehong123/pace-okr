@@ -100,7 +100,7 @@ test("wide light/dark settings retain real fonts, contrast and 200% text", async
   await installApiMocks(page, { slackState: "connected", teamWorkspace: true });
   await page.setViewportSize({ width: 3840, height: 2160 });
   for (const theme of ["white", "dark"]) {
-    await page.addInitScript((value) => localStorage.setItem("okrptr.theme", value), theme);
+    await page.addInitScript((value) => localStorage.setItem("okri.theme", value), theme);
     await page.goto("/?view=work&settings=workspace&tab=integrations&bot=daily");
     await expect(page.locator(".slack-connected-title")).toBeVisible();
     await page.addStyleTag({ content: "html { font-size: 200% !important; }" });

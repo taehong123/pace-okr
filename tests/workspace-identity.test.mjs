@@ -62,7 +62,7 @@ test("name and address are independent; owners/admins can edit without touching 
   assert.equal(saved.name, "새로운 Workspace"); assert.equal(saved.address, "our-team");
   assert.equal(saved.subdomainsEnabled, false); assert.equal(saved.url, "/api/workspaces/open?address=our-team");
   const renamed = await identity.updateWorkspaceIdentity(d1, "a", "admin", { name: "팀 이름만 변경", revision: 1 }, true);
-  assert.equal(renamed.address, "our-team"); assert.equal(renamed.url, "https://our-team.okrptr.com/");
+  assert.equal(renamed.address, "our-team"); assert.equal(renamed.url, "https://our-team.okri.ai/");
   assert.equal(db.prepare("SELECT name FROM workspaces WHERE id='b'").get().name, "다른 팀");
   const source = await readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /personalWorkspace\.name\.endsWith\(" Workspace"\)/);
@@ -159,18 +159,18 @@ test("migration is LF and additive; guards and case-insensitive address uniquene
 test("subdomains route only browser entry to the canonical origin; unknown hosts and unsafe return paths cannot redirect outside", async () => {
   const config = await readFile(new URL("../vite.config.ts", import.meta.url), "utf8");
   assert.match(config, /run_worker_first:\s*\["\/",\s*"\/_vinext\/image"\]/);
-  const redirect = address.workspaceSubdomainRedirect(new Request("https://our-team.okrptr.com/?view=work&project=1&code=secret"), true);
+  const redirect = address.workspaceSubdomainRedirect(new Request("https://our-team.okri.ai/?view=work&project=1&code=secret"), true);
   const target = new URL(redirect.headers.get("location"));
-  assert.equal(target.origin, "https://okrptr.com");
+  assert.equal(target.origin, "https://okri.ai");
   assert.equal(target.searchParams.get("address"), "our-team");
   assert.equal(target.searchParams.get("returnTo"), "/?view=work&project=1");
   for (const input of ["//evil.example", "https://evil.example/", "/\\evil.example", "/api/auth/logout", "http://[", "/\n"]) assert.equal(address.workspaceReturnPath(input), "/");
-  assert.equal(address.workspaceSubdomainRedirect(new Request("https://okrptr.com/"), true), null);
-  assert.equal(address.workspaceSubdomainRedirect(new Request("https://okrptr.com.evil.example/"), true), null);
-  assert.equal(address.workspaceSubdomainRedirect(new Request("https://our-team.okrptr.com/"), false).status, 503);
-  assert.equal(address.workspaceSubdomainRedirect(new Request("https://a.b.okrptr.com/"), true).status, 404);
-  assert.equal(address.workspaceSubdomainRedirect(new Request("https://our-team.okrptr.com/api/items"), true).status, 405);
-  assert.equal(address.workspaceSubdomainRedirect(new Request("https://our-team.okrptr.com/", { method: "POST" }), true).status, 405);
+  assert.equal(address.workspaceSubdomainRedirect(new Request("https://okri.ai/"), true), null);
+  assert.equal(address.workspaceSubdomainRedirect(new Request("https://okri.ai.evil.example/"), true), null);
+  assert.equal(address.workspaceSubdomainRedirect(new Request("https://our-team.okri.ai/"), false).status, 503);
+  assert.equal(address.workspaceSubdomainRedirect(new Request("https://a.b.okri.ai/"), true).status, 404);
+  assert.equal(address.workspaceSubdomainRedirect(new Request("https://our-team.okri.ai/api/items"), true).status, 405);
+  assert.equal(address.workspaceSubdomainRedirect(new Request("https://our-team.okri.ai/", { method: "POST" }), true).status, 405);
 });
 
 test("profile API requires browser same-origin writes and explicit matching workspace context", async () => {
@@ -181,11 +181,11 @@ test("profile API requires browser same-origin writes and explicit matching work
     "@/lib/pace-data": { authorizeRequest: async () => auth },
     "@/lib/workspace-identity": { ...identity, updateWorkspaceIdentity: async () => { writes++; return {}; } },
   });
-  const req = (headers = {}, body = {}) => new Request("https://okrptr.com/api/workspaces/profile", { method: "PATCH", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+  const req = (headers = {}, body = {}) => new Request("https://okri.ai/api/workspaces/profile", { method: "PATCH", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
   assert.equal((await route.PATCH(req())).status, 403);
   assert.equal((await route.PATCH(req({ origin: "https://evil.example" }))).status, 403);
-  assert.equal((await route.PATCH(req({ origin: "https://okrptr.com", "x-okrptr-workspace-id": "b" }))).status, 403);
-  const headers = { origin: "https://okrptr.com", "x-okrptr-workspace-id": "a" };
+  assert.equal((await route.PATCH(req({ origin: "https://okri.ai", "x-okri-workspace-id": "b" }))).status, 403);
+  const headers = { origin: "https://okri.ai", "x-okri-workspace-id": "a" };
   auth = { ...auth, apiToken: true };
   assert.equal((await route.PATCH(req(headers))).status, 403);
   auth = { ...auth, apiToken: false };
@@ -201,7 +201,7 @@ test("address entry never falls back to a different workspace; login keeps the i
     "@/lib/workspace-address": address,
     "@/lib/workspace-identity": { workspaceForAddress: async () => resolved },
   });
-  const request = new Request("https://okrptr.com/api/workspaces/open?address=our-team&returnTo=" + encodeURIComponent("/?view=work"));
+  const request = new Request("https://okri.ai/api/workspaces/open?address=our-team&returnTo=" + encodeURIComponent("/?view=work"));
   const login = await route.GET(request);
   assert.equal(login.status, 302);
   assert.equal(new URL(login.headers.get("location")).pathname, "/api/auth/google");
@@ -212,8 +212,8 @@ test("address entry never falls back to a different workspace; login keeps the i
   resolved = { id: "a" };
   const opened = await route.GET(request);
   assert.equal(opened.status, 200);
-  assert.match(opened.headers.get("set-cookie"), /^okrptr_workspace_id=a;.*HttpOnly.*Secure/);
+  assert.match(opened.headers.get("set-cookie"), /^okri_workspace_id=a;.*HttpOnly.*Secure/);
   assert.doesNotMatch(opened.headers.get("set-cookie"), /Domain=/);
   assert.match(opened.headers.get("content-security-policy"), /frame-ancestors 'none'/);
-  assert.match(await opened.text(), /localStorage.removeItem\("okrptr.bootstrap.v1"\)/);
+  assert.match(await opened.text(), /localStorage.removeItem\("okri.bootstrap.v1"\)/);
 });

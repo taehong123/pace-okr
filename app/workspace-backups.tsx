@@ -23,7 +23,7 @@ async function requestBackup<T>(workspaceId: string, path = "", method = "GET", 
   if (signal?.aborted) abort();
   const timeout = controller ? setTimeout(() => { timedOut = true; controller.abort(); }, 15_000) : undefined;
   try {
-    const response = await fetch(`/api/workspace-backups${path}`, { method, headers: { "x-okrptr-workspace-id": workspaceId, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined, cache: "no-store", signal: controller?.signal ?? signal });
+    const response = await fetch(`/api/workspace-backups${path}`, { method, headers: { "x-okri-workspace-id": workspaceId, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined, cache: "no-store", signal: controller?.signal ?? signal });
     const data = await response.json() as T & { error?: string };
     if (!response.ok) throw new Error(apiError(data, "백업 작업을 완료하지 못했습니다."));
     return data;

@@ -19,11 +19,11 @@ Migration 0041 is additive and LF. It does not alter business data or permission
 ## Routing and Login
 
 The subdomain is an entry address, not a separate app/auth origin. Once configured,
-`https://team-name.okrptr.com/` redirects to the canonical `okrptr.com` entry route,
+`https://team-name.okri.ai/` redirects to the canonical `okri.ai` entry route,
 which verifies membership for that exact label and then opens the existing app.
 Google login, API/MCP endpoints, cookies, PWA scope and billing stay on the main
 origin. No parent-domain session cookie or new cross-origin credential bridge is
-introduced. The browser address changes to `okrptr.com` after entry.
+introduced. The browser address changes to `okri.ai` after entry.
 
 The entry route preserves selected app navigation, carries the requested address
 through Google login, and clears the previous workspace's bootstrap snapshot before
@@ -49,7 +49,7 @@ If wildcard registration is unavailable, leave the flag off and report the hosti
 limitation. A working canonical link is not evidence that the subdomain is active.
 
 On 2026-09-03, the approved production registration was attempted. Sites rejected
-`*.okrptr.com` with `invalid_custom_domain`: "custom domain must be a valid
+`*.okri.ai` with `invalid_custom_domain`: "custom domain must be a valid
 non-wildcard hostname". This is not an outstanding user approval or propagation
 wait. No domain or environment changes were applied. Keep the flag off until
 wildcard-capable routing and TLS are provisioned, or implement a verified

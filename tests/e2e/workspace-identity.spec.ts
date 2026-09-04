@@ -10,14 +10,14 @@ async function setup(page: Page, canManage = true) {
     reads: 0, writes: [] as Record<string, unknown>[], failure: false,
   };
   await page.route("**/api/workspaces/profile", async (route) => {
-    expect(route.request().headers()["x-okrptr-workspace-id"]).toBe("workspace-1");
+    expect(route.request().headers()["x-okri-workspace-id"]).toBe("workspace-1");
     if (route.request().method() === "GET") { state.reads++; return json(route, { profile: state.profile }); }
     const input = route.request().postDataJSON() as Record<string, unknown>;
     state.writes.push(input);
     await new Promise((resolve) => setTimeout(resolve, 120));
     if (state.failure) return json(route, { error: "다른 곳에서 변경되었습니다. 다시 불러와 주세요." }, 409);
     state.profile = { ...state.profile, ...input, revision: state.profile.revision + 1 };
-    if (state.profile.address) state.profile.url = state.profile.subdomainsEnabled ? `https://${state.profile.address}.okrptr.com/` : `/api/workspaces/open?address=${state.profile.address}`;
+    if (state.profile.address) state.profile.url = state.profile.subdomainsEnabled ? `https://${state.profile.address}.okri.ai/` : `/api/workspaces/open?address=${state.profile.address}`;
     return json(route, { profile: state.profile });
   });
   return state;
@@ -92,7 +92,7 @@ test("workspace identity fits narrow/wide screens, long names, real fonts, light
   state.profile.name = "길고 긴 워크스페이스 이름과 한글 영문 Workspace 123 테스트";
   state.profile.address = "a-very-long-team-workspace-address-for-testing";
   state.profile.subdomainsEnabled = true;
-  state.profile.url = `https://${state.profile.address}.okrptr.com/`;
+  state.profile.url = `https://${state.profile.address}.okri.ai/`;
   for (const mode of ["white", "dark"]) {
     await page.addInitScript(({ key, theme }) => localStorage.setItem(key, theme), { key: THEME_STORAGE_KEY, theme: mode });
     for (const width of [320, 390, 1440, 3840]) {

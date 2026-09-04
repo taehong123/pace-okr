@@ -14,13 +14,13 @@ function fixture(t) {
     INSERT INTO workspace_members VALUES('ma','team','a','active'),('mb','team','b','active'),('unlinked','team',NULL,'active');`);
   return { db, d1: d1Fixture(db) };
 }
-const request = (header = "en-US", country) => Object.assign(new Request("https://okrptr.com/api/account/preferences", { headers: { "accept-language": header } }), country ? { cf: { country } } : {});
+const request = (header = "en-US", country) => Object.assign(new Request("https://okri.ai/api/account/preferences", { headers: { "accept-language": header } }), country ? { cf: { country } } : {});
 
 test("automatic language respects browser order and trusted country only as fallback", () => {
   for (const [header, country, expected] of [["ko,en;q=0.5", "US", "ko"], ["ja-JP", "KR", "ja"], ["zh-TW", "KR", "zh"], ["de-DE,es-MX;q=.8", "KR", "es"], ["de-DE", "JP", "ja"], ["de-DE", null, "en"], ["en;q=0,ja;q=0.8", "KR", "ja"], ["*", "CN", "zh"]]) {
     assert.equal(language.requestLanguage(request(header, country)), expected);
   }
-  const spoofed = new Request("https://okrptr.com", { headers: { "CF-IPCountry": "JP", "X-Country": "KR", "Accept-Language": "de" } });
+  const spoofed = new Request("https://okri.ai", { headers: { "CF-IPCountry": "JP", "X-Country": "KR", "Accept-Language": "de" } });
   assert.equal(language.requestLanguage(spoofed), "en");
 });
 
@@ -28,9 +28,9 @@ test("existing accounts remain Korean; new accounts inherit only explicit valid 
   const { d1 } = fixture(t);
   assert.deepEqual(await preferences.languageForBootstrap(d1, "a", request("es")), { language: "ko", resolvedLanguage: "ko", revision: 0 });
   assert.deepEqual(preferences.newAccountLanguage(request("es")), { languagePreference: "auto", resolvedLanguage: "es" });
-  const chosen = new Request("https://okrptr.com", { headers: { cookie: "okrptr_guest_language=ja", "accept-language": "en" } });
+  const chosen = new Request("https://okri.ai", { headers: { cookie: "okri_guest_language=ja", "accept-language": "en" } });
   assert.deepEqual(preferences.newAccountLanguage(chosen), { languagePreference: "ja", resolvedLanguage: "ja" });
-  const invalid = new Request("https://okrptr.com", { headers: { cookie: "okrptr_guest_language=../../secret", "accept-language": "en" } });
+  const invalid = new Request("https://okri.ai", { headers: { cookie: "okri_guest_language=../../secret", "accept-language": "en" } });
   assert.equal(preferences.newAccountLanguage(invalid).resolvedLanguage, "en");
 });
 
@@ -82,10 +82,10 @@ test("Slack bot types, settings, states and safe errors are localized in every s
     "추천 규칙 또는 직접 규칙을 만듭니다",
     "Slack 연결 후 설정할 수 있습니다",
     "Slack 연결을 잠시 사용할 수 없습니다. 서비스 설정을 확인해 주세요.",
-    "Owner 또는 Admin이 이 OKRPTR 워크스페이스에 사용할 Slack을 연결할 수 있습니다.",
+    "Owner 또는 Admin이 이 OKRI 워크스페이스에 사용할 Slack을 연결할 수 있습니다.",
     "데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요.",
-    "OKRPTR 연결이 완료되었습니다. 데일리 발송 설정을 완료해 주세요.",
-    "OKRPTR 연결이 완료되었습니다.",
+    "OKRI 연결이 완료되었습니다. 데일리 발송 설정을 완료해 주세요.",
+    "OKRI 연결이 완료되었습니다.",
     "초기 설정 필요",
     "권한 업데이트 필요",
     "잠시 사용 불가",
@@ -153,7 +153,7 @@ test("preferences API permits every member's own account but denies tokens and c
     "@/lib/language-preferences": preferences,
     "@/lib/slack-daily": { refreshUserReminderLanguages: async (userId) => assert.equal(userId, "a") },
   });
-  const patch = (body, origin = "https://okrptr.com") => new Request("https://okrptr.com/api/account/preferences", { method: "PATCH", headers: { origin, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const patch = (body, origin = "https://okri.ai") => new Request("https://okri.ai/api/account/preferences", { method: "PATCH", headers: { origin, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   for (const role of ["viewer", "member", "admin", "owner"]) {
     auth = { ...auth, role };
     const current = await preferences.readLanguagePreferences(d1, "a");
@@ -211,7 +211,7 @@ test("automatic language does not follow an IP-only change during an active scre
   const { d1 } = fixture(t);
   await preferences.saveLanguagePreferences(d1, "a", { language: "auto", revision: 0 }, request("fr", "JP"));
   const nextRequest = request("fr", "CN");
-  nextRequest.headers.set("x-okrptr-display-language", "ja");
+  nextRequest.headers.set("x-okri-display-language", "ja");
   assert.equal((await preferences.languageForBootstrap(d1, "a", nextRequest)).resolvedLanguage, "ja");
   assert.equal((await preferences.languageForBootstrap(d1, "a", request("fr", "CN"))).resolvedLanguage, "zh");
 });
