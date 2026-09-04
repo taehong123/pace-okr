@@ -68,6 +68,15 @@ test("standalone windows do not offer installation; installed event wins a pendi
   assert.equal(state.status, "installed");
 });
 
+test("app entry points open download guidance before the browser install prompt", async () => {
+  const entry = await readFile(new URL("app/app-install-button.tsx", root), "utf8");
+  const download = await readFile(new URL("app/download/download-client.tsx", root), "utf8");
+  assert.match(entry, /href="\/download"/);
+  assert.doesNotMatch(entry, /__OKRI_INSTALL__\?\.prompt/);
+  assert.match(download, /__OKRI_INSTALL__\?\.prompt/);
+  assert.match(download, /파일은 자동으로 다운로드되지 않습니다/);
+});
+
 test("manifest uses stable same-origin launch paths, real PNG icons, and no account identifiers", async () => {
   const text = await readFile(new URL("public/manifest.webmanifest", root), "utf8");
   const manifest = JSON.parse(text);

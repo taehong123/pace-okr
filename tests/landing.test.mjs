@@ -46,6 +46,8 @@ test("server rendering exposes the first story and an independent immediate Goog
   assert.match(html, /세계적인 기업들이 선택한 목표 관리 방식/);
   assert.match(html, /모든 일이 연결되고, 성과로 이어지는 과정/);
   assert.match(html, /Google로 시작하기/);
+  assert.match(html, /href="\/download"/);
+  assert.match(html, /OKRI 앱 다운로드/);
   assert.equal((html.match(/class="landing-slide"/g) ?? []).length, 4);
   assert.equal((html.match(/ inert=""/g) ?? []).length, 3);
   assert.match(html, /<footer class="landing-login">/);

@@ -1,18 +1,24 @@
-# Windows app
+# OKRI desktop app
 
-OKRI uses an installable PWA, not a native EXE or an embedded WebView.
-Edge/Chrome can install it into a standalone window with the existing Google
-browser authentication, cookies and workspace selection. The browser owns the
-Windows shortcut, taskbar integration, installation confirmation and uninstall.
+OKRI currently uses an installable PWA, not a native EXE, DMG, or embedded
+WebView. Edge/Chrome/Safari can install it into a standalone window with the
+existing Google browser authentication, cookies and workspace selection. The
+browser owns the OS shortcut, installation confirmation and uninstall.
 Do not add a second account store or copy OAuth tokens into desktop storage.
 
-## Installation
+## Download route and installation
 
-Open OKRI in Edge or Chrome. When the browser offers installation, the login
-screen and app menu show `앱 설치`. The same one-use browser event serves all
-buttons. Dismissal does not report success. Installed/standalone windows do not
-show the button. Browsers without the install event can use their own site-app
-installation menu; there is no simulated install dialog.
+Login and app-menu entry points link to `/download`; they never start
+installation or a file download by themselves. The route identifies Windows or
+Mac, explains the browser-managed installation, and lets the user switch
+platforms before acting.
+
+Chromium exposes a real `beforeinstallprompt` event. Only the explicit final
+install button consumes that one-use event and opens the browser-owned
+confirmation. Safari users follow `File > Add to Dock`. The route links to
+official browser guidance when an in-page prompt is unavailable. Dismissal does
+not report success. Only `appinstalled` or standalone display mode reports an
+installed state.
 
 The manifest uses stable same-origin `/` identity and launch scope. Shortcuts
 open existing My Work and OKR views; they do not pin an account
@@ -42,5 +48,5 @@ manifest/installability, offline navigation and themed/responsive controls with
 one browser worker and local API mocks. It does not install software on a user's
 machine or create production records.
 
-The packaged EXE, Microsoft Store listing, code signing, native tray, push
+Packaged EXE/DMG files, store listings, code signing, native tray, push
 notifications and background offline writes are not part of this PWA release.
