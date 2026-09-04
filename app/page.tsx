@@ -77,6 +77,7 @@ import BillingView from "./billing-view";
 import { ChatAiUsage } from "./ai-usage-meter";
 import { aiUsageLimitMessage } from "@/lib/ai-usage";
 import { invalidateAiUsage, type AiUsageScope } from "@/lib/ai-usage-client";
+import { parseAssistantCommand } from "@/lib/assistant-command";
 import { readMyWorkSort, saveMyWorkSort, sortMyWorkItems, type MyWorkSort } from "@/lib/my-work-sort";
 import { DEFAULT_THEME, THEME_STORAGE_KEY, isThemeMode, themeColorScheme, type ThemeMode } from "@/lib/themes";
 import { ThemePicker } from "./theme-picker";
@@ -2170,6 +2171,7 @@ function WorkspaceApp() {
               onCreateRoutine={createRoutineFromConversation}
               onApplyOkrPlan={applyAssistantOkrPlan}
               onCreateTasks={createTasksFromConversation}
+              onStartTaskCreation={openTaskCreationChat}
               onFinish={() => { const destination = okrChatContext?.entry === "task" ? "inbox" : okrChatContext?.entry === "project" ? "work" : okrChatContext?.entry === "routine" ? "routines" : "okr"; setOkrChatContext(null); navigateView(destination); }}
               onNavigateToOkr={() => { setOkrChatContext(null); navigateView("okr"); }}
               context={okrChatContext}
@@ -4196,13 +4198,14 @@ function RecommendationsView({ workspaceId, items, onOpenTask, onOpenProject, on
   return <section className="recommendation-list">{rows.map((row) => <article className="recommendation-row" key={row.id}><span className={`recommendation-icon recommendation-${row.kind}`}>{recommendationIcon(row.kind)}</span><div><h3>{row.title}</h3><p>{row.detail}</p><small>{t("{count}개 항목 · 우선순위 {score}", { count: row.itemIds.length, score: row.score })}</small></div><button aria-label={t("{value1} 관련 항목 열기", { value1: messageValue(row.title) })} title={t("관련 항목 열기")} onClick={() => openRecommendation(row)}><ChevronRight size={15} /></button></article>)}</section>;
 }
 
-function HomeView({ onCreatePlan, onCreateProject, onCreateRoutine, onApplyOkrPlan, onCreateTasks, onFinish, onNavigateToOkr, context, usageScope, workspaceContext, canWrite, members, taskContainers, projectTargets, defaultDriMemberId, defaultCycleId }: {
+function HomeView({ onCreatePlan, onCreateProject, onCreateRoutine, onApplyOkrPlan, onCreateTasks, onStartTaskCreation, onFinish, onNavigateToOkr, context, usageScope, workspaceContext, canWrite, members, taskContainers, projectTargets, defaultDriMemberId, defaultCycleId }: {
   usageScope: AiUsageScope | null;
   onCreatePlan: (plan: OnboardingPlan, cycleId: string | null) => Promise<PlanCreationResult | null>;
   onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget, driMemberId: string | null) => Promise<boolean>;
   onCreateRoutine: (plan: OnboardingPlan, assigneeMemberId: string | null) => Promise<boolean>;
   onApplyOkrPlan: (plan: OnboardingPlan, cycleId: string, target: OkrPlanTarget | null, driMemberId: string | null) => Promise<OkrPlanApplyResult | null>;
   onCreateTasks: (taskText: string, containerValue: string, assigneeMemberId: string | null) => Promise<boolean>;
+  onStartTaskCreation: () => void;
   onFinish: () => void;
   onNavigateToOkr: () => void;
   context: OkrChatContext | null;
@@ -4216,7 +4219,7 @@ function HomeView({ onCreatePlan, onCreateProject, onCreateRoutine, onApplyOkrPl
 }) {
   return (
     <div className="home-layout">
-      <HomeOkrChat onCreate={onCreatePlan} onCreateProject={onCreateProject} onCreateRoutine={onCreateRoutine} onApplyOkrPlan={onApplyOkrPlan} onCreateTasks={onCreateTasks} onFinish={onFinish} onNavigateToOkr={onNavigateToOkr} context={context} usageScope={usageScope} workspaceContext={workspaceContext} canWrite={canWrite} members={members} taskContainers={taskContainers} projectTargets={projectTargets} defaultDriMemberId={defaultDriMemberId} defaultCycleId={defaultCycleId} />
+      <HomeOkrChat onCreate={onCreatePlan} onCreateProject={onCreateProject} onCreateRoutine={onCreateRoutine} onApplyOkrPlan={onApplyOkrPlan} onCreateTasks={onCreateTasks} onStartTaskCreation={onStartTaskCreation} onFinish={onFinish} onNavigateToOkr={onNavigateToOkr} context={context} usageScope={usageScope} workspaceContext={workspaceContext} canWrite={canWrite} members={members} taskContainers={taskContainers} projectTargets={projectTargets} defaultDriMemberId={defaultDriMemberId} defaultCycleId={defaultCycleId} />
     </div>
   );
 }
@@ -4241,13 +4244,14 @@ function isAssistantConversationDraft(value: unknown): value is AssistantConvers
     && Array.isArray(draft.targetCandidates);
 }
 
-function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPlan, onCreateTasks, onFinish, onNavigateToOkr, context, usageScope, workspaceContext, canWrite, members, taskContainers, projectTargets, defaultDriMemberId, defaultCycleId }: {
+function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPlan, onCreateTasks, onStartTaskCreation, onFinish, onNavigateToOkr, context, usageScope, workspaceContext, canWrite, members, taskContainers, projectTargets, defaultDriMemberId, defaultCycleId }: {
   usageScope: AiUsageScope | null;
   onCreate: (plan: OnboardingPlan, cycleId: string | null) => Promise<PlanCreationResult | null>;
   onCreateProject: (plan: OnboardingPlan, target: ProjectChatTarget, driMemberId: string | null) => Promise<boolean>;
   onCreateRoutine: (plan: OnboardingPlan, assigneeMemberId: string | null) => Promise<boolean>;
   onApplyOkrPlan: (plan: OnboardingPlan, cycleId: string, target: OkrPlanTarget | null, driMemberId: string | null) => Promise<OkrPlanApplyResult | null>;
   onCreateTasks: (taskText: string, containerValue: string, assigneeMemberId: string | null) => Promise<boolean>;
+  onStartTaskCreation: () => void;
   onFinish: () => void;
   onNavigateToOkr: () => void;
   context: OkrChatContext | null;
@@ -4313,10 +4317,11 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
         : okrTarget.kind === "key_result" ? t("Initiative {value1}개 만들기", { value1: messageValue(plan.targetInitiatives.length) }) : "Project 탭에서 계속"
     : mode === "project" ? "Project 만들기" : t("Objective 1개 · KR {value1}개 · Initiative {value2}개 만들기", { value1: messageValue(draftCounts.keyResults), value2: messageValue(draftCounts.initiatives) });
   const hasDraft = hasPlanContent(plan);
-  const hasPersistableDraft = Boolean(message.trim() || hasDraft || conversationHistory.some((entry) => entry.role === "user"));
+  const persistedMessage = parseAssistantCommand(message) ? "" : message;
+  const hasPersistableDraft = Boolean(persistedMessage.trim() || hasDraft || conversationHistory.some((entry) => entry.role === "user"));
   const assistantDraftPayload = useMemo<AssistantConversationDraft>(() => ({
     version: 1,
-    message,
+    message: persistedMessage,
     plan,
     guideQuestions,
     conversationHistory,
@@ -4329,7 +4334,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
     routineAssigneeMemberId,
     taskContainer,
     taskAssigneeMemberId,
-  }), [conversationHistory, guideQuestions, message, mode, okrTarget, plan, projectDriMemberId, projectTarget, routineAssigneeMemberId, targetCandidates, taskAssigneeMemberId, taskContainer, visibleFields]);
+  }), [conversationHistory, guideQuestions, mode, okrTarget, persistedMessage, plan, projectDriMemberId, projectTarget, routineAssigneeMemberId, targetCandidates, taskAssigneeMemberId, taskContainer, visibleFields]);
   const canApplyDraft = mode === "task" ? Boolean(taskDraftCount) : assistantFlow
     ? !okrTarget ? treeReady
       : okrTarget.kind === "objective" ? Boolean(plan.keyResults.length && plan.keyResults.every((entry) => entry.title.trim() && entry.initiatives.every((initiative) => initiative.title.trim())) && !plan.unassignedInitiatives.length)
@@ -4507,6 +4512,11 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
   async function organizeMessage() {
     const text = message.trim();
     if (!text || saving) return;
+    if (parseAssistantCommand(text) === "create-task") {
+      setMessage("");
+      onStartTaskCreation();
+      return;
+    }
     setConversationHistory((current) => [...current, { id: `user-${Date.now()}`, role: "user", content: text }]);
     setMessage("");
     setSaving(true);
