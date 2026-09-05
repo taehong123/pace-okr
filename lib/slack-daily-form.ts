@@ -6,7 +6,7 @@ const identityTranslator: Translator = (key) => key;
 
 export type DailyChecklist = {
   date: string; memberName: string; work: DailyWork[]; selectedYesterday: string[]; yesterdayCompleted?: DailyWork[];
-  choices: Record<string, "today" | "done" | "exclude">;
+  choices: Record<string, "today" | "done" | "delete" | "exclude">;
   todayNote: string; yesterdayNote: string; blockersNote: string;
   noPlannedTasks: boolean; skipReason: string | null; skipNote: string; page: number;
 };
@@ -31,11 +31,10 @@ export function orderDailyChecklist(work: DailyWork[]) {
 export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: Translator = identityTranslator, error = "") {
   const pages = Math.max(1, Math.ceil(input.work.length / DAILY_CHECKLIST_PAGE_SIZE));
   const blocks: Record<string, unknown>[] = [
-    { type: "section", text: { type: "plain_text", text: `${input.memberName} · ${input.date}\n${t("완료는 제출할 때 반영됩니다. 오늘 제외는 업무를 삭제하지 않습니다.")}` } },
+    { type: "section", text: { type: "plain_text", text: `${input.memberName} · ${input.date}\n${t("완료와 삭제는 제출할 때 반영됩니다. 삭제한 Task는 업무 목록에서 사라지며 휴지통에서 복구할 수 있습니다.")}` } },
     { type: "context", elements: [{ type: "plain_text", text: t("{page} / {pages} · 전체 {count}개", { page: input.page + 1, pages, count: input.work.length }) }] },
   ];
   if (error) blocks.push({ type: "section", text: { type: "plain_text", text: error } });
-  const options = [["today", "오늘 할 일"], ["done", "완료"], ["exclude", "오늘 제외"]].map(([value, text]) => ({ text: { type: "plain_text", text: t(text) }, value }));
   let lastGroup = "";
   input.work.slice(input.page * DAILY_CHECKLIST_PAGE_SIZE, (input.page + 1) * DAILY_CHECKLIST_PAGE_SIZE).forEach((entry, offset) => {
     const group = dailyWorkGroup(entry);
@@ -44,6 +43,8 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
       lastGroup = group.key;
     }
     if (entry.title.length > 180) blocks.push({ type: "section", text: { type: "plain_text", text: entry.title.slice(0, 2900) } });
+    const options = [["today", "오늘 할 일"], ["done", "완료"], ...(entry.kind === "task" ? [["delete", "삭제"]] : [])]
+      .map(([value, text]) => ({ text: { type: "plain_text", text: t(text) }, value }));
     const initial = options.filter((option) => option.value === input.choices[entry.key]);
     const due = entry.dueDate ? `${entry.dueDate}${entry.dueDate < input.date ? ` · ${t("기한 초과")}` : ""}` : "";
     blocks.push({ type: "input", block_id: `daily_choice_${input.page * DAILY_CHECKLIST_PAGE_SIZE + offset}`, optional: true,

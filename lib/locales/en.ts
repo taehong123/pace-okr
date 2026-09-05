@@ -1960,6 +1960,8 @@ const messages = {
   "설치 버튼이 보이지 않으면 브라우저 메뉴에서 설치할 수 있습니다.": "If the install button is unavailable, install from the browser menu.",
   "브라우저에서 설치를 마쳐 주세요.": "Finish the installation in your browser.",
   "웹에서 계속 사용": "Continue on the web",
+  "완료와 삭제는 제출할 때 반영됩니다. 삭제한 Task는 업무 목록에서 사라지며 휴지통에서 복구할 수 있습니다.": "Completions and deletions take effect when you submit. Deleted Tasks leave your work list and can be restored from Trash.",
+  "데일리에서는 개별 Task만 삭제할 수 있습니다.": "Only individual Tasks can be deleted from the daily check-in.",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

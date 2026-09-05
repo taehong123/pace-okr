@@ -168,7 +168,7 @@ test("new checklist shows every task without search, grouped by stable project I
     assert.match(JSON.stringify(modal), /기한 초과/);
     for (const input of modal.blocks.filter((block) => block.block_id?.startsWith("daily_choice_"))) {
       assert.equal(input.element.type, "checkboxes");
-      assert.deepEqual(input.element.options.map((option) => option.value), ["today", "done", "exclude"]);
+      assert.deepEqual(input.element.options.map((option) => option.value), ["today", "done", "delete"]);
       seen.push(input.block_id);
     }
   }
@@ -177,7 +177,8 @@ test("new checklist shows every task without search, grouped by stable project I
   for (const lang of ["en", "ja", "zh", "es"]) {
     const t = await serverLanguage.serverTranslator(lang);
     const modal = form.dailyChecklistForm(checklistInput(entries.slice(0, 1)), "{}", t);
-    assert.ok(!JSON.stringify(modal).includes("오늘 제외"));
+    assert.ok(!/[가-힣]/.test(JSON.stringify(modal)));
+    assert.ok(modal.blocks.find((block) => block.block_id === "daily_choice_0").element.options.find((option) => option.value === "delete"));
     assert.ok(JSON.stringify(modal).includes("Task 0"));
   }
 });
@@ -222,6 +223,162 @@ test("completed work is revalidated and a failed transaction does not complete a
   await assert.rejects(api.submitDailyDraft(authorization, date, "slack", "failed", ["task:task", "routine:routine"]));
   assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
   assert.equal(db.prepare("SELECT COUNT(*) n FROM routine_completions").get().n, 0);
+});
+
+test("delete on submit moves only the selected Task to Trash and replays never delete twice", async (t) => {
+  const { raw, db, checklist } = fixture(t);
+  db.exec("UPDATE items SET parent_id='project', status='in_progress', progress=35, description='Keep the document' WHERE id='task'");
+  const modal = await checklist.createDailyChecklist("w", "me", checklistInput(await work.listDailyWork(raw, "w", "me", date)), (key) => key);
+  const stored = JSON.parse(db.prepare("SELECT payload_json FROM slack_daily_checklists").get().payload_json);
+  const index = stored.work.findIndex((entry) => entry.key === "task:task");
+  const values = { [`daily_choice_${index}`]: choice("delete") };
+  const before = db.prepare("SELECT * FROM items WHERE id <> 'task' ORDER BY id").all();
+  const result = await checklist.handleDailyChecklist(authorization, modal.private_metadata, values, false, (key) => key);
+  assert.ok(result.submission);
+  assert.deepEqual(result.submission.work, []);
+  const trashed = db.prepare("SELECT * FROM items WHERE id='task'").get();
+  assert.equal(trashed.status, "archived");
+  assert.equal(trashed.archived_from_status, "in_progress");
+  assert.equal(trashed.archive_root_id, "task");
+  assert.ok(trashed.archived_at);
+  assert.equal(trashed.parent_id, "project");
+  assert.equal(trashed.description, "Keep the document");
+  assert.equal(trashed.progress, 35);
+  assert.deepEqual(db.prepare("SELECT * FROM items WHERE id <> 'task' ORDER BY id").all(), before);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM item_assignments WHERE item_id='task'").get().n, 1);
+  assert.ok(!(await work.listDailyWork(raw, "w", "me", date)).some((entry) => entry.key === "task:task"));
+  assert.ok(!(await work.listDailyWork(raw, "w", "me", "2026-09-05")).some((entry) => entry.key === "task:task"));
+  assert.equal(JSON.parse(db.prepare("SELECT payload FROM activity_log WHERE action='item_trashed'").get().payload).rootId, "task");
+  const replay = await checklist.handleDailyChecklist(authorization, modal.private_metadata, values, false, (key) => key);
+  assert.equal(replay.submission.id, result.submission.id);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM activity_log WHERE action='item_trashed'").get().n, 1);
+
+  // Exercise the existing Trash restore SQL, not a parallel test-only restore implementation.
+  const source = ts.createSourceFile("pace-data.ts", await read("../lib/pace-data.ts"), ts.ScriptTarget.Latest, true);
+  const restore = source.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "restoreTrashedItems");
+  const queries = [];
+  const visit = (node) => { if (ts.isNoSubstitutionTemplateLiteral(node)) queries.push(node.text); ts.forEachChild(node, visit); };
+  visit(restore);
+  const restoreSql = queries.find((sql) => sql.includes("UPDATE items") && sql.includes("routine_id = ?") && sql.includes("archive_root_id = NULL"));
+  assert.ok(restoreSql);
+  db.prepare(restoreSql).run("project", null, new Date().toISOString(), "w", "task");
+  const restored = db.prepare("SELECT status, archived_at, archive_root_id, progress FROM items WHERE id='task'").get();
+  assert.equal(restored.status, "in_progress");
+  assert.equal(restored.archived_at, null);
+  assert.equal(restored.archive_root_id, null);
+  assert.equal(restored.progress, 35);
+  assert.ok((await work.listDailyWork(raw, "w", "me", date)).some((entry) => entry.key === "task:task"));
+  await checklist.handleDailyChecklist(authorization, modal.private_metadata, values, false, (key) => key);
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "in_progress");
+});
+
+test("deletion is never offered or accepted for Project and Routine rows", async (t) => {
+  const { raw, db, checklist, api } = fixture(t);
+  const input = checklistInput(await work.listDailyWork(raw, "w", "me", date));
+  const modal = form.dailyChecklistForm(input, "{}");
+  input.work.forEach((entry, i) => {
+    const options = modal.blocks.find((block) => block.block_id === `daily_choice_${i}`).element.options;
+    assert.equal(options.some((option) => option.value === "delete"), entry.kind === "task");
+    if (entry.kind !== "task") assert.ok(checklist.mergeDailyChecklist(input, { [`daily_choice_${i}`]: choice("delete") }, (key) => key).errors[`daily_choice_${i}`]);
+  });
+  await api.saveDailyDraft(authorization, { date, noPlannedTasks: true }, false);
+  for (const key of ["project:project", "project:worker", "routine:routine", "task:not-mine", "task:foreign-task", "task:done"]) {
+    await assert.rejects(api.submitDailyDraft(authorization, date, "slack", `delete-${key}`, [], [key]));
+  }
+  await assert.rejects(api.submitDailyDraft({ ...authorization, role: "viewer" }, date, "slack", "viewer-delete", [], ["task:task"]));
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM daily_submissions").get().n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM items WHERE archived_at IS NOT NULL").get().n, 0);
+});
+
+test("completion and deletion roll back together on a write failure", async (t) => {
+  const { db, api } = fixture(t);
+  await api.saveDailyDraft(authorization, { date, noPlannedTasks: true }, false);
+  db.exec("INSERT INTO slack_daily_channels (id,owner_id,channel_id,channel_name) VALUES ('daily-channel','w','C','Daily')");
+  db.exec("CREATE TRIGGER fail_publication BEFORE INSERT ON slack_daily_publications BEGIN SELECT RAISE(ABORT,'mock publication failure'); END");
+  await assert.rejects(api.submitDailyDraft(authorization, date, "slack", "delete-rollback", ["routine:routine"], ["task:task"]));
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM routine_completions").get().n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM daily_submissions").get().n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM activity_log").get().n, 0);
+  db.exec("DROP TRIGGER fail_publication");
+  await api.submitDailyDraft(authorization, date, "slack", "delete-rollback", ["routine:routine"], ["task:task"]);
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "archived");
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM routine_completions").get().n, 1);
+});
+
+test("assignment, workspace membership and Task changes are rechecked atomically before deletion", async (t) => {
+  for (const change of ["DELETE FROM item_assignments WHERE id='a3'", "UPDATE workspace_members SET role='viewer' WHERE id='me'", "UPDATE workspace_members SET status='inactive' WHERE id='me'", "UPDATE items SET status='done' WHERE id='task'", "UPDATE items SET kind='project' WHERE id='task'"]) {
+    await t.test(change, async (t) => {
+      const { db, raw, api } = fixture(t);
+      await api.saveDailyDraft(authorization, { date, noPlannedTasks: true }, false);
+      const batch = raw.batch;
+      raw.batch = async (statements) => { db.exec(change); return batch(statements); };
+      await assert.rejects(api.submitDailyDraft(authorization, date, "slack", "delete-race", [], ["task:task"]));
+      assert.equal(db.prepare("SELECT archived_at FROM items WHERE id='task'").get().archived_at, null);
+      assert.equal(db.prepare("SELECT COUNT(*) n FROM daily_submissions").get().n, 0);
+      assert.equal(db.prepare("SELECT COUNT(*) n FROM activity_log").get().n, 0);
+    });
+  }
+});
+
+test("legacy exclusions, paging, cancelling and conflicting choices never delete work", async (t) => {
+  const { raw, db, checklist, api } = fixture(t);
+  const entries = await work.listDailyWork(raw, "w", "me", date);
+  const task = entries.find((entry) => entry.key === "task:task");
+  const legacy = await checklist.createDailyChecklist("w", "me", { ...checklistInput([task]), noPlannedTasks: true, choices: { "task:task": "exclude" } }, (key) => key);
+  assert.ok(!JSON.stringify(legacy).includes('"value":"exclude"'));
+  await checklist.handleDailyChecklist(authorization, legacy.private_metadata, { daily_choice_0: choice("exclude") }, false, (key) => key);
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
+  const modal = await checklist.createDailyChecklist("w", "me", checklistInput([task, ...Array.from({ length: 20 }, (_, i) => ({ ...task, id: `t-${i}`, key: `task:t-${i}` }))]), (key) => key);
+  const next = await checklist.handleDailyChecklist(authorization, modal.private_metadata, { daily_choice_0: choice("delete") }, false, (key) => key);
+  const back = await checklist.handleDailyChecklist(authorization, next.view.private_metadata, {}, true, (key) => key);
+  assert.equal(back.view.blocks.find((b) => b.block_id === "daily_choice_0").element.initial_options[0].value, "delete");
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
+  const cleared = checklist.mergeDailyChecklist(checklistInput([task]), { daily_choice_0: choice() }, (key) => key);
+  assert.deepEqual(cleared.next.choices, {});
+  assert.ok(checklist.mergeDailyChecklist(checklistInput([task]), { daily_choice_0: choice("done", "delete") }, (key) => key).errors.daily_choice_0);
+  await api.saveDailyDraft(authorization, { date, selectedWorkIds: ["task:task"] }, false);
+  await assert.rejects(api.submitDailyDraft(authorization, date, "slack", "overlap-delete", [], ["task:task"]));
+  await api.saveDailyDraft(authorization, { date, selectedWorkIds: [], noPlannedTasks: true }, false);
+  await assert.rejects(api.submitDailyDraft(authorization, date, "slack", "overlap-done-delete", ["task:task"], ["task:task"]));
+  await api.saveDailyDraft(authorization, { date, skipReason: "vacation" }, false);
+  await assert.rejects(api.submitDailyDraft(authorization, date, "slack", "skip-delete", [], ["task:task"]));
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
+});
+
+test("Routine tasks retain their Routine and deleted Tasks under an archived Project keep its restore root", async (t) => {
+  const { db, api } = fixture(t);
+  db.exec("UPDATE items SET routine_id='routine' WHERE id='task'");
+  const routinesBefore = db.prepare("SELECT * FROM routines ORDER BY id").all();
+  await api.saveDailyDraft(authorization, { date, noPlannedTasks: true }, false);
+  await api.submitDailyDraft(authorization, date, "slack", "routine-task-delete", [], ["task:task"]);
+  assert.equal(db.prepare("SELECT routine_id FROM items WHERE id='task'").get().routine_id, "routine");
+  assert.deepEqual(db.prepare("SELECT * FROM routines ORDER BY id").all(), routinesBefore);
+  db.exec("UPDATE items SET archived_at=NULL, archived_from_status=NULL, archive_root_id=NULL, status='todo', parent_id='project', routine_id=NULL WHERE id='task'");
+  db.exec("UPDATE items SET archived_at='2026-09-01', status='archived', archived_from_status='backlog', archive_root_id=id WHERE id='project'");
+  await api.submitDailyDraft(authorization, date, "slack", "archived-parent-delete", [], ["task:task"]);
+  assert.equal(db.prepare("SELECT archive_root_id FROM items WHERE id='task'").get().archive_root_id, "project");
+});
+
+test("50 deletions fit the binding limit and a 51st selection is rejected", async (t) => {
+  const { raw, db, api } = fixture(t);
+  const keys = Array.from({ length: 50 }, (_, i) => `task:delete-${i}`);
+  for (let i = 0; i < 50; i++) {
+    db.prepare("INSERT INTO items (id,owner_id,kind,title,status) VALUES (?,'w','task',?,'todo')").run(`delete-${i}`, `Delete ${i}`);
+    db.prepare("INSERT INTO item_assignments (id,owner_id,item_id,member_id,role) VALUES (?,'w',?,'me','task_assignee')").run(`ad-${i}`, `delete-${i}`);
+  }
+  await api.saveDailyDraft(authorization, { date, noPlannedTasks: true }, false);
+  const prepare = raw.prepare;
+  raw.prepare = (sql) => {
+    const statement = prepare(sql), bind = statement.bind;
+    statement.bind = (...values) => { assert.ok(values.length <= 100); return bind.apply(statement, values); };
+    return statement;
+  };
+  await assert.rejects(api.submitDailyDraft(authorization, date, "slack", "too-many-deletes", [], [...keys, "task:task"]));
+  const result = await api.submitDailyDraft(authorization, date, "slack", "bulk-delete", [], keys);
+  assert.ok(result.id);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM items WHERE archived_at IS NOT NULL").get().n, 50);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM activity_log WHERE action='item_trashed'").get().n, 50);
 });
 
 test("assignment changes between validation and transaction prevent completion", async (t) => {

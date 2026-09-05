@@ -27,8 +27,12 @@ export function mergeDailyChecklist(input: DailyChecklist, state: ModalState, t:
     const field = state[block]?.choice;
     if (!field) return;
     const choices = field.selected_options;
-    if (!Array.isArray(choices) || choices.some((option) => !["today", "done", "exclude"].includes(option?.value)) || choices.length > 1) {
+    // Old open modals may still send "exclude"; never reinterpret it as deletion.
+    if (!Array.isArray(choices) || choices.some((option) => !["today", "done", "delete", "exclude"].includes(option?.value)) || choices.length > 1) {
       errors[block] = t("업무마다 한 가지 상태만 선택해 주세요."); return;
+    }
+    if (choices.some((option) => option.value === "delete") && entry.kind !== "task") {
+      errors[block] = t("데일리에서는 개별 Task만 삭제할 수 있습니다."); return;
     }
     delete next.choices[entry.key];
     if (choices.length) next.choices[entry.key] = choices[0].value;
@@ -61,8 +65,8 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
   if (Object.keys(errors).length) return problem(errors);
   const pages = Math.max(1, Math.ceil(input.work.length / DAILY_CHECKLIST_PAGE_SIZE));
   const selected = (choice: string) => Object.entries(next.choices).filter(([, value]) => value === choice).map(([key]) => key);
-  const today = selected("today"), done = selected("done");
-  if (today.length + done.length > 50) return problem({ no_planned: t("오늘 할 업무는 최대 50개까지 선택할 수 있습니다.") });
+  const today = selected("today"), done = selected("done"), deleted = selected("delete");
+  if (today.length + done.length + deleted.length > 50) return problem({ no_planned: t("오늘 할 업무는 최대 50개까지 선택할 수 있습니다.") });
   if (previous || input.page + 1 < pages) {
     next.page = Math.max(0, Math.min(pages - 1, input.page + (previous ? -1 : 1)));
     const result = await env.DB.prepare("UPDATE slack_daily_checklists SET payload_json = ?, revision = revision + 1 WHERE id = ? AND owner_id = ? AND member_id = ? AND revision = ?")
@@ -71,19 +75,19 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
     return { view: dailyChecklistForm(next, metadataFor(parsed.id, parsed.revision + 1), t) };
   }
   const skipReason = normalizeDailySkipReason(next.skipReason);
-  if (skipReason && (today.length || done.length)) return problem({ skip_reason: t("스킵하려면 선택한 업무 상태를 먼저 해제해 주세요.") });
+  if (skipReason && (today.length || done.length || deleted.length)) return problem({ skip_reason: t("스킵하려면 선택한 업무 상태를 먼저 해제해 주세요.") });
   if (next.noPlannedTasks && today.length) return problem({ no_planned: t("오늘 예정 없음과 오늘 할 일을 함께 선택할 수 없습니다.") });
-  if (!skipReason && !next.noPlannedTasks && !today.length && !done.length && !next.todayNote.trim()) return problem({ no_planned: t("오늘 할 업무 또는 ‘오늘 예정 없음’을 선택해 주세요.") });
+  if (!skipReason && !next.noPlannedTasks && !today.length && !done.length && !deleted.length && !next.todayNote.trim()) return problem({ no_planned: t("오늘 할 업무 또는 ‘오늘 예정 없음’을 선택해 주세요.") });
   if (skipReason === "other" && !next.skipNote.trim()) return problem({ skip_note: t("기타 스킵 사유를 입력해 주세요.") });
   // Replays return the durable submission before revalidating already-completed work.
   const receipt = await env.DB.prepare("SELECT id FROM daily_submissions WHERE owner_id = ? AND member_id = ? AND request_id = ?")
     .bind(authorization.ownerId, member.id, parsed.id).first();
   if (!receipt) {
     await saveDailyDraft(authorization, { date: next.date, todayNote: next.todayNote, yesterdayNote: next.yesterdayNote, blockersNote: next.blockersNote,
-      selectedWorkIds: today, selectedYesterdayWorkIds: next.selectedYesterday.filter((key) => !today.includes(key) && !done.includes(key)),
-      noPlannedTasks: next.noPlannedTasks || (!today.length && done.length > 0), skipReason, skipNote: next.skipNote, source: "slack" }, false);
+      selectedWorkIds: today, selectedYesterdayWorkIds: next.selectedYesterday.filter((key) => !today.includes(key) && !done.includes(key) && !deleted.includes(key)),
+      noPlannedTasks: next.noPlannedTasks || (!today.length && done.length + deleted.length > 0), skipReason, skipNote: next.skipNote, source: "slack" }, false);
   }
-  return { submission: await submitDailyDraft(authorization, next.date, "slack", parsed.id, done) };
+  return { submission: await submitDailyDraft(authorization, next.date, "slack", parsed.id, done, deleted) };
 }
 
 export async function retryDailyChecklist(authorization: RequestAuthorization, metadata: string, state: ModalState, message: string, t: Translator) {
