@@ -13,7 +13,8 @@ import {
 } from "@/db/schema";
 import { currentDailyMember, dailySkipReasonLabel, getDailyDashboard, normalizeDailySkipReason, type DailySubmissionValue } from "@/lib/daily-bot";
 import { dailyWorkSnapshots, listDailyWork } from "@/lib/daily-work";
-import { dailyForm, dailyWorkOption } from "@/lib/slack-daily-form";
+import { dailyWorkOption } from "@/lib/slack-daily-form";
+import { createDailyChecklist } from "@/lib/slack-daily-checklist";
 import { attachSlackMember, readSlackMemberMatches, synchronizeSlackMembers } from "@/lib/slack-member-matching";
 import { ensureWorkspace, getSlackConnection, getSlackConnectionByTeam, type RequestAuthorization } from "@/lib/pace-data";
 import { decryptSlackSecret, slackDailyScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
@@ -370,7 +371,7 @@ export async function testDailyChannel(ownerId: string, channelId: string) {
 }
 
 export async function configureSlackDailyOnboarding(authorization: RequestAuthorization, input: {
-  weekdays: number[]; reminderTime: string; timezone: string; memberIds: string[]; channelIds: string[];
+  weekdays: number[]; reminderTime: string; timezone: string; memberIds: string[]; channelIds: string[]; sendTests?: boolean;
 }) {
   const connection = await getSlackConnection(authorization.ownerId);
   if (!connection) throw new Error("Slack을 먼저 연결해 주세요.");
@@ -416,7 +417,7 @@ export async function configureSlackDailyOnboarding(authorization: RequestAuthor
       enabled: selectedMemberIds.has(member.id), reminderTime: null, timezone: null, updatedAt: now,
     }).onConflictDoUpdate({
       target: [slackDailyPreferences.ownerId, slackDailyPreferences.memberId],
-      set: { enabled: selectedMemberIds.has(member.id), reminderTime: null, timezone: null, updatedAt: now },
+      set: { enabled: selectedMemberIds.has(member.id), updatedAt: now },
     });
   }
 
@@ -441,13 +442,13 @@ export async function configureSlackDailyOnboarding(authorization: RequestAuthor
   const dmTest: { status: "sent" | "skipped" | "failed"; memberId: string | null; error?: string } = {
     status: "skipped", memberId: installerMember?.id ?? null,
   };
-  if (installerMember && selectedMemberIds.has(installerMember.id) && linkByMemberId.has(installerMember.id)) {
+  if (input.sendTests && installerMember && selectedMemberIds.has(installerMember.id) && linkByMemberId.has(installerMember.id)) {
     try { await testDailyDm(authorization.ownerId, installerMember.id); dmTest.status = "sent"; }
     catch (error) { dmTest.status = "failed"; dmTest.error = error instanceof Error ? error.message : "테스트 DM 전송 실패"; }
   }
 
   const channelTests = [] as Array<{ channelId: string; channelName: string; status: "sent" | "failed"; error?: string }>;
-  for (const channel of selectedChannels) {
+  for (const channel of input.sendTests ? selectedChannels : []) {
     try {
       await testDailyChannel(authorization.ownerId, channel.id);
       channelTests.push({ channelId: channel.id, channelName: channel.name, status: "sent" });
@@ -783,17 +784,25 @@ export async function openDailyModal(triggerId: string, authorization: RequestAu
     try {
       const preference = await getSlackDailyPreference(authorization);
       const dashboard = await getDailyDashboard(authorization, todayInTimezone(preference.timezone));
-      await slackApi(token, "views.update", { view_id: viewId, hash: opened.view?.hash,
-        view: dailyForm({ work: dashboard.candidates.work, yesterdayWork: dashboard.candidates.yesterdayWork,
-          memberName: dashboard.member.displayName, selected: dashboard.draft.selectedWorkIds,
-          selectedYesterday: dashboard.draft.selectedYesterdayWorkIds, ...dashboard.draft,
-          metadata: JSON.stringify({ ownerId: authorization.ownerId, memberId: dashboard.member.id, date: dashboard.date, requestId: crypto.randomUUID(), workVersion: 2 }) }, t) });
+      const view = await createDailyChecklist(authorization.ownerId, dashboard.member.id, {
+        ...dashboard.draft, date: dashboard.date, work: dashboard.candidates.work, memberName: dashboard.member.displayName,
+        choices: Object.fromEntries(dashboard.draft.selectedWorkIds.map((key) => [key, "today" as const])),
+        selectedYesterday: dashboard.candidates.yesterdayWork.filter((entry) => entry.completedYesterday).slice(0, 50).map((entry) => entry.key),
+        yesterdayCompleted: dashboard.candidates.yesterdayWork.filter((entry) => entry.completedYesterday), page: 0,
+      }, t);
+      await slackApi(token, "views.update", { view_id: viewId, hash: opened.view?.hash, view });
     } catch {
       await slackApi(token, "views.update", { view_id: viewId, view: { type: "modal",
         title: { type: "plain_text", text: t("오늘 할 업무") }, close: { type: "plain_text", text: t("닫기") },
         blocks: [{ type: "section", text: { type: "plain_text", text: t("업무를 불러오지 못했습니다. 잠시 후 데일리를 다시 열어 주세요. 제출된 내용은 없습니다.") } }] } }).catch(() => undefined);
     }
   })());
+}
+
+export async function updateDailyChecklistView(ownerId: string, viewId: string, hash: string | undefined, view: Record<string, unknown>) {
+  const connection = await getSlackConnection(ownerId);
+  if (!connection) throw new Error("Slack 연결을 찾을 수 없습니다.");
+  await slackApi(await slackTokenForConnection(connection), "views.update", { view_id: viewId, hash, view });
 }
 
 export async function externalTaskOptions(authorization: RequestAuthorization, query: string, workMode: boolean | "today" | "yesterday" = false, date?: string) {
@@ -876,7 +885,9 @@ async function reminderReceipts(token: string, channel: string, postAt: number, 
   let cursor = "";
   for (let page = 0; page < 5; page += 1) {
     const result = await slackApi<SlackApiResult & { scheduled_messages?: ReminderReceipt[] }>(token, "chat.scheduledMessages.list", {
-      channel, oldest: String(postAt - 1), latest: String(postAt + 1), limit: 100, ...(cursor ? { cursor } : {}),
+      // Query pending receipts without time bounds. Slack can reject bounds for
+      // expired reservations; filter the exact delivery timestamp locally instead.
+      channel, limit: 100, ...(cursor ? { cursor } : {}),
     }, signal);
     receipts.push(...(result.scheduled_messages ?? []).filter((entry) => entry.channel_id === channel && Number(entry.post_at) === postAt));
     cursor = result.response_metadata?.next_cursor ?? "";
@@ -944,9 +955,15 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
     ? visibleYesterday.map((work) => `• ${escapeSlack(work.title)} _(${t(work.kind === "project" ? "Project" : work.kind === "task" ? "Task" : "Routine")} · ${escapeSlack(work.parentTitle)})_`).join("\n")
     : `• ${t("선택한 업무 없음")}`;
   const yesterdayOverflow = yesterdayWork.length > 20 ? `\n_${t("외 {count}개", { count: yesterdayWork.length - 20 })}_` : "";
-  const allWork = [...submission.tasks, ...(submission.work ?? []).map((work) => ({ taskTitle: work.title, parentTitle: `${work.kind === "project" ? t("Project") : work.kind === "task" ? t("Task") : t("Routine")} · ${work.parentTitle}`, isNew: false }))];
+  const allWork = [...submission.tasks.map((task) => ({ ...task, groupKey: `${task.parentKind}:${task.parentId || "general"}`, completedToday: false })), ...(submission.work ?? []).map((work) => ({ taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, isNew: false, completedToday: Boolean(work.completedToday) }))];
   const visible = allWork.slice(0, 20);
-  const taskLines = visible.length ? visible.map((task) => `${task.isNew ? "✨ " : "• "}${escapeSlack(task.taskTitle)} _(${escapeSlack(task.parentTitle)})_`).join("\n") : `• ${t("오늘 예정 없음")}`;
+  const groups = new Map<string, { title: string; lines: string[] }>();
+  for (const task of visible) {
+    const group = groups.get(task.groupKey) ?? { title: task.parentTitle, lines: [] };
+    group.lines.push(`• ${task.completedToday ? `[${t("완료")}] ` : ""}${escapeSlack(task.taskTitle)}`);
+    groups.set(task.groupKey, group);
+  }
+  const taskLines = visible.length ? [...groups.values()].map((group) => `*${escapeSlack(group.title)}*\n${group.lines.join("\n")}`).join("\n\n") : `• ${t("오늘 예정 없음")}`;
   const overflow = allWork.length > 20 ? `\n_${t("외 {count}개", { count: allWork.length - 20 })}_` : "";
   const blocker = submission.blockersNote ? `\n*${t("블로커")}*\n${escapeSlack(submission.blockersNote)}` : "";
   const note = submission.todayNote ? `\n*${t("오늘 메모")}*\n${escapeSlack(submission.todayNote)}` : "";

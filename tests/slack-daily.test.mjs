@@ -99,7 +99,7 @@ function harness(t) {
     "@/lib/pace-data": { getSlackConnection: async (owner) => connectionFor("owner_id", owner), getSlackConnectionByTeam: async (team) => connectionFor("team_id", team), ensureWorkspace: async () => {} },
     "@/lib/slack-oauth": { decryptSlackSecret: async (owner) => `mock-token-${owner}`, slackScopes: [] },
     "@/lib/slack-daily-status": status,
-    "@/lib/daily-work": {}, "@/lib/slack-daily-form": {}, "@/lib/slack-member-matching": {},
+    "@/lib/daily-work": {}, "@/lib/slack-daily-form": {}, "@/lib/slack-member-matching": {}, "@/lib/slack-daily-checklist": {},
   });
   const calls = [], pending = [];
   const behavior = { rejectSchedule: false, loseResponse: false, rejectCancellation: false, lockedCancellation: false, rejectTeam: "", onSchedule: null, paginate: false, channelPages: [] };
@@ -116,8 +116,10 @@ function harness(t) {
       return Response.json({ ok: true, channels: result.channels, response_metadata: { next_cursor: result.nextCursor || "" } });
     }
     if (method === "chat.scheduledMessages.list") {
+      assert.equal(body.latest, undefined, "expired reservations must not use rejected Slack timestamp bounds");
+      assert.equal(body.oldest, undefined);
       if (behavior.paginate && !body.cursor) return Response.json({ ok: true, scheduled_messages: [], response_metadata: { next_cursor: "next" } });
-      return Response.json({ ok: true, scheduled_messages: pending.filter((entry) => entry.owner === owner && entry.channel_id === body.channel && entry.post_at > Number(body.oldest) && entry.post_at < Number(body.latest)) });
+      return Response.json({ ok: true, scheduled_messages: pending.filter((entry) => entry.owner === owner && entry.channel_id === body.channel) });
     }
     if (method === "chat.scheduleMessage") {
       const ids = body.blocks.flatMap((block) => block.block_id ? [block.block_id] : []);

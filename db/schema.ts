@@ -1399,6 +1399,15 @@ export type SlackAutomation = typeof slackAutomations.$inferSelect;
 export type SlackAutomationDelivery = typeof slackAutomationDeliveries.$inferSelect;
 export type SlackOAuthState = typeof slackOAuthStates.$inferSelect;
 export type SlackMemberLink = typeof slackMemberLinks.$inferSelect;
+export const slackDailyChecklists = sqliteTable("slack_daily_checklists", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  memberId: text("member_id").notNull().references(() => workspaceMembers.id, { onDelete: "cascade" }),
+  payloadJson: text("payload_json").notNull(),
+  revision: integer("revision").notNull().default(0),
+  expiresAt: text("expires_at").notNull(),
+}, (table) => [index("idx_slack_daily_checklists_expiry").on(table.expiresAt)]);
+
 export type SlackDailySettings = typeof slackDailySettings.$inferSelect;
 export type SlackDailyReminder = typeof slackDailyReminders.$inferSelect;
 export type SlackDailyPublication = typeof slackDailyPublications.$inferSelect;

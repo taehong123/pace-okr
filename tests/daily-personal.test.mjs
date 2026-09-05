@@ -21,6 +21,8 @@ const dailySource = await read("../lib/daily-bot.ts");
 const schema = JSON.parse(await read("../drizzle/meta/0038_snapshot.json"));
 const migration = await read("../drizzle/0045_daily_work_selection.sql");
 const yesterdayMigration = await read("../drizzle/0047_daily_yesterday_selection.sql");
+const checklistMigration = await read("../drizzle/0049_slack_daily_checklists.sql");
+const checklistSource = await read("../lib/slack-daily-checklist.ts");
 const date = "2026-09-04";
 const authorization = { ownerId: "w", userId: "u", role: "owner", apiToken: false };
 function fixture(t) {
@@ -37,6 +39,7 @@ function fixture(t) {
   db.exec(migration.replaceAll("--> statement-breakpoint", ""));
   assert.ok(!yesterdayMigration.includes("\r"));
   db.exec(yesterdayMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(checklistMigration.replaceAll("--> statement-breakpoint", ""));
   const raw = { prepare(sql) {
     const statement = db.prepare(sql); let args = [];
     return { bind(...values) { args = values; return this; }, async first() { return statement.get(...args) ?? null; },
@@ -70,7 +73,8 @@ function fixture(t) {
     } }) }) }) }) },
     "@/lib/daily-work": work, "@/lib/pace-data": { ensureWorkspace: async () => {}, dispatchSlackAutomationEvent: async () => {}, createItem: () => { throw new Error("Must never invent tasks"); } },
   });
-  return { db, raw, api };
+  const checklist = compile(checklistSource, { "cloudflare:workers": { env: { DB: raw } }, "@/lib/daily-bot": api, "@/lib/slack-daily-form": form });
+  return { db, raw, api, checklist };
 }
 
 test("personal daily includes assigned DRI/worker projects, tasks and routines only", async (t) => {
@@ -148,6 +152,132 @@ test("Slack v2 modal uses searchable yesterday and today multi-selects", () => {
   assert.equal(inputs[2].element.initial_options[0].value, "task:72");
   assert.ok(!JSON.stringify(modal).includes("new_task"));
   assert.ok(modal.blocks.length < 100);
+});
+
+const checklistInput = (entries) => ({ date, memberName: "Me", work: entries, choices: {}, selectedYesterday: [], page: 0,
+  todayNote: "", yesterdayNote: "", blockersNote: "", skipReason: null, skipNote: "", noPlannedTasks: false });
+const choice = (...values) => ({ choice: { selected_options: values.map((value) => ({ value })) } });
+
+test("new checklist shows every task without search, grouped by stable project ID with overdue dates", async () => {
+  const entries = Array.from({ length: 101 }, (_, i) => ({ key: `task:${i}`, id: String(i), title: `Task ${i}`, kind: "task", parentId: `project-${Math.floor(i / 2)}`, parentKind: "project", parentTitle: "Same project name", dueDate: "2026-09-01" }));
+  const seen = [];
+  for (let page = 0; page < Math.ceil(entries.length / form.DAILY_CHECKLIST_PAGE_SIZE); page++) {
+    const modal = form.dailyChecklistForm({ ...checklistInput(entries), page }, "opaque-metadata");
+    assert.ok(modal.blocks.length <= 100);
+    assert.ok(!JSON.stringify(modal).includes("external_select"));
+    assert.match(JSON.stringify(modal), /기한 초과/);
+    for (const input of modal.blocks.filter((block) => block.block_id?.startsWith("daily_choice_"))) {
+      assert.equal(input.element.type, "checkboxes");
+      assert.deepEqual(input.element.options.map((option) => option.value), ["today", "done", "exclude"]);
+      seen.push(input.block_id);
+    }
+  }
+  assert.equal(new Set(seen).size, 101);
+  assert.notEqual(form.dailyWorkGroup(entries[0]).key, form.dailyWorkGroup(entries[2]).key);
+  for (const lang of ["en", "ja", "zh", "es"]) {
+    const t = await serverLanguage.serverTranslator(lang);
+    const modal = form.dailyChecklistForm(checklistInput(entries.slice(0, 1)), "{}", t);
+    assert.ok(!JSON.stringify(modal).includes("오늘 제외"));
+    assert.ok(JSON.stringify(modal).includes("Task 0"));
+  }
+});
+
+test("checkbox conflicts are rejected and unchecking removes a plan without cancelling the task", async (t) => {
+  const { raw, db, checklist } = fixture(t);
+  const input = checklistInput(await work.listDailyWork(raw, "w", "me", date));
+  input.choices["task:task"] = "today";
+  const index = input.work.findIndex((entry) => entry.key === "task:task");
+  const merged = checklist.mergeDailyChecklist(input, { [`daily_choice_${index}`]: choice("today", "done") }, (key) => key);
+  assert.ok(merged.errors[`daily_choice_${index}`]);
+  const cleared = checklist.mergeDailyChecklist(input, { [`daily_choice_${index}`]: choice() }, (key) => key);
+  assert.equal(cleared.next.choices["task:task"], undefined);
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
+});
+
+test("checklist submit completes today's tasks atomically and retries never duplicate completion", async (t) => {
+  const { raw, db, checklist } = fixture(t);
+  const initial = checklistInput(await work.listDailyWork(raw, "w", "me", date));
+  const modal = await checklist.createDailyChecklist("w", "me", initial, (key) => key);
+  const id = JSON.parse(modal.private_metadata).id;
+  const stored = JSON.parse(db.prepare("SELECT payload_json FROM slack_daily_checklists WHERE id=?").get(id).payload_json);
+  const values = Object.fromEntries(stored.work.map((entry, i) => [`daily_choice_${i}`, choice(entry.key === "task:task" || entry.kind === "routine" ? "done" : "exclude")]));
+  const first = await checklist.handleDailyChecklist(authorization, modal.private_metadata, values, false, (key) => key);
+  assert.ok(first.submission);
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "done");
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='project'").get().status, "backlog");
+  assert.equal(db.prepare("SELECT completion_date FROM routine_completions").get().completion_date, date);
+  assert.equal(JSON.parse(db.prepare("SELECT payload FROM activity_log WHERE item_id='task'").get().payload).effectiveDate, date);
+  assert.equal(first.submission.work.filter((entry) => entry.completedToday).length, 2);
+  const replay = await checklist.handleDailyChecklist(authorization, modal.private_metadata, values, false, (key) => key);
+  assert.equal(replay.submission.id, first.submission.id);
+  assert.equal(replay.submission.newlyCompletedCount, 2);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM daily_submissions").get().n, 1);
+});
+
+test("completed work is revalidated and a failed transaction does not complete anything", async (t) => {
+  const { db, api } = fixture(t);
+  await api.saveDailyDraft(authorization, { date, selectedWorkIds: [], noPlannedTasks: true }, false);
+  for (const key of ["task:not-mine", "task:foreign-task", "task:done"]) await assert.rejects(api.submitDailyDraft(authorization, date, "slack", `bad-${key}`, [key]));
+  db.exec("CREATE TRIGGER fail_submission BEFORE INSERT ON daily_submissions BEGIN SELECT RAISE(ABORT,'mock failure'); END");
+  await assert.rejects(api.submitDailyDraft(authorization, date, "slack", "failed", ["task:task", "routine:routine"]));
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM routine_completions").get().n, 0);
+});
+
+test("assignment changes between validation and transaction prevent completion", async (t) => {
+  const { db, raw, api } = fixture(t);
+  await api.saveDailyDraft(authorization, { date, selectedWorkIds: [], noPlannedTasks: true }, false);
+  const batch = raw.batch;
+  raw.batch = async (statements) => { db.exec("DELETE FROM item_assignments WHERE id='a3'"); return batch(statements); };
+  await assert.rejects(api.submitDailyDraft(authorization, date, "slack", "race", ["task:task"]));
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM daily_submissions").get().n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM activity_log").get().n, 0);
+});
+
+test("Slack acknowledges checklist submission before slow work finishes", async () => {
+  const pending = [], updates = [];
+  let finish;
+  const workResult = new Promise((resolve) => { finish = resolve; });
+  const route = compile(await read("../app/api/slack/interactions/route.ts"), {
+    "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: {} }, waitUntil: (promise) => pending.push(promise) },
+    "@/lib/pace-data": { getSlackConnectionByTeam: async () => ({ ownerId: "w" }) },
+    "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => true },
+    "@/lib/language-preferences": { memberMessageLanguage: async () => "en", workspaceMessageLanguage: async () => "en" },
+    "@/lib/server-language": serverLanguage,
+    "@/lib/slack-daily": { dailyMemberBySlack: async () => ({ authorization, memberId: "me" }),
+      updateDailyChecklistView: async (...args) => updates.push(args), publishDailySubmission: async () => {}, reconcileDailyReminders: async () => {} },
+    "@/lib/slack-daily-checklist": { handleDailyChecklist: async () => workResult, retryDailyChecklist: async () => null },
+    "@/lib/slack-work-command": {}, "@/lib/daily-bot": {},
+  });
+  const response = await route.POST(new Request("https://example.test/api/slack/interactions", { method: "POST", body: new URLSearchParams({ payload: JSON.stringify({
+    type: "view_submission", team: { id: "T" }, user: { id: "U" }, view: { id: "V", callback_id: "daily_checklist_submit", private_metadata: "{}", state: { values: {} } },
+  }) }) }));
+  assert.equal((await response.json()).response_action, "update");
+  assert.equal(updates.length, 0);
+  finish({ submission: { id: "submission" } });
+  await Promise.all(pending);
+  assert.equal(updates.length, 1);
+  assert.match(JSON.stringify(updates[0]), /Submitted/);
+});
+
+test("paged checklists preserve notes and choices, reject foreign/viewer access, and expire", async (t) => {
+  const { raw, db, checklist } = fixture(t);
+  const entries = await work.listDailyWork(raw, "w", "me", date);
+  const input = checklistInput(Array.from({ length: 25 }, (_, i) => ({ ...entries[0], id: `p-${i}`, key: `project:p-${i}` })));
+  const modal = await checklist.createDailyChecklist("w", "me", input, (key) => key);
+  const next = await checklist.handleDailyChecklist(authorization, modal.private_metadata, { daily_choice_0: choice("today"), today_note: { value: { value: "Keep my note" } } }, false, (key) => key);
+  assert.ok(next.view);
+  const back = await checklist.handleDailyChecklist(authorization, next.view.private_metadata, { daily_choice_20: choice("exclude") }, true, (key) => key);
+  assert.equal(back.view.blocks.find((b) => b.block_id === "daily_choice_0").element.initial_options[0].value, "today");
+  assert.equal(back.view.blocks.find((b) => b.block_id === "today_note").element.initial_value, "Keep my note");
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM daily_submissions").get().n, 0);
+  await assert.rejects(checklist.handleDailyChecklist({ ...authorization, role: "viewer" }, back.view.private_metadata, {}, false, (key) => key));
+  await assert.rejects(checklist.handleDailyChecklist({ ...authorization, userId: "c" }, back.view.private_metadata, {}, false, (key) => key));
+  const stale = await checklist.handleDailyChecklist(authorization, modal.private_metadata, {}, false, (key) => key);
+  assert.equal(JSON.parse(stale.view.private_metadata).revision, 2);
+  db.exec("UPDATE slack_daily_checklists SET expires_at='2000-01-01'");
+  await assert.rejects(checklist.handleDailyChecklist(authorization, back.view.private_metadata, {}, false, (key) => key));
 });
 
 test("yesterday candidates auto-select actual completions and mark incomplete choices only on submit", async (t) => {
@@ -286,6 +416,7 @@ test("signed Slack submission passes every personal checklist and rejects other-
   const saved = [], submitted = [], pending = [];
   const state = { memberId: "me", fail: false, signature: true, role: "owner", language: "en" };
   const route = compile(await read("../app/api/slack/interactions/route.ts"), {
+    "@/lib/slack-daily-checklist": {},
     "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: { prepare: () => ({ bind: () => ({ first: async () => ({ yesterday_note: "Yesterday" }) }) }) } }, waitUntil: (p) => pending.push(p) },
     "@/lib/pace-data": { getSlackConnectionByTeam: async () => ({ ownerId: "w" }) },
     "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => state.signature },

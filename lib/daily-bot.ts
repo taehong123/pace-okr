@@ -356,7 +356,7 @@ export async function createExplicitDailyTask(
   return created;
 }
 
-export async function submitDailyDraft(authorization: RequestAuthorization, rawDate: string, source: "web" | "slack" = "web", requestId?: string) {
+export async function submitDailyDraft(authorization: RequestAuthorization, rawDate: string, source: "web" | "slack" = "web", requestId?: string, completedWorkIds: string[] = []) {
   const date = normalizeDailyDate(rawDate);
   const member = await currentDailyMember(authorization);
   const d1 = env.DB;
@@ -371,6 +371,8 @@ export async function submitDailyDraft(authorization: RequestAuthorization, rawD
     WHERE owner_id = ? AND member_id = ? AND scrum_date = ? LIMIT 1`)
     .bind(authorization.ownerId, member.id, date).first<DraftRow>();
   if (!draft) throw new Error("먼저 데일리 초안을 저장해 주세요.");
+  const completedToday = (await validateDailyWork(d1, authorization.ownerId, member.id, date, completedWorkIds))
+    .map((entry) => ({ ...entry, completedToday: true }));
   const work = await validateDailyWork(d1, authorization.ownerId, member.id, date, parseDailyWorkKeys(draft.work_selection_json || "[]"));
   const yesterdayWork = await validateDailyYesterdayWork(d1, authorization.ownerId, member.id, date,
     await dailyTimezone(d1, authorization.ownerId, member.id), parseDailyWorkKeys(draft.yesterday_work_selection_json || "[]", "yesterday"));
@@ -381,16 +383,18 @@ export async function submitDailyDraft(authorization: RequestAuthorization, rawD
     throw new Error("선택한 Task의 상태 또는 할당이 변경되었습니다. 초안을 새로고침해 다시 선택해 주세요.");
   }
   const skipReason = normalizeDailySkipReason(draft.skip_reason);
+  if (skipReason && completedToday.length) throw new Error("스킵하려면 선택한 업무 상태를 먼저 해제해 주세요.");
   if (skipReason === "other" && !draft.skip_note.trim()) {
     throw new Error("기타 스킵 사유를 입력해 주세요.");
   }
   if (!skipReason && !draft.no_planned_tasks && selected.length + work.length === 0 && !draft.today_note.trim()) {
     throw new Error("오늘 Task를 선택하거나 ‘오늘 예정 없음’을 선택해 주세요.");
   }
-  if (selected.length + work.length > MAX_DAILY_TASKS) throw new Error(`오늘 할 업무는 최대 ${MAX_DAILY_TASKS}개까지 선택할 수 있습니다.`);
+  if (selected.length + work.length + completedToday.length > MAX_DAILY_TASKS) throw new Error(`오늘 할 업무는 최대 ${MAX_DAILY_TASKS}개까지 선택할 수 있습니다.`);
   if (yesterdayWork.length > MAX_DAILY_TASKS) throw new Error(`어제 완료한 일은 최대 ${MAX_DAILY_TASKS}개까지 선택할 수 있습니다.`);
   const todayKeys = new Set([...work.map((entry) => entry.key), ...selected.map((entry) => `task:${entry.id}`)]);
   if (yesterdayWork.some((entry) => todayKeys.has(entry.key))) throw new Error("같은 업무를 어제 완료한 일과 오늘 할 일에 동시에 선택할 수 없습니다.");
+  if (completedToday.some((entry) => todayKeys.has(entry.key) || yesterdayWork.some((other) => other.key === entry.key))) throw new Error("업무마다 한 가지 상태만 선택해 주세요.");
 
   const versionRow = await d1.prepare(`SELECT COALESCE(MAX(version), 0) AS version FROM daily_submissions
     WHERE owner_id = ? AND member_id = ? AND scrum_date = ?`)
@@ -398,8 +402,12 @@ export async function submitDailyDraft(authorization: RequestAuthorization, rawD
   const submissionId = crypto.randomUUID();
   const version = Number(versionRow?.version ?? 0) + 1;
   const submittedAt = new Date().toISOString();
-  const effectiveDate = addDays(date, -1);
-  const newlyCompleted = yesterdayWork.filter((entry) => entry.willCompleteOnSubmit);
+  const newlyCompleted = [...yesterdayWork.filter((entry) => entry.willCompleteOnSubmit), ...completedToday];
+  // Recheck current assignments inside the same D1 transaction as completion.
+  const completionGuards = completedToday.map((entry) => entry.kind === "routine"
+    ? "EXISTS (SELECT 1 FROM routines r WHERE r.id = ? AND r.owner_id = ? AND r.assignee_member_id = ? AND r.active = 1 AND r.system_key IS NULL AND NOT EXISTS (SELECT 1 FROM routine_completions c WHERE c.owner_id = r.owner_id AND c.routine_id = r.id AND c.completion_date = ?))"
+    : "EXISTS (SELECT 1 FROM items i JOIN item_assignments a ON a.owner_id = i.owner_id AND a.item_id = i.id WHERE i.id = ? AND i.owner_id = ? AND a.member_id = ? AND i.status = ? AND i.archived_at IS NULL AND ((i.kind = 'task' AND a.role = 'task_assignee') OR (i.kind = 'project' AND a.role IN ('project_dri','project_worker'))))");
+  const completionGuardArgs = completedToday.flatMap((entry) => [entry.id, authorization.ownerId, member.id, entry.kind === "routine" ? date : entry.status]);
   const channels = await d1.prepare("SELECT channel_id FROM slack_daily_channels WHERE owner_id = ? ORDER BY channel_name")
     .bind(authorization.ownerId).all<{ channel_id: string }>();
   await d1.batch([
@@ -407,20 +415,20 @@ export async function submitDailyDraft(authorization: RequestAuthorization, rawD
       (id, owner_id, member_id, member_name, member_email, scrum_date, version, yesterday_note, today_note,
        blockers_note, no_planned_tasks, skip_reason, skip_note, source, submitted_at, work_snapshot_json,
        yesterday_work_snapshot_json, request_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${completionGuards.join(" AND ") || "1"}`)
       .bind(submissionId, authorization.ownerId, member.id, member.displayName || member.email || "멤버", member.email || "", date, version,
         draft.yesterday_note, draft.today_note, draft.blockers_note, draft.no_planned_tasks, skipReason, draft.skip_note, source, submittedAt,
-        JSON.stringify(work), JSON.stringify(yesterdayWork), normalizedRequestId),
+        JSON.stringify([...work, ...completedToday.map((entry) => ({ ...entry, status: "done" }))]), JSON.stringify(yesterdayWork), normalizedRequestId, ...completionGuardArgs),
     ...newlyCompleted.filter((entry) => entry.kind !== "routine").flatMap((entry) => [
-      d1.prepare("UPDATE items SET status = 'done', progress = 100, updated_at = ? WHERE owner_id = ? AND id = ? AND archived_at IS NULL AND status NOT IN ('done','development_done','archived')")
-        .bind(submittedAt, authorization.ownerId, entry.id),
+      d1.prepare("UPDATE items SET status = 'done', progress = 100, updated_at = ? WHERE owner_id = ? AND id = ? AND archived_at IS NULL AND status NOT IN ('done','development_done','archived') AND EXISTS (SELECT 1 FROM daily_submissions WHERE id = ?)")
+        .bind(submittedAt, authorization.ownerId, entry.id, submissionId),
       d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
-        VALUES (?, ?, ?, 'updated', 'daily', ?, ?)`)
-        .bind(crypto.randomUUID(), authorization.ownerId, entry.id, JSON.stringify({ status: "done", fromStatus: entry.status, progress: 100, effectiveDate, origin: "daily_yesterday_selection", requestId: normalizedRequestId }), submittedAt),
+        SELECT ?, ?, ?, 'updated', 'daily', ?, ? WHERE EXISTS (SELECT 1 FROM daily_submissions WHERE id = ?)`)
+        .bind(crypto.randomUUID(), authorization.ownerId, entry.id, JSON.stringify({ status: "done", fromStatus: entry.status, progress: 100, effectiveDate: entry.completedToday ? date : addDays(date, -1), origin: entry.completedToday ? "daily_today_selection" : "daily_yesterday_selection", requestId: normalizedRequestId }), submittedAt, submissionId),
     ]),
     ...newlyCompleted.filter((entry) => entry.kind === "routine").map((entry) => d1.prepare(`INSERT OR IGNORE INTO routine_completions
-      (id, owner_id, routine_id, completion_date, created_at) VALUES (?, ?, ?, ?, ?)`)
-      .bind(crypto.randomUUID(), authorization.ownerId, entry.id, effectiveDate, submittedAt)),
+      (id, owner_id, routine_id, completion_date, created_at) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM daily_submissions WHERE id = ?)`)
+      .bind(crypto.randomUUID(), authorization.ownerId, entry.id, entry.completedToday ? date : addDays(date, -1), submittedAt, submissionId)),
     ...selected.map((task, index) => d1.prepare(`INSERT INTO daily_task_snapshots
       (id, owner_id, submission_id, task_id, task_title, parent_kind, parent_id, parent_title, status, is_new, sort_order)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -614,7 +622,7 @@ function serializeSubmission(row: SubmissionRow, snapshots: SnapshotRow[]): Dail
   return {
     work: dailyWorkSnapshots(row.work_snapshot_json),
     yesterdayWork,
-    newlyCompletedCount: yesterdayWork.filter((entry) => entry.willCompleteOnSubmit).length,
+    newlyCompletedCount: yesterdayWork.filter((entry) => entry.willCompleteOnSubmit).length + dailyWorkSnapshots(row.work_snapshot_json).filter((entry) => entry.completedToday).length,
     id: row.id,
     memberId: row.member_id,
     memberName: row.member_name,

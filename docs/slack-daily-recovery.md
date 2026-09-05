@@ -68,6 +68,31 @@ canceled without restoring a valid installation.
 Slack cancellation contract:
 https://docs.slack.dev/reference/methods/chat.deleteScheduledMessage/
 
+## Reservation Bounds And Daily Checklists
+
+The September 5 incident showed four failed recipient reservations with
+`invalid_ts_latest` from `chat.scheduledMessages.list`. Pending-receipt lookup
+now omits optional time bounds and filters exact channel/timestamp matches locally,
+retaining pagination, ambiguous-receipt protection and cancellation-lock checks.
+
+Workspace and personal settings use explicit save/cancel controls. Saving does
+not send test DMs or test channel messages, and changing shared settings retains
+personal time overrides. Reservation failures remain distinct from saved settings.
+
+New Slack daily forms list assigned work by stable Project/Routine ID, twenty
+items per page. Each row selects today, complete, or not today. Not today excludes
+the work from this daily plan; it does not archive, cancel or delete the record.
+Completion happens on final submission with today's effective date. Project
+completion does not complete its children. Existing yesterday completions remain
+separate. Legacy open modals keep their existing submission protocol.
+
+Short-lived modal state is workspace/member-scoped, revision-checked, and expires
+after 24 hours. Pagination changes neither work records nor submitted reports.
+Submission IDs deduplicate retries; completed-work assignments are rechecked in
+the same D1 transaction as the status updates. Slack is acknowledged before
+processing and the modal is updated with results or recoverable errors. Tests mock
+all external writes. Scheduled delivery is verified separately after deployment.
+
 ## Channel publication delivery
 
 Daily channel publication now uses the shared `slack_bot_deliveries` receipt

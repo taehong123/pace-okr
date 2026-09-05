@@ -4,6 +4,74 @@ import type { Translator } from "@/lib/server-language";
 const names = { project: "Project", task: "Task", routine: "Routine" };
 const identityTranslator: Translator = (key) => key;
 
+export type DailyChecklist = {
+  date: string; memberName: string; work: DailyWork[]; selectedYesterday: string[]; yesterdayCompleted?: DailyWork[];
+  choices: Record<string, "today" | "done" | "exclude">;
+  todayNote: string; yesterdayNote: string; blockersNote: string;
+  noPlannedTasks: boolean; skipReason: string | null; skipNote: string; page: number;
+};
+export const DAILY_CHECKLIST_PAGE_SIZE = 20;
+
+export function dailyWorkGroup(work: DailyWork) {
+  if (work.kind === "project") return { key: `project:${work.id}`, title: work.title };
+  if (work.kind === "routine") return { key: `routine:${work.id}`, title: work.title };
+  return { key: work.parentId ? `${work.parentKind}:${work.parentId}` : "general", title: work.parentId ? work.parentTitle : "General" };
+}
+
+export function orderDailyChecklist(work: DailyWork[]) {
+  const groups = new Map<string, DailyWork[]>();
+  for (const entry of work) {
+    const key = dailyWorkGroup(entry).key;
+    const rows = groups.get(key) ?? [];
+    rows.push(entry); groups.set(key, rows);
+  }
+  return [...groups.values()].flatMap((rows) => rows.sort((a, b) => Number(b.kind !== "task") - Number(a.kind !== "task")));
+}
+
+export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: Translator = identityTranslator, error = "") {
+  const pages = Math.max(1, Math.ceil(input.work.length / DAILY_CHECKLIST_PAGE_SIZE));
+  const blocks: Record<string, unknown>[] = [
+    { type: "section", text: { type: "plain_text", text: `${input.memberName} · ${input.date}\n${t("완료는 제출할 때 반영됩니다. 오늘 제외는 업무를 삭제하지 않습니다.")}` } },
+    { type: "context", elements: [{ type: "plain_text", text: t("{page} / {pages} · 전체 {count}개", { page: input.page + 1, pages, count: input.work.length }) }] },
+  ];
+  if (error) blocks.push({ type: "section", text: { type: "plain_text", text: error } });
+  const options = [["today", "오늘 할 일"], ["done", "완료"], ["exclude", "오늘 제외"]].map(([value, text]) => ({ text: { type: "plain_text", text: t(text) }, value }));
+  let lastGroup = "";
+  input.work.slice(input.page * DAILY_CHECKLIST_PAGE_SIZE, (input.page + 1) * DAILY_CHECKLIST_PAGE_SIZE).forEach((entry, offset) => {
+    const group = dailyWorkGroup(entry);
+    if (group.key !== lastGroup) {
+      blocks.push({ type: "section", text: { type: "plain_text", text: (group.key === "general" ? t("General") : group.title).slice(0, 2900) } });
+      lastGroup = group.key;
+    }
+    if (entry.title.length > 180) blocks.push({ type: "section", text: { type: "plain_text", text: entry.title.slice(0, 2900) } });
+    const initial = options.filter((option) => option.value === input.choices[entry.key]);
+    const due = entry.dueDate ? `${entry.dueDate}${entry.dueDate < input.date ? ` · ${t("기한 초과")}` : ""}` : "";
+    blocks.push({ type: "input", block_id: `daily_choice_${input.page * DAILY_CHECKLIST_PAGE_SIZE + offset}`, optional: true,
+      label: { type: "plain_text", text: entry.title.slice(0, 180) || t(names[entry.kind]) },
+      hint: { type: "plain_text", text: `${t(names[entry.kind])}${due ? ` · ${due}` : ""}` },
+      element: { type: "checkboxes", action_id: "choice", options, ...(initial.length ? { initial_options: initial } : {}) } });
+  });
+  if (!input.work.length) blocks.push({ type: "section", text: { type: "plain_text", text: t("현재 배정된 미완료 업무가 없습니다.") } });
+  if (input.yesterdayCompleted?.length) blocks.push({ type: "section", text: { type: "plain_text", text: `${t("어제 완료한 일")}\n${input.yesterdayCompleted.slice(0, 20).map((entry) => `• ${entry.title}`).join("\n")}`.slice(0, 2900) } });
+  const none = { text: { type: "plain_text", text: t("오늘 예정 없음") }, value: "yes" };
+  blocks.push({ type: "input", block_id: "no_planned", optional: true, label: { type: "plain_text", text: t("오늘 예정") },
+    element: { type: "checkboxes", action_id: "value", options: [none], ...(input.noPlannedTasks ? { initial_options: [none] } : {}) } });
+  for (const [blockId, label, value] of [["yesterday_note", "어제 메모", input.yesterdayNote], ["today_note", "오늘 메모", input.todayNote], ["blockers_note", "도움이 필요한 일", input.blockersNote]]) {
+    blocks.push({ type: "input", block_id: blockId, optional: true, label: { type: "plain_text", text: t(label) },
+      element: { type: "plain_text_input", action_id: "value", multiline: true, max_length: 3000, ...(value ? { initial_value: value } : {}) } });
+  }
+  const skipOptions = [["none", "스킵하지 않음"], ["workload", "본업 과중"], ["vacation", "휴가"], ["personal", "개인 일정"], ["other", "기타"]]
+    .map(([value, label]) => ({ text: { type: "plain_text", text: t(label) }, value }));
+  blocks.push({ type: "input", block_id: "skip_reason", optional: true, label: { type: "plain_text", text: t("데일리 스킵") },
+    element: { type: "static_select", action_id: "value", options: skipOptions, initial_option: skipOptions.find((option) => option.value === (input.skipReason || "none")) } });
+  blocks.push({ type: "input", block_id: "skip_note", optional: true, label: { type: "plain_text", text: t("스킵 상세 사유") },
+    element: { type: "plain_text_input", action_id: "value", max_length: 500, ...(input.skipNote ? { initial_value: input.skipNote } : {}) } });
+  if (input.page > 0) blocks.push({ type: "actions", elements: [{ type: "button", action_id: "daily_checklist_previous", text: { type: "plain_text", text: t("이전") }, value: "previous" }] });
+  return { type: "modal", callback_id: "daily_checklist_submit", private_metadata: metadata,
+    title: { type: "plain_text", text: t("데일리") }, submit: { type: "plain_text", text: t(input.page + 1 < pages ? "다음" : "제출") },
+    close: { type: "plain_text", text: t("취소") }, blocks };
+}
+
 export function dailyWorkOption(work: DailyWork, t: Translator = identityTranslator, mode: "today" | "yesterday" = "today") {
   const detail = mode === "yesterday" && work.willCompleteOnSubmit
     ? `${work.parentTitle} · ${t("제출 시 완료 처리")}`

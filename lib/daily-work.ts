@@ -2,6 +2,7 @@ export type DailyWorkKind = "project" | "task" | "routine";
 export type DailyWork = {
   id: string; key: string; kind: DailyWorkKind; title: string; status: string;
   priority: string; dueDate: string | null; parentTitle: string;
+  parentId?: string | null; parentKind?: string; completedToday?: boolean;
   completedYesterday?: boolean;
   willCompleteOnSubmit?: boolean;
 };
@@ -18,7 +19,9 @@ export function parseDailyWorkKeys(raw: unknown, context: "today" | "yesterday" 
 
 export async function listDailyWork(db: D1Database, ownerId: string, memberId: string, date: string): Promise<DailyWork[]> {
   const rows = await db.prepare(`SELECT * FROM (SELECT DISTINCT item.id, item.kind, item.title, item.status, item.priority,
-      item.due_date AS dueDate, COALESCE(parent.title, routine.title, 'General') AS parentTitle
+      item.due_date AS dueDate, COALESCE(parent.title, routine.title, 'General') AS parentTitle,
+      COALESCE(parent.id, routine.id) AS parentId,
+      CASE WHEN parent.id IS NOT NULL THEN parent.kind WHEN routine.id IS NOT NULL THEN 'routine' ELSE 'general' END AS parentKind
     FROM items item JOIN item_assignments a ON a.item_id = item.id AND a.owner_id = item.owner_id
     LEFT JOIN items parent ON parent.id = item.parent_id AND parent.owner_id = item.owner_id
     LEFT JOIN routines routine ON routine.id = item.routine_id AND routine.owner_id = item.owner_id
@@ -27,7 +30,7 @@ export async function listDailyWork(db: D1Database, ownerId: string, memberId: s
       AND ((item.kind = 'task' AND a.role = 'task_assignee')
         OR (item.kind = 'project' AND a.role IN ('project_dri','project_worker')))
     UNION ALL
-    SELECT r.id, 'routine', r.title, 'todo', 'medium', NULL, 'Routine'
+    SELECT r.id, 'routine', r.title, 'todo', 'medium', NULL, 'Routine', NULL, 'routine'
     FROM routines r WHERE r.owner_id = ? AND r.assignee_member_id = ? AND r.active = 1 AND r.system_key IS NULL
       AND NOT EXISTS (SELECT 1 FROM routine_completions c WHERE c.routine_id = r.id AND c.owner_id = r.owner_id AND c.completion_date = ?))
     ORDER BY dueDate IS NULL, dueDate, title`).bind(ownerId, memberId, ownerId, memberId, date).all<Omit<DailyWork, "key">>();

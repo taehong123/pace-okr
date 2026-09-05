@@ -1,7 +1,8 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { createExplicitDailyTask, currentDailyMember, normalizeDailySkipReason, saveDailyDraft, submitDailyDraft } from "@/lib/daily-bot";
 import { getSlackConnectionByTeam } from "@/lib/pace-data";
-import { createSlackMemberLinkUrl, dailyMemberBySlack, externalTaskOptions, openDailyModal, publishDailySubmission, reconcileDailyReminders } from "@/lib/slack-daily";
+import { createSlackMemberLinkUrl, dailyMemberBySlack, externalTaskOptions, openDailyModal, publishDailySubmission, reconcileDailyReminders, updateDailyChecklistView } from "@/lib/slack-daily";
+import { handleDailyChecklist, retryDailyChecklist } from "@/lib/slack-daily-checklist";
 import { slackConfigured, verifySlackRequest, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { memberMessageLanguage, workspaceMessageLanguage } from "@/lib/language-preferences";
 import { serverTranslator, type Translator } from "@/lib/server-language";
@@ -16,6 +17,8 @@ type SlackInteraction = {
   value?: string;
   actions?: Array<{ action_id?: string; value?: string }>;
   view?: {
+    id?: string;
+    hash?: string;
     callback_id?: string;
     private_metadata?: string;
     state?: { values?: Record<string, Record<string, Record<string, unknown>>> };
@@ -69,6 +72,29 @@ export async function POST(request: Request) {
   }
   if (payload.type === "view_submission" && payload.view?.callback_id === "daily_submit") {
     return submitFromModal(payload, linked.authorization, t);
+  }
+  const previousPage = payload.type === "block_actions" && payload.actions?.some((action) => action.action_id === "daily_checklist_previous");
+  if (payload.view?.callback_id === "daily_checklist_submit" && (payload.type === "view_submission" || previousPage)) {
+    if (linked.authorization.role === "viewer") return Response.json({ response_action: "errors", errors: { no_planned: t("읽기 전용 멤버는 데일리를 제출할 수 없습니다.") } });
+    const { id: viewId, hash, private_metadata: metadata = "", state } = payload.view;
+    if (!viewId) return new Response(null, { status: 400 });
+    const statusView = (text: string) => ({ type: "modal", title: { type: "plain_text", text: t("데일리") },
+      close: { type: "plain_text", text: t("닫기") }, blocks: [{ type: "section", text: { type: "plain_text", text } }] });
+    // Acknowledge before D1 work and downstream automation can exceed Slack's deadline.
+    waitUntil((async () => {
+      try {
+        const result = await handleDailyChecklist(linked.authorization, metadata, state?.values ?? {}, Boolean(previousPage), t);
+        await updateDailyChecklistView(linked.authorization.ownerId, viewId, previousPage ? hash : undefined, result.view ?? statusView(t("제출 완료")));
+        if (result.submission) await Promise.allSettled([publishDailySubmission(linked.authorization.ownerId, result.submission.id), reconcileDailyReminders(linked.authorization.ownerId)]);
+      } catch (error) {
+        const rawMessage = error instanceof Error ? error.message : "";
+        const translated = t(rawMessage);
+        const message = translated !== rawMessage || /^[가-힣\s·]+[가-힣\s·‘’]*[.?!]?$/.test(rawMessage) ? translated : t("데일리를 저장하지 못했습니다.");
+        const retry = await retryDailyChecklist(linked.authorization, metadata, state?.values ?? {}, message, t).catch(() => null);
+        await updateDailyChecklistView(linked.authorization.ownerId, viewId, undefined, retry ?? statusView(t("데일리를 다시 열어 주세요."))).catch(() => undefined);
+      }
+    })());
+    return previousPage ? new Response(null, { status: 200 }) : Response.json({ response_action: "update", view: statusView(t("처리 중")) });
   }
   if (payload.type === "view_submission" && payload.view?.callback_id === "work_command_submit") {
     try {

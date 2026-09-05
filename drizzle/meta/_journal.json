@@ -302,6 +302,13 @@
       "when": 1788505200000,
       "tag": "0048_slack_work_commands",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1788577200000,
+      "tag": "0049_slack_daily_checklists",
+      "breakpoints": true
     }
   ]
 }

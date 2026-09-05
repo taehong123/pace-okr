@@ -2,6 +2,72 @@ import { expect, test } from "@playwright/test";
 import { installApiMocks } from "./api-mocks";
 import AxeBuilder from "@axe-core/playwright";
 
+test("daily settings save explicitly, cancel restores values, and saving never sends a test", async ({ page }) => {
+  await installApiMocks(page, { slackState: "connected", teamWorkspace: true });
+  const writes: Record<string, unknown>[] = [];
+  let fail = true;
+  const admin = {
+    connected: true, teamName: "팀 Slack", setupComplete: true, needsReauthorization: false,
+    settings: { enabled: true, weekdays: [1, 2, 3, 4, 5], reminderTime: "09:00", timezone: "Asia/Seoul", installStatus: "connected", onboardingCompletedAt: "2026-09-02", lastError: "" },
+    delivery: { status: "ready", targetCount: 1, scheduledCount: 1, pendingCount: 0, failedCount: 0 }, channels: [], failedPublications: [],
+    members: [{ memberId: "member-1", displayName: "멤버", linked: true, preference: { enabled: true }, reminder: { status: "scheduled", postAt: Math.floor(Date.now() / 1000) + 86400, error: "" } }],
+  };
+  await page.route("**/api/slack/daily/settings", (route) => { expect(route.request().method()).toBe("GET"); return route.fulfill({ json: admin }); });
+  await page.route("**/api/slack/onboarding", async (route) => {
+    const payload = route.request().postDataJSON(); writes.push(payload);
+    if (fail) return route.fulfill({ status: 500, json: { error: "mock failure" } });
+    admin.settings.reminderTime = payload.reminderTime;
+    return route.fulfill({ json: { admin, schedules: [{ status: "scheduled" }], tests: { dm: { status: "skipped" }, channels: [] } } });
+  });
+  await page.goto("/?settings=workspace&tab=integrations&bot=daily");
+  await page.locator(".slack-connected-title").getByRole("button", { name: "설정", exact: true }).click();
+  const panel = page.locator(".slack-onboarding-card");
+  const input = panel.locator('input[type="time"]');
+  await input.fill("10:15");
+  await expect(panel.getByRole("status")).toHaveText("저장하지 않은 변경사항");
+  expect(writes).toEqual([]);
+  await panel.getByRole("button", { name: "취소", exact: true }).click();
+  await page.locator(".slack-connected-title").getByRole("button", { name: "설정", exact: true }).click();
+  await expect(input).toHaveValue("09:00");
+  await expect(panel.getByRole("button", { name: "변경사항 저장", exact: true })).toBeDisabled();
+  await input.fill("10:15");
+  await panel.getByRole("button", { name: "변경사항 저장", exact: true }).click();
+  await expect(panel.getByRole("alert")).toContainText("저장하지 못했습니다");
+  await expect(input).toHaveValue("10:15");
+  fail = false;
+  await panel.getByRole("button", { name: "변경사항 저장", exact: true }).click();
+  await expect(page.locator(".slack-connected-title")).toBeVisible();
+  expect(writes).toHaveLength(2);
+  expect(writes[1]).toMatchObject({ reminderTime: "10:15", memberIds: ["member-1"], channelIds: [] });
+  expect(writes[1]).not.toHaveProperty("sendTests", true);
+  await page.locator(".slack-connected-title").getByRole("button", { name: "설정", exact: true }).click();
+  await expect(input).toHaveValue("10:15");
+  await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: test.info().outputPath("daily-save.png") });
+});
+
+test("personal daily preferences stay local until saved", async ({ page }) => {
+  await installApiMocks(page, { slackState: "connected", teamWorkspace: true });
+  const writes: unknown[] = [];
+  let preference = { linked: true, enabled: true, reminderTime: "09:00", timezone: "Asia/Seoul" };
+  await page.route("**/api/slack/daily/preferences", (route) => {
+    if (route.request().method() === "PATCH") { const data = route.request().postDataJSON(); writes.push(data); preference = { ...preference, ...data }; }
+    return route.fulfill({ json: preference });
+  });
+  await page.goto("/?view=integrations");
+  const panel = page.locator(".slack-personal-preference");
+  await expect(panel).toBeVisible();
+  await panel.locator('input[type="time"]').fill("11:20");
+  expect(writes).toEqual([]);
+  await panel.getByRole("button", { name: "취소", exact: true }).click();
+  await expect(panel.locator('input[type="time"]')).toHaveValue("09:00");
+  await panel.locator('input[type="time"]').fill("11:20");
+  await panel.getByRole("button", { name: "변경사항 저장", exact: true }).click();
+  await expect(panel.getByRole("status")).toHaveText("저장됨");
+  expect(writes).toEqual([{ enabled: true, reminderTime: "11:20", timezone: "Asia/Seoul" }]);
+});
+
 for (const repairFails of [false, true]) {
 test(`failed reservation remains visible until repair succeeds (${repairFails ? "failure" : "success"})`, async ({ page }) => {
   await installApiMocks(page, { slackState: "connected", teamWorkspace: true });

@@ -235,7 +235,7 @@ export async function installApiMocks(page: Page, options: { withRoutine?: boole
     });
     if (url.pathname === "/api/slack/onboarding") {
       slackSetupComplete = true;
-      return json(route, { setupComplete: true, admin: slackAdmin(), tests: { dm: { status: "sent", memberId: "member-1" }, channels: [{ channelId: "C123", channelName: "daily", status: "sent" }] }, schedules: [{ memberId: "member-1", status: "scheduled", postAt: 1788120000 }] });
+      return json(route, { setupComplete: true, admin: slackAdmin(), tests: { dm: { status: "skipped", memberId: "member-1" }, channels: [] }, schedules: [{ memberId: "member-1", status: "scheduled", postAt: 1788120000 }] });
     }
     if (url.pathname === "/api/slack/daily/settings") return json(route, slackAdmin());
     if (url.pathname === "/api/slack/channels") return json(route, { channels: [{ id: "C123", name: "daily", isPrivate: false, isMember: false }] });

@@ -96,7 +96,7 @@ function harness(t) {
     "@/lib/pace-data": { getSlackConnection: async (ownerId) => db.prepare("SELECT * FROM slack_connections WHERE owner_id=?").get(ownerId) },
     "@/lib/slack-daily-status": {}, "@/lib/slack-oauth": {}, "@/lib/slack-bot-delivery": api,
     "@/lib/daily-bot": { normalizeDailySkipReason: () => null },
-    "@/lib/daily-work": { dailyWorkSnapshots: (raw) => JSON.parse(raw || "[]") }, "@/lib/slack-daily-form": {}, "@/lib/slack-member-matching": {},
+    "@/lib/daily-work": { dailyWorkSnapshots: (raw) => JSON.parse(raw || "[]") }, "@/lib/slack-daily-form": {}, "@/lib/slack-member-matching": {}, "@/lib/slack-daily-checklist": {},
   });
   t.after(() => { globalThis.fetch = originalFetch; db.close(); });
   const input = (team = "a", overrides = {}) => ({ ownerId: team, botKind: "automation", subjectId: `delivery-${team}`, eventKey: "same-event",

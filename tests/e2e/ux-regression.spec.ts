@@ -347,10 +347,10 @@ test.describe("개인 앱 연동과 워크스페이스 자동화 봇", () => {
     await expect(page.getByRole("radio", { name: "채널 공유 안 함" })).toBeVisible();
     await page.getByText("#daily", { exact: true }).click();
     const onboardingRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/slack/onboarding");
-    await page.getByRole("button", { name: "설정 완료" }).click();
+    await page.getByRole("button", { name: "변경사항 저장" }).click();
     expect((await onboardingRequest).postDataJSON()).toMatchObject({ weekdays: [1, 2, 3, 4, 5], reminderTime: "09:00", timezone: "Asia/Seoul", memberIds: ["member-1"], channelIds: ["C123"] });
-    await expect(page.getByText("설치자 테스트 DM 성공")).toBeVisible();
-    await expect(page.getByText("#daily 테스트 성공")).toBeVisible();
+    await expect(page.getByText("설치자 DM 테스트 생략")).toBeVisible();
+    await expect(page.getByText("#daily 테스트 성공")).toHaveCount(0);
     await expect(page.locator(".slack-service-card > header")).toContainText("고객 Slack A");
     const metrics = await page.evaluate(() => ({ scrollHeight: document.documentElement.scrollHeight, clientHeight: document.documentElement.clientHeight, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth }));
     expect(metrics.overflow).toBeLessThanOrEqual(1);
