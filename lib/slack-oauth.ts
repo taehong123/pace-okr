@@ -47,11 +47,9 @@ export const slackDailyScopes = [
   "channels:read",
   "channels:join",
   "groups:read",
-  "channels:history",
-  "groups:history",
 ];
 
-export const slackScopes = [...slackDailyScopes, "app_mentions:read"];
+export const slackScopes = [...slackDailyScopes, "channels:history", "groups:history", "app_mentions:read"];
 
 export function slackConfigured(runtime: SlackRuntimeEnv) {
   return Boolean(runtime.SLACK_CLIENT_ID && runtime.SLACK_CLIENT_SECRET && runtime.SLACK_SIGNING_SECRET && runtime.SLACK_TOKEN_ENCRYPTION_KEY);

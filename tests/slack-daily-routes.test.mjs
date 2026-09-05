@@ -90,6 +90,17 @@ function harness() {
   return { routes, state, calls, pending, request, old };
 }
 
+test("daily settings do not require channel message history or mention access", () => {
+  const loaded = { exports: {} };
+  new Function("require", "module", "exports", oauthOutput)(() => ({}), loaded, loaded.exports);
+  for (const scope of ["channels:history", "groups:history", "app_mentions:read"]) {
+    assert.ok(!loaded.exports.slackDailyScopes.includes(scope));
+    assert.ok(loaded.exports.slackScopes.includes(scope));
+  }
+  assert.ok(loaded.exports.slackDailyScopes.includes("im:history"));
+  assert.ok(loaded.exports.slackDailyScopes.includes("chat:write"));
+});
+
 for (const role of ["owner", "admin", "member", "viewer", "unauthenticated"]) {
   test(`repair and disconnect enforce ${role} access without cross-workspace input`, async () => {
     for (const action of ["repair", "disconnect"]) {
