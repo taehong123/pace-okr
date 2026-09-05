@@ -41,7 +41,7 @@ async function assertLayout(page: Page) {
         return box.x >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= footer.top && box.width >= 44 && box.height >= 44;
       }),
       buttonVisible: button.top >= footer.top && button.bottom <= footer.bottom && button.width >= 44 && button.height >= 44,
-      escapedText: [...document.querySelectorAll<HTMLElement>(".landing-header h1, .landing-copy h2, .landing-copy > p, .landing-login-copy > p")].filter((node) => !node.closest("[aria-hidden='true']")).some((node) => node.scrollWidth > node.clientWidth + 1),
+      escapedText: [...document.querySelectorAll<HTMLElement>(".landing-header h1, .landing-copy h2, .landing-copy > p, .landing-login-meta > p, .landing-example p, .landing-example-label")].filter((node) => !node.closest("[aria-hidden='true']")).some((node) => node.scrollWidth > node.clientWidth + 1),
     };
   });
   expect(geometry).toEqual({ pageOverflow: false, slideOverflow: false, footerVisible: true, separated: true, readingArea: true, controlsVisible: true, buttonVisible: true, escapedText: false });
@@ -102,11 +102,11 @@ test("the final slide introduces Slack bots with readable setup guidance and imm
   await page.goto("/");
   await goToSlide(page, 3);
   const slide = page.locator(".landing-slide[aria-hidden='false']");
-  await expect(slide.getByRole("heading")).toHaveText("Slack 연결은 버튼 하나로. 반복되는 관리는 봇에게.");
-  await expect(slide.locator(".landing-copy")).toContainText("데일리 스크럼부터 누락된 담당자·기한 확인, Task 변경 알림까지.");
-  await expect(slide.locator(".landing-copy")).toContainText("봇을 불러 Task를 만들고");
+  await expect(slide.getByRole("heading")).toHaveText("Slack 연결은 버튼 하나로.");
+  await expect(slide.locator(".landing-copy")).toContainText("데일리 스크럼, 누락 확인, Task 생성과 변경 알림을 한곳에서.");
+  await expect(slide.locator(".landing-example-bots")).toContainText("!task 가입 안내 문구 정리");
   await slide.locator(".landing-context").scrollIntoViewIfNeeded();
-  await expect(slide.locator(".landing-context")).toContainText("Slack에서 승인하면 멤버와 채널을 불러옵니다");
+  await expect(slide.locator(".landing-context")).toContainText("Slack 승인 후 알림 대상과 시간을 설정하세요");
   await expect(page.locator(".landing-login-button")).toBeEnabled();
   await assertLayout(page);
   await slide.evaluate((node) => { node.scrollTop = 0; });
@@ -134,6 +134,34 @@ test("every slide can sign in immediately and preserves deep links and invitatio
   }
   expect(authRequests).toHaveLength(4);
   expect(state.writes).toEqual([]);
+});
+
+test("mobile examples translate completely and remain sharp without screenshot assets", async ({ page }, info) => {
+  test.setTimeout(90_000);
+  const state = await guest(page);
+  const screenshotRequests: string[] = [];
+  page.on("request", (request) => { if (new URL(request.url()).pathname.startsWith("/landing/")) screenshotRequests.push(request.url()); });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  for (const { id } of landingLanguages) {
+    await page.locator(".landing-language select").selectOption(id);
+    for (let index = 0; index < 4; index++) {
+      await goToSlide(page, index);
+      const active = page.locator(".landing-slide[aria-hidden='false']");
+      await active.evaluate((node) => { node.scrollTop = 0; });
+      await expect(active.locator("img, picture, canvas")).toHaveCount(0);
+      if (id !== "ko") await expect(active).not.toContainText(/[가-힣]/);
+      await assertLayout(page);
+      await page.screenshot({ path: info.outputPath(`intro-${id}-${index + 1}.png`) });
+    }
+  }
+  await page.locator(".landing-language select").selectOption("en");
+  await expect(page.locator(".landing-dots button").last()).toHaveAttribute("aria-current", "step");
+  await expect(page.locator(".landing-example-bots")).toContainText("!task Revise signup instructions");
+  expect(screenshotRequests).toEqual([]);
+  expect(state.writes).toEqual([]);
+  expect(state.errors).toEqual([]);
 });
 
 test("failure and missing configuration retain the independent login area", async ({ page }) => {
@@ -220,7 +248,7 @@ test("all languages and themes retain keyboard-readable content at 200 percent t
   await page.screenshot({ path: info.outputPath("landing-zoom-controls.png") });
 });
 
-test("five languages and six themes remain legible with native images on narrow and wide screens", async ({ page }, info) => {
+test("five languages and six themes remain legible with native examples on narrow and wide screens", async ({ page }, info) => {
   test.setTimeout(240_000);
   const state = await guest(page);
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -234,18 +262,14 @@ test("five languages and six themes remain legible with native images on narrow 
         for (let index = 0; index < 4; index++) {
           await goToSlide(page, index);
           await assertLayout(page);
-          const img = page.locator(".landing-slide[aria-hidden='false'] img");
-          await img.scrollIntoViewIfNeeded();
-          await expect.poll(() => img.evaluate((node: HTMLImageElement) => node.complete && node.naturalWidth > 0 && node.currentSrc.includes(`/${document.documentElement.dataset.theme}/`))).toBe(true);
-          const distortion = await img.evaluate((node: HTMLImageElement) => {
-            const box = node.getBoundingClientRect();
-            return Math.abs(box.width / box.height - node.naturalWidth / node.naturalHeight);
-          });
-          expect(distortion).toBeLessThan(0.01);
-        }
-        if ((width === 320 || width === 1440) && id === "ko") {
-          const violations = (await new AxeBuilder({ page: page as never }).include(".landing-shell").analyze()).violations;
-          expect(violations, `${mode}/${id}/${width}`).toEqual([]);
+          const example = page.locator(".landing-slide[aria-hidden='false'] .landing-example");
+          await expect(example).toBeVisible();
+          await expect(example.locator("img, picture, button, input, select")).toHaveCount(0);
+          if (id !== "ko") await expect(example).not.toContainText(/[가-힣]/);
+          if ((width === 320 || width === 1440) && id === "ko") {
+            const violations = (await new AxeBuilder({ page: page as never }).include(".landing-shell").analyze()).violations;
+            expect(violations, `${mode}/${id}/${width}/slide-${index + 1}`).toEqual([]);
+          }
         }
       }
     }
@@ -278,6 +302,12 @@ test("actual Korean, Latin and numeral fonts are local; large text and long titl
   const { fonts } = await client.send("CSS.getPlatformFontsForNode", { nodeId });
   expect(fonts.length).toBeGreaterThan(0);
   for (const font of fonts) { expect(font.isCustomFont).toBe(true); expect(font.familyName).toContain("Pretendard"); }
+  for (const selector of [".landing-example-goal p", ".landing-example-goal .landing-example-label", ".landing-example-metrics dd"]) {
+    const node = await client.send("DOM.querySelector", { nodeId: root.nodeId, selector });
+    const result = await client.send("CSS.getPlatformFontsForNode", { nodeId: node.nodeId });
+    expect(result.fonts.length).toBeGreaterThan(0);
+    for (const font of result.fonts) { expect(font.isCustomFont).toBe(true); expect(font.familyName).toContain("Pretendard"); }
+  }
   expect(fontRequests.size).toBeGreaterThan(0);
   expect(fontRequests.size).toBeLessThan(92);
   for (const url of fontRequests) expect(new URL(url).origin).toBe(new URL(page.url()).origin);

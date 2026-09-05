@@ -1,36 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
-import { ArrowLeft, ArrowRight, ArrowUpRight, Languages, LoaderCircle, LogIn } from "lucide-react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, LoaderCircle, LogIn } from "lucide-react";
 import { getLandingCopy, landingLanguages, type LandingLanguage } from "@/lib/landing-copy";
-import { DEFAULT_THEME, isThemeMode } from "@/lib/themes";
 import { AppInstallButton } from "./app-install-button";
 import { BrandLogo } from "./brand-logo";
+import { LandingExample } from "./landing-examples";
 import "./landing.css";
 import { chooseGuestLanguage, t, useLanguage } from "@/lib/client-language";
 
-const productSizes = [
-  { width: 1120, height: 264, mobileWidth: 358, mobileHeight: 361 },
-  { width: 1120, height: 521, mobileWidth: 358, mobileHeight: 697 },
-  { width: 860, height: 488, mobileWidth: 362, mobileHeight: 818 },
-  { width: 783, height: 350, mobileWidth: 358, mobileHeight: 516 },
-];
-
-function subscribeTheme(callback: () => void) {
-  const observer = new MutationObserver(callback);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-  return () => observer.disconnect();
-}
-
-function browserTheme() {
-  const theme = document.documentElement.dataset.theme;
-  return isThemeMode(theme) ? theme : DEFAULT_THEME;
-}
-
 export function LandingScreen({ reason, onSignIn }: { reason: string | null; onSignIn: () => void }) {
   const { language } = useLanguage();
-  const theme = useSyncExternalStore(subscribeTheme, browserTheme, () => DEFAULT_THEME);
-  const copy = getLandingCopy(t);
+  const copy = getLandingCopy(t, language);
   const [index, setIndex] = useState(0);
   const [signingIn, setSigningIn] = useState(false);
   const viewport = useRef<HTMLDivElement>(null);
@@ -90,9 +71,8 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
   return (
     <main className="landing-shell" lang={language}>
       <header className="landing-header">
-        <h1><BrandLogo /></h1>
+        <h1><BrandLogo size="compact" /></h1>
         <label className="landing-language">
-          <Languages size={18} aria-hidden="true" />
           <span className="sr-only">{copy.language}</span>
           <select value={language} onChange={(event) => {
             const next = event.target.value as LandingLanguage;
@@ -112,16 +92,11 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
             <section key={slideIndex} id={`landing-slide-${slideIndex}`} className="landing-slide" role="group" tabIndex={slideIndex === index ? 0 : -1} aria-roledescription={copy.slide} aria-label={`${slideIndex + 1} / 4`} aria-hidden={slideIndex !== index} inert={slideIndex !== index}>
               <div className="landing-slide-inner">
                 <div className="landing-copy">
-                  <span className="landing-step" aria-hidden="true">0{slideIndex + 1}<span> / 04</span></span>
                   <h2>{slide.title}</h2>
                   <p>{slide.description}</p>
                 </div>
-                <figure className={`landing-product${slideIndex === 3 ? " landing-product-bots" : ""}`}>
-                  {/* Product captures deliberately remain images, not editable demo records. */}
-                  <picture>
-                    <source media="(max-width: 640px)" srcSet={`/landing/${theme}/slide-${slideIndex + 1}-mobile.png`} width={productSizes[slideIndex].mobileWidth} height={productSizes[slideIndex].mobileHeight} />
-                    <img src={`/landing/${theme}/slide-${slideIndex + 1}.png`} alt={slide.alt} width={productSizes[slideIndex].width} height={productSizes[slideIndex].height} loading={slideIndex === 0 ? "eager" : "lazy"} decoding="async" />
-                  </picture>
+                <figure className="landing-product">
+                  <LandingExample kind={slide.example} copy={copy.example} />
                   <figcaption>{copy.sample}</figcaption>
                 </figure>
                 <div className="landing-context">
@@ -148,16 +123,16 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
 
       <footer className="landing-login">
         <div className="landing-login-inner">
-          <div className="landing-login-copy">
-            <p id="landing-login-note">{copy.loginNote}</p>
-            {(reason === "failed" || unavailable) && <p className="landing-auth-error" role="alert">{unavailable ? copy.unavailable : copy.loginError}</p>}
-          </div>
           <button type="button" className="primary-action landing-login-button" aria-describedby="landing-login-note" disabled={signingIn || unavailable} aria-busy={signingIn} onClick={signIn}>
             {signingIn ? <LoaderCircle className="spin" size={18} aria-hidden="true" /> : <LogIn size={18} aria-hidden="true" />}
             <span>{signingIn ? copy.loggingIn : copy.login}</span>
           </button>
+          <div className="landing-login-meta">
+            <p id="landing-login-note">{copy.loginNote}</p>
+            <AppInstallButton placement="login" />
+          </div>
+          {(reason === "failed" || unavailable) && <p className="landing-auth-error" role="alert">{unavailable ? copy.unavailable : copy.loginError}</p>}
         </div>
-        <AppInstallButton placement="login" />
       </footer>
     </main>
   );
