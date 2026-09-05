@@ -13,14 +13,15 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 function compile(path, imports = {}) {
   const compiled = ts.transpileModule(read(path), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const target = { exports: {} };
-  new Function("require", "exports", "module", compiled)((id) => id.endsWith(".css") ? {} : id === "@/lib/client-language" ? clientLanguage : id === "./language" ? language : imports[id] ?? require(id), target.exports, target);
+  new Function("require", "exports", "module", compiled)((id) => id.endsWith(".css") ? { default: new Proxy({}, { get: (_, key) => key }) } : id === "@/lib/client-language" ? clientLanguage : id === "./language" ? language : imports[id] ?? require(id), target.exports, target);
   return target.exports;
 }
 const translations = compile("lib/landing-copy.ts");
 const themes = compile("lib/themes.ts");
 const install = compile("lib/app-install.ts");
 const installButton = compile("app/app-install-button.tsx", { "@/lib/app-install": install });
-const { LandingScreen } = compile("app/landing.tsx", { "@/lib/landing-copy": translations, "@/lib/themes": themes, "./app-install-button": installButton });
+const brandLogo = compile("app/brand-logo.tsx", { "@/lib/brand-artwork": compile("lib/brand-artwork.ts") });
+const { LandingScreen } = compile("app/landing.tsx", { "@/lib/landing-copy": translations, "@/lib/themes": themes, "./app-install-button": installButton, "./brand-logo": brandLogo });
 const { getLandingCopy, landingLanguages, resolveLandingLanguage } = translations;
 const landingCopy = Object.fromEntries(await Promise.all(landingLanguages.map(async ({ id }) => [id, getLandingCopy(await serverLanguage.serverTranslator(id))])));
 
