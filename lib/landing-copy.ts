@@ -17,7 +17,7 @@ type LandingCopy = {
   language: string; carousel: string; slide: string; previous: string; next: string;
   heroTitle: string; heroDescription: string;
   login: string; loggingIn: string; loginNote: string; loginError: string; unavailable: string;
-  exampleSource: string; google: string; intel: string; mcp: string; slack: string;
+  sourceLabel: string; exampleSource: string; google: string; intel: string; mcp: string; slack: string;
   example: LandingExampleContent;
   slides: readonly [LandingSlide, LandingSlide, LandingSlide, LandingSlide];
 };
@@ -38,7 +38,8 @@ export function getLandingCopy(translate: (key: string) => string, language: Lan
     loginNote: translate("기존 계정은 로그인, 처음이면 가입합니다."),
     loginError: translate("Google 로그인을 완료하지 못했습니다. 다시 시도해 주세요."),
     unavailable: translate("Google 로그인 설정을 완료하는 중입니다."),
-    exampleSource: translate("Healthcare.gov OKR 사례 · OKRI 구조로 재구성"),
+    sourceLabel: translate("사례와 근거"),
+    exampleSource: translate("Healthcare.gov의 Objective와 Key Result는 공개 사례를 번역했고, Initiative 이하는 OKRI 구조에 맞춰 구성했습니다."),
     google: translate("Google의 OKR 이야기"), intel: translate("Intel의 OKR 사례"),
     mcp: translate("MCP로 사용 중인 AI에서도 이어가세요."),
     slack: translate("Slack 승인 후 알림 대상과 시간을 설정하세요."),
@@ -51,7 +52,7 @@ export function getLandingCopy(translate: (key: string) => string, language: Lan
       secondTask: translate("응답 지연이 발생하는 구간을 점검한다."),
       objectiveLabel: translate("Objective"), keyResultLabel: translate("Key Result"),
       initiativeLabel: translate("Initiative"), projectLabel: translate("Project"), taskLabel: translate("Task"),
-      current: translate("당시"), target: translate("목표값"), currentValue: `3 / ${integer.format(100000)}`, targetValue: percent.format(0.7),
+      current: translate("출시 당시 가입 성공"), target: translate("목표 완료율"), currentValue: `3 / ${integer.format(100000)}`, targetValue: percent.format(0.7),
       inProgress: translate("진행 중"), request: translate("Healthcare.gov의 가입 완료율을 높일 Project로 정리해줘."),
       proposal: translate("Project 제안"), review: translate("등록 전 검토"),
       daily: translate("데일리 봇"), dailyDetail: translate("오늘 할 일과 완료한 일"),

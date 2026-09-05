@@ -26,23 +26,22 @@ async function goToSlide(page: Page, index: number) {
 async function assertLayout(page: Page) {
   const geometry = await page.evaluate(() => {
     const active = document.querySelector<HTMLElement>(".landing-slide[aria-hidden='false']")!;
-    const entry = document.querySelector(".landing-entry")!.getBoundingClientRect();
     const story = document.querySelector(".landing-story")!.getBoundingClientRect();
+    const auth = document.querySelector(".landing-auth")!.getBoundingClientRect();
     const viewport = document.querySelector(".landing-viewport")!.getBoundingClientRect();
     const button = document.querySelector(".landing-login-button")!.getBoundingClientRect();
     const navigation = document.querySelector(".landing-navigation")!.getBoundingClientRect();
-    const stacked = innerWidth <= 980;
     return {
       pageOverflow: document.documentElement.scrollWidth > innerWidth + 1,
       slideOverflow: active.scrollWidth > active.clientWidth + 1,
-      ordered: stacked ? entry.bottom <= story.top + 1 : entry.right <= story.left + 1,
+      ordered: story.bottom <= auth.top + 1,
       readingArea: viewport.width >= 44 && viewport.height >= 44 && navigation.width >= 44,
       controlsVisible: [...document.querySelectorAll(".landing-navigation button, .landing-language select")].every((node) => {
         const box = node.getBoundingClientRect();
         return box.x >= 0 && box.right <= innerWidth + 1 && box.width >= 44 && box.height >= 44;
       }),
-      buttonContained: button.left >= entry.left - 1 && button.right <= entry.right + 1 && button.top >= entry.top - 1 && button.bottom <= entry.bottom + 1 && button.width >= 44 && button.height >= 44,
-      escapedText: [...document.querySelectorAll<HTMLElement>(".landing-header h1, .landing-entry-copy h2, .landing-entry-copy > p, .landing-copy h2, .landing-copy > p, .landing-login-meta > p, .landing-example p, .landing-example-label, .landing-product figcaption")].filter((node) => !node.closest("[aria-hidden='true']")).some((node) => node.scrollWidth > node.clientWidth + 1),
+      buttonContained: button.left >= auth.left - 1 && button.right <= auth.right + 1 && button.top >= auth.top - 1 && button.bottom <= auth.bottom + 1 && button.width >= 44 && button.height >= 44,
+      escapedText: [...document.querySelectorAll<HTMLElement>(".landing-header h1, .landing-kicker, .landing-copy h2, .landing-copy > p, .landing-login-meta > p, .landing-example p, .landing-example-label, .landing-evidence")].filter((node) => !node.closest("[aria-hidden='true']")).some((node) => node.scrollWidth > node.clientWidth + 1),
     };
   });
   expect(geometry).toEqual({ pageOverflow: false, slideOverflow: false, ordered: true, readingArea: true, controlsVisible: true, buttonContained: true, escapedText: false });
@@ -71,13 +70,14 @@ test("four manual slides, keyboard navigation, language persistence and an alway
   await expect(page.locator(".landing-login-button")).toHaveText("Continuar con Google");
   await page.reload();
   await expect(page.locator(".landing-shell")).toHaveAttribute("lang", "es");
-  await expect(page.locator(".landing-product figcaption a").first()).toHaveAttribute("href", "https://www.whatmatters.com/faqs/okr-examples-and-how-to-write-them");
+  await page.locator(".landing-evidence summary").click();
+  await expect(page.locator(".landing-evidence a").first()).toHaveAttribute("href", "https://www.whatmatters.com/faqs/okr-examples-and-how-to-write-them");
   expect(state.writes).toEqual([]);
   expect(state.errors).toEqual([]);
 });
 
 test("native touch swiping changes slides without making vertical reading a navigation action", async ({ browser, baseURL }) => {
-  const context = await browser.newContext({ baseURL, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const context = await browser.newContext({ baseURL, viewport: { width: 390, height: 568 }, isMobile: true, hasTouch: true });
   try {
     const page = await context.newPage();
     await guest(page);
@@ -148,12 +148,17 @@ test("mobile examples translate completely and remain sharp without screenshot a
   await page.goto("/");
   for (const { id } of landingLanguages) {
     await page.locator(".landing-language select").selectOption(id);
-    if (id !== "ko") await expect(page.locator(".landing-entry")).not.toContainText(/[가-힣]/);
+    if (id !== "ko") await expect(page.locator(".landing-auth")).not.toContainText(/[가-힣]/);
     for (let index = 0; index < 4; index++) {
       await goToSlide(page, index);
       const active = page.locator(".landing-slide[aria-hidden='false']");
       await expect(active.locator("img, picture, canvas")).toHaveCount(0);
-      await expect(active.locator("figcaption a")).toHaveAttribute("href", "https://www.whatmatters.com/faqs/okr-examples-and-how-to-write-them");
+      if (index === 0) {
+        await active.locator(".landing-evidence summary").click();
+        await expect(active.locator(".landing-evidence a").first()).toHaveAttribute("href", "https://www.whatmatters.com/faqs/okr-examples-and-how-to-write-them");
+      } else {
+        await expect(active.locator("figcaption")).toHaveCount(0);
+      }
       if (id !== "ko") await expect(active).not.toContainText(/[가-힣]/);
       await assertLayout(page);
       await page.screenshot({ path: info.outputPath(`intro-${id}-${index + 1}.png`) });

@@ -44,7 +44,7 @@ for (const { id } of landingLanguages) test(`${id}: four complete independent st
   if (id !== "ko") for (const value of [copy.heroTitle, copy.heroDescription, copy.exampleSource]) assert.doesNotMatch(value, /[가-힣]/);
 });
 
-test("server rendering exposes the first story and an independent immediate Google sign-in", () => {
+test("server rendering puts the stories before an independent Google sign-in", () => {
   const html = renderToStaticMarkup(React.createElement(LandingScreen, { reason: null, onSignIn() { throw new Error("render must never sign in"); } }));
   assert.match(html, /세계적인 기업들이 선택한 OKR/);
   assert.match(html, /내 일이 어떤 성과와 연결되는지/);
@@ -54,10 +54,13 @@ test("server rendering exposes the first story and an independent immediate Goog
   assert.match(html, /OKRI 앱 다운로드/);
   assert.equal((html.match(/class="landing-slide"/g) ?? []).length, 4);
   assert.equal((html.match(/ inert=""/g) ?? []).length, 3);
-  assert.match(html, /<section class="landing-entry"/);
+  assert.match(html, /<section class="landing-story"/);
+  assert.match(html, /<section class="landing-auth"/);
+  assert.ok(html.indexOf("landing-story") < html.indexOf("landing-auth"));
   assert.match(html, /class="landing-brand-home" aria-label="홈으로 이동"/);
   assert.match(html, /href="https:\/\/www\.whatmatters\.com\/faqs\/okr-examples-and-how-to-write-them"/);
-  assert.match(html, /Healthcare\.gov OKR 사례 · OKRI 구조로 재구성/);
+  assert.match(html, /<summary>사례와 근거/);
+  assert.match(html, /Healthcare\.gov의 Objective와 Key Result는 공개 사례를 번역했고/);
   assert.match(html, /aria-current="step"/);
   assert.doesNotMatch(html, /<img|<picture|landing-step/);
   assert.doesNotMatch(html, /!프로젝트생성|!테스크생성|AllVibe/);
@@ -101,7 +104,10 @@ test("new styling uses registered roles and retains stable typography and motion
   assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b|rgba?\(|linear-gradient|letter-spacing\s*:\s*[^0]|font-size\s*:[^;]*(?:vw|clamp)|\bzoom\s*:/i);
   assert.match(css, /prefers-reduced-motion/);
   assert.match(css, /grid-template-rows: auto minmax\(0, 1fr\)/);
-  assert.match(css, /@media \(max-width: 980px\)/);
+  assert.match(css, /@media \(max-width: 640px\)/);
+  assert.match(css, /\.landing-main \{/);
+  assert.match(css, /\.landing-story \{[^}]*border-top:/);
+  assert.doesNotMatch(css, /\.landing-layout|\.landing-entry/);
   assert.doesNotMatch(css, /\.landing-login\s*\{/);
 });
 
@@ -127,6 +133,8 @@ test("every product example is localized native text without fake interactive co
   }
   assert.equal(landingCopy.en.example.currentValue, "3 / 100,000");
   assert.equal(landingCopy.en.example.targetValue, "70%");
+  assert.equal(landingCopy.ko.example.current, "출시 당시 가입 성공");
+  assert.equal(landingCopy.ko.example.target, "목표 완료율");
   assert.match(landingCopy.en.example.task, /failure logs/i);
   assert.match(landingCopy.en.example.objective, /Healthcare\.gov/);
   for (const { id } of landingLanguages) {
