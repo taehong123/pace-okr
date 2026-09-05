@@ -96,6 +96,25 @@ test("native touch swiping changes slides without making vertical reading a navi
   } finally { await context.close(); }
 });
 
+test("the final slide introduces Slack bots with readable setup guidance and immediate login", async ({ page }, info) => {
+  const state = await guest(page);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  await goToSlide(page, 3);
+  const slide = page.locator(".landing-slide[aria-hidden='false']");
+  await expect(slide.getByRole("heading")).toHaveText("Slack 연결은 버튼 하나로. 반복되는 관리는 봇에게.");
+  await expect(slide.locator(".landing-copy")).toContainText("데일리 스크럼부터 누락된 담당자·기한 확인, Task 변경 알림까지.");
+  await expect(slide.locator(".landing-copy")).toContainText("봇을 불러 Task를 만들고");
+  await slide.locator(".landing-context").scrollIntoViewIfNeeded();
+  await expect(slide.locator(".landing-context")).toContainText("Slack에서 승인하면 멤버와 채널을 불러옵니다");
+  await expect(page.locator(".landing-login-button")).toBeEnabled();
+  await assertLayout(page);
+  await slide.evaluate((node) => { node.scrollTop = 0; });
+  await page.screenshot({ path: info.outputPath("landing-slack.png") });
+  expect(state.writes).toEqual([]);
+  expect(state.errors).toEqual([]);
+});
+
 test("every slide can sign in immediately and preserves deep links and invitation tokens", async ({ page }) => {
   test.setTimeout(60_000);
   const state = await guest(page);

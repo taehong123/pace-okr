@@ -57,16 +57,26 @@ test("server rendering exposes the first story and an independent immediate Goog
   assert.doesNotMatch(html, /!프로젝트생성|!테스크생성|AllVibe/);
 });
 
-test("the fourth story offers Slack connection and visibility into recorded work, not unsupported integrations", () => {
+test("the fourth story explains shipped Slack bots and the approval and setup steps in all five languages", () => {
   for (const { id } of landingLanguages) {
     const story = landingCopy[id].slides[3];
     assert.match(story.description, /Slack/);
     assert.match(story.description, /OKRI/);
+    assert.match(story.description, /Task/);
+    assert.match(landingCopy[id].slack, /Slack/);
+    if (id !== "ko") {
+      for (const value of [...Object.values(story), landingCopy[id].slack]) assert.doesNotMatch(value, /[가-힣]/);
+    }
     assert.doesNotMatch(`${story.title} ${story.description}`, /Notion|노션|!테스크생성|!프로젝트생성/i);
   }
-  assert.match(landingCopy.ko.slides[3].title, /데일리를 따로 모으지 않아도/);
-  assert.match(landingCopy.ko.slides[3].description, /버튼 하나로 시작/);
-  assert.match(landingCopy.ko.slides[3].description, /등록된 업무/);
+  assert.match(landingCopy.ko.slides[3].title, /Slack 연결은 버튼 하나로/);
+  for (const capability of ["데일리 스크럼", "누락된 담당자·기한", "Task 변경 알림", "봇을 불러 Task", "프로젝트별 업무"]) {
+    assert.ok(landingCopy.ko.slides[3].description.includes(capability));
+  }
+  assert.match(landingCopy.ko.slack, /승인하면 멤버와 채널/);
+  assert.match(landingCopy.ko.slack, /대상과 시간을 설정/);
+  const html = renderToStaticMarkup(React.createElement(LandingScreen, { reason: null, onSignIn() {} }));
+  assert.ok(html.includes(landingCopy.ko.slack));
 });
 
 test("authentication failures and unavailable configuration stay visible by the login control", () => {

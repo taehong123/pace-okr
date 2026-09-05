@@ -20,7 +20,7 @@ const workspace = { id: "workspace-1", name: "제품 팀", kind: "team", persona
 const routine = { id: "routine-1", title: "고객 피드백 확인", description: "고객의 목소리를 매일 확인합니다.", cadence: "daily", triggerPoint: "업무 시작 후", actionPlace: "고객 피드백 목록", actionSteps: "피드백 확인 후 개선 항목을 기록합니다.", systemKey: null, assigneeMemberId: member.id, active: true, completed: false, createdAt: now, updatedAt: now };
 
 export async function installLandingProductFixture(page: Page) {
-  await installApiMocks(page, { teamWorkspace: true });
+  await installApiMocks(page, { teamWorkspace: true, slackState: "connected" });
   const draft = {
     version: 1, message: "", mode: "project", guideQuestions: [], visibleFields: ["project"], okrTarget: null, targetCandidates: [],
     projectTarget: { initiativeId: "initiative-1", initiativeTitle: "첫 경험의 마찰 줄이기", cycleId: cycle.id, cycleName: cycle.name, keyResultTitle: items[1].title, objectiveTitle: items[0].title },
@@ -49,6 +49,26 @@ export async function installLandingProductFixture(page: Page) {
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     if (route.request().method() !== "GET") return json(route, { draft: { payload: draft }, mocked: true });
+    if (url.pathname === "/api/slack/status") return json(route, { slack: {
+      connected: true, state: "connected", missingScopes: [], connectionScope: "workspace", distributionMode: "direct_oauth",
+      teamName: workspace.name, teamId: "T-SAMPLE", connectedTeam: { id: "T-SAMPLE", name: workspace.name },
+      connectedAt: now, updatedAt: now,
+    } });
+    if (url.pathname === "/api/slack/daily/settings") return json(route, {
+      connected: true, teamName: workspace.name, needsReauthorization: false, setupComplete: true,
+      settings: { enabled: true, weekdays: [1, 2, 3, 4, 5], reminderTime: "09:00", timezone: "Asia/Seoul", installStatus: "connected", onboardingCompletedAt: now, lastSyncedAt: now, lastError: "" },
+      channels: [{ id: "C-SAMPLE", name: "daily", isPrivate: false, isMember: true }],
+      members: [{ memberId: member.id, displayName: member.displayName, email: member.email, linked: true, slackDisplayName: "minji", preference: { enabled: true, reminderTime: null, timezone: null }, reminder: { status: "scheduled", postAt: 4_092_796_800, error: "" } }],
+      failedPublications: [],
+    });
+    if (url.pathname === "/api/workspace-management-bot") return json(route, {
+      settings: { enabled: true, weekdays: [1, 2, 3, 4, 5], reportTime: "09:30", timezone: "Asia/Seoul", channelId: "C-SAMPLE", channelName: "daily", signals: ["missing_due_date", "missing_owner", "overdue"], lastSentDate: null, lastSentAt: null, lastError: "", updatedAt: now },
+      snapshot: { date: "2026-09-03", totalCount: 0, groups: [] }, slackConnected: true,
+      channels: [{ id: "C-SAMPLE", name: "daily", isPrivate: false, isMember: true }],
+    });
+    if (url.pathname === "/api/slack/automations") return json(route, {
+      automations: [{ id: "sample-changes", name: "Task updates", triggerType: "task_changed", active: true, channelId: "C-SAMPLE", channelName: "daily", statusFilter: "", messageTemplateKind: "default", messageTemplate: "", lastDeliveryStatus: "sent", lastError: "", createdAt: now, updatedAt: now }], deliveries: [],
+    });
     if (url.pathname === "/api/project-reviews") return json(route, {
       review, workspaceName: workspace.name, existingProjectId: null, canApprove: true,
       recommendations: [{ ...review.recommendations[0], initiative }], candidates: { choices: [initiative], truncated: false },

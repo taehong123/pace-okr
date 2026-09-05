@@ -13,7 +13,7 @@ const productSizes = [
   { width: 1120, height: 264, mobileWidth: 358, mobileHeight: 361 },
   { width: 1120, height: 521, mobileWidth: 358, mobileHeight: 697 },
   { width: 860, height: 488, mobileWidth: 362, mobileHeight: 818 },
-  { width: 1120, height: 608, mobileWidth: 358, mobileHeight: 754 },
+  { width: 783, height: 350, mobileWidth: 358, mobileHeight: 516 },
 ];
 
 function subscribeTheme(callback: () => void) {
@@ -116,7 +116,7 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
                   <h2>{slide.title}</h2>
                   <p>{slide.description}</p>
                 </div>
-                <figure className="landing-product">
+                <figure className={`landing-product${slideIndex === 3 ? " landing-product-bots" : ""}`}>
                   {/* Product captures deliberately remain images, not editable demo records. */}
                   <picture>
                     <source media="(max-width: 640px)" srcSet={`/landing/${theme}/slide-${slideIndex + 1}-mobile.png`} width={productSizes[slideIndex].mobileWidth} height={productSizes[slideIndex].mobileHeight} />
@@ -130,6 +130,7 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
                     <a href="https://www.whatmatters.com/okrs-explained/john-doerr-operation-crush" target="_blank" rel="noreferrer">{copy.intel}<ArrowUpRight size={14} aria-hidden="true" /></a>
                   </div>}
                   {slideIndex === 2 && <p>{copy.mcp}</p>}
+                  {slideIndex === 3 && <p>{copy.slack}</p>}
                 </div>
               </div>
             </section>

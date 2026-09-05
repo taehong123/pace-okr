@@ -25,11 +25,37 @@ test("capture real product examples using only fictional local API responses", a
     await page.getByRole("radio").check();
     await expect(page.locator(".review-summary")).toContainText("온보딩 흐름 개선");
     await capture(page, ".review-summary", 3, mobile);
-    await page.goto("/?view=my_work");
-    await expect(page.locator(".my-work-view")).toContainText("고객 피드백 확인");
-    await capture(page, ".my-work-view", 4, mobile);
+    await captureSlack(page, mobile);
   }
 });
+
+test("capture the Slack introduction from fictional connected bot settings", async ({ page, baseURL }) => {
+  test.skip(process.env.OKRI_CAPTURE_SLACK_LANDING !== "1", "Asset capture is an explicit local authoring step.");
+  test.setTimeout(90_000);
+  expect(["localhost", "127.0.0.1"]).toContain(new URL(baseURL!).hostname);
+  await installLandingProductFixture(page);
+  await page.route("https://**/*", (route) => route.abort());
+  for (const mobile of [false, true]) {
+    await page.setViewportSize(mobile ? { width: 390, height: 920 } : { width: 1440, height: 1000 });
+    await captureSlack(page, mobile);
+  }
+});
+
+async function captureSlack(page: Page, mobile: boolean) {
+  if (mobile) await page.setViewportSize({ width: 390, height: 1400 });
+  await page.goto("/?settings=workspace&tab=integrations");
+  await expect(page.locator(".bot-accordion-trigger")).toHaveCount(4);
+  for (const [index, summary] of [[0, "#daily"], [1, "#daily"], [3, "활성 규칙 1개"]] as const) {
+    const button = page.locator(".bot-accordion-trigger").nth(index);
+    await button.click();
+    await expect(button).toContainText(summary);
+    await button.click();
+  }
+  await expect(page.locator(".bot-accordion-trigger").first()).toContainText("#daily");
+  await expect(page.locator(".bot-accordion-trigger").last()).toContainText("활성 규칙 1개");
+  await page.mouse.move(0, 0);
+  await capture(page, ".workspace-integration-section .bot-accordion", 4, mobile);
+}
 
 async function capture(page: Page, selector: string, slide: number, mobile: boolean) {
   await page.evaluate(() => document.fonts.ready);

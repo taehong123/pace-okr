@@ -16,7 +16,8 @@
   justify-content: space-between;
   gap: var(--space-4);
 }
-.landing-header h1 { margin: 0; font-size: var(--type-page); font-weight: 750; line-height: 1.25; white-space: nowrap; }
+.landing-header h1 { display: flex; margin: 0; font-size: var(--type-page); font-weight: 750; line-height: 1.25; white-space: nowrap; }
+.landing-header h1 > svg { width: 140px; height: 40px; }
 .landing-header h1 > span { color: var(--text-secondary); }
 .landing-language { min-width: 0; display: flex; align-items: center; gap: var(--space-2); color: var(--text-secondary); }
 .landing-language select { min-height: 44px; max-width: 10rem; padding: var(--space-2); border: 1px solid var(--border-control); border-radius: var(--radius-control); color: var(--input-fg); background: var(--input-bg); font-size: var(--type-label); }
@@ -33,6 +34,7 @@
 .landing-copy h2 { margin: 0 0 var(--space-4); font-size: var(--type-page); font-weight: 650; line-height: 1.35; text-wrap: balance; word-break: keep-all; overflow-wrap: anywhere; }
 .landing-copy > p { max-width: 46rem; margin: 0; color: var(--text-secondary); font-size: var(--type-body); line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere; }
 .landing-product { width: 100%; max-width: 1000px; margin: 0; }
+.landing-product-bots { max-width: 783px; }
 .landing-product picture { display: block; }
 .landing-product img { display: block; width: 100%; height: auto; }
 .landing-product figcaption { margin-top: var(--space-2); color: var(--text-secondary); font-size: var(--type-meta); line-height: 1.6; }
