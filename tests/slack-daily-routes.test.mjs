@@ -25,6 +25,13 @@ function harness() {
   class SlackWorkspaceConnectionError extends Error {}
   class SlackOAuthExchangeError extends Error {}
   const deps = {
+    "@/lib/slack-daily-manual": {
+      async latestDailyManualRun() { return null; },
+      async startDailyManualRun(_db, auth, id) { calls.push(["bulk-start", auth.ownerId, id]); return { id, status: "pending" }; },
+      async getDailyManualRun(_db, ownerId, id) { calls.push(["bulk-read", ownerId, id]); return { id, status: "pending" }; },
+      async processDailyManualRun(_db, ownerId, id) { calls.push(["bulk-process", ownerId, id]); },
+    },
+    "@/lib/slack-bot-delivery": { async runDueSlackBotDeliveries() { calls.push(["retry-deliveries"]); } },
     "cloudflare:workers": {
       env: { SLACK_TOKEN_ENCRYPTION_KEY: "mock", SLACK_SIGNING_SECRET: "mock", DB: { prepare() {
         return { bind(id, team) { return { async run() {
@@ -99,6 +106,22 @@ test("daily settings do not require channel message history or mention access", 
   }
   assert.ok(loaded.exports.slackDailyScopes.includes("im:history"));
   assert.ok(loaded.exports.slackDailyScopes.includes("chat:write"));
+});
+
+test("bulk send and polling use authorized workspace and require admin access", async () => {
+  for (const role of ["owner", "admin", "member", "viewer"]) {
+    const h = harness(); h.state.authorization.role = role;
+    const response = await h.routes.settings.PATCH(h.request("PATCH", { action: "send_all_now", requestId: "manual-request-0001", ownerId: "other" }));
+    assert.equal(response.status, ["owner", "admin"].includes(role) ? 202 : 403);
+    await Promise.all(h.pending);
+    if (role === "owner" || role === "admin") assert.deepEqual(h.calls.find((call) => call[0] === "bulk-start"), ["bulk-start", "workspace", "manual-request-0001"]);
+    else assert.ok(!h.calls.some((call) => call[0].startsWith("bulk-")));
+    const poll = await h.routes.settings.GET(new Request("https://example.test/api/slack/daily/settings?runId=manual-request-0001&ownerId=other"));
+    assert.equal(poll.status, ["owner", "admin"].includes(role) ? 200 : 403);
+  }
+  const h = harness();
+  await h.routes.settings.GET(new Request("https://example.test/api/slack/daily/settings"));
+  assert.ok(!h.calls.some((call) => call[0].startsWith("bulk-")));
 });
 
 for (const role of ["owner", "admin", "member", "viewer", "unauthenticated"]) {

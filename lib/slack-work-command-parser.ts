@@ -8,7 +8,7 @@ export type SlackWorkCommand = (typeof SLACK_WORK_COMMANDS)[number];
 export type ParsedSlackWorkCommand = { command: SlackWorkCommand; query: string };
 
 const commandPatterns: Array<[SlackWorkCommand, RegExp]> = [
-  ["help", /^!\s*(?:도움말|help|okri)(?:\s+(.*))?$/iu],
+  ["help", /^!\s*(?:메뉴얼|매뉴얼|도움말|manual|help|okri)(?:\s+(.*))?$/iu],
   ["my_work", /^!\s*(?:내\s*업무|my\s*work)(?:\s+(.*))?$/iu],
   ["project_create", /^!\s*(?:프로젝트\s*생성|project(?!\s+(?:view|edit|status)\b)(?:\s+create)?)(?:\s+(.*))?$/iu],
   ["project_view", /^!\s*(?:프로젝트\s*조회|project\s+view)(?:\s+(.*))?$/iu],

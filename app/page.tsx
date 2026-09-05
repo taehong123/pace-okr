@@ -736,7 +736,7 @@ const slackOAuthIssueCopy: Record<SlackOAuthIssue, { title: string; detail: stri
   oauth_exchange_failed: { title: "Slack 연결을 완료하지 못했습니다", detail: "승인 정보가 만료되었거나 Slack 응답을 확인하지 못했습니다. 다시 연결해 주세요.", tone: "error" },
   service_unavailable: { title: "Slack 연결을 잠시 사용할 수 없습니다", detail: "별도로 입력할 설정은 없습니다. 서비스가 준비되면 이 화면에서 바로 연결할 수 있습니다.", tone: "error" },
 };
-type SlackAutomationTrigger = "task_created" | "task_status_changed";
+type SlackAutomationTrigger = "task_created" | "task_status_changed" | "task_changed";
 type SlackAutomation = {
   id: string;
   name: string;
@@ -4274,12 +4274,15 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
 }
 
 function DailySubmissionSummary({ submission, onOpenTask, onOpenWork }: { submission: DailySubmission; onOpenTask: (id: string) => void; onOpenWork: (work: DailyWork) => void }) {
+  const completedWork = submission.work?.filter((entry) => entry.completedToday) ?? [];
+  const plannedWork = submission.work?.filter((entry) => !entry.completedToday) ?? [];
   return <div className="daily-submission-summary">
     <b>{t("어제 완료한 일")}</b>
-    <ul>{submission.yesterdayWork?.length ? submission.yesterdayWork.map((entry) => <li key={entry.key}><button onClick={() => onOpenWork(entry)}>{entry.title}</button><small>{entry.kind === "project" ? t("Project") : entry.kind === "task" ? t("Task") : t("Routine")} · {entry.parentTitle}</small></li>) : <li>{t("선택한 업무 없음")}</li>}</ul>
+    <ul aria-label={t("어제 완료한 일")}>{submission.yesterdayWork?.length ? submission.yesterdayWork.map((entry) => <li key={entry.key}><button onClick={() => onOpenWork(entry)}>{entry.title}</button><small>{entry.kind === "project" ? t("Project") : entry.kind === "task" ? t("Task") : t("Routine")} · {entry.parentTitle}</small></li>) : <li>{t("선택한 업무 없음")}</li>}</ul>
     {submission.yesterdayNote && <p><b>{t("어제 메모")}</b>{submission.yesterdayNote}</p>}
+    {completedWork.length > 0 && <><b>{t("오늘 완료한 일")}</b><ul aria-label={t("오늘 완료한 일")}>{completedWork.map((entry) => <li key={entry.key}><button onClick={() => onOpenWork(entry)}>{entry.title}</button><small>{entry.kind === "project" ? t("Project") : entry.kind === "task" ? t("Task") : t("Routine")} · {entry.parentTitle}</small></li>)}</ul></>}
     <b>{t("오늘 할 일")}</b>
-    <ul>{submission.tasks.map((task) => <li key={task.id}>{task.isNew && <em>{t("신규")}</em>}<button disabled={!task.taskId} onClick={() => task.taskId && onOpenTask(task.taskId)}>{task.taskTitle}</button><small>{task.parentTitle}</small></li>)}{submission.work?.map((entry) => <li key={entry.key}>{entry.completedToday && <em>{t("완료")}</em>}<button onClick={() => onOpenWork(entry)}>{entry.title}</button><small>{entry.kind === "project" ? t("Project") : entry.kind === "task" ? t("Task") : t("Routine")} · {entry.parentTitle}</small></li>)}{submission.noPlannedTasks && !submission.tasks.length && !submission.work?.length && <li>{t("오늘 예정 없음")}</li>}</ul>
+    <ul aria-label={t("오늘 할 일")}>{submission.tasks.map((task) => <li key={task.id}>{task.isNew && <em>{t("신규")}</em>}<button disabled={!task.taskId} onClick={() => task.taskId && onOpenTask(task.taskId)}>{task.taskTitle}</button><small>{task.parentTitle}</small></li>)}{plannedWork.map((entry) => <li key={entry.key}><button onClick={() => onOpenWork(entry)}>{entry.title}</button><small>{entry.kind === "project" ? t("Project") : entry.kind === "task" ? t("Task") : t("Routine")} · {entry.parentTitle}</small></li>)}{!submission.tasks.length && !plannedWork.length && <li>{t("오늘 예정 없음")}</li>}</ul>
     {submission.todayNote && <p><b>{t("오늘 메모")}</b>{submission.todayNote}</p>}
     {submission.blockersNote && <p className="blocker"><b>{t("블로커")}</b>{submission.blockersNote}</p>}
   </div>;
@@ -6553,7 +6556,7 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
         <BotAccordionRow id="daily" icon={Bot} title={t("데일리 봇")} description={t("멤버별 데일리 DM과 공유 채널")} status={displayedBotSummaries.daily.status} summary={displayedBotSummaries.daily.summary} expanded={openBot === "daily"} onToggle={toggleBot}><SlackDailySettingsPanel key={`daily-${botRefreshAttempt}`} active={openBot === "daily"} connected={slackConnected} canManage={canManageSlack} teamName={connectedSlackName} onSummary={updateDailySummary} onNotice={onNotice} /></BotAccordionRow>
         <BotAccordionRow id="management" icon={Activity} title={t("관리 봇")} description={t("누락 정보와 긴급 업무 리포트")} status={displayedBotSummaries.management.status} summary={displayedBotSummaries.management.summary} expanded={openBot === "management"} onToggle={toggleBot}><WorkspaceManagementBot key={`management-${botRefreshAttempt}`} active={openBot === "management"} canManage={canManageSlack} onSummary={updateManagementSummary} onNotice={onNotice} /></BotAccordionRow>
         <BotAccordionRow id="work" icon={ListChecks} title={t("업무 관리 봇")} description={t("Slack에서 Project와 Task 생성·조회·수정")} status={slackState === "reauthorization_required" ? "권한 업데이트 필요" : displayedBotSummaries.work.status} summary={slackState === "reauthorization_required" ? "새 Slack 권한을 승인해 주세요" : displayedBotSummaries.work.summary} expanded={openBot === "work"} onToggle={toggleBot}><SlackWorkManagementBot connected={slackConnected} needsReauthorization={slackState === "reauthorization_required"} /></BotAccordionRow>
-        <BotAccordionRow id="automation" icon={Zap} title={t("Task 변동 알림 봇")} description={t("Task 생성·완료·다시 열림 알림")} status={displayedBotSummaries.automation.status} summary={displayedBotSummaries.automation.summary} expanded={openBot === "automation"} onToggle={toggleBot}><SlackAutomationManager key={`automation-${botRefreshAttempt}`} active={openBot === "automation"} connected={slackConnected} canManage={canManageSlack} workspaceName={workspaceName} onSummary={updateAutomationSummary} onNotice={onNotice} /></BotAccordionRow>
+        <BotAccordionRow id="automation" icon={Zap} title={t("Task 변동 알림 봇")} description={t("Task의 모든 변경사항 알림")} status={displayedBotSummaries.automation.status} summary={displayedBotSummaries.automation.summary} expanded={openBot === "automation"} onToggle={toggleBot}><SlackAutomationManager key={`automation-${botRefreshAttempt}`} active={openBot === "automation"} connected={slackConnected} canManage={canManageSlack} workspaceName={workspaceName} onSummary={updateAutomationSummary} onNotice={onNotice} /></BotAccordionRow>
       </div>
     </div>
   </section>;
@@ -6580,6 +6583,12 @@ type SlackOnboardingResult = {
 };
 
 function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSummary, onNotice }: { active: boolean; connected: boolean; canManage: boolean; teamName: string; onSummary: (status: string, summary: string) => void; onNotice: (message: string) => void }) {
+  const confirmAction = useAppConfirm();
+  const [bulkResult, setBulkResult] = useState<import("@/lib/slack-daily-manual").DailyManualResult | null>(null);
+  const [bulkError, setBulkError] = useState("");
+  const [bulkSending, setBulkSending] = useState(false);
+  const bulkRequestRef = useRef<string | null>(null);
+  const bulkLockRef = useRef(false);
   const [admin, setAdmin] = useState<SlackDailyAdminData | null>(null);
   const [savedAdmin, setSavedAdmin] = useState<SlackDailyAdminData | null>(null);
   const [saveError, setSaveError] = useState("");
@@ -6596,13 +6605,47 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
   const { channels, setChannels, loading: channelsLoading, error: channelLoadError, refresh: refreshChannels } = useLiveSlackChannels(active && connected && canManage && shouldLoadChannels);
 
   useEffect(() => {
+    if (!active || !connected || !canManage || bulkResult?.status !== "pending" || bulkError) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void fetch(`/api/slack/daily/settings?runId=${encodeURIComponent(bulkResult.id)}`, { cache: "no-store", signal: controller.signal }).then(async (response) => {
+        const data = await response.json() as import("@/lib/slack-daily-manual").DailyManualResult & { error?: string };
+        if (!response.ok) throw new Error(apiError(data, "발송 결과를 확인하지 못했습니다."));
+        setBulkResult(data);
+      }).catch((error: unknown) => {
+        if (!controller.signal.aborted) setBulkError(slackErrorMessage(error, "발송 결과를 확인하지 못했습니다."));
+      });
+    }, 2000);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [active, connected, canManage, bulkResult, bulkError]);
+
+  async function sendDailyToAll() {
+    if (bulkLockRef.current) return;
+    bulkLockRef.current = true;
+    try {
+      if (!bulkRequestRef.current) {
+        const count = admin?.members.filter((member) => member.linked).length ?? 0;
+        if (!count || !await confirmAction({ title: t("데일리 전체 발송"), message: t("연결된 멤버 {count}명에게 지금 DM을 보냅니다. 오늘 제출한 멤버와 예약을 끈 멤버도 포함되며, 기존 예약은 유지됩니다.", { count }), confirmLabel: t("전체 보내기") })) return;
+        bulkRequestRef.current = crypto.randomUUID();
+      }
+      setBulkSending(true);
+      setBulkError("");
+      const response = await fetch("/api/slack/daily/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "send_all_now", requestId: bulkRequestRef.current }) });
+      const data = await response.json() as import("@/lib/slack-daily-manual").DailyManualResult & { error?: string };
+      if (!response.ok) throw new Error(apiError(data, "발송 결과를 확인하지 못했습니다."));
+      setBulkResult(data);
+    } catch (error) { setBulkError(slackErrorMessage(error, "발송 결과를 확인하지 못했습니다.")); }
+    finally { setBulkSending(false); bulkLockRef.current = false; }
+  }
+
+  useEffect(() => {
     if (!active || !connected || !canManage || loadedRef.current) return;
     loadedRef.current = true;
     let mounted = true;
     const controller = new AbortController();
     setLoadError(false);
     void fetch("/api/slack/daily/settings", { cache: "no-store", signal: controller.signal }).then(async (response) => {
-      const data = await response.json() as SlackDailyAdminData & { error?: string };
+      const data = await response.json() as SlackDailyAdminData & { error?: string; manualRun?: import("@/lib/slack-daily-manual").DailyManualResult | null };
       if (!response.ok) throw new Error(apiError(data, "Slack 설정을 불러오지 못했습니다."));
       return data;
     }).then((nextAdmin) => {
@@ -6610,6 +6653,10 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
       setObservedAt(Date.now());
       setAdmin(nextAdmin);
       setSavedAdmin(nextAdmin);
+      if (nextAdmin.manualRun) {
+        setBulkResult(nextAdmin.manualRun);
+        bulkRequestRef.current = nextAdmin.manualRun.id;
+      }
       setChannels(nextAdmin.channels);
       const targetCount = nextAdmin.members.filter((member) => member.linked && member.preference.enabled).length;
       const days = nextAdmin.settings.weekdays.join(",") === "1,2,3,4,5" ? "평일" : nextAdmin.settings.weekdays.map((day) => ["일", "월", "화", "수", "목", "금", "토"][day]).join("·");
@@ -6765,7 +6812,17 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
     </section> : <section className="slack-connected-summary">
       <div className="slack-connected-title">{delivery.status === "ready" ? <CheckCircle2 size={19} /> : <span><AlertTriangle size={19} /></span>}<p><b>{t("데일리 봇")}{dailyDeliveryLabel(delivery.status)}</b><span>{teamName}</span></p><button type="button" disabled={busy} onClick={() => { setSavedAdmin(admin); setSaveError(""); setEditing(true); }}>{t("설정")}</button></div>
       <dl><div><dt>{t("대상")}</dt><dd>{t("{count}명", { count: targetMembers.length })}</dd></div><div><dt>{t("다음 발송")}</dt><dd>{nextReminder ? new Date(nextReminder * 1000).toLocaleString(getClientLocale(), { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : t("예약 확인 필요")}</dd></div><div><dt>{t("공유 채널")}</dt><dd>{admin.channels.length ? admin.channels.map((channel) => `#${channel.name}`).join(", ") : t("공유 안 함")}</dd></div></dl>
-      <section className="slack-manual-send" aria-labelledby="slack-manual-send-title"><header><b id="slack-manual-send-title">{t("즉시 발송")}</b><small>{t("멤버에게 데일리 DM을 바로 보냅니다.")}</small></header>{linkedMembers.length ? <div className="slack-member-links">{linkedMembers.map((member) => <div key={member.memberId}><span className="linked" /><p><b>{member.displayName}</b><small>{member.preference.enabled ? t("예약 대상") : t("수동 발송만")}</small></p><button type="button" disabled={busy || sendingMemberId !== null} onClick={() => void sendDailyNow(member)}>{sendingMemberId === member.memberId ? <><LoaderCircle className="spin" size={13} />{t("발송 중")}</> : t("지금 보내기")}</button></div>)}</div> : <p className="slack-manual-send-empty">{t("Slack에 연결된 멤버가 없습니다.")}</p>}</section>
+      <section className="slack-manual-send" aria-labelledby="slack-manual-send-title">
+        <header><div><b id="slack-manual-send-title">{t("즉시 발송")}</b><small>{t("멤버에게 데일리 DM을 바로 보냅니다.")}</small></div><button type="button" disabled={busy || sendingMemberId !== null || bulkSending || bulkResult?.status === "pending" || !linkedMembers.length || Boolean(bulkError)} onClick={() => { if (bulkResult?.status === "complete") bulkRequestRef.current = null; void sendDailyToAll(); }}><Send size={14} />{bulkSending || bulkResult?.status === "pending" ? t("발송 중") : t("전체 보내기")}</button></header>
+        {bulkResult && <p className="slack-bulk-result" role="status">{bulkResult.createdAt && <>{t("최근 수동 발송")} · {formatSlackAutomationTime(bulkResult.createdAt)}<br /></>}{t("전체 {total}명 · 성공 {sent} · 실패 {failed} · 확인 필요 {uncertain} · 대기 {pending}", { total: bulkResult.total, sent: bulkResult.sent, failed: bulkResult.failed, uncertain: bulkResult.uncertain, pending: bulkResult.pending })}</p>}
+        {bulkResult?.uncertain ? <p className="slack-save-error">{t("일부 발송 결과를 확인하지 못했습니다. 중복 발송을 피하려면 해당 멤버의 Slack을 먼저 확인해 주세요.")}</p> : null}
+        {bulkError && <div className="slack-bulk-error" role="alert"><span>{bulkError}</span><button type="button" disabled={bulkSending} onClick={() => void sendDailyToAll()}><RefreshCw size={13} />{t("발송 결과 다시 확인")}</button></div>}
+        {linkedMembers.length ? <div className="slack-member-links">{linkedMembers.map((member) => {
+          const receipt = bulkResult?.members.find((entry) => entry.memberId === member.memberId);
+          const status = receipt ? receipt.status === "sent" ? t("전송 성공") : ["failed", "cancelled"].includes(receipt.status) ? t("전송 실패") : receipt.status === "uncertain" ? t("확인 필요") : t("발송 처리 중") : member.preference.enabled ? t("예약 대상") : t("수동 발송만");
+          return <div key={member.memberId}><span className="linked" /><p><b>{member.displayName}</b><small>{status}</small>{receipt?.error && <small className="slack-save-error">{slackErrorMessage(receipt.error)}</small>}</p><button type="button" disabled={busy || sendingMemberId !== null || bulkSending || bulkResult?.status === "pending"} onClick={() => void sendDailyNow(member)}>{sendingMemberId === member.memberId ? <><LoaderCircle className="spin" size={13} />{t("발송 중")}</> : t("지금 보내기")}</button></div>;
+        })}</div> : <p className="slack-manual-send-empty">{t("Slack에 연결된 멤버가 없습니다.")}</p>}
+      </section>
       {result && <div className="slack-test-results" role="status"><p className={result.tests.dm.status}><span>{result.tests.dm.status === "sent" ? t("설치자 테스트 DM 성공") : result.tests.dm.status === "skipped" ? t("설치자 DM 테스트 생략") : t("테스트 DM 실패 · {value1}", { value1: messageValue(slackErrorMessage(result.tests.dm.error)) })}</span>{result.tests.dm.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("dm", result.tests.dm.memberId)}>{t("재시도")}</button>}</p>{result.tests.channels.map((channel) => <p key={channel.channelId} className={channel.status}><span>{channel.status === "sent" ? t("#{value1} 테스트 성공", { value1: messageValue(channel.channelName) }) : t("#{value1} 실패 · {value2}", { value1: messageValue(channel.channelName), value2: messageValue(slackErrorMessage(channel.error)) })}</span>{channel.status === "failed" && <button disabled={busy} onClick={() => void retrySetupResult("channel", channel.channelId)}>{t("재시도")}</button>}</p>)}{result.schedules.filter((entry) => entry.status === "failed").map((entry) => <p key={entry.memberId} className="failed"><span>{t("예약 실패 · {name}", { name: admin.members.find((member) => member.memberId === entry.memberId)?.displayName || t("미지정") })}</span><button disabled={busy} onClick={() => void retrySetupResult("schedule", null)}>{t("재시도")}</button></p>)}</div>}
     </section>}
     {admin.setupComplete && <details className="slack-advanced-settings" onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}><summary>{t("멤버 연결·발송 관리")}<ChevronDown size={14} /></summary>{advancedOpen && <SlackDailyAdvancedSettings connected canManage mode="workspace" onNotice={onNotice} />}</details>}
@@ -6863,6 +6920,7 @@ type SlackAutomationDraft = {
 };
 
 const slackAutomationDefaults: Record<SlackAutomationTrigger, string> = {
+  task_changed: "*{{title}}*\n{{changes}}\n{{parent}} · {{workspace}}",
   task_created: "새 업무가 등록되었습니다.\n*{{title}}*\n상태: {{status}} · 우선순위: {{priority}} · {{workspace}}",
   task_status_changed: "*{{title}}* 상태가 `{{from_status}}` → `{{status}}`로 바뀌었습니다.\n우선순위: {{priority}} · {{workspace}}",
 };
@@ -6881,6 +6939,7 @@ async function fetchSlackAutomationData() {
 }
 
 const slackAutomationRecommendations = [
+  { id: "changed", name: "모든 Task 변동", description: "생성·수정·담당자·속성·삭제·복구를 모두 알립니다.", triggerType: "task_changed" as const, triggerStatus: "", messageTemplate: slackAutomationDefaults.task_changed },
   { id: "created", name: "새 Task 알림", description: "새 Task가 만들어지면 담당 채널에 알립니다.", triggerType: "task_created" as const, triggerStatus: "", messageTemplate: slackAutomationDefaults.task_created },
   { id: "completed", name: "Task 완료 알림", description: "Task가 완료되면 담당 채널에 알립니다.", triggerType: "task_status_changed" as const, triggerStatus: "done", messageTemplate: slackAutomationDefaults.task_status_changed },
   { id: "reopened", name: "Task 다시 열림 알림", description: "완료한 Task가 다시 열리면 담당 채널에 알립니다.", triggerType: "task_status_changed" as const, triggerStatus: "todo", messageTemplate: slackAutomationDefaults.task_status_changed },
@@ -6899,7 +6958,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
   const [messageLanguage, setMessageLanguage] = useState<Language>("ko");
   const [automations, setAutomations] = useState<SlackAutomation[]>([]);
   const [deliveries, setDeliveries] = useState<SlackAutomationDelivery[]>([]);
-  const [recommendedChannels, setRecommendedChannels] = useState<Record<string, string>>({ created: "", completed: "", reopened: "" });
+  const [recommendedChannels, setRecommendedChannels] = useState<Record<string, string>>({ changed: "", created: "", completed: "", reopened: "" });
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<SlackAutomationDraft>(emptySlackAutomationDraft());
@@ -7083,7 +7142,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
   }
 
   if (!active && !loaded) return null;
-  if (!connected) return <div className="slack-automation-locked"><Zap size={16} /><div><b>{t("Slack 연결 후 Task 변동 알림 봇을 설정할 수 있습니다")}</b><p>{t("연결을 완료하면 Task 생성·완료·다시 열림을 채널로 자동 전송할 수 있습니다.")}</p></div></div>;
+  if (!connected) return <div className="slack-automation-locked"><Zap size={16} /><div><b>{t("Slack 연결 후 Task 변동 알림 봇을 설정할 수 있습니다")}</b><p>{t("연결을 완료하면 Task의 생성부터 수정·삭제까지 채널로 알릴 수 있습니다.")}</p></div></div>;
 
   return <div className="slack-automation-manager">
     {canManage && <SlackChannelSyncStatus loading={channelsLoading} error={channelLoadError} onRefresh={() => void refreshChannels(false)} />}
@@ -7095,12 +7154,12 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
       <div className="slack-form-grid">
         <label><span>{t("자동화 이름")}</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={t("예: 새 업무 알림")} maxLength={80} /></label>
         <label><span>{t("Slack 발송 채널")}</span><select value={draft.channelId} onChange={(event) => setDraft({ ...draft, channelId: event.target.value })}><option value="">{t("채널 선택")}</option>{draft.channelId && !channels.some((channel) => channel.id === draft.channelId) && <option value={draft.channelId}>#{draft.channelId}</option>}{channels.map((channel) => <option value={channel.id} key={channel.id}>{slackChannelOptionLabel(channel)}</option>)}</select></label>
-        <label><span>{t("트리거")}</span><select value={draft.triggerType} onChange={(event) => { const triggerType = event.target.value as SlackAutomationTrigger; setDraft({ ...draft, triggerType, triggerStatus: triggerType === "task_status_changed" ? "done" : "", messageTemplate: slackAutomationDefaults[triggerType], messageTemplateKind: "default" }); }}><option value="task_created">{t("Task 생성")}</option><option value="task_status_changed">{t("Task 완료 또는 다시 열림")}</option></select></label>
+        <label><span>{t("트리거")}</span><select value={draft.triggerType} onChange={(event) => { const triggerType = event.target.value as SlackAutomationTrigger; setDraft({ ...draft, triggerType, triggerStatus: triggerType === "task_status_changed" ? "done" : "", messageTemplate: slackAutomationDefaults[triggerType], messageTemplateKind: "default" }); }}><option value="task_changed">{t("모든 Task 변동")}</option><option value="task_created">{t("Task 생성")}</option><option value="task_status_changed">{t("Task 완료 또는 다시 열림")}</option></select></label>
         {draft.triggerType === "task_status_changed" && <label><span>{t("변동")}</span><select value={draft.triggerStatus} onChange={(event) => setDraft({ ...draft, triggerStatus: event.target.value })}><option value="done">{t("Task 완료")}</option><option value="todo">{t("Task 다시 열림")}</option></select></label>}
       </div>
       <label className="slack-message-field"><span>{t("보낼 메시지")}</span><textarea value={draft.messageTemplateKind && draft.messageTemplateKind !== "custom" ? translateForLanguage(messageLanguage, draft.messageTemplate) : draft.messageTemplate} onChange={(event) => setDraft({ ...draft, messageTemplate: event.target.value, messageTemplateKind: "custom" })} maxLength={3000} rows={4} /></label>
       <p>{t(draft.messageTemplateKind && draft.messageTemplateKind !== "custom" ? "기본 문구는 워크스페이스 공용 언어로 발송됩니다." : "사용자 문구는 번역하지 않고 그대로 발송합니다.")} <button type="button" onClick={() => setDraft({ ...draft, messageTemplate: slackAutomationDefaults[draft.triggerType], messageTemplateKind: "default" })}>{t("기본 문구 사용")}</button></p>
-      <div className="slack-variable-row"><span>{t("변수")}</span>{["{{title}}", "{{status}}", "{{from_status}}", "{{priority}}", "{{workspace}}"].map((variable) => <button type="button" key={variable} onClick={() => { const message = draft.messageTemplateKind && draft.messageTemplateKind !== "custom" ? translateForLanguage(messageLanguage, draft.messageTemplate) : draft.messageTemplate; setDraft({ ...draft, messageTemplate: `${message}${message.endsWith(" ") || message.endsWith("\n") ? "" : " "}${variable}`, messageTemplateKind: "custom" }); }}>{variable}</button>)}</div>
+      <div className="slack-variable-row"><span>{t("변수")}</span>{["{{title}}", "{{status}}", "{{from_status}}", "{{priority}}", "{{workspace}}", "{{changes}}", "{{parent}}"].map((variable) => <button type="button" key={variable} onClick={() => { const message = draft.messageTemplateKind && draft.messageTemplateKind !== "custom" ? translateForLanguage(messageLanguage, draft.messageTemplate) : draft.messageTemplate; setDraft({ ...draft, messageTemplate: `${message}${message.endsWith(" ") || message.endsWith("\n") ? "" : " "}${variable}`, messageTemplateKind: "custom" }); }}>{variable}</button>)}</div>
       <p className="slack-channel-help">{t("공개 채널은 선택할 때 봇이 참여합니다. 비공개·Slack Connect 채널은 봇이 이미 참여한 경우만 표시됩니다.")}</p>
       <div className="slack-form-actions"><label><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /><span>{t("저장 즉시 활성화")}</span></label><div><button type="button" onClick={() => setFormOpen(false)}>{t("취소")}</button><button type="submit" disabled={saving}>{saving ? <LoaderCircle className="spin" size={13} /> : <Check size={13} />}{saving ? t("저장 중") : t("저장")}</button></div></div>
     </form>}
@@ -7114,6 +7173,7 @@ function SlackAutomationManager({ active, connected, canManage, workspaceName, o
 }
 
 function slackTriggerLabel(automation: SlackAutomation) {
+  if (automation.triggerType === "task_changed") return t("모든 Task 변동");
   if (automation.triggerType === "task_created") return t("Task 생성");
   if (automation.triggerStatus === "done") return t("Task 완료");
   if (automation.triggerStatus === "todo") return t("Task 다시 열림");

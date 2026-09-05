@@ -1,4 +1,4 @@
-export const SLACK_AUTOMATION_TRIGGERS = ["task_created", "task_status_changed"] as const;
+export const SLACK_AUTOMATION_TRIGGERS = ["task_created", "task_status_changed", "task_changed"] as const;
 
 export type SlackAutomationTrigger = (typeof SLACK_AUTOMATION_TRIGGERS)[number];
 
@@ -9,6 +9,8 @@ export type SlackAutomationContext = {
   priority: string;
   kind: string;
   workspace: string;
+  changes?: string;
+  parent?: string;
 };
 
 const statusLabels: Record<string, string> = {
@@ -43,11 +45,12 @@ export function isSlackAutomationTrigger(value: string): value is SlackAutomatio
 }
 
 export function isSupportedTaskAutomation(triggerType: string, triggerStatus: string) {
-  return triggerType === "task_created"
+  return triggerType === "task_created" || triggerType === "task_changed"
     || (triggerType === "task_status_changed" && ["todo", "done"].includes(triggerStatus));
 }
 
 export function defaultSlackAutomationTemplate(triggerType: SlackAutomationTrigger) {
+  if (triggerType === "task_changed") return "*{{title}}*\n{{changes}}\n{{parent}} · {{workspace}}";
   if (triggerType === "task_status_changed") {
     return "*{{title}}* 상태가 `{{from_status}}` → `{{status}}`로 바뀌었습니다.\n우선순위: {{priority}} · {{workspace}}";
   }
@@ -68,9 +71,11 @@ export function renderSlackAutomationMessage(template: string, context: SlackAut
     priority: t(priorityLabels[context.priority] ?? context.priority),
     kind: t(kindLabels[context.kind] ?? context.kind),
     workspace: context.workspace,
+    changes: context.changes ?? t("Task 변경"),
+    parent: context.parent ?? "-",
   };
 
-  const message = template.replace(/{{\s*(title|status|from_status|priority|kind|workspace)\s*}}/g, (_, key: string) => escapeSlackText(variables[key] ?? ""));
+  const message = template.replace(/{{\s*(title|status|from_status|priority|kind|workspace|changes|parent)\s*}}/g, (_, key: string) => escapeSlackText(variables[key] ?? ""));
   return `*${t("Task 변동 알림 봇")}*\n${message}`;
 }
 

@@ -1399,6 +1399,31 @@ export type SlackAutomation = typeof slackAutomations.$inferSelect;
 export type SlackAutomationDelivery = typeof slackAutomationDeliveries.$inferSelect;
 export type SlackOAuthState = typeof slackOAuthStates.$inferSelect;
 export type SlackMemberLink = typeof slackMemberLinks.$inferSelect;
+export const slackDailyManualRuns = sqliteTable("slack_daily_manual_runs", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  createdByUserId: text("created_by_user_id").notNull(),
+  targetsJson: text("targets_json").notNull(),
+  errorsJson: text("errors_json").notNull().default("{}"),
+  status: text("status").notNull().default("pending"),
+  createdAt: text("created_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+  expiresAt: text("expires_at").notNull(),
+}, (table) => [index("idx_slack_manual_pending").on(table.status, table.expiresAt)]);
+
+export const slackTaskChanges = sqliteTable("slack_task_changes", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  automationId: text("automation_id").notNull().references(() => slackAutomations.id, { onDelete: "cascade" }),
+  taskId: text("task_id").notNull(),
+  channelId: text("channel_id").notNull(),
+  changeKind: text("change_kind").notNull(),
+  taskJson: text("task_json").notNull(),
+  beforeJson: text("before_json").notNull(),
+  afterJson: text("after_json").notNull(),
+  createdAt: text("created_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+  processedAt: text("processed_at"),
+}, (table) => [index("idx_slack_task_changes_pending").on(table.processedAt, table.createdAt)]);
+
 export const slackDailyChecklists = sqliteTable("slack_daily_checklists", {
   id: text("id").primaryKey(),
   ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),

@@ -60,6 +60,10 @@ export async function handleSlackWorkCommandEvent(request: Request, connection: 
   const t = linked
     ? await memberTranslator(linked.authorization)
     : await serverTranslator(await workspaceMessageLanguage(env.DB, connection.ownerId));
+  if (parsed.command === "help") {
+    await postPrivate(token, event, commandHelp(t));
+    return;
+  }
   if (!linked) {
     const link = await createSlackMemberLinkUrl(connection.ownerId, connection.teamId, event.user, request);
     await postPrivate(token, event, t("OKRI 계정 연결이 필요합니다. 15분 안에 로그인해 연결해 주세요.\n{link}", { link }));
@@ -67,10 +71,6 @@ export async function handleSlackWorkCommandEvent(request: Request, connection: 
   }
   if (isWriteCommand(parsed.command) && linked.authorization.role === "viewer") {
     await postPrivate(token, event, t("Viewer는 조회 명령만 사용할 수 있습니다."));
-    return;
-  }
-  if (parsed.command === "help") {
-    await postPrivate(token, event, commandHelp(t));
     return;
   }
   if (parsed.command === "my_work") {
@@ -308,10 +308,33 @@ async function assignedWorkSummary(authorization: RequestAuthorization, memberId
 }
 
 function commandHelp(t: Translator) {
-  return `*${t("업무 관리 봇 명령")}*\n` + [
-    "!my work", "!project <name>", "!project view <name>", "!project edit <name>", "!project status <name>",
-    "!task <name>", "!task view <name>", "!task edit <name>", "!task complete <name>", "!task reopen <name>",
-  ].map((command) => `• \`${command}\``).join("\n");
+  const row = (command: string, type: SlackWorkCommand) => `• \`${command}\` — ${commandLabel(type, t)}`;
+  const slashHelp = t("사용법\n• `/okri daily` — 개인 데일리 작성\n• `/okri <문장>` — 문장을 General Task로 수집")
+    .split("\n").slice(1).join("\n");
+  return [
+    `*${t("업무 관리 봇 명령")}*`,
+    "",
+    "*Daily*",
+    slashHelp,
+    "",
+    `*${t("내 업무")}*`,
+    row("!내 업무 · !my work", "my_work"),
+    "",
+    "*Project*",
+    row("!프로젝트 생성 [이름] · !project [name]", "project_create"),
+    row("!프로젝트 조회 [검색어] · !project view [query]", "project_view"),
+    row("!프로젝트 수정 [검색어] · !project edit [query]", "project_edit"),
+    row("!프로젝트 상태 [검색어] · !project status [query]", "project_status"),
+    "",
+    "*Task*",
+    row("!태스크 생성 [이름] · !task [name]", "task_create"),
+    row("!태스크 조회 [검색어] · !task view [query]", "task_view"),
+    row("!태스크 수정 [검색어] · !task edit [query]", "task_edit"),
+    row("!태스크 완료 [검색어] · !task complete [query]", "task_complete"),
+    row("!태스크 재열기 [검색어] · !task reopen [query]", "task_reopen"),
+    "",
+    "`!메뉴얼` · `!매뉴얼` · `!도움말` · `!help`",
+  ].join("\n");
 }
 
 function commandLabel(command: SlackWorkCommand, t: Translator) {

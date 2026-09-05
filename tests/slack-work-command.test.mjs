@@ -14,6 +14,9 @@ test("Slack work commands accept Task spelling and whitespace variants", () => {
     ["!project view Mobile", "project_view", "Mobile"],
     ["!my work", "my_work", ""],
     ["!okri", "help", ""],
+    ["!메뉴얼", "help", ""],
+    ["!매뉴얼", "help", ""],
+    ["!manual", "help", ""],
     ["!테스크생성 명함", "task_create", "명함"],
     [" ! 태스크   완료   명함 ", "task_complete", "명함"],
     ["!테스크 재 열기 명함", "task_reopen", "명함"],
@@ -46,6 +49,8 @@ test("Slack channel events, private responses, permissions, and request idempote
   assert.match(events, /const commandMessage = Boolean/);
   assert.ok(events.indexOf("const commandMessage") < events.indexOf("INSERT OR IGNORE INTO slack_event_receipts"));
   assert.match(domain, /chat\.postEphemeral/);
+  assert.ok(domain.indexOf('parsed.command === "help"') < domain.indexOf("if (!linked)"));
+  for (const command of ["/okri daily", "!내 업무", "!프로젝트 생성 [이름]", "!태스크 완료 [검색어]", "!메뉴얼"]) assert.ok(domain.includes(command));
   assert.match(domain, /authorization\.role === "viewer"/);
   assert.match(domain, /metadata\.teamId !== teamId/);
   assert.match(domain, /metadata\.slackUserId !== slackUserId/);

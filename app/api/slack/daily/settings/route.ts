@@ -1,11 +1,25 @@
 import { authorizeRequest, canManageTeam } from "@/lib/pace-data";
+import { env, waitUntil } from "cloudflare:workers";
+import { getDailyManualRun, latestDailyManualRun, processDailyManualRun, startDailyManualRun } from "@/lib/slack-daily-manual";
+import { runDueSlackBotDeliveries } from "@/lib/slack-bot-delivery";
 import { getSlackDailySettings, reconcileDailyReminders, retryDailyPublication, sendDailyReminderNow, syncSlackDailyInstallation, testDailyChannel, testDailyDm, updateSlackDailySettings } from "@/lib/slack-daily";
 
 export async function GET(request: Request) {
   const authorization = await authorizeRequest(request, { allowViewerWrite: true });
   if (authorization instanceof Response) return authorization;
   if (!canManageTeam(authorization)) return Response.json({ error: "Owner 또는 Admin 권한이 필요합니다." }, { status: 403 });
-  try { return Response.json(await getSlackDailySettings(authorization)); } catch (error) { return routeError(error); }
+  try {
+    const runId = new URL(request.url).searchParams.get("runId");
+    if (runId) {
+      const result = await getDailyManualRun(env.DB, authorization.ownerId, runId);
+      if (result.status === "pending") {
+        waitUntil(processDailyManualRun(env.DB, authorization.ownerId, runId));
+        waitUntil(runDueSlackBotDeliveries(env.DB, new Date(), authorization.ownerId));
+      }
+      return Response.json(result, { headers: { "Cache-Control": "no-store" } });
+    }
+    return Response.json({ ...await getSlackDailySettings(authorization), manualRun: await latestDailyManualRun(env.DB, authorization.ownerId) });
+  } catch (error) { return routeError(error); }
 }
 
 export async function PATCH(request: Request) {
@@ -14,6 +28,12 @@ export async function PATCH(request: Request) {
   if (!canManageTeam(authorization)) return Response.json({ error: "Owner 또는 Admin 권한이 필요합니다." }, { status: 403 });
   try {
     const payload = await request.json() as Record<string, unknown>;
+    if (payload.action === "send_all_now") {
+      const result = await startDailyManualRun(env.DB, authorization, typeof payload.requestId === "string" ? payload.requestId : "");
+      waitUntil(processDailyManualRun(env.DB, authorization.ownerId, result.id));
+      waitUntil(runDueSlackBotDeliveries(env.DB, new Date(), authorization.ownerId));
+      return Response.json(result, { status: 202 });
+    }
     if (payload.action === "repair") {
       await reconcileDailyReminders(authorization.ownerId, { verify: true });
       return Response.json(await getSlackDailySettings(authorization));

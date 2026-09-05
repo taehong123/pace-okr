@@ -870,7 +870,7 @@ async function currentMemberForSlackPreference(authorization: RequestAuthorizati
   return member;
 }
 
-async function ensureDmChannel(token: string, slackUserId: string, existing: string, signal?: AbortSignal) {
+export async function ensureDmChannel(token: string, slackUserId: string, existing: string, signal?: AbortSignal) {
   if (existing) return existing;
   const result = await slackApi<SlackApiResult & { channel?: { id?: string } }>(token, "conversations.open", { users: slackUserId, return_im: true }, signal);
   if (!result.channel?.id) throw new Error("Slack DM 채널을 열지 못했습니다.");
@@ -956,15 +956,18 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
     : `• ${t("선택한 업무 없음")}`;
   const yesterdayOverflow = yesterdayWork.length > 20 ? `\n_${t("외 {count}개", { count: yesterdayWork.length - 20 })}_` : "";
   const allWork = [...submission.tasks.map((task) => ({ ...task, groupKey: `${task.parentKind}:${task.parentId || "general"}`, completedToday: false })), ...(submission.work ?? []).map((work) => ({ taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, isNew: false, completedToday: Boolean(work.completedToday) }))];
-  const visible = allWork.slice(0, 20);
-  const groups = new Map<string, { title: string; lines: string[] }>();
-  for (const task of visible) {
-    const group = groups.get(task.groupKey) ?? { title: task.parentTitle, lines: [] };
-    group.lines.push(`• ${task.completedToday ? `[${t("완료")}] ` : ""}${escapeSlack(task.taskTitle)}`);
-    groups.set(task.groupKey, group);
-  }
-  const taskLines = visible.length ? [...groups.values()].map((group) => `*${escapeSlack(group.title)}*\n${group.lines.join("\n")}`).join("\n\n") : `• ${t("오늘 예정 없음")}`;
-  const overflow = allWork.length > 20 ? `\n_${t("외 {count}개", { count: allWork.length - 20 })}_` : "";
+  const completedWork = allWork.filter((work) => work.completedToday);
+  const plannedWork = allWork.filter((work) => !work.completedToday);
+  const groupedLines = (work: typeof allWork) => {
+    const groups = new Map<string, { title: string; lines: string[] }>();
+    for (const task of work.slice(0, 20)) {
+      const group = groups.get(task.groupKey) ?? { title: task.parentTitle, lines: [] };
+      group.lines.push(`• ${escapeSlack(task.taskTitle)}`);
+      groups.set(task.groupKey, group);
+    }
+    const lines = work.length ? [...groups.values()].map((group) => `*${escapeSlack(group.title)}*\n${group.lines.join("\n")}`).join("\n\n") : `• ${t("오늘 예정 없음")}`;
+    return lines + (work.length > 20 ? `\n_${t("외 {count}개", { count: work.length - 20 })}_` : "");
+  };
   const blocker = submission.blockersNote ? `\n*${t("블로커")}*\n${escapeSlack(submission.blockersNote)}` : "";
   const note = submission.todayNote ? `\n*${t("오늘 메모")}*\n${escapeSlack(submission.todayNote)}` : "";
   const yesterdayNote = submission.yesterdayNote ? `\n*${t("어제 메모")}*\n${escapeSlack(submission.yesterdayNote)}` : "";
@@ -972,7 +975,9 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
   const text = `[${t("데일리 봇")}] ${t("{member}님의 {date} 데일리", { member: submission.memberName, date: submission.date })}`;
   return { text, unfurl_links: false, unfurl_media: false, blocks: [
     { type: "header", text: { type: "plain_text", text: `${t("데일리 봇")} · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
-    { type: "section", text: { type: "mrkdwn", text: `*${t("어제 완료한 일")}*\n${yesterdayLines}${yesterdayOverflow}${yesterdayNote}\n\n*${t("오늘 할 일")}*\n${taskLines}${overflow}${note}${blocker}`.slice(0, 2900) } },
+    { type: "section", text: { type: "mrkdwn", text: `*${t("어제 완료한 일")}*\n${yesterdayLines}${yesterdayOverflow}${yesterdayNote}`.slice(0, 2900) } },
+    ...(completedWork.length ? [{ type: "section", text: { type: "mrkdwn", text: `*${t("오늘 완료한 일")}*\n${groupedLines(completedWork)}`.slice(0, 2900) } }] : []),
+    { type: "section", text: { type: "mrkdwn", text: `*${t("오늘 할 일")}*\n${groupedLines(plannedWork)}${note}${blocker}`.slice(0, 2900) } },
     { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 보기") }, url: appUrl }] },
   ] };
 }

@@ -84,6 +84,7 @@ export async function POST(request: Request) {
     waitUntil((async () => {
       try {
         const result = await handleDailyChecklist(linked.authorization, metadata, state?.values ?? {}, Boolean(previousPage), t);
+        waitUntil(import("@/lib/slack-task-changes").then(({ runDueTaskChanges }) => runDueTaskChanges(env.DB)));
         await updateDailyChecklistView(linked.authorization.ownerId, viewId, previousPage ? hash : undefined, result.view ?? statusView(t("제출 완료")));
         if (result.submission) await Promise.allSettled([publishDailySubmission(linked.authorization.ownerId, result.submission.id), reconcileDailyReminders(linked.authorization.ownerId)]);
       } catch (error) {

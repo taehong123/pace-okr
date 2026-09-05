@@ -14,7 +14,7 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
-  triggers: { crons: ["*/15 * * * *"] },
+  triggers: { crons: ["* * * * *"] },
   assets: {
     // Resolve workspace entry hosts before serving the shared prerendered shell.
     // Other static assets retain Cloudflare's direct asset path.

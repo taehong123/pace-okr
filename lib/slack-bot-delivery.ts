@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { decryptSlackSecret, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { postSlackMessage, SlackMessageError } from "@/lib/slack-automation";
 
-type BotKind = "management" | "automation" | "daily_publication";
+type BotKind = "management" | "automation" | "daily_publication" | "daily_manual";
 type Payload = { channel: string; text: string; blocks?: unknown[]; test?: boolean; streamKey?: string };
 type Row = {
   id: string; owner_id: string; bot_kind: BotKind; subject_id: string; event_key: string;
@@ -156,6 +156,20 @@ async function readConnection(db: D1Database, ownerId: string) {
 }
 
 async function readPolicy(db: D1Database, ownerId: string, kind: BotKind, subjectId: string, test: boolean) {
+  if (kind === "daily_manual") {
+    const [runId, memberId] = subjectId.split("/");
+    if (!runId || !memberId) return null;
+    const recipient = await db.prepare(`SELECT l.dm_channel_id, l.slack_user_id, m.id AS member_id, r.id AS run_id, r.expires_at
+      FROM slack_daily_manual_runs r JOIN json_each(r.targets_json) target
+      JOIN workspace_members m ON m.workspace_id = r.owner_id AND m.id = json_extract(target.value, '$.memberId') AND m.status = 'active'
+      JOIN slack_member_links l ON l.owner_id = r.owner_id AND l.member_id = m.id AND l.slack_user_id = json_extract(target.value, '$.slackUserId')
+      JOIN slack_connections c ON c.owner_id = l.owner_id AND c.team_id = l.team_id
+      JOIN workspace_members actor ON actor.workspace_id = r.owner_id AND actor.user_id = r.created_by_user_id
+        AND actor.status = 'active' AND actor.role IN ('owner','admin')
+      WHERE r.owner_id = ? AND r.id = ? AND m.id = ? AND r.expires_at > ?`)
+      .bind(ownerId, runId, memberId, new Date().toISOString()).first<Record<string, string>>();
+    return recipient?.dm_channel_id ? { channel: recipient.dm_channel_id, settings: recipient } : null;
+  }
   if (kind === "daily_publication") {
     const publication = await db.prepare(`SELECT p.channel_id, s.id, s.version, s.member_id FROM slack_daily_publications p
       JOIN daily_submissions s ON s.id = p.submission_id AND s.owner_id = p.owner_id
@@ -171,12 +185,20 @@ async function readPolicy(db: D1Database, ownerId: string, kind: BotKind, subjec
       .bind(ownerId).first<Record<string, string | number>>();
     return settings && (settings.enabled || test) ? { channel: String(settings.channel_id), settings } : null;
   }
-  const rule = await db.prepare(`SELECT a.active, a.channel_id, a.trigger_type, a.trigger_status, a.message_template
+  const rule = await db.prepare(`SELECT a.active, a.channel_id, a.trigger_type, a.trigger_status, a.message_template,
+      a.id AS automation_id, i.id AS item_id, i.archived_at
     FROM slack_automation_deliveries d JOIN slack_automations a ON a.id = d.automation_id AND a.owner_id = d.owner_id
     LEFT JOIN items i ON i.id = d.item_id AND i.owner_id = d.owner_id
-    WHERE d.owner_id = ? AND d.id = ? AND (? = 1 OR (i.id IS NOT NULL AND i.archived_at IS NULL))`)
-    .bind(ownerId, subjectId, test ? 1 : 0).first<Record<string, string | number>>();
-  return rule && (rule.active || test) ? { channel: String(rule.channel_id), settings: rule } : null;
+    WHERE d.owner_id = ? AND d.id = ?`)
+    .bind(ownerId, subjectId).first<Record<string, string | number | null>>();
+  if (!rule || (!rule.active && !test)) return null;
+  if (!test && rule.trigger_type === "task_changed") {
+    const change = await db.prepare("SELECT id FROM slack_task_changes WHERE owner_id = ? AND id = ? AND automation_id = ? AND channel_id = ?")
+      .bind(ownerId, subjectId, rule.automation_id, rule.channel_id).first();
+    if (!change) return null;
+  } else if (!test && (!rule.item_id || rule.archived_at)) return null;
+  const settings = { active: rule.active, channel_id: rule.channel_id, trigger_type: rule.trigger_type, trigger_status: rule.trigger_status, message_template: rule.message_template };
+  return { channel: String(rule.channel_id), settings };
 }
 
 async function validatePolicy(db: D1Database, row: Row, payload: Payload) {
@@ -203,7 +225,7 @@ async function mirrorDelivery(db: D1Database, row: Row) {
       WHERE owner_id = ? AND id = (SELECT automation_id FROM slack_automation_deliveries WHERE owner_id = ? AND id = ?)
         AND COALESCE(last_triggered_at, '') <= ?`)
       .bind(row.created_at, status, row.last_error, row.owner_id, row.owner_id, row.subject_id, row.created_at).run();
-  } else if (!payload.test) {
+  } else if (row.bot_kind === "management" && !payload.test) {
     if (row.status === "sent") {
       await db.prepare(`UPDATE workspace_management_bot_settings SET last_sent_date = ?, last_sent_at = ?, last_error = ''
         WHERE owner_id = ? AND COALESCE(last_sent_date, '') <= ?`)

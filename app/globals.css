@@ -2198,7 +2198,16 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .slack-member-links b, .slack-publication-failures b { font-size: var(--type-body); }
 .slack-member-links small, .slack-publication-failures small { color: var(--muted); font-size: var(--type-meta); }
 .slack-manual-send { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
-.slack-manual-send > header { display: grid; gap: 3px; }
+.slack-manual-send > header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.slack-manual-send > header > div { display: grid; gap: 3px; min-width: 0; }
+.slack-manual-send > header button, .slack-bulk-error button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--control-height); padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); font-size: var(--type-meta); }
+.slack-manual-send > header button, .slack-bulk-error button {
+  background: var(--button-secondary-bg); color: var(--button-secondary-fg);
+  &:hover:not(:disabled) { background: var(--button-secondary-hover-bg); color: var(--button-secondary-hover-fg); }
+  &:active:not(:disabled) { background: var(--button-secondary-active-bg); color: var(--button-secondary-active-fg); }
+}
+.slack-bulk-result { margin: 0; color: var(--muted); font-size: var(--type-meta); line-height: 1.6; overflow-wrap: anywhere; }
+.slack-bulk-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--danger-fg); font-size: var(--type-meta); }
 .slack-manual-send > header b { font-size: var(--type-body); }
 .slack-manual-send > header small { color: var(--muted); font-size: var(--type-meta); line-height: 1.45; }
 .slack-manual-send .slack-member-links button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
@@ -2874,7 +2883,7 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
   .slack-admin-grid { grid-template-columns: 1fr; }
   .slack-weekdays label { min-width: 44px; min-height: 44px; }
   .slack-admin-actions { display: grid; }
-  .slack-admin-actions button, .slack-member-links button, .slack-publication-failures button { min-height: 44px; }
+  .slack-admin-actions button, .slack-member-links button, .slack-publication-failures button, .slack-manual-send > header button, .slack-bulk-error button { min-height: 44px; }
   .slack-member-links > div, .slack-publication-failures > div { align-items: flex-start; flex-wrap: wrap; min-height: 58px; }
   .slack-member-links > div > button, .slack-publication-failures > div > button { width: 100%; }
   .integration-modal footer { align-items: flex-end; }

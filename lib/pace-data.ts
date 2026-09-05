@@ -4308,12 +4308,12 @@ export async function replaceItemAssignmentRole(
   const now = new Date().toISOString();
   const d1 = (env as RuntimeEnv).DB;
   await d1.batch([
-    d1.prepare("DELETE FROM item_assignments WHERE owner_id = ? AND item_id = ? AND role = ?")
-      .bind(ownerId, itemId, role),
+    d1.prepare("DELETE FROM item_assignments WHERE owner_id = ? AND item_id = ? AND role = ? AND member_id NOT IN (SELECT value FROM json_each(?))")
+      .bind(ownerId, itemId, role, JSON.stringify(uniqueMemberIds)),
     ...uniqueMemberIds.map((memberId) => d1.prepare(`INSERT INTO item_assignments
       (id, owner_id, item_id, member_id, role, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .bind(crypto.randomUUID(), ownerId, itemId, memberId, role, now, now)),
+      SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM item_assignments WHERE owner_id = ? AND item_id = ? AND member_id = ? AND role = ?)`)
+      .bind(crypto.randomUUID(), ownerId, itemId, memberId, role, now, now, ownerId, itemId, memberId, role)),
   ]);
   await logActivity(ownerId, itemId, "assignments_updated", "web", { role, memberIds: uniqueMemberIds });
   return (await getItemAssignmentMap(ownerId, [itemId]))[itemId] ?? [];

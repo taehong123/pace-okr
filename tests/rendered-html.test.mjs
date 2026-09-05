@@ -839,7 +839,8 @@ test("connects API data independently to Key Results and Projects", async () => 
   assert.match(schema, /kr_data_connections/);
   assert.match(schema, /itemId: text\("kr_item_id"\)/);
   assert.match(worker, /scheduled\(_controller/);
-  assert.match(viteConfig, /crons: \["\*\/15 \* \* \* \*"\]/);
+  assert.match(viteConfig, /crons: \["\* \* \* \* \*"\]/);
+  assert.match(worker, /getUTCMinutes\(\) % 15 !== 0/);
   assert.match(migration, /UPDATE `items` SET `progress` = 0 WHERE `kind` IN \('objective', 'initiative'\)/);
 });
 
@@ -1076,7 +1077,8 @@ test("implements a workspace management bot for data quality and urgency reporti
   assert.match(runtimeSchema, /workspace_management_bot_settings/);
   assert.match(migration, /idx_workspace_management_bot_due/);
   assert.match(worker, /runDueWorkspaceManagementBots/);
-  assert.match(viteConfig, /crons: \["\*\/15 \* \* \* \*"\]/);
+  assert.match(viteConfig, /crons: \["\* \* \* \* \*"\]/);
+  assert.match(worker, /getUTCMinutes\(\) % 15 !== 0/);
 });
 
 test("keeps completion checkboxes visually compact while preserving mobile touch targets", async () => {

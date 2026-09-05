@@ -95,11 +95,19 @@ const worker = {
     }
 
     const response = await handler.fetch(request, env, ctx);
+    if (response.ok && !["GET", "HEAD", "OPTIONS"].includes(request.method) && (url.pathname.startsWith("/api/") || url.pathname === "/mcp")) {
+      ctx.waitUntil(import("@/lib/slack-task-changes").then(({ runDueTaskChanges }) => runDueTaskChanges(env.DB)));
+    }
     if (cacheableRequest && response.ok) return withCacheHeaders(request, response, url.pathname);
     if (url.pathname.startsWith("/api/") && !response.ok) return withPublicErrorDetails(response);
     return response;
   },
   scheduled(_controller: ScheduledController, _env: Env, ctx: ExecutionContext) {
+    // Delivery queues resume every minute; existing maintenance keeps its 15-minute cadence.
+    ctx.waitUntil(import("@/lib/slack-bot-delivery").then(({ runDueSlackBotDeliveries }) => runDueSlackBotDeliveries(_env.DB)));
+    ctx.waitUntil(import("@/lib/slack-task-changes").then(({ runDueTaskChanges }) => runDueTaskChanges(_env.DB)));
+    ctx.waitUntil(import("@/lib/slack-daily-manual").then(({ runDueDailyManualRuns }) => runDueDailyManualRuns(_env.DB)));
+    if (new Date(_controller.scheduledTime).getUTCMinutes() % 15 !== 0) return;
     const managementBotRun = import("@/lib/workspace-management-bot")
       .then(({ runDueWorkspaceManagementBots }) => runDueWorkspaceManagementBots(_env.DB));
     ctx.waitUntil(Promise.all([
@@ -109,7 +117,6 @@ const worker = {
     // Keep backups alive even if an unrelated integration job rejects.
     ctx.waitUntil(runDueWorkspaceBackups(_env));
     ctx.waitUntil(import("@/lib/slack-daily").then(({ runDueSlackDailyReminders }) => runDueSlackDailyReminders()));
-    ctx.waitUntil(import("@/lib/slack-bot-delivery").then(({ runDueSlackBotDeliveries }) => runDueSlackBotDeliveries(_env.DB)));
   },
 };
 

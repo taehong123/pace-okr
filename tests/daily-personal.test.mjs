@@ -196,7 +196,7 @@ test("checkbox conflicts are rejected and unchecking removes a plan without canc
 });
 
 test("checklist submit completes today's tasks atomically and retries never duplicate completion", async (t) => {
-  const { raw, db, checklist } = fixture(t);
+  const { raw, db, checklist, api } = fixture(t);
   const initial = checklistInput(await work.listDailyWork(raw, "w", "me", date));
   const modal = await checklist.createDailyChecklist("w", "me", initial, (key) => key);
   const id = JSON.parse(modal.private_metadata).id;
@@ -209,6 +209,10 @@ test("checklist submit completes today's tasks atomically and retries never dupl
   assert.equal(db.prepare("SELECT completion_date FROM routine_completions").get().completion_date, date);
   assert.equal(JSON.parse(db.prepare("SELECT payload FROM activity_log WHERE item_id='task'").get().payload).effectiveDate, date);
   assert.equal(first.submission.work.filter((entry) => entry.completedToday).length, 2);
+  const nextDay = await work.listDailyYesterdayWork(raw, "w", "me", "2026-09-05", "Asia/Seoul");
+  assert.deepEqual(nextDay.filter((entry) => entry.completedYesterday).map((entry) => entry.key).sort(), ["routine:routine", "task:task"]);
+  const nextDashboard = await api.getDailyDashboard(authorization, "2026-09-05");
+  assert.deepEqual(nextDashboard.draft.selectedYesterdayWorkIds.sort(), ["routine:routine", "task:task"]);
   const replay = await checklist.handleDailyChecklist(authorization, modal.private_metadata, values, false, (key) => key);
   assert.equal(replay.submission.id, first.submission.id);
   assert.equal(replay.submission.newlyCompletedCount, 2);
@@ -405,6 +409,7 @@ test("Slack acknowledges checklist submission before slow work finishes", async 
     "@/lib/slack-daily": { dailyMemberBySlack: async () => ({ authorization, memberId: "me" }),
       updateDailyChecklistView: async (...args) => updates.push(args), publishDailySubmission: async () => {}, reconcileDailyReminders: async () => {} },
     "@/lib/slack-daily-checklist": { handleDailyChecklist: async () => workResult, retryDailyChecklist: async () => null },
+    "@/lib/slack-task-changes": { runDueTaskChanges: async () => {} },
     "@/lib/slack-work-command": {}, "@/lib/daily-bot": {},
   });
   const response = await route.POST(new Request("https://example.test/api/slack/interactions", { method: "POST", body: new URLSearchParams({ payload: JSON.stringify({

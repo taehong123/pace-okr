@@ -86,7 +86,7 @@ export async function POST(request: Request) {
       user: commandEvent.user,
       text: commandEvent.text,
       threadTs: commandEvent.thread_ts,
-    }, parsedCommand).catch((error) => console.error("Slack work command failed", error)));
+    }, parsedCommand).then(() => import("@/lib/slack-task-changes")).then(({ runDueTaskChanges }) => runDueTaskChanges(env.DB)).catch((error) => console.error("Slack work command failed", error)));
   }
   return new Response(null, { status: 200 });
 }
