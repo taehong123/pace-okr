@@ -41,6 +41,7 @@ for (const { id } of landingLanguages) test(`${id}: four complete independent st
   assert.equal(new Set(copy.slides.map((slide) => slide.title)).size, 4);
   for (const [key, value] of Object.entries(copy)) if (key !== "slides" && key !== "example") assert.ok(typeof value === "string" && value.trim(), key);
   for (const slide of copy.slides) for (const value of Object.values(slide)) assert.ok(value.trim());
+  if (id !== "ko") for (const value of [copy.heroTitle, copy.heroDescription, copy.exampleSource]) assert.doesNotMatch(value, /[가-힣]/);
 });
 
 test("server rendering exposes the first story and an independent immediate Google sign-in", () => {
@@ -48,11 +49,15 @@ test("server rendering exposes the first story and an independent immediate Goog
   assert.match(html, /세계적인 기업들이 선택한 OKR/);
   assert.match(html, /내 일이 어떤 성과와 연결되는지/);
   assert.match(html, /Google로 시작하기/);
+  assert.match(html, /목표부터 오늘 할 일까지/);
   assert.match(html, /href="\/download"/);
   assert.match(html, /OKRI 앱 다운로드/);
   assert.equal((html.match(/class="landing-slide"/g) ?? []).length, 4);
   assert.equal((html.match(/ inert=""/g) ?? []).length, 3);
-  assert.match(html, /<footer class="landing-login">/);
+  assert.match(html, /<section class="landing-entry"/);
+  assert.match(html, /class="landing-brand-home" aria-label="홈으로 이동"/);
+  assert.match(html, /href="https:\/\/www\.whatmatters\.com\/faqs\/okr-examples-and-how-to-write-them"/);
+  assert.match(html, /Healthcare\.gov OKR 사례 · OKRI 구조로 재구성/);
   assert.match(html, /aria-current="step"/);
   assert.doesNotMatch(html, /<img|<picture|landing-step/);
   assert.doesNotMatch(html, /!프로젝트생성|!테스크생성|AllVibe/);
@@ -95,7 +100,9 @@ test("new styling uses registered roles and retains stable typography and motion
   for (const [, token] of css.matchAll(/var\(--([\w-]+)/g)) assert.ok(known.has(token), `Unknown token ${token}`);
   assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b|rgba?\(|linear-gradient|letter-spacing\s*:\s*[^0]|font-size\s*:[^;]*(?:vw|clamp)|\bzoom\s*:/i);
   assert.match(css, /prefers-reduced-motion/);
-  assert.match(css, /grid-template-rows: auto minmax\(0, 1fr\) auto/);
+  assert.match(css, /grid-template-rows: auto minmax\(0, 1fr\)/);
+  assert.match(css, /@media \(max-width: 980px\)/);
+  assert.doesNotMatch(css, /\.landing-login\s*\{/);
 });
 
 test("only the signed-out branch changes and sign-in preserves path, search and invitation hash", () => {
@@ -106,6 +113,9 @@ test("only the signed-out branch changes and sign-in preserves path, search and 
   const landing = read("app/landing.tsx");
   assert.doesNotMatch(landing, /fetch\(|setInterval\(|setTimeout\(/);
   assert.match(landing, /signingInRef.current \|\| unavailable/);
+  assert.match(landing, /function goHome\(\)/);
+  assert.match(landing, /navigate\(0\)/);
+  assert.match(page, /className="workspace-brand"[\s\S]*onClick=\{\(\) => navigateView\("okr"\)\}/);
 });
 
 test("every product example is localized native text without fake interactive controls or screenshot requests", () => {
@@ -115,8 +125,14 @@ test("every product example is localized native text without fake interactive co
     assert.doesNotMatch(html, /<img|<picture|<button|<input|<select|<a /);
     if (id !== "ko") assert.doesNotMatch(html, /[가-힣]/);
   }
-  assert.equal(landingCopy.en.example.currentValue, "36%");
-  assert.match(landingCopy.en.example.task, /signup/i);
+  assert.equal(landingCopy.en.example.currentValue, "3 / 100,000");
+  assert.equal(landingCopy.en.example.targetValue, "70%");
+  assert.match(landingCopy.en.example.task, /failure logs/i);
+  assert.match(landingCopy.en.example.objective, /Healthcare\.gov/);
+  for (const { id } of landingLanguages) {
+    assert.match(landingCopy[id].exampleSource, /Healthcare\.gov/);
+    if (id !== "ko") assert.doesNotMatch(landingCopy[id].exampleSource, /[가-힣]/);
+  }
   assert.doesNotMatch(read("app/landing-examples.tsx"), /fetch\(|setInterval\(|setTimeout\(/);
   const html = renderToStaticMarkup(React.createElement(examples.LandingExample, { kind: "connection", copy: landingCopy.en.example }));
   assert.deepEqual([...html.matchAll(/data-kind="([^"]+)"/g)].map((match) => match[1]), ["task", "project", "initiative", "key-result", "objective"]);

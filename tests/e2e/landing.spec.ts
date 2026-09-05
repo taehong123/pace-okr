@@ -26,25 +26,26 @@ async function goToSlide(page: Page, index: number) {
 async function assertLayout(page: Page) {
   const geometry = await page.evaluate(() => {
     const active = document.querySelector<HTMLElement>(".landing-slide[aria-hidden='false']")!;
-    const footer = document.querySelector(".landing-login")!.getBoundingClientRect();
+    const entry = document.querySelector(".landing-entry")!.getBoundingClientRect();
+    const story = document.querySelector(".landing-story")!.getBoundingClientRect();
     const viewport = document.querySelector(".landing-viewport")!.getBoundingClientRect();
     const button = document.querySelector(".landing-login-button")!.getBoundingClientRect();
     const navigation = document.querySelector(".landing-navigation")!.getBoundingClientRect();
+    const stacked = innerWidth <= 980;
     return {
       pageOverflow: document.documentElement.scrollWidth > innerWidth + 1,
       slideOverflow: active.scrollWidth > active.clientWidth + 1,
-      footerVisible: footer.top >= 0 && footer.bottom <= innerHeight + 1,
-      separated: viewport.bottom <= footer.top,
-      readingArea: viewport.height >= 44 && navigation.bottom <= footer.top,
+      ordered: stacked ? entry.bottom <= story.top + 1 : entry.right <= story.left + 1,
+      readingArea: viewport.width >= 44 && viewport.height >= 44 && navigation.width >= 44,
       controlsVisible: [...document.querySelectorAll(".landing-navigation button, .landing-language select")].every((node) => {
         const box = node.getBoundingClientRect();
-        return box.x >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= footer.top && box.width >= 44 && box.height >= 44;
+        return box.x >= 0 && box.right <= innerWidth + 1 && box.width >= 44 && box.height >= 44;
       }),
-      buttonVisible: button.top >= footer.top && button.bottom <= footer.bottom && button.width >= 44 && button.height >= 44,
-      escapedText: [...document.querySelectorAll<HTMLElement>(".landing-header h1, .landing-copy h2, .landing-copy > p, .landing-login-meta > p, .landing-example p, .landing-example-label")].filter((node) => !node.closest("[aria-hidden='true']")).some((node) => node.scrollWidth > node.clientWidth + 1),
+      buttonContained: button.left >= entry.left - 1 && button.right <= entry.right + 1 && button.top >= entry.top - 1 && button.bottom <= entry.bottom + 1 && button.width >= 44 && button.height >= 44,
+      escapedText: [...document.querySelectorAll<HTMLElement>(".landing-header h1, .landing-entry-copy h2, .landing-entry-copy > p, .landing-copy h2, .landing-copy > p, .landing-login-meta > p, .landing-example p, .landing-example-label, .landing-product figcaption")].filter((node) => !node.closest("[aria-hidden='true']")).some((node) => node.scrollWidth > node.clientWidth + 1),
     };
   });
-  expect(geometry).toEqual({ pageOverflow: false, slideOverflow: false, footerVisible: true, separated: true, readingArea: true, controlsVisible: true, buttonVisible: true, escapedText: false });
+  expect(geometry).toEqual({ pageOverflow: false, slideOverflow: false, ordered: true, readingArea: true, controlsVisible: true, buttonContained: true, escapedText: false });
 }
 
 test("four manual slides, keyboard navigation, language persistence and an always-available sign-in", async ({ page }) => {
@@ -70,6 +71,7 @@ test("four manual slides, keyboard navigation, language persistence and an alway
   await expect(page.locator(".landing-login-button")).toHaveText("Continuar con Google");
   await page.reload();
   await expect(page.locator(".landing-shell")).toHaveAttribute("lang", "es");
+  await expect(page.locator(".landing-product figcaption a").first()).toHaveAttribute("href", "https://www.whatmatters.com/faqs/okr-examples-and-how-to-write-them");
   expect(state.writes).toEqual([]);
   expect(state.errors).toEqual([]);
 });
@@ -88,8 +90,8 @@ test("native touch swiping changes slides without making vertical reading a navi
     for (const x of [290, 240, 180, 100, 50]) await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y }] });
     await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await expect(page.locator(".landing-dots button").nth(1)).toHaveAttribute("aria-current", "step");
-    const active = page.locator(".landing-slide[aria-hidden='false']");
-    await active.evaluate((node) => { node.scrollTop = 150; });
+    await page.evaluate(() => window.scrollBy({ top: 150, behavior: "instant" }));
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
     await expect(page.locator(".landing-dots button").nth(1)).toHaveAttribute("aria-current", "step");
     await assertLayout(page);
     await client.detach();
@@ -104,12 +106,12 @@ test("the final slide introduces Slack bots with readable setup guidance and imm
   const slide = page.locator(".landing-slide[aria-hidden='false']");
   await expect(slide.getByRole("heading")).toHaveText("Slack 연결은 버튼 하나로.");
   await expect(slide.locator(".landing-copy")).toContainText("데일리 스크럼, 누락 확인, Task 생성과 변경 알림을 한곳에서.");
-  await expect(slide.locator(".landing-example-bots")).toContainText("!task 가입 안내 문구 정리");
+  await expect(slide.locator(".landing-example-bots")).toContainText("!task 가입 실패 로그를 원인별로 분류한다.");
   await slide.locator(".landing-context").scrollIntoViewIfNeeded();
   await expect(slide.locator(".landing-context")).toContainText("Slack 승인 후 알림 대상과 시간을 설정하세요");
   await expect(page.locator(".landing-login-button")).toBeEnabled();
   await assertLayout(page);
-  await slide.evaluate((node) => { node.scrollTop = 0; });
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
   await page.screenshot({ path: info.outputPath("landing-slack.png") });
   expect(state.writes).toEqual([]);
   expect(state.errors).toEqual([]);
@@ -146,11 +148,12 @@ test("mobile examples translate completely and remain sharp without screenshot a
   await page.goto("/");
   for (const { id } of landingLanguages) {
     await page.locator(".landing-language select").selectOption(id);
+    if (id !== "ko") await expect(page.locator(".landing-entry")).not.toContainText(/[가-힣]/);
     for (let index = 0; index < 4; index++) {
       await goToSlide(page, index);
       const active = page.locator(".landing-slide[aria-hidden='false']");
-      await active.evaluate((node) => { node.scrollTop = 0; });
       await expect(active.locator("img, picture, canvas")).toHaveCount(0);
+      await expect(active.locator("figcaption a")).toHaveAttribute("href", "https://www.whatmatters.com/faqs/okr-examples-and-how-to-write-them");
       if (id !== "ko") await expect(active).not.toContainText(/[가-힣]/);
       await assertLayout(page);
       await page.screenshot({ path: info.outputPath(`intro-${id}-${index + 1}.png`) });
@@ -158,7 +161,7 @@ test("mobile examples translate completely and remain sharp without screenshot a
   }
   await page.locator(".landing-language select").selectOption("en");
   await expect(page.locator(".landing-dots button").last()).toHaveAttribute("aria-current", "step");
-  await expect(page.locator(".landing-example-bots")).toContainText("!task Revise signup instructions");
+  await expect(page.locator(".landing-example-bots")).toContainText("!task Classify enrollment failure logs by cause.");
   expect(screenshotRequests).toEqual([]);
   expect(state.writes).toEqual([]);
   expect(state.errors).toEqual([]);
@@ -238,14 +241,31 @@ test("all languages and themes retain keyboard-readable content at 200 percent t
         await goToSlide(page, index);
         await assertLayout(page);
         const active = page.locator(".landing-slide[aria-hidden='false']");
-        await active.evaluate((node) => { node.scrollTop = 0; });
+        await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
         await active.focus();
         await page.keyboard.press("PageDown");
-        await expect.poll(() => active.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+        await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
       }
     }
   }
   await page.screenshot({ path: info.outputPath("landing-zoom-controls.png") });
+});
+
+test("the landing logo returns to the first story and the top without reloading", async ({ page }) => {
+  const state = await guest(page);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  await goToSlide(page, 3);
+  const navigationEntries = await page.evaluate(() => performance.getEntriesByType("navigation").length);
+  const home = page.locator(".landing-brand-home");
+  await expect(home).toHaveAttribute("aria-label", "홈으로 이동");
+  await expect(home).toHaveCSS("min-height", "44px");
+  await home.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".landing-dots button").first()).toHaveAttribute("aria-current", "step");
+  expect(await page.evaluate(() => performance.getEntriesByType("navigation").length)).toBe(navigationEntries);
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  expect(state.writes).toEqual([]);
 });
 
 test("five languages and six themes remain legible with native examples on narrow and wide screens", async ({ page }, info) => {

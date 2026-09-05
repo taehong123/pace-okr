@@ -2220,7 +2220,15 @@ function WorkspaceApp() {
 
       <section className="workspace">
         <header className="workspace-topbar">
-          <span className="workspace-brand"><BrandLogo size="compact" /></span>
+          <button
+            type="button"
+            className="workspace-brand"
+            onClick={() => navigateView("okr")}
+            aria-label={t("홈으로 이동")}
+            aria-current={activeView === "okr" && !selectedProject && !selectedTask ? "page" : undefined}
+          >
+            <BrandLogo size="compact" decorative />
+          </button>
           <button
             type="button"
             className="workspace-mobile-home"

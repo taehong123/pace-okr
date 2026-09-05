@@ -15,8 +15,9 @@ export type LandingExampleContent = {
 };
 type LandingCopy = {
   language: string; carousel: string; slide: string; previous: string; next: string;
+  heroTitle: string; heroDescription: string;
   login: string; loggingIn: string; loginNote: string; loginError: string; unavailable: string;
-  sample: string; google: string; intel: string; mcp: string; slack: string;
+  exampleSource: string; google: string; intel: string; mcp: string; slack: string;
   example: LandingExampleContent;
   slides: readonly [LandingSlide, LandingSlide, LandingSlide, LandingSlide];
 };
@@ -27,25 +28,31 @@ export function resolveLandingLanguage(saved: string | null, browserLanguages: r
 
 export function getLandingCopy(translate: (key: string) => string, language: LandingLanguage = "ko"): LandingCopy {
   const percent = new Intl.NumberFormat(formatLocale(language), { style: "percent", maximumFractionDigits: 0 });
+  const integer = new Intl.NumberFormat(formatLocale(language));
   return {
     language: translate("안내 언어"), carousel: translate("OKRI 소개"),
     slide: translate("슬라이드"), previous: translate("이전 슬라이드"), next: translate("다음 슬라이드"),
+    heroTitle: translate("목표부터 오늘 할 일까지."),
+    heroDescription: translate("검증된 OKR로 목표를 세우고, 모든 업무와 성과의 연결을 확인하세요."),
     login: translate("Google로 시작하기"), loggingIn: translate("Google로 이동 중"),
     loginNote: translate("기존 계정은 로그인, 처음이면 가입합니다."),
     loginError: translate("Google 로그인을 완료하지 못했습니다. 다시 시도해 주세요."),
     unavailable: translate("Google 로그인 설정을 완료하는 중입니다."),
-    sample: translate("사용 예시"),
+    exampleSource: translate("Healthcare.gov OKR 사례 · OKRI 구조로 재구성"),
     google: translate("Google의 OKR 이야기"), intel: translate("Intel의 OKR 사례"),
     mcp: translate("MCP로 사용 중인 AI에서도 이어가세요."),
     slack: translate("Slack 승인 후 알림 대상과 시간을 설정하세요."),
     example: {
-      objective: translate("첫 경험을 더 쉽게"), keyResult: translate("핵심 기능 사용률"),
-      initiative: translate("첫 경험의 마찰 줄이기"), project: translate("온보딩 흐름 개선"),
-      task: translate("가입 안내 문구 정리"), secondTask: translate("첫 사용 흐름 검토"),
+      objective: translate("대다수 사람이 Healthcare.gov에서 보험 가입을 완료할 수 있게 한다."),
+      keyResult: translate("보험 가입 완료율을 70%까지 높인다."),
+      initiative: translate("가입 경험의 안정성과 속도를 개선한다."),
+      project: translate("보험 가입 흐름의 병목을 제거한다."),
+      task: translate("가입 실패 로그를 원인별로 분류한다."),
+      secondTask: translate("응답 지연이 발생하는 구간을 점검한다."),
       objectiveLabel: translate("Objective"), keyResultLabel: translate("Key Result"),
       initiativeLabel: translate("Initiative"), projectLabel: translate("Project"), taskLabel: translate("Task"),
-      current: translate("현재"), target: translate("목표값"), currentValue: percent.format(0.36), targetValue: percent.format(0.45),
-      inProgress: translate("진행 중"), request: translate("온보딩을 개선할 프로젝트로 정리해줘."),
+      current: translate("당시"), target: translate("목표값"), currentValue: `3 / ${integer.format(100000)}`, targetValue: percent.format(0.7),
+      inProgress: translate("진행 중"), request: translate("Healthcare.gov의 가입 완료율을 높일 Project로 정리해줘."),
       proposal: translate("Project 제안"), review: translate("등록 전 검토"),
       daily: translate("데일리 봇"), dailyDetail: translate("오늘 할 일과 완료한 일"),
       management: translate("관리 봇"), managementDetail: translate("누락된 담당자·기한 확인"),

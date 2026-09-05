@@ -265,6 +265,8 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .workspace-topbar button, .database-actions button, .view-tabs button { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .workspace-topbar button { width: var(--control-height); min-height: var(--control-height); display: grid; place-items: center; border-radius: var(--radius-control); }
 .workspace-topbar button:hover { background: var(--hover); color: var(--ink); }
+.workspace-topbar button.workspace-brand { width: auto; min-width: 44px; min-height: 44px; display: flex; align-items: center; padding: var(--space-1); color: var(--ink); }
+.workspace-topbar button.workspace-brand[aria-current="page"] { background: var(--hover); }
 .workspace-mobile-home { display: none !important; }
 .mobile-assistant-trigger { display: none !important; }
 .page-body { width: min(100rem, 100%); min-height: calc(100vh - var(--row-height)); margin: 0 auto; padding: var(--space-8) var(--space-8) 4rem; background: var(--paper); }

@@ -2,7 +2,7 @@
   height: 100svh;
   height: 100dvh;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   color: var(--text-primary);
   background: var(--bg-page);
   overflow: hidden;
@@ -18,22 +18,40 @@
   gap: var(--space-2);
 }
 .landing-header h1 { display: flex; min-width: 0; margin: 0; line-height: 1; }
+.landing-brand-home { min-width: 44px; min-height: 44px; display: flex; align-items: center; padding: var(--space-1); border: 0; border-radius: var(--radius-control); color: inherit; background: transparent; cursor: pointer; }
+.landing-brand-home:hover { background: var(--bg-hover); }
+.landing-brand-home:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .landing-language { display: flex; min-width: 0; color: var(--text-secondary); }
 .landing-language select { min-height: 44px; max-width: 100%; padding: var(--space-1) var(--space-2); border: 1px solid transparent; border-radius: var(--radius-control); color: var(--input-fg); background: var(--input-bg); font-size: var(--type-label); cursor: pointer; }
 .landing-language select:hover { background: var(--bg-hover); }
 .landing-language select:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.landing-story { min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
+.landing-layout { width: min(100%, 75rem); min-height: 0; margin: 0 auto; padding: 0 var(--space-8) var(--space-4); display: grid; grid-template-columns: minmax(18rem, .8fr) minmax(0, 1.2fr); gap: var(--space-8); }
+.landing-entry { min-width: 0; align-self: center; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-4); padding-block: var(--space-6); }
+.landing-entry-copy { max-width: 32rem; }
+.landing-entry-copy h2 { margin: 0 0 var(--space-3); font-size: var(--type-page); font-weight: 650; line-height: 1.25; text-wrap: balance; word-break: keep-all; overflow-wrap: anywhere; }
+.landing-entry-copy > p { margin: 0; color: var(--text-secondary); font-size: var(--type-body); line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere; }
+.landing-entry .landing-login-button { width: 100%; min-height: 48px; justify-content: center; gap: var(--space-3); padding: var(--space-2) var(--space-4); font-size: var(--type-label); font-weight: 600; }
+.landing-login-button > span { min-width: 0; overflow-wrap: anywhere; }
+.landing-login-button > svg { flex-shrink: 0; }
+.landing-login-meta { width: 100%; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-4); }
+.landing-login-meta > p { flex: 1 1 14rem; min-width: 0; margin: 0; color: var(--text-secondary); font-size: var(--type-label); line-height: 1.6; overflow-wrap: anywhere; }
+.landing-entry .app-install-login { flex: 0 0 auto; display: inline-flex; min-height: 44px; max-width: 100%; margin: 0; padding: 0; border: 0; background: transparent; color: var(--text-link); font-size: var(--type-label); gap: var(--space-2); }
+.landing-entry .app-install-login:hover { text-decoration: underline; text-underline-offset: 4px; }
+.landing-auth-error { margin: 0; color: var(--danger-fg); font-size: var(--type-label); line-height: 1.6; overflow-wrap: anywhere; }
+.landing-story { min-width: 0; min-height: 0; padding-inline-start: var(--space-8); border-inline-start: 1px solid var(--border-default); display: grid; grid-template-rows: minmax(0, 1fr) auto; }
 .landing-viewport { min-width: 0; min-height: 0; display: flex; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
 .landing-viewport::-webkit-scrollbar { display: none; }
 .landing-viewport:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -3px; }
 .landing-slide { flex: 0 0 100%; min-width: 0; height: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior-y: contain; scroll-snap-align: start; scroll-snap-stop: always; }
 .landing-slide:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -3px; }
-.landing-slide-inner { width: min(100%, 75rem); min-height: 100%; margin: 0 auto; padding: var(--space-6) var(--space-8) var(--space-2); display: flex; flex-direction: column; gap: var(--space-6); }
+.landing-slide-inner { width: 100%; min-height: 100%; margin: 0 auto; padding: var(--space-6) 0 var(--space-2); display: flex; flex-direction: column; gap: var(--space-6); }
 .landing-copy { max-width: 42rem; }
 .landing-copy h2 { margin: 0 0 var(--space-2); font-size: var(--type-section); font-weight: 650; line-height: 1.25; text-wrap: balance; word-break: keep-all; overflow-wrap: anywhere; }
 .landing-copy > p { margin: 0; color: var(--text-secondary); font-size: var(--type-body); line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere; }
 .landing-product { width: 100%; max-width: 42rem; margin: 0; }
 .landing-product figcaption { margin-top: var(--space-2); color: var(--text-secondary); font-size: var(--type-label); line-height: 1.6; }
+.landing-product figcaption a { min-height: 44px; display: inline-flex; align-items: center; gap: var(--space-1); color: var(--text-link); text-underline-offset: 4px; overflow-wrap: anywhere; }
+.landing-product figcaption a:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
 .landing-context { max-width: 42rem; color: var(--text-secondary); font-size: var(--type-label); line-height: 1.6; }
 .landing-context:empty { display: none; }
 .landing-context > p { margin: 0; overflow-wrap: anywhere; }
@@ -49,17 +67,6 @@
 .landing-dots button > span { width: .375rem; height: .375rem; border-radius: 50%; background: var(--text-secondary); }
 .landing-dots button[aria-current] > span { width: 1.25rem; border-radius: 4px; background: var(--text-primary); }
 .landing-dots button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -3px; border-radius: var(--radius-control); }
-.landing-login { border-top: 1px solid var(--border-default); background: var(--bg-raised); padding-bottom: env(safe-area-inset-bottom); }
-.landing-login-inner { width: min(100%, 75rem); margin: 0 auto; padding: var(--space-4) var(--space-8); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2) var(--space-6); }
-.landing-login-meta { grid-row: 1; grid-column: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-4); }
-.landing-login-meta > p { flex: 1 1 14rem; min-width: 0; margin: 0; color: var(--text-secondary); font-size: var(--type-label); line-height: 1.6; overflow-wrap: anywhere; }
-.landing-login .app-install-login { flex: 0 0 auto; display: inline-flex; min-height: 44px; max-width: 100%; margin: 0; padding: 0; border: 0; background: transparent; color: var(--text-link); font-size: var(--type-label); gap: var(--space-2); }
-.landing-login .app-install-login:hover { text-decoration: underline; text-underline-offset: 4px; }
-.landing-login .landing-login-button { grid-column: 2; grid-row: 1; min-width: 13.75rem; min-height: 48px; gap: var(--space-3); padding: var(--space-2) var(--space-4); font-size: var(--type-label); font-weight: 600; }
-.landing-login-button > span { min-width: 0; overflow-wrap: anywhere; }
-.landing-login-button > svg { flex-shrink: 0; }
-.landing-auth-error { grid-column: 1 / -1; margin: 0; color: var(--danger-fg); font-size: var(--type-label); line-height: 1.6; overflow-wrap: anywhere; }
-
 .landing-example { margin: 0; padding: var(--space-4) 0; border-block: 1px solid var(--border-default); font-size: var(--type-body); line-height: 1.6; }
 .landing-example p { margin: 0; overflow-wrap: anywhere; }
 .landing-example svg { flex-shrink: 0; }
@@ -93,15 +100,26 @@
 .landing-example-bots > li:last-child { border-bottom: 0; }
 .landing-example-bots > li > svg { margin-top: var(--space-1); color: var(--icon-default); }
 
+@media (max-width: 980px) {
+  .landing-shell { height: auto; min-height: 100svh; min-height: 100dvh; display: block; overflow: visible; }
+  .landing-layout { width: 100%; min-height: 0; padding: 0; display: flex; flex-direction: column; gap: 0; }
+  .landing-entry { width: 100%; align-self: stretch; padding: var(--space-6) var(--space-8); }
+  .landing-entry-copy, .landing-entry .landing-login-button, .landing-login-meta, .landing-auth-error { max-width: 42rem; }
+  .landing-story { min-height: 0; padding-inline-start: 0; border-inline-start: 0; border-top: 1px solid var(--border-default); }
+  .landing-viewport { min-height: 0; align-items: stretch; overflow-y: hidden; }
+  .landing-slide { height: auto; overflow: visible; overscroll-behavior-y: auto; }
+  .landing-slide-inner { min-height: 0; padding: var(--space-6) var(--space-8) var(--space-2); }
+}
+
 @media (max-width: 640px) {
   .landing-header { padding: min(var(--space-2), 8px) min(var(--space-4), 16px); }
   .landing-language select { padding: min(var(--space-1), 4px); }
+  .landing-entry { gap: min(var(--space-4), 16px); padding: min(var(--space-6), 24px) min(var(--space-4), 16px); }
   .landing-slide-inner { padding: min(var(--space-4), 16px); gap: min(var(--space-4), 16px); }
   .landing-navigation { gap: min(var(--space-2), 8px); padding: min(var(--space-1), 4px) min(var(--space-4), 16px) min(var(--space-2), 8px); }
-  .landing-login-inner { display: flex; flex-direction: column; align-items: stretch; gap: min(var(--space-1), 4px); padding: min(var(--space-3), 12px) min(var(--space-4), 16px); }
   .landing-login-meta { gap: min(var(--space-1), 4px) min(var(--space-3), 12px); }
-  .landing-login .landing-login-button { min-width: 0; width: 100%; gap: min(var(--space-2), 8px); padding: min(var(--space-2), 8px) min(var(--space-3), 12px); }
-  .landing-login .app-install-login { display: inline-flex; margin: 0; padding: 0; }
+  .landing-entry .landing-login-button { min-width: 0; width: 100%; gap: min(var(--space-2), 8px); padding: min(var(--space-2), 8px) min(var(--space-3), 12px); }
+  .landing-entry .app-install-login { display: inline-flex; margin: 0; padding: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .landing-shell .spin { animation: none; }

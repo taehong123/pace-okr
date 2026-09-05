@@ -9,6 +9,8 @@ import { LandingExample } from "./landing-examples";
 import "./landing.css";
 import { chooseGuestLanguage, t, useLanguage } from "@/lib/client-language";
 
+const HEALTHCARE_OKR_SOURCE = "https://www.whatmatters.com/faqs/okr-examples-and-how-to-write-them";
+
 export function LandingScreen({ reason, onSignIn }: { reason: string | null; onSignIn: () => void }) {
   const { language } = useLanguage();
   const copy = getLandingCopy(t, language);
@@ -42,6 +44,12 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
     node.scrollTo({ left: target * node.clientWidth, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
   }
 
+  function goHome() {
+    document.getElementById("landing-slide-0")?.scrollTo({ top: 0, behavior: "instant" });
+    window.scrollTo({ top: 0, behavior: "instant" });
+    navigate(0);
+  }
+
   function trackScroll() {
     if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
     scrollFrame.current = requestAnimationFrame(() => {
@@ -71,7 +79,11 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
   return (
     <main className="landing-shell" lang={language}>
       <header className="landing-header">
-        <h1><BrandLogo size="compact" /></h1>
+        <h1>
+          <button type="button" className="landing-brand-home" onClick={goHome} aria-label={t("홈으로 이동")}>
+            <BrandLogo size="compact" decorative />
+          </button>
+        </h1>
         <label className="landing-language">
           <span className="sr-only">{copy.language}</span>
           <select value={language} onChange={(event) => {
@@ -83,7 +95,24 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
         </label>
       </header>
 
-      <section className="landing-story" aria-label={copy.carousel} aria-roledescription="carousel">
+      <div className="landing-layout">
+        <section className="landing-entry" aria-labelledby="landing-entry-title">
+          <div className="landing-entry-copy">
+            <h2 id="landing-entry-title">{copy.heroTitle}</h2>
+            <p>{copy.heroDescription}</p>
+          </div>
+          <button type="button" className="primary-action landing-login-button" aria-describedby="landing-login-note" disabled={signingIn || unavailable} aria-busy={signingIn} onClick={signIn}>
+            {signingIn ? <LoaderCircle className="spin" size={18} aria-hidden="true" /> : <LogIn size={18} aria-hidden="true" />}
+            <span>{signingIn ? copy.loggingIn : copy.login}</span>
+          </button>
+          <div className="landing-login-meta">
+            <p id="landing-login-note">{copy.loginNote}</p>
+            <AppInstallButton placement="login" />
+          </div>
+          {(reason === "failed" || unavailable) && <p className="landing-auth-error" role="alert">{unavailable ? copy.unavailable : copy.loginError}</p>}
+        </section>
+
+        <section className="landing-story" aria-label={copy.carousel} aria-roledescription="carousel">
         {/* A scrollable carousel needs a focus stop for native and arrow-key scrolling. */}
         {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex, jsx-a11y/no-noninteractive-element-interactions */}
         <div className="landing-viewport" role="group" ref={viewport} onScroll={trackScroll} onKeyDown={handleKeys} tabIndex={0} aria-label={copy.carousel}>
@@ -97,7 +126,11 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
                 </div>
                 <figure className="landing-product">
                   <LandingExample kind={slide.example} copy={copy.example} />
-                  <figcaption>{copy.sample}</figcaption>
+                  <figcaption>
+                    <a href={HEALTHCARE_OKR_SOURCE} target="_blank" rel="noreferrer">
+                      {copy.exampleSource}<ArrowUpRight size={14} aria-hidden="true" />
+                    </a>
+                  </figcaption>
                 </figure>
                 <div className="landing-context">
                   {slideIndex === 0 && <div className="landing-sources">
@@ -119,21 +152,8 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
           <button type="button" className="secondary landing-arrow" aria-label={copy.next} title={copy.next} disabled={index === 3} onClick={() => navigate(index + 1)}><ArrowRight size={20} aria-hidden="true" /></button>
           <span className="sr-only" aria-live="polite" aria-atomic="true">{copy.slide} {index + 1} / 4: {copy.slides[index].title}</span>
         </nav>
-      </section>
-
-      <footer className="landing-login">
-        <div className="landing-login-inner">
-          <button type="button" className="primary-action landing-login-button" aria-describedby="landing-login-note" disabled={signingIn || unavailable} aria-busy={signingIn} onClick={signIn}>
-            {signingIn ? <LoaderCircle className="spin" size={18} aria-hidden="true" /> : <LogIn size={18} aria-hidden="true" />}
-            <span>{signingIn ? copy.loggingIn : copy.login}</span>
-          </button>
-          <div className="landing-login-meta">
-            <p id="landing-login-note">{copy.loginNote}</p>
-            <AppInstallButton placement="login" />
-          </div>
-          {(reason === "failed" || unavailable) && <p className="landing-auth-error" role="alert">{unavailable ? copy.unavailable : copy.loginError}</p>}
-        </div>
-      </footer>
+        </section>
+      </div>
     </main>
   );
 }

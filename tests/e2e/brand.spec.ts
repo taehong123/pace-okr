@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }, info) => {
 
 async function fits(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
-  const logo = page.getByRole("img", { name: "OKRI", exact: true }).first();
+  const logo = page.locator(".landing-brand-home svg, [role='img'][aria-label='OKRI']").first();
   await expect(logo).toBeVisible();
   const bounds = (await logo.boundingBox())!;
   expect(bounds.x).toBeGreaterThanOrEqual(0);
@@ -27,10 +27,14 @@ test("public surfaces preserve the approved logo, themes, keyboard and user text
   await page.route("**/api/**", (route) => route.fulfill({ status: 401, json: { error: "unauthorized" } }));
   for (const path of ["/", "/download", "/privacy", "/terms"]) {
     await page.goto(path);
-    const logo = page.getByRole("img", { name: "OKRI", exact: true }).first();
+    const logo = page.locator(".landing-brand-home svg, [role='img'][aria-label='OKRI']").first();
     await expect(logo).toBeVisible();
     await expect(logo.locator("path").first()).toHaveAttribute("d", BRAND_SYMBOL_PATH);
     await expect(logo.locator("path").last()).toHaveAttribute("d", BRAND_WORDMARK_PATH);
+    if (path === "/") {
+      await expect(page.getByRole("button", { name: "홈으로 이동", exact: true })).toBeVisible();
+      await expect(logo).toHaveAttribute("aria-hidden", "true");
+    }
     for (const theme of ["white", "beige", "gray", "dark", "neon", "cyberpunk"]) {
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
       const ink = await logo.locator("rect").evaluate(node => getComputedStyle(node).fill);
@@ -61,11 +65,14 @@ test("public surfaces preserve the approved logo, themes, keyboard and user text
   expect(errors).toEqual([]);
 });
 
-test("workspace identity and navigation stay independent of the product logo", async ({ page, context }, info) => {
+test("workspace identity stays distinct and the desktop logo opens OKR home", async ({ page, context }, info) => {
   await installApiMocks(page);
   await page.goto("/?view=my_work");
   await expect(page.locator(".page-header h1")).toHaveText("내 업무");
-  await expect(page.locator(".workspace-brand").getByRole("img", { name: "OKRI" })).toBeVisible();
+  const brandHome = page.locator("button.workspace-brand");
+  await expect(brandHome).toBeVisible();
+  await expect(brandHome).toHaveAttribute("aria-label", "홈으로 이동");
+  await expect(brandHome.locator("svg")).toHaveAttribute("aria-hidden", "true");
   await expect(page.locator(".workspace-avatar").first()).toHaveText("테");
   await page.locator(".page-header h1").evaluate(node => { node.textContent = "긴 업무 제목과 성과 OKRI 2026"; });
   await page.evaluate(() => document.fonts.ready);
@@ -85,6 +92,11 @@ test("workspace identity and navigation stay independent of the product logo", a
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
     expect(new URL(page.url()).searchParams.get("view")).toBe("my_work");
   }
+  await page.evaluate(() => { document.documentElement.style.fontSize = "100%"; });
+  await brandHome.click();
+  await expect(page).toHaveURL(/\?view=okr$/);
+  await expect(page.locator(".page-header h1")).toHaveText("OKR");
+  await expect(brandHome).toHaveAttribute("aria-current", "page");
 });
 
 test("offline page uses the same cached brand in light and dark", async ({ page }, info) => {
