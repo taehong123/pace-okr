@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
+import { BrandLogo } from "@/app/brand-logo";
 import Link from "next/link";
 
 export const metadata: Metadata = { title: "이용약관 | OKRI", description: "OKRI 이용약관" };
 
 export default function TermsPage() {
   return <main className="legal-page"><article>
-    <header><Link href="/">OKRI</Link><h1>이용약관</h1><p>시행일: 2026년 9월 1일</p></header>
+    <header><Link href="/"><BrandLogo /></Link><h1>이용약관</h1><p>시행일: 2026년 9월 1일</p></header>
     <section><h2>1. 서비스</h2><p>OKRI는 워크스페이스의 목표, Project, Task, Routine과 선택한 외부 서비스 연동을 관리하는 업무 도구입니다.</p></section>
     <section><h2>2. 가입과 계정</h2><p>사용자는 본인의 Google 계정으로 로그인하며 Google이 확인한 이메일을 계정 식별과 거래성 안내에 사용합니다. 가입을 위해 휴대전화 번호나 PASS 본인인증을 요구하지 않습니다. 사용자는 계정과 워크스페이스 접근 권한을 안전하게 관리해야 합니다.</p></section>
     <section><h2>3. 연령</h2><p>현재 가입 대상은 만 14세 이상입니다. 만 14세 미만 사용자를 위한 법정대리인 동의 절차는 별도로 제공하지 않습니다.</p></section>

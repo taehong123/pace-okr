@@ -93,6 +93,7 @@ import LanguageLoadError from "./language-load-error";
 import type { LanguagePreferences } from "@/lib/language";
 import { LandingScreen } from "./landing";
 import { AppInstallButton } from "./app-install-button";
+import { BrandLogo } from "./brand-logo";
 
 function slackErrorMessage(error: unknown, fallback?: string) {
   return t(baseSlackErrorMessage(error, fallback));
@@ -2219,7 +2220,7 @@ function WorkspaceApp() {
 
       <section className="workspace">
         <header className="workspace-topbar">
-          <span className="workspace-brand">OKRI</span>
+          <span className="workspace-brand"><BrandLogo size="compact" /></span>
           <button
             type="button"
             className="workspace-mobile-home"
@@ -2536,7 +2537,7 @@ function AppLoadingScreen() {
   return (
     <main className="app-loading-shell" aria-busy="true" aria-label={t("OKRI 불러오는 중")}>
       <aside className="app-loading-sidebar" aria-hidden="true">
-        <div className="app-loading-brand"><span className="brand-mark">O</span><span><b>OKRI</b><small>Workspace</small></span></div>
+        <div className="app-loading-brand"><BrandLogo symbolOnly size="compact" decorative /><span><b>OKRI</b><small>Workspace</small></span></div>
         <div className="app-loading-nav">
           <i /><i /><i /><i /><i />
         </div>
@@ -2658,7 +2659,7 @@ function WelcomeModal({ language, onLanguageChange, onClose, onOpenMcp }: {
     <OverlayDialog title={copy.title} className="welcome-backdrop" onRequestClose={() => onClose()}>
       {(requestClose) => <section className="welcome-modal">
         <header className="welcome-toolbar">
-          <div className="welcome-brand"><span className="brand-mark">O</span><strong>OKRI</strong></div>
+          <div className="welcome-brand"><BrandLogo size="compact" /></div>
           <div className="language-select">
             <Languages size={14} />
             <label className="sr-only" htmlFor="intro-language">{copy.languageLabel}</label>

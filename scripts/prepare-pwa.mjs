@@ -6,6 +6,9 @@ const root = new URL("../", import.meta.url);
 const source = await readFile(new URL("lib/themes.ts", root), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 const { THEMES, DEFAULT_THEME, themeCss, themeBootstrapScript } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const brandSource = await readFile(new URL("lib/brand-artwork.ts", root), "utf8");
+const brandCompiled = ts.transpileModule(brandSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const { BRAND_ASSET_ROOT } = await import(`data:text/javascript;base64,${Buffer.from(brandCompiled).toString("base64")}`);
 const tokens = THEMES.find((theme) => theme.mode === DEFAULT_THEME).tokens;
 const manifest = {
   id: "/",
@@ -18,7 +21,10 @@ const manifest = {
   display: "standalone",
   background_color: tokens["bg-page"],
   theme_color: tokens["bg-sidebar"],
-  icons: [192, 512].map((size) => ({ src: `/icons/okri-${size}.png`, sizes: `${size}x${size}`, type: "image/png", purpose: "any" })),
+  icons: [
+    ...[192, 512].map((size) => ({ src: `${BRAND_ASSET_ROOT}/okri-${size}.png`, sizes: `${size}x${size}`, type: "image/png", purpose: "any" })),
+    { src: `${BRAND_ASSET_ROOT}/okri-maskable-512.png`, sizes: "512x512", type: "image/png", purpose: "maskable" },
+  ],
   shortcuts: [
     { name: "내 업무", url: "/?view=my_work" },
     { name: "OKR", url: "/?view=okr" },
@@ -43,6 +49,7 @@ fontCss.walkAtRules("font-face", (rule) => {
   if (covered) offlineFonts.push(rule.toString());
 });
 const offline = template
+  .replaceAll("{{brandRoot}}", BRAND_ASSET_ROOT)
   .replace("/* build:theme */", themeCss)
   .replace("/* build:tokens */", sharedTokens)
   .replace("/* build:preference */", themeBootstrapScript)

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex">
     <title>연결 확인 · OKRI</title>
-    <link rel="icon" href="/favicon.svg">
+    <link rel="icon" href="{{brandRoot}}/okri-icon.svg">
     <style>/* build:theme */
       /* build:tokens */
     </style>
@@ -16,8 +16,10 @@
       body { margin: 0; background: var(--bg-page); color: var(--text-primary); font-family: var(--font-ui); font-size: var(--type-body); line-height: 1.6; }
       main { width: min(100%, 38rem); margin-inline: auto; padding: var(--space-8) var(--space-4); }
       header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-8); }
-      img { width: 2.5rem; height: 2.5rem; }
-      header strong { font-size: var(--type-section); }
+      header img { width: 8.75rem; height: 2.5rem; max-width: 100%; }
+      .brand-reverse { display: none; }
+      html:is([data-theme="dark"], [data-theme="neon"], [data-theme="cyberpunk"]) .brand-default { display: none; }
+      html:is([data-theme="dark"], [data-theme="neon"], [data-theme="cyberpunk"]) .brand-reverse { display: block; }
       h1 { margin: 0 0 var(--space-4); font-size: var(--type-page); line-height: 1.25; overflow-wrap: anywhere; }
       p { margin: 0 0 var(--space-6); color: var(--text-secondary); overflow-wrap: anywhere; }
       button { min-height: 2.75rem; max-width: 100%; padding: var(--space-2) var(--space-4); border: 1px solid var(--button-primary-bg); border-radius: var(--radius-control); background: var(--button-primary-bg); color: var(--button-primary-fg); font: inherit; cursor: pointer; }
@@ -28,7 +30,7 @@
   </head>
   <body>
     <main>
-      <header><img src="/favicon.svg" alt="" width="40" height="40"><strong>OKRI</strong></header>
+      <header><img class="brand-default" src="{{brandRoot}}/okri-logo.svg" alt="OKRI" width="896" height="256"><img class="brand-reverse" src="{{brandRoot}}/okri-logo-reverse.svg" alt="OKRI" width="896" height="256"></header>
       <h1>인터넷 연결을 확인해 주세요</h1>
       <p>현재 서버에 연결할 수 없습니다. 연결 후 최신 업무를 불러올 수 있습니다.</p>
       <button type="button" id="retry">다시 시도</button>

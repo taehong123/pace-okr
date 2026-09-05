@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowRight, ArrowUpRight, Languages, LoaderCircle, LogIn } f
 import { getLandingCopy, landingLanguages, type LandingLanguage } from "@/lib/landing-copy";
 import { DEFAULT_THEME, isThemeMode } from "@/lib/themes";
 import { AppInstallButton } from "./app-install-button";
+import { BrandLogo } from "./brand-logo";
 import "./landing.css";
 import { chooseGuestLanguage, t, useLanguage } from "@/lib/client-language";
 
@@ -89,7 +90,7 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
   return (
     <main className="landing-shell" lang={language}>
       <header className="landing-header">
-        <h1>OKRI<span aria-hidden="true">.</span></h1>
+        <h1><BrandLogo /></h1>
         <label className="landing-language">
           <Languages size={18} aria-hidden="true" />
           <span className="sr-only">{copy.language}</span>

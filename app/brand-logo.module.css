@@ -1,0 +1,21 @@
+/* Approved monochrome artwork, independent of interactive/status theme colors. */
+.logo {
+  --logo-ink: #111111;
+  --logo-paper: #ffffff;
+  display: inline-block;
+  flex: 0 0 auto;
+  max-width: 100%;
+  vertical-align: middle;
+}
+.ink { fill: var(--logo-ink); }
+.paper { fill: var(--logo-paper); }
+.lockup { width: 8.75rem; height: 2.5rem; }
+.symbol { width: 2.5rem; height: 2.5rem; }
+.lockup.compact { width: 5.6875rem; height: 1.625rem; }
+.symbol.compact { width: 1.625rem; height: 1.625rem; }
+:global(html[data-theme="dark"]) .logo,
+:global(html[data-theme="neon"]) .logo,
+:global(html[data-theme="cyberpunk"]) .logo {
+  --logo-ink: #ffffff;
+  --logo-paper: #111111;
+}

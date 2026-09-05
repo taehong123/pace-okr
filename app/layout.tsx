@@ -7,6 +7,7 @@ import "./pwa.css";
 import { themeBootstrapScript, themeCss } from "@/lib/themes";
 import { appInstallBootstrapScript } from "@/lib/app-install";
 import { PRODUCT_NAME, PUBLIC_APP_URL } from "@/lib/brand";
+import { BRAND_ASSET_ROOT } from "@/lib/brand-artwork";
 
 const bootstrapScript = themeBootstrapScript + appInstallBootstrapScript + `(() => {
   const now = new Date();
@@ -36,17 +37,20 @@ export async function generateMetadata(): Promise<Metadata> {
     title: "OKRI - 목표를 오늘의 실행으로",
     description: "Objective부터 Task까지 연결하고 MCP, 데일리 실행과 Routine을 관리하는 워크스페이스",
     icons: {
-      icon: "/favicon.svg",
-      shortcut: "/favicon.svg",
+      icon: `${BRAND_ASSET_ROOT}/okri-icon.svg`,
+      shortcut: `${BRAND_ASSET_ROOT}/okri-icon.svg`,
+      apple: `${BRAND_ASSET_ROOT}/apple-touch-icon.png`,
     },
     openGraph: {
       title: `${PRODUCT_NAME} - 목표를 오늘의 실행으로`,
       description: "OKR 계층, Project, Task 데이터베이스와 Routine을 MCP 중심으로 관리합니다.",
+      images: [{ url: `${BRAND_ASSET_ROOT}/okri-social.png`, width: 1200, height: 630, alt: PRODUCT_NAME }],
     },
     twitter: {
-      card: "summary",
+      card: "summary_large_image",
       title: `${PRODUCT_NAME} - 목표를 오늘의 실행으로`,
       description: "OKR 계층, Project, Task 데이터베이스와 Routine을 MCP 중심으로 관리합니다.",
+      images: [`${BRAND_ASSET_ROOT}/okri-social.png`],
     },
   };
 }

@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowLeft, Check, Download, ExternalLink, Laptop, LoaderCircle } from "lucide-react";
+import { ArrowLeft, Check, Download, ExternalLink, LoaderCircle } from "lucide-react";
+import { BrandLogo } from "@/app/brand-logo";
 import type { AppInstallStatus } from "@/lib/app-install";
 import { t } from "@/lib/client-language";
 import styles from "./download.module.css";
@@ -83,7 +84,7 @@ export function DownloadClient() {
 
       <section className={styles.content} aria-labelledby="download-title">
         <div className={styles.intro}>
-          <span className={styles.brand}><Laptop size={18} aria-hidden="true" /> OKRI</span>
+          <span className={styles.brand}><BrandLogo /></span>
           <h1 id="download-title">{t("OKRI 데스크톱 앱")}</h1>
           <p>{t("설치 방법을 먼저 확인하고 준비되면 진행하세요.")}</p>
           <p className={styles.notice}>{t("파일은 자동으로 다운로드되지 않습니다.")}</p>

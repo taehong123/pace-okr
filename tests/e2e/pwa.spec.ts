@@ -152,7 +152,7 @@ test.describe("real installed-app resources", () => {
     await session.send("DOM.enable");
     await session.send("CSS.enable");
     const { root } = await session.send("DOM.getDocument");
-    for (const selector of ["h1", "header strong", "button"]) {
+    for (const selector of ["h1", "main p", "button"]) {
       const { nodeId } = await session.send("DOM.querySelector", { nodeId: root.nodeId, selector });
       const { fonts } = await session.send("CSS.getPlatformFontsForNode", { nodeId });
       expect(fonts.filter(font => font.glyphCount > 0).every(font => font.isCustomFont && font.familyName.includes("Pretendard"))).toBe(true);

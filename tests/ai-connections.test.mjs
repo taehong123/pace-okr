@@ -71,7 +71,7 @@ function fixture() {
     import { effectiveIntegrationProvider } from '@/lib/integration-providers';
     const ensureSchema = async () => {}; ${tokenFunctions}`);
   const common = { "cloudflare:workers": { env: { DB } }, "@/lib/pace-data": tokens, "@/lib/integration-providers": providers, "@/lib/themes": load("lib/themes.ts"),
-    "@/lib/mcp-oauth-metadata": load("lib/mcp-oauth-metadata.ts") };
+    "@/lib/mcp-oauth-metadata": load("lib/mcp-oauth-metadata.ts"), "@/lib/brand-artwork": load("lib/brand-artwork.ts") };
   const oauth = load("lib/mcp-oauth.ts", common);
   const approval = load("lib/mcp-oauth-approval.ts", common);
   const routes = { ...common, "@/lib/mcp-oauth": oauth, "@/lib/mcp-oauth-approval": approval, "@/lib/pace-data": {

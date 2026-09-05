@@ -16,6 +16,7 @@ const renderer = compile("lib/mcp-oauth-approval.ts", {
   "cloudflare:workers": { env: {} },
   "@/lib/integration-providers": compile("lib/integration-providers.ts"),
   "@/lib/themes": compile("lib/themes.ts"),
+  "@/lib/brand-artwork": compile("lib/brand-artwork.ts"),
 }) as { approvalPage: typeof approvalPage; approvalContentSecurityPolicy: typeof approvalContentSecurityPolicy };
 
 export function approvalFixture() {
